@@ -17,7 +17,7 @@ g.add(m);
 }
 function mkChute(scale=1){
 const g=new THREE.Group();
-const mat=new THREE.MeshLambertMaterial({color:0x9aa08c,side:THREE.DoubleSide});
+const mat=new THREE.MeshLambertMaterial({color:0x9aa08c,side:THREE.DoubleSide,map:TEX.cloth}); // B8/P3-12 降落伞帆布
 const canopy=new THREE.Mesh(new THREE.SphereGeometry(2.3,12,7,0,TAU,0,1.05),mat);
 canopy.scale.set(1,0.75,1);
 canopy.castShadow=true;

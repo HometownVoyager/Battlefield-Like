@@ -13,7 +13,7 @@ brass: new THREE.MeshLambertMaterial({color:0xb89440}),
 sleeve0: new THREE.MeshLambertMaterial({color:0x4d5240}),
 sleeve1: new THREE.MeshLambertMaterial({color:0x4a4d52}),
 skin: new THREE.MeshLambertMaterial({color:0xc09878}),
-nade: new THREE.MeshLambertMaterial({color:0x3a4232}),
+nade: new THREE.MeshLambertMaterial({color:0x3a4232,map:TEX.metalBrush}), // B8/P3-12 手雷
 };
 vmMats.sleeve0.color.set(TEAM_FACTION[0].sleeve);
 vmMats.sleeve1.color.set(TEAM_FACTION[1].sleeve);

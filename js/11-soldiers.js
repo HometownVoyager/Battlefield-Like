@@ -138,13 +138,13 @@ const hip=new THREE.Group(); hip.position.set(side*0.12,0,0); pelvis.add(hip);
 bx(U.pants,0.16,0.46,0.16,0,-0.23,0,hip);
 const knee=new THREE.Group(); knee.position.y=-0.46; hip.add(knee);
 bx(U.pants,0.14,0.48,0.14,0,-0.24,0,knee);
-bx(new THREE.MeshLambertMaterial({color:0x2e2820}),0.15,0.1,0.24,0,-0.46,0.04,knee);
+bx(new THREE.MeshLambertMaterial({color:0x2e2820,map:TEX.cloth}),0.15,0.1,0.24,0,-0.46,0.04,knee); // B8/P3-12 军靴
 return {hip,knee};
 };
 const legL=mkLeg(-1), legR=mkLeg(1);
 const gunG=new THREE.Group(); gunG.position.set(0.14,0.4,0.1); gunG.rotation.order='YXZ'; torsoG.add(gunG);
 bx(team===0?U.pants:U.coat,0.3,0.34,0.14, 0,0.3,-0.18, torsoG);
-bx(new THREE.MeshLambertMaterial({color:0x3a3428}),0.4,0.08,0.28, 0,0.02,0, torsoG);
+bx(new THREE.MeshLambertMaterial({color:0x3a3428,map:TEX.cloth}),0.4,0.08,0.28, 0,0.02,0, torsoG); // B8/P3-12 装具/背包带
 root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
 const c=document.createElement('canvas'); c.width=128; c.height=32;
 const g2=c.getContext('2d');

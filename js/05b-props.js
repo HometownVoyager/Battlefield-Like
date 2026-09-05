@@ -163,7 +163,7 @@ const rec={kind:'dead',x,z,g0,meshes:[t,b1],cyl,alive:true,dead:false};
 floraHashAdd(rec);
 }
 const craterGeo=new THREE.CircleGeometry(1,20);
-const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false});
+const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false,map:TEX.crater}); // 2026-09-06 B8/P3-12: 焦土径向贴图取代纯色
 const runtimeCraters=[];
 function crater(x,z,r,runtime=false){
 if(!runtime){

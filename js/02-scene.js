@@ -272,24 +272,26 @@ const SVG_OK=(typeof Image!=='undefined');
 function svgURI(w,h,body){
 return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`);
 }
-function svgUpgrade(tex,w,h,body){
+function svgUpgrade(tex,w,h,body,name){
 if(!SVG_OK) return tex;
 try{
 const img=new Image();
 img.onload=()=>{ try{
 const c=tex.image, g=c.getContext('2d');
-g.globalAlpha=1; g.clearRect(0,0,c.width,c.height);
-g.drawImage(img,0,0,c.width,c.height);
-tex.needsUpdate=true;
-}catch(e){} };
-img.onerror=()=>{};
+g.globalAlpha=1;
+g.clearRect(0,0,c.width,c.height);
+}catch(e){ return; }
+try{ g.drawImage(img,0,0,c.width,c.height); tex.needsUpdate=true; }
+catch(e){ console.warn('[SVG] 贴图重绘绘制失败: '+(name||'?'), e&&e.message); }
+};
+img.onerror=()=>{ console.warn('[SVG] 贴图重绘加载失败(停留在兜底版): '+(name||'?')); };
 img.src=svgURI(w,h,body);
 }catch(e){}
 return tex;
 }
 const SVGTEX={};
 function svgReg(name,w,h,make){ SVGTEX[name]={w,h,make}; return make; }
-function svgApply(tex,name){ const e=SVGTEX[name]; if(e) svgUpgrade(tex,e.w,e.h,e.make()); return tex; }
+function svgApply(tex,name){ const e=SVGTEX[name]; if(e&&tex) svgUpgrade(tex,e.w,e.h,e.make(),name); return tex; }
 // 常用片段: 分形噪声色斑 (把 feTurbulence 亮度映射为 alpha 的半透明色块层; 滤镜域=整格 + stitchTiles → 可无缝平铺)
 function svgMottle(id,freq,oct,rgb,s,bias,op,seed){
 return `<filter id="${id}" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${freq}" numOctaves="${oct}" seed="${seed}" stitchTiles="stitch"/><feColorMatrix type="matrix" values="0 0 0 0 ${rgb[0]} 0 0 0 0 ${rgb[1]} 0 0 0 0 ${rgb[2]} ${s} ${s} ${s} 0 ${bias}"/></filter><rect width="100%" height="100%" filter="url(#${id})" opacity="${op}"/>`;
@@ -642,6 +644,38 @@ return `<rect width="128" height="128" fill="#ffffff"/>`
 +svgMottle('gl1','0.06',3,[0.62,0.6,0.55],0.85,-0.72,0.2,7)
 +svgGrain('gl2','0.7',[0.4,0.4,0.38],0.1,13);
 });
+svgReg('water',128,128,()=>{
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('wa1','0.012',3,[0.55,0.66,0.72],0.85,-0.7,0.16,21)
++svgMottle('wa2','0.04',2,[0.92,0.97,1.0],0.8,-0.66,0.12,22)
++svgStreak('wa3','0.006','0.2',[0.82,0.9,0.96],0.8,-0.72,0.1,23);
+});
+svgReg('ice',128,128,()=>{
+let cracks='';
+for(let i=0;i<9;i++){
+const x0=rand(10,118),y0=rand(10,118),a=rand(0,Math.PI*2),l=rand(10,30);
+const x1=Math.min(122,Math.max(6,x0+Math.cos(a)*l)), y1=Math.min(122,Math.max(6,y0+Math.sin(a)*l));
+const mx=(x0+x1)/2+rand(-6,6), my=(y0+y1)/2+rand(-6,6);
+cracks+=`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}" stroke="rgb(120,138,152)" stroke-width="0.8" fill="none" opacity="0.5"/>`;
+}
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('ic1','0.02',3,[0.72,0.78,0.85],0.85,-0.7,0.13,31)
++svgGrain('ic2','0.5',[0.5,0.55,0.62],0.08,32)
++cracks;
+});
+// 弹坑焦土: 白底相对明度贴图 (中心焦黑→外缘亮土), 与材质基色 0x4a4238 乘法叠加成焦土渐变; 飞溅斑点非平铺件
+svgReg('crater',128,128,()=>{
+let sp='';
+for(let i=0;i<26;i++){
+const a=rand(0,Math.PI*2), rr=rand(30,62);
+const px=64+Math.cos(a)*rr, py=64+Math.sin(a)*rr, sz=rand(1.2,3.4);
+sp+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${sz.toFixed(1)}" fill="rgb(46,40,32)" opacity="${rand(0.25,0.6).toFixed(2)}"/>`;
+}
+return `<rect width="128" height="128" fill="rgb(150,142,124)"/>`
++`<defs><radialGradient id="crg"><stop offset="0" stop-color="rgb(40,36,30)"/><stop offset="0.5" stop-color="rgb(72,66,54)"/><stop offset="0.82" stop-color="rgb(104,96,80)"/><stop offset="1" stop-color="rgb(150,142,124)"/></radialGradient></defs><circle cx="64" cy="64" r="64" fill="url(#crg)"/>`
++sp;
+});
+
 // ── 对既有 TEX 库逐张发起 SVG 重绘 (Canvas 版继续作为即时兜底) ──
 svgApply(TEX.grass,'grass'); svgApply(TEX.snowGround,'snowGround'); svgApply(TEX.dirt,'dirt');
 svgApply(TEX.brick,'brick'); svgApply(TEX.plaster,'plaster'); svgApply(TEX.stone,'stone');
@@ -652,7 +686,10 @@ TEX.grime=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); })
 TEX.cloth=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
 TEX.metalBrush=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
 TEX.grainLight=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
-svgApply(TEX.grime,'grime'); svgApply(TEX.cloth,'cloth');
+TEX.water=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
+TEX.ice=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
+TEX.crater=makeTex(128,128,(g,w,h)=>{ g.fillStyle='#fff'; g.fillRect(0,0,w,h); });
+svgApply(TEX.grime,'grime'); svgApply(TEX.cloth,'cloth'); svgApply(TEX.water,'water'); svgApply(TEX.ice,'ice'); svgApply(TEX.crater,'crater');
 svgApply(TEX.metalBrush,'metalBrush'); svgApply(TEX.grainLight,'grainLight');
 const MAT = {
 grass: new THREE.MeshLambertMaterial({map:TEX.grass, vertexColors:true}),

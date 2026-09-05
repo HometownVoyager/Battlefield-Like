@@ -49,7 +49,7 @@ if(s.isPlayer) collideMove(s.pos,0.42);
 // 巡飞弹/坦克炮/固定炮/反坦克攻击(火箭筒/反坦克枪/炸药)仍全额生效 —— takeDmg 第3参 ap=true 表示反装甲伤害
 // (2026-09-02 用户调参: 减免倍率 0.4 → 0.3, 非反装甲伤害只吃三成)
 const TANK_ARMOR=0.3;
-const wreckMat=new THREE.MeshLambertMaterial({color:0x1e1c18});
+const wreckMat=new THREE.MeshLambertMaterial({color:0x1e1c18,map:TEX.grime}); // B8/P3-12 残骸焦污
 // ── 越野跨越 (2026-09-04 用户指定): 低矮且无法摧毁的障碍(油桶/石碾/碎石堆/矮木箱/木凳等,
 // 自身高度≤1.3m(顶面相对其地面), 且无 dGroup 可撞塌/无 crush 可碾毁)直接驶上跨越 —— 不阻挡也不碾毁,
 // 障碍保持完好; 可摧毁的(沙袋/木箱/石墙, 高速撞毁/碾毁)与高障碍(拒马1.5m/石柱/建筑)维持原判定 ──
@@ -124,7 +124,7 @@ this.respawn(true); // 开局首次生成不播报
 buildMesh(){
 const D=this.def;
 this.matBody=new THREE.MeshLambertMaterial({color:D.col, map:TEX.grime});
-const matB=new THREE.MeshLambertMaterial({color:0x363830});
+const matB=new THREE.MeshLambertMaterial({color:0x363830,map:TEX.metalBrush}); // B8/P3-12 负重轮/炮盾
 const L=D.hullL;
 this.grp=new THREE.Group();
 const h=new THREE.Mesh(new THREE.BoxGeometry(2.6,0.95,L),this.matBody); h.position.y=1.0; this.grp.add(h);

@@ -774,8 +774,8 @@ decorateTrenches();
 // 彻底消除旧实现"每块一个 box、各自取水位"造成的台阶式错位。
 if(RIVER){
 const wmat=RIVER.ice
-?new THREE.MeshLambertMaterial({color:0xcfe2ee})
-:new THREE.MeshLambertMaterial({color:0x3e5a6a,transparent:true,opacity:0.72});
+?new THREE.MeshLambertMaterial({color:0xcfe2ee,map:TEX.ice}) // 2026-09-06 B8/P1-7: 冰面裂纹+grainLight
+:new THREE.MeshLambertMaterial({color:0x3e5a6a,transparent:true,opacity:0.72,map:TEX.water}); // 低频涌浪波纹
 const P=RIVER.pts;
 const hw=RIVER.w*0.95; // 条带半宽 (略窄于河道下切宽度)
 const samples=[];
@@ -832,6 +832,17 @@ idx.push(a,a+1,b, a+1,b+1,b);
 }
 const wgeo=new THREE.BufferGeometry();
 wgeo.setAttribute('position',new THREE.BufferAttribute(verts,3));
+{ // B8/P1-7: 条带 UV —— u=沿河累计距离/14m 平铺, v=横断向 0..1 (旧版无 UV 无法挂贴图)
+const uvs=new Float32Array(samples.length*2*2);
+let accU=0;
+for(let i=0;i<samples.length;i++){
+const s2=samples[i];
+if(i>0){ const p2=samples[i-1]; accU+=Math.hypot(s2.x-p2.x,s2.z-p2.z); }
+uvs[i*4+0]=accU/14; uvs[i*4+1]=0;
+uvs[i*4+2]=accU/14; uvs[i*4+3]=1;
+}
+wgeo.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
+}
 wgeo.setIndex(idx);
 wgeo.computeVertexNormals();
 const wmesh=new THREE.Mesh(wgeo,wmat);

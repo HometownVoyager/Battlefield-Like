@@ -102,7 +102,7 @@ const mat=new THREE.MeshLambertMaterial({color:D.col, map:TEX.grime});
 this.grp=new THREE.Group();
 const fuse=new THREE.Mesh(new THREE.CylinderGeometry(0.28*s,0.4*s,3.6*s,8),mat);
 fuse.rotation.x=-HPI; this.grp.add(fuse);
-const cowl=new THREE.Mesh(new THREE.CylinderGeometry(0.42*s,0.36*s,0.5*s,8),new THREE.MeshLambertMaterial({color:0x33362e}));
+const cowl=new THREE.Mesh(new THREE.CylinderGeometry(0.42*s,0.36*s,0.5*s,8),new THREE.MeshLambertMaterial({color:0x33362e,map:TEX.grime})); // B8/P3-12 整流罩
 cowl.rotation.x=-HPI; cowl.position.z=1.6*s; this.grp.add(cowl);
 const wing=new THREE.Mesh(new THREE.BoxGeometry(7.6*s,0.1,1.5*s),mat);
 wing.position.set(0,-0.05,0.2*s); this.grp.add(wing);

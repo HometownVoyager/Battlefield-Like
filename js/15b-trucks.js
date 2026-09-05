@@ -19,7 +19,7 @@ for(const r of R) P.push([r[2],r[3]]);
 _convoyPathCache=P;
 return P;
 }
-const truckTarpMat=new THREE.MeshLambertMaterial({color:0x6a5a44});
+const truckTarpMat=new THREE.MeshLambertMaterial({color:0x6a5a44,map:TEX.cloth}); // B8/P3-12
 class Truck {
 constructor(team,i){
 this.kind='truck';

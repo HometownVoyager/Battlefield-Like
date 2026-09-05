@@ -254,8 +254,8 @@ BUILD_REG.push({type:'watchtower',x,z,ry,w:4,d:7,floor:base,doors:[],roofY:deckT
 }
 // 帐篷: 双坡帆布小屋式——四面墙(正面门洞, 墙段框架自动登记通行区)+
 // 实心帆布坡顶(挡弹/挡视线), 全部件有碰撞; 旧 A 型两块帆布板与墙互相穿模, 弃用
-const tentMatA=new THREE.MeshLambertMaterial({color:0x5e6244});
-const tentMatB=new THREE.MeshLambertMaterial({color:0x565a3e});
+const tentMatA=new THREE.MeshLambertMaterial({color:0x5e6244,map:TEX.cloth}); // B8/P3-12
+const tentMatB=new THREE.MeshLambertMaterial({color:0x565a3e,map:TEX.cloth});
 function tent(x,z,ry){
 const f=foundation(x,z,ry,3.2,4.4,{raise:0.02});
 const ctx=bctx(x,z,ry,f.floor);

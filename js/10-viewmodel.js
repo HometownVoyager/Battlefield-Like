@@ -60,7 +60,7 @@ AudioSys.metalSlide(0.18,0.1,700,1400);
 }
 function buildBandage(){
 const g=new THREE.Group();
-const mat=new THREE.MeshLambertMaterial({color:0xece4d0});
+const mat=new THREE.MeshLambertMaterial({color:0xece4d0,map:TEX.cloth}); // B8/P3-12 绷带卷布面
 // 绷带卷: 短粗圆柱(轴向z) + 垂下的布条
 const roll=new THREE.Mesh(new THREE.CylinderGeometry(0.026,0.026,0.05,12),mat);
 roll.rotation.z=HPI; g.add(roll);
@@ -318,7 +318,7 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       // 绷带缠在前臂皮肤段上: 白色包扎环随进度变宽
       let wrap=VM.arms.L.userData.wrap;
       if(!wrap){
-        wrap=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.1,10),new THREE.MeshLambertMaterial({color:0xece4d0}));
+        wrap=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.1,10),new THREE.MeshLambertMaterial({color:0xece4d0,map:TEX.cloth}));
         wrap.rotation.x=HPI; wrap.position.set(0,0,-0.06);
         VM.arms.L.add(wrap); VM.arms.L.userData.wrap=wrap;
       }
