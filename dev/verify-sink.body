@@ -1,0 +1,162 @@
+// ── 沉入系统推演: 结构/坦克/坠机/树木/灌木 各摧毁路径 (2026-08-31 新特性) ──
+function runCampaign(i){
+const ctx=boot(i);
+const start=vm.runInContext(`(()=>{
+try{
+const btn=document.getElementById('startBtn');
+if(btn&&btn.onclick) btn.onclick(); else return {ok:false,err:'no onclick bound'};
+return {ok:true};
+}catch(e){ return {ok:false,err:String(e&&e.stack||e)}; }
+})()`,ctx);
+if(!start.ok) return {camp:'#'+i,fail:'开局失败: '+(start.err||'unknown')};
+return vm.runInContext(`(()=>{
+const out={camp:CAMPAIGN.id,checks:[]};
+function assert(cond,msg){ if(!cond) throw new Error('断言失败: '+msg); }
+// 步进 helper: fn(dt) × 次数
+const step=(fn,dt,times)=>{ for(let k=0;k<times;k++){ nowT+=dt; fn(dt); } };
+function chk(name,fn){
+try{ fn(); out.checks.push(name+' ✓'); }
+catch(e){ out.checks.push(name+' ✗ '+String(e&&e.stack||e).split('\\n').slice(0,2).join(' | ')); out.failed=true; }
+}
+
+// ── 1. 房屋墙段/废墟结构: 摧毁后视觉停留 → 下沉开始碎块化 → 全沉移除 ──
+chk('结构:摧毁停留→沉入→删除',()=>{
+const g=DESTRUCTIBLES.find(g=>!g.dead);
+if(!g){ out.checks.push('(本布局无可毁结构, 跳过)'); return; }
+const visMeshes=g.meshes.filter(m=>m&&m.parent);
+assert(visMeshes.length>0,'结构组有视觉网格');
+destroyStructure(g);
+for(const bi of g.bi) assert(BOXES[bi].dead,'碰撞即刻死亡 bi='+bi);
+const stillVis=g.meshes.filter(m=>m&&m.parent).length;
+assert(stillVis===visMeshes.length,'摧毁后模型停留原地 (parent 保留)');
+assert(SINK_JOBS.length>0,'下沉任务已排队');
+step(updateWreckSinks,0.25,4); // 1s: 仍在停留期
+assert(g.meshes.filter(m=>m&&m.parent).length===stillVis,'停留期内不移除');
+step(updateWreckSinks,0.25,80); // 停留(≤13s)+下沉(4.5s)+余量 ≈ 21s
+assert(g.meshes.every(m=>!m||!m.parent),'全沉后网格全部移除');
+assert(SINK_JOBS.every(j=>!(j.objs&&j.objs.some(m=>g.meshes.includes(m)))),'下沉任务清空');
+});
+
+// ── 2. 坦克残骸: 停留期是火源 → 开始下沉即熄火 → 半沉撤碰撞 → 全沉隐藏 → 重生恢复 ──
+chk('坦克:停留燃烧→下沉熄火→全沉隐藏→重生恢复',()=>{
+const t=tanks.find(t=>t.alive);
+if(!t){ out.checks.push('(本模式无坦克, 跳过)'); return; }
+t.takeDmg(99999,null);
+assert(!t.alive,'坦克被摧毁');
+assert(FIRE_SOURCES.includes(t.fireSrc),'残骸成为持续火源');
+const bs=t.wreckBs;
+assert(bs&&bs.every(b=>!b.dead),'残骸碰撞体存在');
+step(updateWreckSinks,0.5,52); // 26s: 覆盖停留期(24-30s 中段)
+// 停留期可能尚未结束(restT≤30): 继续步进直到进入下沉(火源被移除) — 上限再 12s
+let guard=0;
+while(t.fireSrc&&guard++<24) step(updateWreckSinks,0.5,1);
+assert(!t.fireSrc,'开始下沉即不再火源 (removeFireSource)');
+assert(!FIRE_SOURCES.includes(t.fireSrc),'FIRE_SOURCES 中已移除');
+guard=0;
+while(t.grp.visible!==false&&guard++<20) step(updateWreckSinks,0.5,1);
+assert(t.grp.visible===false,'全沉后模型隐藏 (noRemove, 重生复用)');
+assert(!t.wreckBs,'半沉时残骸碰撞体已撤除');
+for(const b of bs) assert(b.dead,'碰撞体已死');
+t.respawn();
+assert(t.grp.visible===true,'重生恢复可见');
+assert(t.alive,'重生存活');
+});
+
+// ── 3. 坠机残骸: 落地燃烧停留 → 下沉即熄火 → 全沉移除模型体 ──
+chk('坠机:停留燃烧→下沉熄火→全沉移除',()=>{
+const p=planes.find(p=>p.alive);
+if(!p){ out.checks.push('(本模式无飞机, 跳过)'); return; }
+p.takeDmg(99999,null);
+assert(planeWrecks.length>0,'生成坠机残骸');
+const w=planeWrecks[planeWrecks.length-1];
+assert(w.state==='fall','残骸拖焰坠落中');
+// 步进至坠地 (火源在落地瞬间注册)
+let guard=0;
+while(guard++<600&&w.state==='fall'){ updatePlaneWrecks(0.1); nowT+=0.1; }
+assert(w.state==='rest','残骸已坠地静置');
+assert(w.fireSrc&&FIRE_SOURCES.includes(w.fireSrc),'残骸火源已注册');
+let fireGoneAtSink=true;
+guard=0;
+while(guard++<600&&planeWrecks.includes(w)){
+updatePlaneWrecks(0.1); nowT+=0.1;
+if(w.sinking&&FIRE_SOURCES.includes(w.fireSrc)) fireGoneAtSink=false;
+}
+assert(!planeWrecks.includes(w),'全沉后残骸条目移除');
+assert(fireGoneAtSink,'下沉开始即熄火');
+assert(w.m.parent===null||w.m.parent===undefined,'模型体已从场景移除');
+});
+
+// ── 4. 树木: 倒伏停留 → 连干带冠沉入 → 实例删除 ──
+chk('树木:倒伏→停留→沉入→实例删除',()=>{
+const tr=TREE_LIVE.find(t=>t.alive&&!t.fall);
+if(!tr){ out.checks.push('(本布局无活树, 跳过)'); return; }
+const trunkArr=TREE_IM.trunks.instanceMatrix.array;
+const leafArr=TREE_IM.leaves.instanceMatrix.array;
+treeFall(tr,1,0);
+assert(tr.fall,'树开始倒伏');
+step(updateFallingTrees,0.1,20); // 倒伏动画 (~1.3s)
+assert(TREE_SINKS.some(s=>s.tr===tr),'倒伏完成登记沉入');
+step(updateTreeSinks,0.25,132); // 停留(≤22s)+下沉(3.6s)+余量 ≈ 33s
+assert(!TREE_SINKS.some(s=>s.tr===tr),'沉入任务完成');
+assert(tr.dead===true,'树记录标死 (floraNear 不再返回)');
+// 实例删除: 零缩放矩阵的位置元素(12/13/14)归零 (e[15] 恒为 1)
+const posZero=(arr,base,n)=>{ for(let e2=12;e2<15;e2++){ for(let off=0;off<n;off++){ if(arr[(base+off)*16+e2]!==0) return false; } } return true; };
+assert(posZero(trunkArr,tr.ti,1),'树干实例已删除');
+assert(posZero(leafArr,tr.li,3),'叶面实例已删除');
+});
+
+// ── 5. 灌木: 炸没后停留 → 沉入 → 实例零缩放 ──
+chk('灌木:炸没→停留→沉入→实例删除',()=>{
+const rec=BUSH_LIVE.find(r=>!r.dead);
+if(!rec){ out.checks.push('(本布局无灌木, 跳过)'); return; }
+const arr=rec.im.instanceMatrix.array;
+const posZero2=(base,n)=>{ for(let e2=12;e2<15;e2++){ for(let off=0;off<n;off++){ if(arr[(base+off)*16+e2]!==0) return false; } } return true; };
+vanishFlora(rec,true);
+assert(rec.dead,'灌木记录标死');
+step(updateWreckSinks,0.25,72); // 停留(≤8s)+下沉(2.2s)+余量
+assert(posZero2(rec.li0,2),'全沉后叶面实例零缩放删除');
+});
+
+// ── 6. 草丛/庄稼实例下沉 (与灌木同路径, 直接验证 inst sink 任务) ──
+chk('实例批:queueSink inst 下沉→零缩放',()=>{
+const bi=BURN_INST[0];
+assert(bi,'存在可燃实例批');
+let idx0=-1;
+for(let k2=0;k2<bi.im.count;k2++){
+const a=bi.im.instanceMatrix.array;
+let vis=false; for(let e=0;e<16;e++) if(a[k2*16+e]!==0){ vis=true; break; }
+if(vis){ idx0=k2; break; }
+}
+assert(idx0>=0,'存在可见实例');
+const y0=bi.im.instanceMatrix.array[idx0*16+13];
+const job=queueSink({inst:{im:bi.im,idxs:[idx0]},depth:1.6,rest:1,sink:2});
+step(updateWreckSinks,0.25,6); // 1s 静置 + 0.5s 下沉 (k≈0.25)
+const y1=bi.im.instanceMatrix.array[idx0*16+13];
+assert(y1<y0,'下沉中: 实例位置下降 ('+y0.toFixed(2)+'→'+y1.toFixed(2)+')');
+step(updateWreckSinks,0.25,10);
+const a6=bi.im.instanceMatrix.array;
+let zero6=true;
+for(let e2=12;e2<15;e2++){ if(a6[idx0*16+e2]!==0) zero6=false; }
+assert(zero6,'全沉后实例零缩放');
+assert(!SINK_JOBS.includes(job),'任务完成移除');
+});
+
+out.ok=!out.failed;
+return out;
+})()`,ctx);
+}
+const idx=process.argv[2]!==undefined?parseInt(process.argv[2]):-1;
+const probe=boot(0);
+const total=vm.runInContext('CAMPAIGN.n?1:1',probe)&&vm.runInContext('CAMPAIGNS.length',probe);
+const all=Array.from({length:total},(_,k)=>k);
+const range=idx>=0&&idx<total?[idx]:all;
+let bad=0;
+for(const i of range){
+const r=runCampaign(i);
+if(r.fail){ console.log(`#${i} FAIL ${r.fail}`); bad++; continue; }
+for(const c of r.checks) console.log(`#${i} ${r.camp}  ${c}`);
+if(r.ok) console.log(`#${i} ${r.camp}  —— 全部通过 ✓`);
+else bad++;
+}
+console.log(bad===0?'\n沉入系统推演全部通过 ✓':'\n存在失败项 ✗');
+process.exit(bad===0?0:1);
