@@ -43,8 +43,8 @@ document.getElementById('heatWrap').style.display='block';
 }
 function mountAT(g){
 player.onAT=g; g.user=player;
-player.pos.x=g.x-Math.sin(g.face)*1.3;
-player.pos.z=g.z-Math.cos(g.face)*1.3;
+player.pos.x=g.x-Math.sin(g.face)*AT_CREW_DIST; // 站位单源常量 (00-config)
+player.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
 player.yaw=g.face+Math.PI; player.pitch=0; player.ads=false;
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';

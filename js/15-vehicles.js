@@ -142,7 +142,7 @@ return V3(Math.sin(a)*Math.cos(p),Math.sin(p),Math.cos(a)*Math.cos(p));
 coaxMuzzle(){
 const a=this.yaw+this.turretYaw;
 const sn=Math.sin(a),cs=Math.cos(a);
-return V3(this.pos.x+cs*0.42+sn*1.25,this.pos.y+1.88,this.pos.z-sn*0.42+cs*1.25);
+return V3(this.pos.x+cs*0.42+sn*2.2,this.pos.y+1.88,this.pos.z-sn*0.42+cs*2.2); // 前向 2.2 与视觉管口对齐 (P2-20: 旧 1.25 缩在管中)
 }
 update(dt){
 // 炮管可见性单点维护: 仅玩家乘本车且开车长镜(炮手镜)时隐藏防穿模, 其余状态(下车/第三人称跟车/残骸)一律恢复
@@ -528,7 +528,7 @@ const mdir=dir.clone();
 mdir.x+=rand(-0.022,0.022); mdir.y+=rand(-0.015,0.015); mdir.z+=rand(-0.022,0.022); mdir.normalize();
 const mo=this.coaxMuzzle();
 (this.crewBot||this.crew)._src=this.name; // 同轴机枪击杀来源: 载具名
-fireBullet(this.crewBot||this.crew,mo,mdir,{dmg:40,headMul:2.0,snd:'mg',tracer:2,vehDmg:9},mo);
+fireBullet(this.crewBot||this.crew,mo,mdir,MG_BULLET_DEF,mo);
 if(--this.mgBurst<=0) this.mgPause=rand(0.35,0.8);
 }
 }
@@ -561,7 +561,7 @@ if(this.mgT>0) return;
 this.mgT=0.08;
 const o=this.coaxMuzzle();
 player._src=this.name; // 玩家同轴机枪击杀来源: 载具名
-fireBullet(player,o,dir,{dmg:40,headMul:2.0,snd:'mg',tracer:2,vehDmg:9},o);
+fireBullet(player,o,dir,MG_BULLET_DEF,o);
 AudioSys.gunshot('mg',0,0);
 addTrauma(0.02);
 }

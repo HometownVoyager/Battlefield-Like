@@ -964,20 +964,14 @@ const dh=Math.hypot(tp.x-mg.x,tp.z-mg.z);
 mg.pitch.rotation.x=-clamp(Math.atan2(dy,dh),-0.7,0.45);
 mg.fireT-=dt; // 射速间隔在炮上: 换人不重置 (与玩家同规)
 if(this.reactT<=0&&mg.fireT<=0&&mg.heat<1){
-const mdef2=mg.def||{rpm:1100,dmg:26,heatPS:0.012};
-mg.fireT=60/mdef2.rpm;
-mg.heat+=mdef2.heatPS;
-const eye=V3(mg.x,mg.y+0.1,mg.z);
+const eye=V3(mg.x,mg.y+EMPL_MG_EYE,mg.z);
 const dir=V3(tp.x-eye.x,tp.y+1.1+rand(-0.4,0.4)-eye.y,tp.z-eye.z).normalize();
-const spread=0.02*(this.suppression+0.7);
+const spread=0.02*(this.suppression+0.7); // AI 散布档 (含压制惩罚; 玩家走 0.011+heat 输入散布)
 dir.x+=rand(-spread,spread); dir.y+=rand(-spread,spread); dir.z+=rand(-spread,spread); dir.normalize();
-const muzzle=V3(mg.x+dir.x*1.3,mg.y+0.1+dir.y*1.3,mg.z+dir.z*1.3);
-const mgDef={dmg:mdef2.dmg,headMul:1.8,snd:'mg',tracer:2,vehDmg:2.5};
-this._src=mdef2.name||'重机枪'; // 击杀来源: 固定机枪座名称
-fireBullet(this,eye,dir,mgDef,muzzle);
+emplMGFire(mg,this,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-combat)
 }
 }
-mg.heat=Math.max(0,mg.heat-dt*0.15);
+mg.heat=Math.max(0,mg.heat-dt*0.15); // AI 散热档 0.15 (玩家 0.22 且开火不散) —— 显式节奏分叉, README 口径
 this.updateMesh(dt,0);
 return;
 }
@@ -1010,17 +1004,10 @@ bd=d; tx=f2.x; tz=f2.z;
 }
 }
 if(tx!==null){
-mo.cd=rand(4.2,6.5);
+mo.cd=rand(4.2,6.5); // AI 冷却档 (玩家 3.2s 固定) —— 显式节奏分叉: 自动索敌间隔更长, README 口径
 const sx=tx+rand(-7,7), sz=tz+rand(-7,7);
-const dH=Math.hypot(sx-mo.x,sz-mo.z);
-const tof=clamp(dH/42,1.8,4.2);
-const v=V3((sx-mo.x)/tof,0.5*9.8*tof,(sz-mo.z)/tof);
-const nPos=V3(mo.x,mo.y+0.25,mo.z);
-this._src='迫击炮'; // 击杀来源: 固定迫击炮
-const shell=new THREE.Mesh(nadeGeoAT,vmMats.gun); shell.position.copy(nPos); scene.add(shell);
-nades.push({m:shell,pos:nPos.clone(),vel:v,fuse:9,thrower:this,team:this.team,spin:V3(3,0,0.5),bounces:0,mortar:true});
+emplMortarShell(mo,this,sx,sz); // 弹道/弹体/击杀来源/炮口烟单源 (13-combat)
 AudioSys.mortarThunk(this.pos.distanceTo(camera.position));
-spawnP(PT.dark,mo.x,mo.y+0.4,mo.z,0,1.4,0,0.5,1.6,0.6,0.5,0.2);
 mo.tube.rotation.x=0.5;
 } else mo.cd=1.4;
 }
@@ -1338,8 +1325,8 @@ this.vel.set(0,0,0);
 this.pos.y=standHeight(this.pos.x,this.pos.z,this.pos.y+1);
 g.cd-=dt;
 if(g.kind==='at'){
-this.pos.x=g.x-Math.sin(g.face)*1.2;
-this.pos.z=g.z-Math.cos(g.face)*1.2;
+this.pos.x=g.x-Math.sin(g.face)*AT_CREW_DIST; // 站位单源常量 (00-config; 旧 1.2 与玩家 1.3 均嵌沙袋墙)
+this.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
 const tk=enemyTankNear(this,160);
 if(tk){
 const wantYaw=Math.atan2(tk.pos.x-g.x,tk.pos.z-g.z);
@@ -1351,18 +1338,13 @@ const dh=Math.hypot(tk.pos.x-g.x,tk.pos.z-g.z);
 const pit=clamp(Math.atan2((tk.pos.y+1.2)-g.y,dh),-0.55,0.6);
 g.pitch.rotation.x=dampF(g.pitch.rotation.x,-pit,4,dt);
 if(Math.abs(angDiff(g.face+g.yaw.rotation.y,wantYaw))<0.05&&g.cd<=0&&this.reactT<=0){
-g.cd=5.2+rand(0,1.4);
 const dir=V3(Math.sin(this.yaw)*Math.cos(pit),Math.sin(pit),Math.cos(this.yaw)*Math.cos(pit));
-const er=0.02*DIFF_TABLE[SETTINGS.diff].spreadMul;
+const er=0.02*DIFF_TABLE[SETTINGS.diff].spreadMul; // AI 散布档 (DIFF_TABLE)
 dir.x+=rand(-er,er); dir.y+=rand(-er,er)*0.6; dir.z+=rand(-er,er); dir.normalize();
-const o=V3(g.x,g.y+0.25,g.z).addScaledVector(dir,2.6);
-const chk=raycastWorld(o,dir,dh);
+const o=V3(g.x,g.y,g.z).addScaledVector(dir,2.7);
+const chk=raycastWorld(o,dir,dh); // LOS 预检只有 Bot 需要 (玩家目视瞄准)
 if(!chk||chk.dist>dh-4){
-AudioSys.cannon(o.distanceTo(camera.position)*1.3);
-spawnP(PT.flash,o.x,o.y,o.z,dir.x*3,dir.y*3,dir.z*3,0.8,8,0.1,1,0,true);
-spawnP(PT.dark,o.x,o.y,o.z,dir.x*2,1,dir.z*2,0.8,2.5,0.8,0.7,0.5);
-shells.push({pos:o.clone(),vel:dir.clone().multiplyScalar(150),team:this.team,owner:this,life:3,kind:'at',trail:0});
-this.lastFiredT=nowT;
+emplATFire(g,this,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-combat)
 	} else g.cd=3.5; // 被墙/地形挡住打不中: 较长间隔重试, 避免"连续开炮"观感
 }
 }
@@ -1372,7 +1354,7 @@ const pl=enemyPlaneAlive(this.team);
 if(pl){
 const lead=pl.pos.clone();
 const dist=lead.distanceTo(V3(g.x,g.y,g.z));
-const tof=dist/150;
+const tof=dist/SHELL_SPD;
 lead.x+=Math.sin(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-25,25);
 lead.z+=Math.cos(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-25,25);
 lead.y+=Math.sin(pl.pitch)*pl.speed*tof*0.5+rand(-8,8);
@@ -1383,7 +1365,7 @@ const dh=Math.hypot(lead.x-g.x,lead.z-g.z);
 const pit=clamp(Math.atan2(lead.y-g.y,Math.max(dh,3)),-0.45,1.35);
 g.pitch.rotation.x=dampF(g.pitch.rotation.x,-pit,5,dt);
 if(g.cd<=0&&dist<220){
-g.cd=0.62;
+g.cd=EMPL_AA_CD; // D1=c: 与玩家同档 0.34 (旧 0.62 分叉), Bot 强度差异走 DIFF_TABLE 散布
 const dir=V3(Math.sin(wantYaw)*Math.cos(pit),Math.sin(pit),Math.cos(wantYaw)*Math.cos(pit));
 const er=0.05*DIFF_TABLE[SETTINGS.diff].spreadMul;
 dir.x+=rand(-er,er); dir.y+=rand(-er,er)*0.7; dir.z+=rand(-er,er); dir.normalize();

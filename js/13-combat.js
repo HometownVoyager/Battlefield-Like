@@ -99,6 +99,42 @@ if(cx*cx+cy*cy+cz*cz<6){ s.suppression=Math.min(1.6,s.suppression+0.35); s.notic
 if(!shooter.spectator) gunEvents.push({x:origin.x,z:origin.z,team:shooter.team,t:nowT,shooter}); // 观战开火不产生枪声事件
 shooter.lastFiredT=nowT;
 }
+// ===== 固定火力点开火单源 (2026-09-06 B4/P1-1: 玩家 20a-seats 与 Bot 14-bots 共用一份弹道/冷却/特效) =====
+// 机枪座: 冷却与热量在炮上(换人不重置); 散布/后坐等输入差异由调用方在 dir 上先行处理
+const EMPL_MG_EYE=0.12, EMPL_MG_MUZ=1.35; // 枪管中线高度与炮口前移 (旧 Bot 0.1/1.3 vs 玩家 0.12/1.35 已统一)
+function emplMGFire(mg,shooter,dir){
+const mdef=mg.def||EMPL_MG_DEF;
+mg.fireT=60/mdef.rpm;
+mg.heat+=mdef.heatPS;
+const eye=V3(mg.x,mg.y+EMPL_MG_EYE,mg.z);
+const muzz=eye.clone().addScaledVector(dir,EMPL_MG_MUZ);
+shooter._src=mdef.name||'重机枪'; // 击杀来源: 固定机枪座名称
+fireBullet(shooter,eye,dir,mgBulletDef(mdef),muzz);
+muzzleFXWorld(muzz,dir);
+}
+// 迫击炮: 单源弹道 (tof=clamp(dH/42,1.8,4.2) 高抛解) + 弹体创建; 音效/烟/ trauma 与冷却档由调用方处理
+function emplMortarShell(mo,shooter,tx,tz){
+const dH=Math.hypot(tx-mo.x,tz-mo.z);
+const tof=clamp(dH/42,1.8,4.2);
+const v=V3((tx-mo.x)/tof,0.5*9.8*tof,(tz-mo.z)/tof);
+shooter._src='迫击炮'; // 击杀来源: 固定迫击炮
+const nPos=V3(mo.x,mo.y+0.25,mo.z);
+const shell=new THREE.Mesh(nadeGeoAT,vmMats.gun); shell.position.copy(nPos); scene.add(shell);
+nades.push({m:shell,pos:nPos.clone(),vel:v,fuse:9,thrower:shooter,team:shooter.team,spin:V3(3,0,0.5),bounces:0,mortar:true});
+spawnP(PT.dark,mo.x,mo.y+0.4,mo.z,0,1.4,0,0.5,1.6,0.6,0.5,0.2);
+}
+// 反坦克炮: 单源开炮 (炮口前移统一 2.7、弹壳出生 g.y —— 旧 Bot +0.25/2.6 vs 玩家 +0.25/2.7 分叉已统一);
+// 弹速引 SHELL_SPD (15-vehicles 常量, B7a 单源化同口径); LOS 检查只 Bot 需要, 留在 Bot 调用方
+function emplATFire(g,shooter,dir){
+g.cd=5.2+rand(0,1.4); // 炮上冷却, 换人不重置
+const o=V3(g.x,g.y,g.z).addScaledVector(dir,2.7);
+shooter._src='反坦克炮';
+AudioSys.cannon(o.distanceTo(camera.position));
+spawnP(PT.flash,o.x,o.y,o.z,dir.x*3,dir.y*3,dir.z*3,0.85,8.5,0.1,1,0,true);
+spawnP(PT.dark,o.x,o.y,o.z,dir.x*2,1,dir.z*2,0.85,2.55,0.85,0.7,0.5);
+shells.push({pos:o.clone(),vel:dir.clone().multiplyScalar(SHELL_SPD),team:shooter.team,owner:shooter,life:3,kind:'at',trail:0});
+shooter.lastFiredT=nowT;
+}
 const nades=[];
 const nadeGeoUS=new THREE.SphereGeometry(0.06,8,6);
 const nadeGeoGER=new THREE.CylinderGeometry(0.035,0.035,0.24,8);

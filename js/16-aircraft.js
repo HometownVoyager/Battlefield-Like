@@ -477,7 +477,7 @@ for(const p of planes) if(p.alive&&p.team!==team) return p;
 return null;
 }
 function fireFlak(gun,shooter,dir){
-const o=V3(gun.x,gun.y+0.4,gun.z).addScaledVector(dir,1.6);
+const o=V3(gun.x,gun.y,gun.z).addScaledVector(dir,1.6); // 弹壳出生炮轴心 (2026-09-06 P2-20: 旧 +0.4 与炮管视觉错位)
 AudioSys.gunshot('mg',o.distanceTo(camera.position),0);
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*2,dir.y*2,dir.z*2,0.35,3,0.07,1,0,true);
 flakShots.push({pos:o.clone(),vel:dir.clone().multiplyScalar(150),team:shooter.team,owner:shooter,life:2.6});

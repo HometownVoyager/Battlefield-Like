@@ -329,6 +329,12 @@ planes:[{name:'隼(缴获)',hp:150,spd:[29,56],rof:0.085,mgDmg:20,bombs:2,col:0x
 const TEAM_FACTION=[FACTIONS[CAMPAIGN.f[0]],FACTIONS[CAMPAIGN.f[1]]];
 const TEAM_NAME=[TEAM_FACTION[0].short,TEAM_FACTION[1].short];
 const TEAM_COL=[0x8fc1ff,0xff9c8a];
+// ===== 固定火力点/载具机枪单源常量 (2026-09-06 B4: 玩家与 Bot 走同一份射击代码) =====
+const MG_BULLET_DEF={dmg:40,headMul:2.0,snd:'mg',tracer:2,vehDmg:9};      // 载具同轴机枪弹 (坦克 AI/玩家共用)
+const mgBulletDef=mdef=>({dmg:mdef.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:2.5}); // 固定重机枪弹 (座子 def 参数化; headMul 统一 1.9)
+const AT_CREW_DIST=0.9;   // 反坦克炮炮手站位: 炮后方距离 (旧 1.2/1.3 会嵌进后方沙袋墙 0.35m)
+const EMPL_AA_CD=0.34;    // 防空炮射速间隔: 玩家/Bot 同档 (D1=c; Bot 强度差异交 DIFF_TABLE 散布表达)
+const EMPL_MG_DEF={rpm:1100,dmg:26,heatPS:0.012,name:'重机枪'}; // 机枪座 def 缺省兜底 (旧两处字面量 dmg 26/28 分叉已统一)
 // 超大地图战役(如雪峰山 800×800)在战役条目里指定 mapSize; 其余沿用标准 320
 const MAP_SIZE=CAMPAIGN.mapSize||320;
 let BOTS_PER_TEAM=11;

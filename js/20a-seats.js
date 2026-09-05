@@ -116,16 +116,9 @@ mortarMarker.rotation.y+=dt*1.2;
 const mscale=0.85+Math.sin(nowT*3.2)*0.08;
 mortarMarker.scale.setScalar(mscale);
 if(mouseDown&&m.cd<=0&&!matchOver){
-m.cd=3.2;
-const dH=Math.hypot(vo.x-m.x,vo.z-m.z);
-const tof=clamp(dH/42,1.8,4.2);
-const v=V3((vo.x-m.x)/tof,0.5*9.8*tof,(vo.z-m.z)/tof);
-p._src='迫击炮'; // 击杀来源: 固定迫击炮
+m.cd=3.2; // 玩家冷却档 (Bot AI rand(4.2,6.5) 显式节奏分叉)
+emplMortarShell(m,p,vo.x,vo.z); // 弹道/弹体/击杀来源/炮口烟单源 (13-combat)
 AudioSys.metalSlide(0.35,0.18,140,50);
-const nPos=V3(m.x,m.y+0.25,m.z);
-const shell=new THREE.Mesh(nadeGeoAT,vmMats.gun); shell.position.copy(nPos); scene.add(shell);
-nades.push({m:shell,pos:nPos.clone(),vel:v,fuse:9,thrower:p,team:p.team,spin:V3(3,0,0.5),bounces:0,mortar:true});
-spawnP(PT.dark,m.x,m.y+0.4,m.z,0,1.4,0,0.5,1.6,0.6,0.5,0.2);
 addTrauma(0.12);
 }
 // 炮管俯仰随视角(高抛→炮管更竖直), 开火后阻尼回位
@@ -142,21 +135,14 @@ g.cd-=dt;
 	p.pitch=clamp(p.pitch,-0.55,0.6);
 g.yaw.rotation.y=rel;
 g.pitch.rotation.x=-p.pitch;
-p.pos.x=g.x-Math.sin(g.face)*1.3;
-p.pos.z=g.z-Math.cos(g.face)*1.3;
+p.pos.x=g.x-Math.sin(g.face)*AT_CREW_DIST; // 站位单源常量 (00-config; P2-19: 旧 1.3 嵌进后方沙袋墙 0.35m)
+p.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
 p.pos.y=standHeight(p.pos.x,p.pos.z,p.pos.y+1);
 p.vel.set(0,0,0);
 if(mouseDown&&g.cd<=0&&!matchOver){
-g.cd=5.2+rand(0,1.4); // 与Bot同规: 炮上冷却, 换人不重置 (2026-09-02 用户指定常驻炮上)
-p._src='反坦克炮'; // 击杀来源: 固定反坦克炮
 const dir=camForward();
-const o=V3(g.x,g.y+0.25,g.z).addScaledVector(dir,2.7);
-AudioSys.cannon(0);
+emplATFire(g,p,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-combat, 与 Bot 同一份)
 addTrauma(0.45);
-spawnP(PT.flash,o.x,o.y,o.z,dir.x*3,dir.y*3,dir.z*3,0.9,9,0.1,1,0,true);
-spawnP(PT.dark,o.x,o.y,o.z,dir.x*2,1,dir.z*2,0.9,2.6,0.9,0.7,0.5);
-shells.push({pos:o.clone(),vel:dir.clone().multiplyScalar(150),team:p.team,owner:p,life:3,kind:'at',trail:0});
-p.lastFiredT=nowT;
 }
 document.getElementById('heatFill').style.width=(clamp(1-g.cd/4.5,0,1)*100)+'%';
 updateInteractHint();
@@ -186,7 +172,7 @@ pip.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px';
 } else pip.style.display='none';
 } else pip.style.display='none';
 if(mouseDown&&g.cd<=0&&!matchOver){
-g.cd=0.34;
+g.cd=EMPL_AA_CD; // 与 Bot 同档单源 (D1=c)
 p._src='防空炮'; // 击杀来源: 固定防空炮
 const dir=camForward();
 fireFlak(g,p,dir);
@@ -194,7 +180,7 @@ addTrauma(0.1);
 p.recoilPitch+=0.004;
 p.lastFiredT=nowT;
 }
-document.getElementById('heatFill').style.width=(clamp(1-g.cd/0.34,0,1)*100)+'%';
+document.getElementById('heatFill').style.width=(clamp(1-g.cd/EMPL_AA_CD,0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerMG(dt){
@@ -206,14 +192,10 @@ p.vel.set(0,0,0);
 mg.yaw.rotation.y=angDiff(mg.face+Math.PI,p.yaw);
 mg.pitch.rotation.x=-p.pitch*0.9;
 mg.fireT-=dt;
-const mdef=mg.def||{rpm:1100,dmg:28,heatPS:0.014};
-mg.heat=Math.max(0,mg.heat-dt*(mouseDown?0:0.22));
+mg.heat=Math.max(0,mg.heat-dt*(mouseDown?0:0.22)); // 玩家散热档 0.22 且开火不散 (Bot 0.15 常散=显式节奏分叉)
 if(mouseDown&&mg.fireT<=0&&mg.heat<1&&!matchOver){
-mg.fireT=60/mdef.rpm; // 射速间隔在炮上: 下炮再上不重置 (2026-09-02 用户指定)
-mg.heat+=mdef.heatPS;
-if(mg.heat>=1){ AudioSys.metalSlide(0.4,0.3,400,200); }
 const dir=camForward();
-const spread=0.011+mg.heat*0.015;
+const spread=0.011+mg.heat*0.015; // 玩家输入散布 (随热量; Bot 走 0.02*(suppression+0.7))
 const rv=camRight(), uv=rv.clone().cross(dir).negate();
 dir.addScaledVector(rv,rand(-spread,spread)).addScaledVector(uv,rand(-spread,spread)).normalize();
 p.recoilPitch+=0.0022;
@@ -221,11 +203,8 @@ p.pitch=clamp(p.pitch+0.0012,-0.7,0.45);
 p.yaw+=rand(-1,1)*0.0018;
 addTrauma(0.06);
 AudioSys.gunshot('mg',0,0);
-const o=V3(mg.x,mg.y+0.12,mg.z);
-const muzz=o.clone().addScaledVector(dir,1.35);
-p._src=mdef.name||'重机枪'; // 击杀来源: 固定机枪座名称
-fireBullet(p,o,dir,{dmg:mdef.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:2.5},muzz);
-muzzleFXWorld(muzz,dir);
+emplMGFire(mg,p,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-combat, 与 Bot 同一份; headMul 统一 1.9)
+if(mg.heat>=1){ AudioSys.metalSlide(0.4,0.3,400,200); } // 过热提示: emplMGFire 内已累加热量
 }
 document.getElementById('heatFill').style.width=(mg.heat*100)+'%';
 updateInteractHint();

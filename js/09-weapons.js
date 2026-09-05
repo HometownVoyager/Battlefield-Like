@@ -435,7 +435,7 @@ bx(gm,0.055,0.003,0.05, 0,0,0.13,rr);
 rr.visible=false;
 G.add(rr);
 parts.reloadRocket=rr;
-parts.muzzle.set(0,0.06,-0.95);
+parts.muzzle.set(0,0.06,-1.02); // 火箭筒/巡飞弹(loiter 复用 bazooka 模型)炮口前移出管口 0.02 (P3-10: audit-gunmodels 枪口前置0.050)
 } else {
 bx(gm,0.032,0.05,0.19, 0,0.02,-0.02,G);
 parts.slide=bx(gl,0.034,0.032,0.2, 0,0.045,-0.02,G);
