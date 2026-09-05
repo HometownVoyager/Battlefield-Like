@@ -62,10 +62,11 @@ this.slots=wset.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_D
 this.mag=this.def.mag;
 this.pMag=this.slots[1]?this.slots[1].def.mag:0;
 this.pReloadT=0;
-this.nades=CLASSES[cls].nades;
-this.smokes=CLASSES[cls].smoke||0;
-this.atn=cls===2?4:(cls===5?(TEAM_FACTION[this.team].atn5||3)*2:0);
-this.maxBandages=cls===4?12:4;
+const gear=clsGear(cls,this.team); // 投掷物公式单源 (2026-09-06 B7b/P2-5)
+this.nades=gear.nades;
+this.smokes=gear.smoke;
+this.atn=(EXPERIMENT&&cls===5)?(TEAM_FACTION[this.team].atn5||3)*2:gear.atn; // Bot 不吃实验模式 atn 清零变体 (行为等价)
+this.maxBandages=CLASSES[cls].bandages||4;
 this.bandages=this.maxBandages;
 const kind=gunKindOf(this.wpnKey);
 if(kind!==this.gunKind||this.wgKey!==this.wpnKey){
@@ -1405,9 +1406,13 @@ if(!found) yaw+=Math.PI*(Math.random()<0.5?0.5:-0.5);
 }
 	const cr=this.prone?0.28:this.crouch?0.5:1;
 	const wf=nowT-(this.wireT||-9)<0.3?0.42:1;
-	// 深谷激流: 涉水大幅减速并持续受创 (寻路本不走河道, 误入/被冲入时尽快脱身)
+	// 深谷激流: 涉水大幅减速并持续受创; 被激流冲向下游 1.5m/s (2026-09-06 B7b/D5: 与玩家同参, README 口径兑现)
 	const riv=inRiverChannel(this.pos.x,this.pos.z);
-	if(riv) this.damage(RAPIDS_DMG*dt,null,false);
+	if(riv){
+	this.damage(RAPIDS_DMG*dt,null,false);
+	const rd=riverDirAt(this.pos.x,this.pos.z);
+	if(rd){ this.pos.x+=rd[0]*1.5*dt; this.pos.z+=rd[1]*1.5*dt; }
+	}
 	this.vel.x=Math.sin(yaw)*speed*cr*wf*(riv?0.4:1);
 	this.vel.z=Math.cos(yaw)*speed*cr*wf*(riv?0.4:1);
 this.pos.x+=this.vel.x*dt;

@@ -347,6 +347,7 @@ if(job.objs) job.y0s=job.objs.map(m=>m.position.y);
 if(job.inst){
 const arr=job.inst.im.instanceMatrix.array;
 job.ys=job.inst.idxs.map(i=>arr[i*16+13]);
+if(job.dx) job.xs=job.inst.idxs.map(i=>arr[i*16+12]);
 }
 SINK_JOBS.push(job);
 return job;
@@ -389,9 +390,13 @@ const m=job.objs[oi];
 if(m.parent) m.position.y=job.y0s[oi]-job.depth*k;
 }
 }
+if(job.onTick) job.onTick(dt,k);
 if(job.inst){
 const arr=job.inst.im.instanceMatrix.array;
-for(let ii=0;ii<job.inst.idxs.length;ii++) arr[job.inst.idxs[ii]*16+13]=job.ys[ii]-job.depth*k;
+for(let ii=0;ii<job.inst.idxs.length;ii++){
+arr[job.inst.idxs[ii]*16+13]=job.ys[ii]-job.depth*k;
+if(job.xs) arr[job.inst.idxs[ii]*16+12]=job.xs[ii]+job.dx*k;
+}
 job.inst.im.instanceMatrix.needsUpdate=true;
 }
 if(k>=1){

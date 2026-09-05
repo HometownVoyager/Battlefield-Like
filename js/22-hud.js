@@ -339,6 +339,7 @@ ch.style.display='none';
 } else ch.style.display='none';
 }
 let respawnCd=0, selectedSpawn=0;
+function setRespawnCd(v){ respawnCd=v; } // owner 暴露接口 (2026-09-06 B7b/P2-14: 18-game 跨文件写改经此)
 function initMenuUI(){
 // 主菜单导航
 	const showPanel=(id)=>{
@@ -486,8 +487,7 @@ player.team=SETTINGS.team;
 BOTS_PER_TEAM=SIZE_OPTS[SIZE_IDX].bots;
 	const tk=Math.round(START_TICKETS*mul/2);
 	tickets[0]=tk; tickets[1]=tk;
-	wipeAnnounced[0]=false; wipeAnnounced[1]=false; // 清场播报复位 (2026-09-04)
-	wipeT[0]=null; wipeT[1]=null; // 最后一人清场倒计时复位 (2026-09-04)
+	resetMatchState(); // 清场播报/倒计时复位 (2026-09-06 B7b/P2-14: 21-match 暴露的唯一入口)
 	startMatch();
 el('menu').classList.add('hidden');
 showDeploy(true);

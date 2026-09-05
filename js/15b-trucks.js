@@ -32,7 +32,7 @@ this.pos=V3(); this.yaw=0; this.vel=0;
 this.idx=i;
 this.wpI=0;
 this.wreckBs=null;
-this.sunk=false; this.sinkDelay=0; this.sinkT=0; this._collDropped=false;
+this.sunk=false; this.sinking=false;
 this.startU=i*((CAMPAIGN.convoy&&CAMPAIGN.convoy.gap)||15); // 列队间距: 沿行进方向提前 startU
 this.buildMesh();
 this.placeAtColumn();
@@ -96,24 +96,8 @@ this.pos.y=heightAt(this.pos.x,this.pos.z);
 }
 update(dt){
 if(!this.alive){
-// 残骸: 爆炸后静置 sinkDelay 秒, 再以约 1m/s 匀速沉入地下, 半沉撤碰撞, 全沉移除
-if(this.escaped||this.sunk) return;
-if(this.sinkDelay>0){ this.sinkDelay-=dt; return; }
-this.sinkT+=dt;
-const k=this.sinkT/3.6;
-this.grp.position.y=this.pos.y+0.2-k*3.8;
-if(!this._collDropped&&k>0.4){
-this._collDropped=true;
-if(this.wreckBs) killDynCollider(this.wreckBs);
-}
-if(k<0.9&&Math.random()<dt*2.2){
-spawnP(PT.dark,this.pos.x+rand(-1.4,1.4),this.grp.position.y+rand(0.3,1.2),this.pos.z+rand(-1.4,1.4),rand(-0.3,0.3),rand(0.4,1.2),rand(-0.3,0.3),0.5,1.1,rand(0.7,1.2),0.5,0.45);
-}
-if(k>=1){
-this.sunk=true;
-world.remove(this.grp);
-}
-return;
+// 残骸沉没已收敛 queueSink (2026-09-06 B7b/P2-4): 静置1.2s→沉入3.6s→半沉(40%)撤碰撞→全沉移除, 冒烟走 onTick
+if(this.escaped||this.sunk||this.sinking) return;
 }
 const P=convoyPath();
 if(this.wpI>=P.length-1){
@@ -136,37 +120,7 @@ this.pos.x+=Math.sin(this.yaw)*this.vel*dt;
 this.pos.z+=Math.cos(this.yaw)*this.vel*dt;
 this.pos.y=dampF(this.pos.y,heightAt(this.pos.x,this.pos.z),8,dt);
 // 实体碰撞: 步兵不可穿入车体; 行进正面的敌军碾压, 其余侧向挤出 (同坦克模式)
-{
-const hx=1.05, hz=3.7;
-const csb=Math.cos(this.yaw), snb=Math.sin(this.yaw);
-const moving=this.vel>0.8;
-for(const s of combatants){
-if(!s.alive||s.onVehicle) continue;
-if(s.pos.y>this.pos.y+2.0) continue;
-const relx=s.pos.x-this.pos.x, relz=s.pos.z-this.pos.z;
-const lx=relx*csb-relz*snb;
-const lz=relx*snb+relz*csb;
-if(Math.abs(lx)>=hx+0.38||Math.abs(lz)>=hz+0.38) continue;
-const frontal=lz>hz-1.4;
-if(moving&&frontal&&s.team!==this.team){
-s.damage(300,this,false);
-if(!s.alive) continue;
-}
-const penX=hx+0.38-Math.abs(lx);
-const penZ=hz+0.38-Math.abs(lz);
-let lateral=penX<penZ;
-if(moving&&frontal) lateral=true;
-if(lateral){
-const sgn=lx>=0?1:-1;
-const amt=penX<0.5?penX:Math.min(penX,(3+this.vel)*dt*2.2);
-s.pos.x+=csb*sgn*amt; s.pos.z+=-snb*sgn*amt;
-} else {
-const sgn=lz>0?1:-1;
-s.pos.x+=snb*sgn*penZ; s.pos.z+=csb*sgn*penZ;
-}
-if(s.isPlayer) collideMove(s.pos,0.42);
-}
-}
+vehiclePushSoldiers(this,1.05,3.7,{dt,crusher:this,moving:this.vel>0.8,yMax:2.0,frontalBand:1.4,symmetricFrontal:true,crushDmg:300,pushVel:this.vel});
 // 护运方补给: 紧贴本车的护运士兵自动补绷带 (运输车是护运方唯一补给来源)
 for(const s of combatants){
 if(!s.alive||s.team!==this.team||s.onVehicle) continue;
@@ -203,7 +157,11 @@ explosionFlora(this.pos,4.5);
 	this.grp.rotation.set(rand(-0.08,0.08),this.yaw,rand(-0.22,0.22));
 	this.grp.position.y=this.pos.y+0.2;
 	this.wreckBs=registerDynCollider(this.pos.x,this.pos.y+0.7,this.pos.z,2.4,1.5,6.4);
-	this.sinkDelay=1.2; this.sinkT=0; this.sunk=false; this._collDropped=false;
+	this.sinking=true;
+queueSink({objs:[this.grp],rest:1.2,sink:3.6,depth:3.8,
+onHalf:()=>{ if(this.wreckBs) killDynCollider(this.wreckBs); },
+onTick:(dtk,k)=>{ if(k<0.9&&Math.random()<dtk*2.2) spawnP(PT.dark,this.pos.x+rand(-1.4,1.4),this.grp.position.y+rand(0.3,1.2),this.pos.z+rand(-1.4,1.4),rand(-0.3,0.3),rand(0.4,1.2),rand(-0.3,0.3),0.5,1.1,rand(0.7,1.2),0.5,0.45); },
+onDone:()=>{ world.remove(this.grp); this.sunk=true; }});
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
 attacker.score=(attacker.score||0)+SCORE_TABLE.truck;

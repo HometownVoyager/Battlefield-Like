@@ -71,7 +71,7 @@ this.deathCamT=this.deathRag?2.2:0.8;
 this.deathCamYaw=this.yaw+Math.PI;
 this.deathPos=this.pos.clone();
 this.deathPos.y+=0.4;
-respawnCd=8;
+setRespawnCd(8); // 经 22-hud owner 接口 (2026-09-06 B7b/P2-14)
 const dly=this.deathRag?2100:900;
 setTimeout(()=>{ if(!this.alive) document.getElementById('blackOv').style.opacity=0.75; },dly);
 setTimeout(()=>{ if(!matchOver&&!this.alive) showDeploy(true); },dly+700);

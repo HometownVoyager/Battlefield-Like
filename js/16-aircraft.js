@@ -41,6 +41,8 @@ w.m.rotation.set(rand(-0.15,0.15),w.yaw,rand(-0.4,0.4));
 w.m.position.copy(w.pos);
 w.col=registerDynCollider(w.pos.x,gh+0.7,w.pos.z,3.6,1.4,3.6);
 }
+} else if(w.sinking){
+// 沉没推进已收敛 queueSink (2026-09-06 B7b/P2-4)
 } else {
 w.restT-=dt;
 w.smokeT-=dt;
@@ -49,25 +51,13 @@ w.smokeT=0.16;
 spawnP(PT.dark,w.pos.x+rand(-1,1),w.pos.y+0.8,w.pos.z+rand(-1,1),rand(-0.2,0.2),rand(0.8,1.6),rand(-0.2,0.2),0.8,1.5,rand(1.2,2),0.55,0.15);
 }
 if(w.restT<=0){
-// 残骸沉入地下: 开始下沉即熄火(不再是火源), 半沉撤碰撞, 全沉移除模型体
-if(!w.sinking){
-w.sinking=true; w.sinkT=0; w.colKilled=false;
+// 残骸沉入地下: 开始下沉即熄火(不再是火源), 半沉撤碰撞, 全沉移除 —— 收敛 queueSink (2026-09-06 B7b/P2-4)
+w.sinking=true;
 if(w.fireSrc){ removeFireSource(w.fireSrc); w.fireSrc=null; }
-}
-w.sinkT+=dt;
-const k=w.sinkT/4;
-w.m.position.y=w.pos.y-4.6*k;
-if(!w.colKilled&&k>0.4){
-w.colKilled=true;
-if(w.col){ killDynCollider(w.col); w.col=null; }
-}
-if(k<0.9&&Math.random()<dt*2){
-spawnP(PT.dark,w.pos.x+rand(-1.6,1.6),w.m.position.y+rand(0.3,1),w.pos.z+rand(-1.6,1.6),rand(-0.3,0.3),rand(0.4,1),rand(-0.3,0.3),0.6,1.2,rand(0.8,1.3),0.5,0.45);
-}
-if(k>=1){
-scene.remove(w.m);
-planeWrecks.splice(i,1);
-}
+queueSink({objs:[w.m],rest:0,sink:4,depth:4.6,
+onHalf:()=>{ if(w.col){ killDynCollider(w.col); w.col=null; } },
+onTick:(dtk,k)=>{ if(k<0.9&&Math.random()<dtk*2) spawnP(PT.dark,w.pos.x+rand(-1.6,1.6),w.m.position.y+rand(0.3,1),w.pos.z+rand(-1.6,1.6),rand(-0.3,0.3),rand(0.4,1),rand(-0.3,0.3),0.6,1.2,rand(0.8,1.3),0.5,0.45); },
+onDone:()=>{ scene.remove(w.m); const j=planeWrecks.indexOf(w); if(j>=0) planeWrecks.splice(j,1); }});
 }
 }
 }
@@ -178,12 +168,12 @@ if(tp>2&&tp<200){ const d2=rel.lengthSq()-tp*tp; if(d2<3.2*3.2){ ep.takeDmg(this
 }
 for(const t of tanks){
 if(!t.alive||t.team===this.team) continue;
-const r=rayCyl(o,dir,{x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+2.6},200);
+const r=rayCyl(o,dir,vehHitCyl(t),200);
 if(r){ t.takeDmg(3,shooter); break; }
 }
 for(const t of trucks){
 if(!t.alive||t.team===this.team) continue;
-const r=rayCyl(o,dir,{x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5},200);
+const r=rayCyl(o,dir,truckHitCyl(t),200);
 if(r){ t.takeDmg(3,shooter); break; }
 }
 }

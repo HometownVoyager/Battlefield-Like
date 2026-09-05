@@ -312,7 +312,7 @@ const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).lengt
 	} else if(GAMEMODE==='convoy'){
 	// 劫道: 双方兵力均为标准相等有限票 (胜负仍看车队), 16分钟限时
 	matchTime=16*60;
-	SUPPLY_START=nowT; // 劫道方临时补给点寿命计时从开局起算
+	supplyClockStart(); // 劫道方临时补给点寿命计时从开局起算 (owner 接口)
 	}
 // 组建玩家小队: 挑3名本方步兵
 for(const s of soldiers){

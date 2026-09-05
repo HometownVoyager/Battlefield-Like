@@ -24,7 +24,7 @@ const wr2=raycastWorld(co,cd,D);
 if(wr2) D=wr2.dist;
 for(const t2 of tanks){
 if(t2===t||!t2.alive) continue;
-const r2=rayCyl(co,cd,{x:t2.pos.x,z:t2.pos.z,r:2.3,y0:t2.pos.y,y1:t2.pos.y+2.6},D);
+const r2=rayCyl(co,cd,vehHitCyl(t2),D);
 if(r2) D=r2.t;
 }
 	wantPitch=clamp(p.pitch+SHELL_G*D/(2*SHELL_SPD*SHELL_SPD),-0.12,0.35);

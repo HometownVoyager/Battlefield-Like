@@ -99,7 +99,7 @@ if(occBlocked(tx,tz)){ showScorePop('此处无法建造'); return; }
 const lim=MAP_SIZE/2-4;
 if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop('超出战场边界'); return; }
 pl.pendingBuild={type,cost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
-VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmSndFlags={};
+VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmResetSndFlags();
 showScorePop('建造中: '+BUILD_NAMES[type]+' … (移动取消)');
 }
 function cancelBuild(pl){
@@ -109,7 +109,7 @@ if(VM.state==='build'){
 VM.state='idle';
 if(VM.gunParts) VM.gunParts.gun.visible=true;
 if(VM.hammerM) VM.hammerM.visible=false;
-vmSndFlags={};
+vmResetSndFlags();
 }
 }
 function engBuildExec(pl){

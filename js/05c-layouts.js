@@ -686,6 +686,7 @@ crater(270,-112,2.2); crater(-8,-48,1.8);
 // 补给内容=弹药+绷带+投掷物全满 (与弹药箱同标准); 仅劫道方(team0)玩家可使用
 const SUPPLY_POINTS=[];
 let SUPPLY_EXPIRED=false, SUPPLY_START=-1;
+function supplyClockStart(){ SUPPLY_START=nowT; } // owner 接口 (2026-09-06 B7b/P2-14: 23-deploy 跨文件写改经此)
 function placeSupplyPoint(x,z){
 // 尝试布置 + 兜底偏移; 失败则放弃 (不打断伏击点其他布置)
 for(const [ox,oz] of [[0,0],[1,-1],[2,1],[-1,-2]]){

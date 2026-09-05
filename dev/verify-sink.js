@@ -241,7 +241,7 @@ assert(w.fireSrc&&FIRE_SOURCES.includes(w.fireSrc),'残骸火源已注册');
 let fireGoneAtSink=true;
 guard=0;
 while(guard++<600&&planeWrecks.includes(w)){
-updatePlaneWrecks(0.1); nowT+=0.1;
+updatePlaneWrecks(0.1); updateWreckSinks(0.1); nowT+=0.1; // 2026-09-06 B7b: 沉没推进收敛 queueSink 后, 主循环同时驱动两者 (24-main:65-69 同序)
 if(w.sinking&&FIRE_SOURCES.includes(w.fireSrc)) fireGoneAtSink=false;
 }
 assert(!planeWrecks.includes(w),'全沉后残骸条目移除');

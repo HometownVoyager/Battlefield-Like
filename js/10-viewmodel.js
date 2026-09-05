@@ -100,6 +100,7 @@ VM.arms.L.position.set(-0.015,-0.075,-0.2); VM.arms.L.rotation.set(0.28,-0.1,0);
 function ss(t,a,b){ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); }
 function pulse(t,a,b,c){ return t<b? ss(t,a,b) : 1-ss(t,b,c); }
 let vmSndFlags={};
+function vmResetSndFlags(){ vmSndFlags={}; } // owner 接口 (2026-09-06 B7b/P2-14: 06-engineering 跨文件写改经此)
 function vmPlayOnce(id,fn){ if(!vmSndFlags[id]){ vmSndFlags[id]=true; fn(); } }
 function updateViewModel(dt,player){
 const d=WPN_DEFS[VM.key]||{};

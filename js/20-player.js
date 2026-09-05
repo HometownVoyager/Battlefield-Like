@@ -215,6 +215,7 @@ return;
 }
 }
 let camTrauma=0, dmgFlash=0;
+function addDmgFlash(x){ dmgFlash=Math.min(1,dmgFlash+x); } // owner 接口 (2026-09-06 B7b/P2-14: 15-vehicles 跨文件写改经此)
 function addTrauma(x){ camTrauma=Math.min(1.2,camTrauma+x); }
 // 严寒 HUD (#coldTip): 文案变化才写 DOM (状态键比较), 离开露天/进屋即隐藏
 function coldHudShow(line){

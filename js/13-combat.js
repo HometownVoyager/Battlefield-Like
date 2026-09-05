@@ -37,12 +37,12 @@ let wallD=wr?wr.dist:maxD;
 let hitTank=null, hitTruck=null, tankD=1e9, truckD=1e9;
 for(const t of tanks){
 if(!t.alive) continue;
-const r=rayCyl(origin,dir,{x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.25,y1:t.pos.y+2.55},wallD);
+const r=rayCyl(origin,dir,vehHitCyl(t),wallD);
 if(r){ wallD=r.t; hitTank=t; tankD=r.t; }
 }
 for(const t of trucks){
 if(!t.alive) continue;
-const r=rayCyl(origin,dir,{x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5},wallD);
+const r=rayCyl(origin,dir,truckHitCyl(t),wallD);
 if(r){ wallD=r.t; hitTruck=t; truckD=r.t; }
 }
 const sr=raySoldiers(origin,dir,wallD,shooter);
@@ -312,23 +312,28 @@ const cp=Math.cos(d.pitch);
 return V3(-Math.sin(d.yaw)*cp, Math.sin(d.pitch), -Math.cos(d.yaw)*cp);
 }
 // 不分敌我溅射: 圈内所有步兵(含发射者与友军)、坦克/卡车/飞机(含友军)一律受伤
-function splashDamageFF(p,attacker,radius,dmgMax,dmgVeh,ap){
+// 溅射单源 (2026-09-06 B7b/P2-6: 旧 splashDamage(15-vehicles,队伤) 与 splashDamageFF(13-combat,无差别) 90% 同构合并;
+// team=-1 ⇒ 无差别(FF): 不吃队伤豁免、载具衰减下限 20、含飞机圈; team 传队号 ⇒ 同队免伤、衰减下限 10、不含飞机圈)
+function splashDamage(p,attacker,team,radius,dmgMax,dmgVeh,ap){
+const ff=team===-1||team===undefined;
+const vehFloor=ff?20:10;
 for(const s of combatants){
 if(!s.alive||s.onVehicle) continue;
+if(!ff&&s.team===team&&s!==attacker) continue; // 不误伤队友, 但炸自己会受伤
 const d=Math.hypot(s.pos.x-p.x,(s.pos.y+0.9)-p.y,s.pos.z-p.z);
 if(d<radius) s.damage(lerp(dmgMax,10,d/radius),attacker,false);
 }
 for(const t of tanks){
-if(!t.alive) continue;
+if(!t.alive||(!ff&&t.team===team)) continue;
 const d=t.pos.distanceTo(p);
-if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,20,d/(radius+2.5)),attacker,ap);
+if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5)),attacker,ap);
 }
 for(const t of trucks){
-if(!t.alive) continue;
+if(!t.alive||(!ff&&t.team===team)) continue;
 const d=t.pos.distanceTo(p);
-if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,20,d/(radius+2.5)),attacker);
+if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5)),attacker);
 }
-for(const pl of planes){
+if(ff) for(const pl of planes){
 if(!pl.alive) continue;
 const d=pl.pos.distanceTo(p);
 if(d<radius+3) pl.takeDmg(lerp(dmgVeh,20,d/(radius+3)),attacker);
@@ -369,7 +374,7 @@ const wr=raycastWorld(d.pos,dir,hitD);
 if(wr){ hitD=wr.dist; hit=wr; }
 for(const t of tanks){
 if(!t.alive) continue;
-const r=rayCyl(d.pos,dir,{x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+2.6},hitD);
+const r=rayCyl(d.pos,dir,vehHitCyl(t),hitD);
 if(r){ hitD=r.t; hitTank=t; hitSol=null; hitPlane=null; hit=r; }
 }
 // 空中目标: 弹体航迹与机体圆柱相交即碰炸 (飞机即使悬停/迎头相撞也按最近距离判定)
@@ -425,7 +430,7 @@ if(!matchOver){
 explosionFX(p);
 AudioSys.explosion(p.distanceTo(camera.position)*0.8);
 // 攻顶战斗部: 不分敌我的大范围高伤害爆炸 (含发射者自己与友军)
-splashDamageFF(p,d.owner,9.5,240,560,true); // 巡飞弹: 反装甲全额
+splashDamage(p,d.owner,-1,9.5,240,560,true); // 巡飞弹: 反装甲全额, 无差别 (单源 splashDamage team=-1)
 damageStructures(p,9,300);
 crater(p.x,p.z,1.6,true);
 if(directTank) directTank.takeDmg(900,d.owner,true); // 巡飞弹直击: 反装甲全额

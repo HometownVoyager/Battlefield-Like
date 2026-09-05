@@ -20,6 +20,10 @@ const MATCH_END_DELAY=1.5;
 const wipeAnnounced=[false,false];
 const WIPE_GRACE=30;     // 最后一人清场倒计时秒数
 const wipeT=[null,null]; // 各队倒计时剩余秒数, null=未进入 (仅归零方且场上仅剩1人时启动)
+function resetMatchState(){ // 对局态复位唯一入口 (2026-09-06 B7b/P2-14: 替代 22-hud startGame 的跨文件直写)
+wipeAnnounced[0]=false; wipeAnnounced[1]=false;
+wipeT[0]=null; wipeT[1]=null;
+}
 function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
 if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
 return 0;

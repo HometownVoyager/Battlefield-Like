@@ -9,6 +9,42 @@ const tanks=[], shells=[];
 const SHELL_G=0.5;
 // 主炮弹速/射程 (2026-09-01 压制力增强: 130m/s×3.5s=455m → 150m/s×4.5s≈675m)
 const SHELL_SPD=150;
+// ── 载具命中圆柱单源 (2026-09-06 B7b/P2-2): 旧 7 处内联, 同一辆坦克两套命中体积(子弹 2.2/炮弹 2.3) ──
+// 半径统一 2.3 (命中体积修正, 非玩法 nerf); 卡车无炮弹路径, 保留 2.2 口径
+function vehHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+2.6}; }
+function truckHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5}; }
+// ── 载具步兵碰撞/推出/碾压单源 (2026-09-06 B7b/P2-3): Tank/Truck 逐行同构块参数化 ──
+function vehiclePushSoldiers(veh,hx,hz,o){
+const csb=Math.cos(veh.yaw), snb=Math.sin(veh.yaw);
+for(const s of combatants){
+if(!s.alive||s.onVehicle) continue;
+if(o.checkSpectator&&s.spectator) continue;
+if(s.pos.y>veh.pos.y+o.yMax) continue;
+const relx=s.pos.x-veh.pos.x, relz=s.pos.z-veh.pos.z;
+const lx=relx*csb-relz*snb;
+const lz=relx*snb+relz*csb;
+if(Math.abs(lx)>=hx+0.38||Math.abs(lz)>=hz+0.38) continue;
+const frontal=o.symmetricFrontal?(lz>hz-o.frontalBand):(veh.vel>0?(lz>hz-o.frontalBand):(lz<-(hz-o.frontalBand)));
+if(o.moving&&frontal&&s.team!==veh.team){
+o.crusher._src=veh.name; // 碾压击杀来源: 记入载具名
+s.damage(o.crushDmg,o.crusher,false);
+if(!s.alive) continue;
+}
+const penX=hx+0.38-Math.abs(lx);
+const penZ=hz+0.38-Math.abs(lz);
+let lateral=penX<penZ;
+if(o.moving&&frontal) lateral=true;
+if(lateral){
+const sgn=lx>=0?1:-1;
+const amt=penX<0.5?penX:Math.min(penX,(3+o.pushVel)*o.dt*2.2);
+s.pos.x+=csb*sgn*amt; s.pos.z+=-snb*sgn*amt;
+} else {
+const sgn=lz>0?1:-1;
+s.pos.x+=snb*sgn*penZ; s.pos.z+=csb*sgn*penZ;
+}
+if(s.isPlayer) collideMove(s.pos,0.42);
+}
+}
 // 2026-09-02 装甲抗性: 坦克对"非反装甲"伤害(机枪/步枪子弹、火烧、飞机扫射、炸弹/迫击炮溅射等)按此倍率减免;
 // 巡飞弹/坦克炮/固定炮/反坦克攻击(火箭筒/反坦克枪/炸药)仍全额生效 —— takeDmg 第3参 ap=true 表示反装甲伤害
 // (2026-09-02 用户调参: 减免倍率 0.4 → 0.3, 非反装甲伤害只吃三成)
@@ -276,41 +312,7 @@ this.pos.y=dampF(this.pos.y,tankRideH(this.pos.x,this.pos.z,this.pos.y),8,dt);
 // 碾压植被: 行进中撞上树顺势撞倒 (倒向车头方向), 灌木直接碾没 (见 04b-fire)
 if(Math.abs(this.vel)>0.8&&typeof floraCrushTank==='function') floraCrushTank(this);
 // 实体碰撞: 步兵无法穿入车体; 友军挤开, 敌军按行进方向与车速判定碾压
-{
-const hx=2.05, hz=this.def.hullL/2+0.45;
-const csb=Math.cos(this.yaw), snb=Math.sin(this.yaw);
-const crusher=this.playerDriven?player:(this.crewBot||this.crew);
-const moving=Math.abs(this.vel)>1.2;
-for(const s of combatants){
-if(!s.alive||s.onVehicle||s.spectator) continue;
-if(s.pos.y>this.pos.y+1.9) continue;
-const relx=s.pos.x-this.pos.x, relz=s.pos.z-this.pos.z;
-const lx=relx*csb-relz*snb;
-const lz=relx*snb+relz*csb;
-if(Math.abs(lx)>=hx+0.38||Math.abs(lz)>=hz+0.38) continue;
-// 碾压: 车在动 且 目标处于行进方向的前沿区域 且 是敌军
-const frontal=this.vel>0?(lz>hz-1.5):(lz<-(hz-1.5));
-if(moving&&frontal&&s.team!==this.team){
-crusher._src=this.name; // 碾压击杀来源: 记入载具名
-s.damage(320,crusher,false);
-if(!s.alive) continue;
-}
-// 推出: 沿穿透较浅的轴推离; 行进正面的存活者向侧面挤出
-const penX=hx+0.38-Math.abs(lx);
-const penZ=hz+0.38-Math.abs(lz);
-let lateral=penX<penZ;
-if(moving&&frontal) lateral=true;
-if(lateral){
-const sgn=lx>=0?1:-1;
-const amt=penX<0.5?penX:Math.min(penX,(3+Math.abs(this.vel))*dt*2.2);
-s.pos.x+=csb*sgn*amt; s.pos.z+=-snb*sgn*amt;
-} else {
-const sgn=lz>0?1:-1;
-s.pos.x+=snb*sgn*penZ; s.pos.z+=csb*sgn*penZ;
-}
-if(s.isPlayer) collideMove(s.pos,0.42);
-}
-}
+vehiclePushSoldiers(this,2.05,this.def.hullL/2+0.45,{dt,crusher:this.playerDriven?player:(this.crewBot||this.crew),moving:Math.abs(this.vel)>1.2,yMax:1.9,frontalBand:1.5,symmetricFrontal:false,crushDmg:320,pushVel:Math.abs(this.vel)});
 // 履带滚动与路轮
 this.trackTex.offset.y-=this.vel*dt*0.55;
 for(const wh of this.wheels) wh.rotation.x+=this.vel*dt/0.36;
@@ -575,7 +577,7 @@ if(!this.alive) return;
 if(!ap) amt*=TANK_ARMOR;
 this.hp-=amt;
 this.lastDmgT=nowT;
-if(this.playerDriven){ dmgFlash=Math.min(1,dmgFlash+0.35); addTrauma(0.3); }
+if(this.playerDriven){ addDmgFlash(0.35); addTrauma(0.3); }
 else if(attacker&&attacker.pos){
 this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
 setTimeout(()=>{ if(this.threatYaw!==null) this.threatYaw=null; },6000);
@@ -687,12 +689,12 @@ const wr=raycastWorld(s.pos,dir,hitD);
 if(wr){ hitD=wr.dist; hit=wr; }
 for(const t of tanks){
 if(!t.alive||t.team===s.team) continue;
-const r=rayCyl(s.pos,dir,{x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+2.6},hitD);
+const r=rayCyl(s.pos,dir,vehHitCyl(t),hitD);
 if(r){ hitD=r.t; hit=r; hitTank=t; hitSol=null; }
 }
 for(const t of trucks){
 if(!t.alive||t.team===s.team) continue;
-const r=rayCyl(s.pos,dir,{x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5},hitD);
+const r=rayCyl(s.pos,dir,truckHitCyl(t),hitD);
 if(r){ hitD=r.t; hit=r; hitTruck=t; hitTank=null; hitSol=null; }
 }
 const sr=raySoldiers(s.pos,dir,hitD,{team:s.team,isPlayer:false});
@@ -717,22 +719,4 @@ spawnP(PT.flash,p.x,p.y+0.3,p.z,0,1,0, 1.6,10,0.12,1,0,true);
 for(let i=0;i<6;i++) spawnP(PT.dark,p.x+rand(-0.5,0.5),p.y+rand(0.2,1),p.z+rand(-0.5,0.5), rand(-1.5,1.5),rand(1,3),rand(-1.5,1.5), rand(0.6,1),1.8,rand(0.7,1.3),0.8,0.6);
 for(let i=0;i<6;i++) spawnP(PT.dirt,p.x,p.y+0.2,p.z, rand(-4,4),rand(2,6),rand(-4,4), rand(0.25,0.5),0.5,rand(0.5,0.9),0.9,8);
 }
-function splashDamage(p,attacker,team,radius,dmgMax,dmgVeh,ap){
-for(const s of combatants){
-if(!s.alive||s.onVehicle) continue;
-if(s.team===team&&s!==attacker) continue; // 不误伤队友, 但炸自己会受伤
-const d=Math.hypot(s.pos.x-p.x,(s.pos.y+0.9)-p.y,s.pos.z-p.z);
-if(d<radius) s.damage(lerp(dmgMax,10,d/radius),attacker,false);
-}
-for(const t of tanks){
-if(!t.alive||t.team===team) continue;
-const d=t.pos.distanceTo(p);
-if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,10,d/(radius+2.5)),attacker,ap);
-}
-for(const t of trucks){
-if(!t.alive||t.team===team) continue;
-const d=t.pos.distanceTo(p);
-if(d<radius+2.5) t.takeDmg(lerp(dmgVeh,10,d/(radius+2.5)),attacker);
-}
-if(player.alive&&p.distanceTo(camera.position)<18) addTrauma(0.5);
-}
+// 溅射已单源到 13-combat splashDamage (2026-09-06 B7b/P2-6)
