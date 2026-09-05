@@ -233,7 +233,7 @@ el('resN').textContent=''; el('nadeN').textContent='';
 	el('magN').textContent=player.onMG?'∞':w.mag;
 	el('resN').textContent=player.onMG?'':'/ '+w.reserve;
 	el('magN').style.color=(!player.onMG&&w.mag<=Math.max(2,w.def.mag*0.25))?'#ff7060':'#eee';
-	el('nadeN').textContent='手雷 ×'+player.nadeCount+' · 绷带[H] ×'+player.bandages+(player.cls===2?' · AT雷[3] ×'+player.atNades:'')+(CLASSES[player.cls].smoke?' · 烟雾[4] ×'+player.smokeCount:'')+(player.incinCount>0?' · 燃烧[6] ×'+player.incinCount:'')+(player.cls===4?' · 医疗箱[B] ×'+(player.medkitUsed?'0':'1'):'');
+	el('nadeN').textContent='手雷 ×'+player.nadeCount+' · 绷带[H] ×'+player.bandages+(player.cls===2?' · AT雷[3] ×'+player.atNades:'')+(CLASSES[player.cls].smoke?' · 烟雾[4] ×'+player.smokeCount:'')+(player.incinCount>0?' · 燃烧[6] ×'+player.incinCount:'')+(player.cls===4?' · 医疗箱[B]':'');
 	}
 // 载具血量条 (2026-09-01 用户新增: 驾驶坦克/飞机时按压感显示机体血量)
 if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='plane')){

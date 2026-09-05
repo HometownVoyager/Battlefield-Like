@@ -68,7 +68,6 @@ if(f.cap<=0){ f.cap=0; f.capTeam=attacker; }
 f.cap+=rate*dt;
 if(f.cap>=1){
 f.cap=0;
-const oldOwner=f.owner;
 f.owner=attacker; f.capTeam=-1;
 drawFlagTex(f);
 addKillMsg(`${TEAM_NAME[attacker]} 占领了 ${f.id} 点`,attacker);

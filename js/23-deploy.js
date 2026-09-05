@@ -222,7 +222,7 @@ p.smokeCount=gear.smoke;
 p.incinCount=gear.incin;
 p.bandaging=0;
 p.useCast=null;
-p.medkitUsed=false; p.grabAction=null;
+p.grabAction=null;
 p.deathRag=null; p.deathCamT=0;
 p.lifeStartT=nowT; p.lifeKills=0; p.lifeScoreStart=p.score||0;
 p.onMortar=null; p.mortarPlaced=false; p.buildCount=6; p.buildSel=0; p.pendingBuild=null;

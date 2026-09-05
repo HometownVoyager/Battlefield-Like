@@ -21,7 +21,6 @@ if(r){ best={sol:s,t:r.t,head:false}; bestT=r.t; }
 }
 return best;
 }
-const rockets=[];
 function fireRocket(shooter,origin,dir,def,vis){
 const vel=dir.clone().multiplyScalar(85);
 shells.push({pos:origin.clone(),vel,team:shooter.team,owner:shooter,life:3.6,kind:'at',dmgV:def.atDmg||320,trail:0,rocket:true});

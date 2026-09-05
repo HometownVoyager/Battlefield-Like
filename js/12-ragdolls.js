@@ -83,20 +83,16 @@ cons.push(hc);
 }
 { const ptarr=[pelvis,torso,head,armL,armR,legL,legR,helmBody].filter(Boolean);
 for(const pt2 of ptarr){
-// 尸体继承角色移动惯性 + 被命中方向冲量 + 爆炸额外推力
+// 尸体继承角色移动惯性 + 被命中方向冲量 (旧"爆炸额外推力"死分支已删: window._lastExplosion 全库无写入, 2026-09-06 D3=a)
 let ix=rand(-1,1),iz=rand(-1,1),imp=rand(2.2,3.5);
 if(attacker&&attacker.pos){
 const dx=p.x-attacker.pos.x,dz=p.z-attacker.pos.z;
 const dl=Math.hypot(dx,dz)||1;
 ix=dx/dl; iz=dz/dl; imp=rand(2.8,5.5);
 }
-const blastT=window._lastExplosion||0;
-const blastDist=window._lastExplosionPos?Math.hypot(p.x-window._lastExplosionPos.x,p.z-window._lastExplosionPos.z):1e9;
-if(nowT-blastT<0.3&&blastDist<8){ imp*=1.8+rand(1,2.2); }
 if(isHead) imp*=1.4;
 pt2.velocity.set(bot.vel.x*0.6+ix*imp*rand(0.7,1.3),rand(0.5,3.5),bot.vel.z*0.6+iz*imp*rand(0.7,1.3));
 pt2.angularVelocity.set(rand(-5,5),rand(-4,4),rand(-5,5));
-if(blastDist<8){ pt2.velocity.y+=rand(1.5,5); pt2.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9)); }
 }
 if(isHead){ head.velocity.y+=2.2; head.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9)); }
 }

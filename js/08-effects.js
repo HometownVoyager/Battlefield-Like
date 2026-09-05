@@ -302,7 +302,7 @@ let best=null;
 for(const b of bloodGeos) if(!b.alive&&(!best||b.age<best.age)) best=b;
 if(!best) return;
 if(!best.m){
-best.m=new THREE.Mesh(best.g,bloodMat);
+best.m=new THREE.Mesh(best.g,bloodMat.clone()); // 36 池共享一片材质会让逐贴片 opacity 互相覆盖, 每贴片独立克隆 (2026-09-06 P3-4)
 best.m.rotation.x=-HPI;
 best.m.renderOrder=0;
 }

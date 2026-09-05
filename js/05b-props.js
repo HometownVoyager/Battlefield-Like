@@ -250,7 +250,7 @@ const s=wr(0.5,1.4);
 const m=mesh(boxGeo(s,s*0.7,s),wr(0,1)<0.5?MAT.rubble:MAT.brick,bx,g0+s*0.3,bz,wr(0,3));
 m.rotation.x=wr(-0.3,0.3);
 }
-const mound=mesh(new THREE.SphereGeometry(r*0.8,10,6),MAT.rubble,x,g0-r*0.35,z);
+mesh(new THREE.SphereGeometry(r*0.8,10,6),MAT.rubble,x,g0-r*0.35,z);
 CYLS.push({x,z,r:r*0.65,y0:g0,y1:g0+r*0.5});
 coverPoints.push({x:x+r,z}); coverPoints.push({x:x-r,z});
 }

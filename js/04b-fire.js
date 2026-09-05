@@ -93,8 +93,7 @@ if(dd<bd){ bd=dd; bx=s.x; bz=s.z; }
 if(bd>clear) return null;
 return {dx:bx-x, dz:bz-z};
 }
-// ===== 可燃植被登记: 树木/灌木/枯树/竹丛/蕨丛/树篱 =====
-const TREE_LIVE=[];        // 活树记录 (flushTreeBatch 回填实例索引)
+const TREE_LIVE=[];        // 活树记录 (flushTreeBatch 回填实例索引); 数组本体仅沙箱断言读 (verify-fire/verify-sink), 逐树状态走 floraHash
 const FLORA_HASH=new Map(); // 3m 格 → 植被记录数组 (碾压/爆炸/点燃查询)
 function floraHashAdd(rec){
 const ci=fCellI(rec.x,rec.z);
@@ -118,7 +117,7 @@ c.dead=true; c.r=0; c.y1=c.y0-1;
 }
 // ===== 灌木: 两片交叉叶面 (并入独立 InstancedMesh), 无碰撞, 可燃/可碾 =====
 const BUSH_BATCH=[];
-const BUSH_LIVE=[];
+const BUSH_LIVE=[];        // 灌木记录: 逐株状态经 floraHash 供燃烧/碾压读写; 数组本体仅沙箱断言读 (verify-fire/verify-sink)
 function bush(x,z,s=1){
 if(!propFree(x,z,0.8*s)) return;
 propTake(x,z,0.8*s);

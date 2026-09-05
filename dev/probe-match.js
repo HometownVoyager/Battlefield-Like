@@ -73,7 +73,7 @@ setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
 class _Color{constructor(c){this.c=c;}set(){return this;}}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}dispose(){}}; };
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}dispose(){}clone(){ return new this.constructor(Object.assign({},this,{color:this.color})); }}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={

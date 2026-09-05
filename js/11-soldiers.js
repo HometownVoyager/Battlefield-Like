@@ -22,7 +22,6 @@ coat:new THREE.MeshLambertMaterial({color:F.coat, map:TEX.cloth}), pants:new THR
 helm:new THREE.MeshLambertMaterial({color:F.helm, map:TEX.cloth}), skin:new THREE.MeshLambertMaterial({color:F.skin}),
 };
 });
-const worldGunGeoCache={};
 function worldGunModel(kind,team,key){
 const g=new THREE.Group();
 const gm=vmMats.gun, wd=vmMats.wood;
@@ -116,7 +115,7 @@ helm.position.set(0,0.165,0);
 headG.add(helm);
 const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.17,0.025,10),U.helm);
 brim.position.set(0,0.1,0); headG.add(brim);
-const star=bx(new THREE.MeshLambertMaterial({color:0xd8b840}),0.02,0.024,0.008, 0,0.16,0.135, headG);
+bx(new THREE.MeshLambertMaterial({color:0xd8b840}),0.02,0.024,0.008, 0,0.16,0.135, headG);
 } else {
 // 八路军帽: 布帽+短帽檐(朝前)+红星
 const cap=bx(U.helm,0.21,0.09,0.21, 0,0.19,0, headG);
@@ -126,12 +125,12 @@ bx(new THREE.MeshLambertMaterial({color:0xc03028}),0.024,0.024,0.008, 0,0.19,0.1
 const mkArm=(side)=>{
 const sh=new THREE.Group(); sh.position.set(side*0.28,0.5,0); torsoG.add(sh);
 bx(U.coat,0.13,0.32,0.13,0,-0.16,0,sh);
-const el=new THREE.Group(); el.position.y=-0.32; sh.add(el);
-bx(U.coat,0.115,0.28,0.115,0,-0.14,0,el);
-const hand=new THREE.Group(); hand.position.y=-0.3; el.add(hand);
+const elm=new THREE.Group(); elm.position.y=-0.32; sh.add(elm);
+bx(U.coat,0.115,0.28,0.115,0,-0.14,0,elm);
+const hand=new THREE.Group(); hand.position.y=-0.3; elm.add(hand);
 bx(U.skin,0.09,0.09,0.09,0,0,0,hand);
 sh.userData.swing=0;
-return {sh,el,hand};
+return {sh,elm,hand};
 };
 const armL=mkArm(-1), armR=mkArm(1);
 const mkLeg=(side)=>{

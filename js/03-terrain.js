@@ -364,7 +364,6 @@ scene.add(ground);
 }
 const BOXES=[];
 const CYLS=[];
-const SHOOTABLES=[];
 function addBoxCollider(cx,cy,cz,w,h,d){
 const b={minX:cx-w/2,minY:cy-h/2,minZ:cz-d/2,maxX:cx+w/2,maxY:cy+h/2,maxZ:cz+d/2,gh:heightAt(cx,cz)};
 BOXES.push(b); return b;

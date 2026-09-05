@@ -5,7 +5,6 @@
 'use strict';
 // ===== 迫击炮架设 + 工程兵工事 =====
 const MORTARS=[];
-const BUILDS=[]; // 工程兵建造的沙袋墙/铁丝网/拒马/额外机枪
 function deployMortar(owner,x,z,yaw){
 if(!owner.alive||owner.mortarPlaced||owner.onMortar||owner.mortUse||owner.onVehicle||owner.onMG||owner.onAT||owner.onAA) return false;
 const gh=heightAt(x,z);
@@ -28,7 +27,7 @@ const cross=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.32,5),vmMats
 cross.position.set(0,0.34,0.28); cross.rotation.z=HPI; grp.add(cross);
 grp.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
 coverPoints.push({x,z});
-MORTARS.push({x,z,y:gh,face:yaw,grp,tube,parts:[],user:null,cd:0,cdLock:0,owner,alive:true});
+MORTARS.push({x,z,y:gh,face:yaw,grp,tube,user:null,cd:0,cdLock:0,owner,alive:true});
 if(owner.isPlayer){ showScorePop('迫击炮已架设 (F 上炮 · B 靠近回收)'); AudioSys.click(800,0.3,0.05); }
 owner.mortarPlaced=true;
 return true;
@@ -37,7 +36,6 @@ function recoverMortar(pl){
 const m=MORTARS.find(mt=>mt.owner===pl&&mt.alive&&!mt.user&&Math.hypot(mt.x-pl.pos.x,mt.z-pl.pos.z)<3.5);
 if(!m){ if(pl.isPlayer&&pl.mortarPlaced) showScorePop('需靠近自己的迫击炮才能回收'); return; }
 world.remove(m.grp);
-for(const pt of (m.parts||[m.tube])) world.remove(pt);
 MORTARS.splice(MORTARS.indexOf(m),1);
 pl.mortarPlaced=false;
 const w=pl.slots.find(s=>s&&s.def.mortar)||pl.slots[0];
@@ -125,7 +123,6 @@ else if(tk.type==='hedge'){ hedgehog(tk.tx,tk.tz); }
 else if(tk.type==='mg'){ mg42(tk.tx,tk.tz,tk.ry,pl.team); }
 riseNewMeshes(ci,0.85);
 pl.buildCount=(pl.buildCount||0)-tk.cost;
-BUILDS.push({type:tk.type,x:tk.tx,z:tk.tz,builder:pl,t:nowT});
 const gy=heightAt(tk.tx,tk.tz);
 for(let i=0;i<7;i++) spawnP(PT.dirt,tk.tx+rand(-1.6,1.6),gy+rand(0.1,0.4),tk.tz+rand(-1.6,1.6),rand(-1,1),rand(0.5,1.6),rand(-1,1),rand(0.3,0.5),0.8,rand(0.5,0.9),0.85,2);
 if(pl.isPlayer){ showScorePop(BUILD_NAMES[tk.type]+' · 建成 (剩余 '+pl.buildCount+' 点)'); AudioSys.metalSlide(0.25,0.2,300,150); }

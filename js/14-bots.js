@@ -197,7 +197,8 @@ if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user
 tickets[this.team]=Math.max(0,tickets[this.team]-1);
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+100;
+// 玩家记分唯一入口=onPlayerKill (21-match): 此处只给 Bot/乘员加分, 否则玩家击杀双计 200 (2026-09-06 P0-1)
+if(!attacker.isPlayer) attacker.score=(attacker.score||0)+100;
 addKillfeed(attacker,this,isHead);
 if(attacker.isPlayer){ onPlayerKill(this,isHead); }
 }
@@ -1547,9 +1548,9 @@ m.armR.sh.userData.swing-=dt;
 shR+=Math.sin(m.armR.sh.userData.swing*16)*0.6;
 }
 m.armR.sh.rotation.x=dampF(m.armR.sh.rotation.x,shR,11,dt);
-m.armR.el.rotation.x=dampF(m.armR.el.rotation.x,elR,11,dt);
+m.armR.elm.rotation.x=dampF(m.armR.elm.rotation.x,elR,11,dt);
 m.armL.sh.rotation.x=dampF(m.armL.sh.rotation.x,shL,11,dt);
-m.armL.el.rotation.x=dampF(m.armL.el.rotation.x,elL,11,dt);
+m.armL.elm.rotation.x=dampF(m.armL.elm.rotation.x,elL,11,dt);
 m.armL.sh.rotation.y=dampF(m.armL.sh.rotation.y,shLy,8,dt);
 m.armR.sh.rotation.y=dampF(m.armR.sh.rotation.y,shRy,8,dt);
 m.armL.sh.rotation.z=dampF(m.armL.sh.rotation.z,shLz,9,dt);

@@ -86,7 +86,6 @@ this.respawn(true); // 开局首次生成不播报
 buildMesh(){
 const D=this.def;
 this.matBody=new THREE.MeshLambertMaterial({color:D.col, map:TEX.grime});
-const matT=new THREE.MeshLambertMaterial({color:D.colT, map:TEX.grime});
 const matB=new THREE.MeshLambertMaterial({color:0x363830});
 const L=D.hullL;
 this.grp=new THREE.Group();

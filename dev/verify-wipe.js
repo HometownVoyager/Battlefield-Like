@@ -15,7 +15,8 @@
 //   T10 倒计时兜底不等待残留坦克 (30 秒到期照常结算);
 //   T13 坦克不计入胜利条件: 残兵清空即判胜, 敌方坦克仍存活不阻塞清场 (2026-09-05);
 //   T11 坦克越野跨越: 矮盒/油桶可跨不阻挡+底盘爬升+悬挂俯仰弹起, 1.6m 高墙仍阻挡;
-//   T12 击杀来源标签: 播报/玩家死亡显示载具/火力点名, 乘员身份反推载具名。
+//   T12 击杀来源标签: 播报/玩家死亡显示载具/火力点名, 乘员身份反推载具名;
+//   T14 击杀记分单源: 玩家杀普通Bot=100/爆头=125 (onPlayerKill 唯一入口), Bot杀Bot=100 (2026-09-06 P0-1)。
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
@@ -702,8 +703,40 @@ ok(err.pDead===true&&err.pSrc==='MG42 通用机枪','T12 玩家死亡记录击�
 ok(err.pName!==''&&err.srcCrew==='九五式轻型坦克','T12 乘员身份反推为载具名 (srcCrew='+err.srcCrew+')');
 }
 
+// T14: 击杀记分单源 (2026-09-06 P0-1) —— 玩家杀普通 Bot=100 / 爆头=125 (onPlayerKill 唯一入口);
+// Bot 杀 Bot=100 (Bot 记分板); 双计回归: 修复前玩家实得 200/225
+function t14(){
+console.log('T14 击杀记分单源: 玩家100/爆头125, Bot杀Bot=100 (淞沪)');
+const ctx=boot(3);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+var v1=null,v2=null,v0=null,a=null;
+for(const s of soldiers){ if(!s.alive) continue; if(s.team===1&&!v1) v1=s; else if(s.team===1&&!v2) v2=s; if(s.team===0&&!v0) v0=s; else if(s.team===0&&v0&&!a) a=s; }
+// 玩家普通击杀
+player.score=0;
+v1.damage(999,player,false);
+var sNormal=player.score;
+// 玩家爆头击杀
+player.score=0;
+v2.damage(999,player,true);
+var sHead=player.score;
+// Bot 杀 Bot
+a.score=0;
+v0.damage(999,a,false);
+var sBot=a.score, aIsPlayer=!!a.isPlayer;
+return {sNormal,sHead,sBot,aIsPlayer};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T14 '+(err||'')); return; }
+ok(err.sNormal===100,'T14 玩家杀普通 Bot → score===100 (修复前双计 200, 实测 '+err.sNormal+')');
+ok(err.sHead===125,'T14 玩家爆头击杀 → score===125 (修复前双计 225, 实测 '+err.sHead+')');
+ok(!err.aIsPlayer&&err.sBot===100,'T14 Bot 杀 Bot → attacker.score===100 (Bot 记分板, 实测 '+err.sBot+')');
+}
+
 // ── 入口 ──
 console.log('== 清场胜利规则沙箱 ==');
-t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13();
+t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14();
 console.log(`== 结果: ${PASS.length} 通过 / ${FAILS} 失败 ==`);
 process.exit(FAILS?1:0);

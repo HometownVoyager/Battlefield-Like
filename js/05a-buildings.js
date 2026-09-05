@@ -54,22 +54,6 @@ addCoverAround(x,z,w,d,ry);
 p=ctx.L(0,0); coverPoints.push({x:p[0],z:p[1]});
 BUILD_REG.push({type:'cnHouse',x,z,ry,w,d,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+1.12});
 }
-// 工厂废墟: 砖墙骨架+高烟囱+机器残骸
-function factoryRuin(x,z,ry){
-ruinedHouse(x,z,10,13,ry,MAT.brick,0.55);
-const cs=Math.cos(ry),sn=Math.sin(ry);
-const cx2=x+6.8*cs+5*sn, cz2=z-6.8*sn+5*cs;
-const g0=heightAt(cx2,cz2);
-mesh(new THREE.CylinderGeometry(0.65,0.95,11,10),MAT.brick,cx2,g0+5.5,cz2);
-mesh(new THREE.CylinderGeometry(0.72,0.7,0.5,10),MAT.stone,cx2,g0+10.6,cz2);
-CYLS.push({x:cx2,z:cz2,r:1.0,y0:g0,y1:g0+11});
-const m1x=x+2*cs-2*sn, m1z=z-2*sn-2*cs, m2x=x-2.5*cs+3*sn, m2z=z+2.5*sn+3*cs;
-solidBox(MAT.metalDark,2.4,1.5,1.3,m1x,heightAt(m1x,m1z)+0.75,m1z,ry);
-solidBox(MAT.metalDark,1.6,1.1,1.2,m2x,heightAt(m2x,m2z)+0.55,m2z,ry+0.4);
-if(freeSpot(x-3*cs,z+3*sn,1.5)) rubblePile(x-3*cs,z+3*sn,1.8);
-coverPoints.push({x:cx2+2,z:cz2},{x,z});
-}
-// 教堂: 大殿(高窗/双坡顶) + 背面钟塔(可登顶瞭望, 墙随朝向旋转)
 function buildChurch(x,z,ry){
 const f=foundation(x,z,ry,10,16,{maxDh:1.6});
 const ctx=bctx(x,z,ry,f.floor);
@@ -119,7 +103,7 @@ solidBox(MAT.woodDark,0.12,0.95,3.25,rl[0],tf.floor+7.2+0.475,rl[1],ry);
 // 塔顶盖 + 尖顶
 const cp=tc.L(0,0);
 addSnowCap(solidBox(MAT.stone,5.4,0.4,5.4,cp[0],tf.floor+tH+0.2,cp[1],ry));
-const spire=mesh(new THREE.ConeGeometry(2.2,2.8,4),MAT.woodDark,cp[0],tf.floor+tH+1.8,cp[1],ry+HPI);
+mesh(new THREE.ConeGeometry(2.2,2.8,4),MAT.woodDark,cp[0],tf.floor+tH+1.8,cp[1],ry+HPI);
 addCoverAround(x,z,10,16,ry);
 coverPoints.push({x:ctx.L(0,-4)[0],z:ctx.L(0,-4)[1]},{x:ctx.L(0,3)[0],z:ctx.L(0,3)[1]});
 BUILD_REG.push({type:'church',x,z,ry,w:10,d:16,floor:f.floor,doors:ctx.doors.concat(tc.doors),roofY:f.floor+H+1.91,towerFloor:tf.floor,towerRoofY:tf.floor+tH+0.4});

@@ -105,10 +105,9 @@ if(pre) destroyStructure(g,true);
 return g;
 }
 // 单个碰撞箱移除 (墙组销毁/屋顶坍塌的碰撞带共用)
-// keepMesh 视觉残留模式: 2026-09-01 倒塌重构后结构系统不再使用(网格即刻移除), 字段保留兼容
 function killBox(b){
 if(b.dead) return; b.dead=true;
-if(b.mesh&&b.mesh.parent&&!b.keepMesh) world.remove(b.mesh);
+if(b.mesh&&b.mesh.parent) world.remove(b.mesh);
 if(OCC.data){
 const i0=clamp(Math.floor((b.minX-0.7+OCC.off)/OCC.res),0,OCC.N-1),i1=clamp(Math.ceil((b.maxX+0.7+OCC.off)/OCC.res),0,OCC.N-1);
 const j0=clamp(Math.floor((b.minZ-0.7+OCC.off)/OCC.res),0,OCC.N-1),j1=clamp(Math.ceil((b.maxZ+0.7+OCC.off)/OCC.res),0,OCC.N-1);
@@ -417,7 +416,7 @@ return ref;
 // ===== 建筑框架: 直跑楼梯 =====
 // 从 (lx,lz) 沿局部 dir 上行: 步高=ceil((topY-base)/maxRise) 反推, 顶面与 topY 严格齐平(±0)
 // dir: 'z+'|'z-'|'x+'|'x-'; o.exit=[lx,lz] 登顶落点(默认直线越过顶踏步), 记入 STAIRS 供验证
-const STAIRS=[];
+const STAIRS=[]; // 楼梯登顶落点登记: 供布局断言 (verify-buildings/verify-layouts) 读取
 function stairFlight(ctx,o){
 const rise=o.topY-o.base;
 const n=Math.max(2,Math.ceil(rise/(o.maxRise||0.42)));
