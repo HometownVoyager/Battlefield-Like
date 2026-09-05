@@ -366,7 +366,17 @@ const BOXES=[];
 const CYLS=[];
 function addBoxCollider(cx,cy,cz,w,h,d){
 const b={minX:cx-w/2,minY:cy-h/2,minZ:cz-d/2,maxX:cx+w/2,maxY:cy+h/2,maxZ:cz+d/2,gh:heightAt(cx,cz)};
-BOXES.push(b); return b;
+BOXES.push(b);
+// 2026-09-06 B5/P0-2: 索引建立后新增的碰撞盒增量注册进 RGRID —— 工程兵建造/残骸/探针摆件即时可见。
+// (旧全量扫描时代无感; RGRID 化后移动碰撞/射线都依赖此即时性, 否则要等下一次 NAV.refresh)
+if(RGRID.boxCells){
+const {cell,N,off}=RGRID;
+const bi=BOXES.length-1;
+const i0=clamp(Math.floor((b.minX+off)/cell),0,N-1), i1=clamp(Math.floor((b.maxX+off)/cell),0,N-1);
+const j0=clamp(Math.floor((b.minZ+off)/cell),0,N-1), j1=clamp(Math.floor((b.maxZ+off)/cell),0,N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.boxCells[j*N+i].push(bi);
+}
+return b;
 }
 function rayBox(o,dir,b,maxD){
 let tmin=0,tmax=maxD, n=[0,0,0];
@@ -508,14 +518,7 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	OCC.data=d;
 }
 function registerDynCollider(cx,cy,cz,w,h,d){
-const b=addBoxCollider(cx,cy,cz,w,h,d);
-const bi=BOXES.length-1;
-if(RGRID.boxCells){
-const {cell,N,off}=RGRID;
-const i0=clamp(Math.floor((b.minX+off)/cell),0,N-1),i1=clamp(Math.floor((b.maxX+off)/cell),0,N-1);
-const j0=clamp(Math.floor((b.minZ+off)/cell),0,N-1),j1=clamp(Math.floor((b.maxZ+off)/cell),0,N-1);
-for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.boxCells[j*N+i].push(bi);
-}
+const b=addBoxCollider(cx,cy,cz,w,h,d); // RGRID 增量注册已由 addBoxCollider 统一处理
 if(OCC.data){
 const i0=clamp(Math.floor((b.minX-0.6+OCC.off)/OCC.res),0,OCC.N-1),i1=clamp(Math.ceil((b.maxX+0.6+OCC.off)/OCC.res),0,OCC.N-1);
 const j0=clamp(Math.floor((b.minZ-0.6+OCC.off)/OCC.res),0,OCC.N-1),j1=clamp(Math.ceil((b.maxZ+0.6+OCC.off)/OCC.res),0,OCC.N-1);

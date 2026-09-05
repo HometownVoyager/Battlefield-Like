@@ -86,10 +86,60 @@ _rcP.set(o.x+dir.x*best,o.y+dir.y*best,o.z+dir.z*best);
 _rcN.set(bn.nx,bn.ny,bn.nz);
 return { dist:best, point:_rcP, normal:_rcN, kind };
 }
+// ── RGRID 邻近候选遍历 (2026-09-06 B5/P0-2): 移动碰撞/站高/坦克足印查询不再全场景扫描 BOXES/CYLS ──
+// 候选集 ⊇ 真命中集 (命中判定仍走各调用方的原精确测试, 结果与全量遍历一致);
+// window.RGRID_OFF=true 一键回退旧全量路径 (等价性探针/异常排查用)。
+// 使用独立 stamp (RQ) 而非复用射线的 stampB/stampC: 查询回调内可能触发 destroyStructure 等重入逻辑。
+const RQ={gen:0,stampB:null,stampC:null};
+function rqStamps(){
+if(!RQ.stampB||RQ.stampB.length<BOXES.length) RQ.stampB=new Int32Array(BOXES.length+128);
+if(!RQ.stampC||RQ.stampC.length<CYLS.length) RQ.stampC=new Int32Array(CYLS.length+32);
+}
+function eachBoxNear(x0,z0,x1,z1,fn){
+if(window.RGRID_OFF||!RGRID.boxCells){
+for(let i=0;i<BOXES.length;i++) fn(BOXES[i]);
+return;
+}
+rqStamps();
+const gen=++RQ.gen;
+const {cell,N,off,boxCells}=RGRID;
+const i0=clamp(Math.floor((x0+off)/cell),0,N-1), i1=clamp(Math.floor((x1+off)/cell),0,N-1);
+const j0=clamp(Math.floor((z0+off)/cell),0,N-1), j1=clamp(Math.floor((z1+off)/cell),0,N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+const bl=boxCells[j*N+i];
+for(let k=0;k<bl.length;k++){
+const bi=bl[k];
+if(bi<RQ.stampB.length){ if(RQ.stampB[bi]===gen) continue; RQ.stampB[bi]=gen; }
+fn(BOXES[bi]);
+}
+}
+}
+function eachCylNear(x0,z0,x1,z1,fn){
+if(window.RGRID_OFF||!RGRID.cylCells){
+for(let i=0;i<CYLS.length;i++) fn(CYLS[i]);
+return;
+}
+rqStamps();
+const gen=++RQ.gen;
+const {cell,N,off,cylCells}=RGRID;
+const i0=clamp(Math.floor((x0+off)/cell),0,N-1), i1=clamp(Math.floor((x1+off)/cell),0,N-1);
+const j0=clamp(Math.floor((z0+off)/cell),0,N-1), j1=clamp(Math.floor((z1+off)/cell),0,N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+const cl=cylCells[j*N+i];
+for(let k=0;k<cl.length;k++){
+const ci=cl[k];
+if(ci<RQ.stampC.length){ if(RQ.stampC[ci]===gen) continue; RQ.stampC[ci]=gen; }
+fn(CYLS[ci]);
+}
+}
+}
 function collideMove(pos, radius){
-for(const b of BOXES){
-if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) continue;
-if(b.maxY-pos.y<=0.56) continue;
+// 查询半径=碰撞半径 (推挤只作用于表面距 pos<radius 的盒/柱, 候选矩形再留 0.02 采样余量)
+const m=0.02;
+eachBoxNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,b=>{
+if(b.dead) return;
+if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) return;
+if(b.maxY-pos.y<=0.56) return;
 const cx=clamp(pos.x,b.minX,b.maxX), cz=clamp(pos.z,b.minZ,b.maxZ);
 let dx=pos.x-cx, dz=pos.z-cz;
 const d2=dx*dx+dz*dz;
@@ -103,26 +153,27 @@ const d=Math.sqrt(d2), push=(radius-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
 }
-}
-for(const c of CYLS){
-if(pos.y+1.7<c.y0||pos.y+0.2>c.y1) continue;
+});
+eachCylNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,c=>{
+if(pos.y+1.7<c.y0||pos.y+0.2>c.y1) return;
 let dx=pos.x-c.x, dz=pos.z-c.z;
 const rr=c.r+radius, d2=dx*dx+dz*dz;
 if(d2<rr*rr&&d2>1e-8){
 const d=Math.sqrt(d2), push=(rr-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
-}
+});
 const lim=MAP_SIZE/2+8;
 pos.x=clamp(pos.x,-lim,lim); pos.z=clamp(pos.z,-lim,lim);
 }
 function standHeight(x,z,curY){
 let h=heightAt(x,z);
-for(const b of BOXES){
+eachBoxNear(x-0.07,z-0.07,x+0.07,z+0.07,b=>{
+if(b.dead) return;
 if(x>b.minX-0.05&&x<b.maxX+0.05&&z>b.minZ-0.05&&z<b.maxZ+0.05){
 if(b.maxY<=curY+0.55&&b.maxY>h) h=b.maxY;
 }
-}
+});
 return h;
 }
 // 严寒庇护判定 (2026-09-05 城市组·斯大林格勒 cold:true): 头顶竖直射线 12m 内有静态遮蔽

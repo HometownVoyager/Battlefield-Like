@@ -162,15 +162,17 @@ continue;
 n.vel.y-=9.8*dt;
 const nx=n.pos.x+n.vel.x*dt, ny=n.pos.y+n.vel.y*dt, nz=n.pos.z+n.vel.z*dt;
 let bounced=false;
-for(const b of BOXES){
+// 2026-09-06 B5/P0-2: 手雷撞盒全量扫描改 RGRID 邻近候选 (±0.06 判定 + 0.02 采样余量);
+// 原实现命中首个盒即 break —— 以 bounced 旗复刻, 候选次序差异由等价探针覆盖
+eachBoxNear(nx-0.08,nz-0.08,nx+0.08,nz+0.08,b=>{
+if(bounced) return;
 if(nx>b.minX-0.06&&nx<b.maxX+0.06&&ny>b.minY-0.06&&ny<b.maxY+0.06&&nz>b.minZ-0.06&&nz<b.maxZ+0.06){
 const dl=Math.min(nx-b.minX,b.maxX-nx), dv=Math.min(ny-b.minY,b.maxY-ny), dd=Math.min(nz-b.minZ,b.maxZ-nz);
 if(dv<=dl&&dv<=dd){ n.vel.y*=-0.4; n.vel.x*=0.7; n.vel.z*=0.7; }
 else if(dl<=dd){ n.vel.x*=-0.5; } else { n.vel.z*=-0.5; }
 bounced=true;
-break;
 }
-}
+});
 if(n.at||n.bomb||n.mortar){
 for(const t of tanks){
 if(!t.alive||t.team===n.team) continue;

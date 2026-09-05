@@ -20,45 +20,47 @@ const wreckMat=new THREE.MeshLambertMaterial({color:0x1e1c18});
 const TANK_STEP=1.3;
 function tankRideH(x,z,baseY){
 // 坦克底盘目标高度: 地面与脚下/前方 2.2m 足印内可跨越障碍顶面取高者 (阻尼过渡呈上坡爬越感)
+// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (查询半径 2.25; 圆柱 r+1.9≤4.0 ⇒ 全场 r≤2.1 恒成立)
 let h=heightAt(x,z);
 const r2=2.2*2.2;
-for(const b of BOXES){
-if(b.dead) continue;
-if(b.maxY<=baseY-0.25||b.maxY>baseY+TANK_STEP) continue; // 足印内平齐/已过/太高都不算
+eachBoxNear(x-2.25,z-2.25,x+2.25,z+2.25,b=>{
+if(b.dead) return;
+if(b.maxY<=baseY-0.25||b.maxY>baseY+TANK_STEP) return; // 足印内平齐/已过/太高都不算
 // 可跨越 = 障碍自身低矮(顶面高出其地面≤1.3m) 且 无 dGroup 撞塌/无 crush 碾毁 的可放行类别;
 // <0.7m 的本来就放行 (与碰撞循环口径一致), 高度按自身相对地面判定 — 不随坦克瞬时高度漂变
 const bh=b.maxY-b.gh;
-if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) continue;
+if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
 const cx=clamp(x,b.minX,b.maxX), cz=clamp(z,b.minZ,b.maxZ);
 const dx=x-cx, dz=z-cz;
 if(dx*dx+dz*dz<r2&&b.maxY>h) h=b.maxY;
-}
-for(const c of CYLS){
-if(c.r<0.3) continue;
-if(c.y1-c.y0>TANK_STEP) continue; // 自身低矮
-if(c.y1<=baseY-0.25||c.y1>baseY+TANK_STEP) continue;
+});
+eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,c=>{
+if(c.r<0.3) return;
+if(c.y1-c.y0>TANK_STEP) return; // 自身低矮
+if(c.y1<=baseY-0.25||c.y1>baseY+TANK_STEP) return;
 const dx=x-c.x, dz=z-c.z, q=c.r+1.9;
 if(dx*dx+dz*dz<q*q&&c.y1>h) h=c.y1;
-}
+});
 return h;
 }
 function tankSurfH(x,z){
 // 悬挂采样面高度: 地面与足下可跨越障碍顶面取高者 —— 不做 baseY 频带过滤,
 // 前/后/左/右采样点一旦贴到障碍顶面就推动俯仰/侧倾弹簧, 越过时产生"上坡-颠簸-下坡"的跨越姿态
+// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (盒 1.6 / 圆柱 r+1.5≤4.0)
 let h=heightAt(x,z);
-for(const b of BOXES){
-if(b.dead) continue;
+eachBoxNear(x-1.6,z-1.6,x+1.6,z+1.6,b=>{
+if(b.dead) return;
 const bh=b.maxY-b.gh;
-if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) continue;
+if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
 const cx=clamp(x,b.minX,b.maxX), cz=clamp(z,b.minZ,b.maxZ);
 const dx=x-cx, dz=z-cz;
 if(dx*dx+dz*dz<1.55*1.55&&b.maxY>h) h=b.maxY;
-}
-for(const c of CYLS){
-if(c.r<0.3||c.y1-c.y0>TANK_STEP) continue;
+});
+eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,c=>{
+if(c.r<0.3||c.y1-c.y0>TANK_STEP) return;
 const dx=x-c.x, dz=z-c.z, q=c.r+1.5;
 if(dx*dx+dz*dz<q*q&&c.y1>h) h=c.y1;
-}
+});
 return h;
 }
 class Tank {
@@ -183,20 +185,21 @@ this.pos.x+=sn*this.vel*dt; this.pos.z+=cs*this.vel*dt;
 	for(let pass=0;pass<2;pass++){
 	for(const off of [-1.95,0,1.95]){
 	const cxp=this.pos.x+sn*off, czp=this.pos.z+cs*off;
-	for(const b of BOXES){
-	if(b.dead||this.pos.y+2<b.minY||this.pos.y>b.maxY) continue;
-	if(b.maxY-b.gh<0.7) continue;
+	// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (推挤测试半径 1.55, 查询余量至 1.56)
+	eachBoxNear(cxp-1.56,czp-1.56,cxp+1.56,czp+1.56,b=>{
+	if(b.dead||this.pos.y+2<b.minY||this.pos.y>b.maxY) return;
+	if(b.maxY-b.gh<0.7) return;
 	const cx=clamp(cxp,b.minX,b.maxX), cz=clamp(czp,b.minZ,b.maxZ);
 	const dx=cxp-cx, dz=czp-cz;
 	const d2=dx*dx+dz*dz;
-	if(d2>=1.55*1.55) continue;
+	if(d2>=1.55*1.55) return;
 	// 坦克冲撞可毁墙体: 车速足够时直接撞塌整段结构
 	if(b.dGroup&&!b.dGroup.dead&&Math.abs(this.vel)>1.9){
 	destroyStructure(b.dGroup);
 	this.vel*=0.58;
 	this.suspPV-=Math.sign(this.vel)*0.9;
 	if(this.playerDriven) addTrauma(0.28);
-	continue;
+	return;
 	}
 	// 2026-09-02 越野碾压: 掩体(沙袋/木箱/石墙/树篱/倒木, 挂牌 crush)车速足够时直接碾毁通过, 不再被阻拦
 	if(b.crush&&Math.abs(this.vel)>1.5){
@@ -204,11 +207,11 @@ this.pos.x+=sn*this.vel*dt; this.pos.z+=cs*this.vel*dt;
 	this.vel*=0.92;
 	this.suspPV-=Math.sign(this.vel)*0.25;
 	if(this.playerDriven) addTrauma(0.12);
-	continue;
+	return;
 	}
 	// 2026-09-04 越野跨越: 低矮且无法摧毁的障碍(自身高度≤1.3m: 顶面相对其地面, 无 dGroup 可撞塌/无 crush 可碾毁)
 	// 直接放行不阻挡不碾毁, 底盘高度由 tankRideH 抬升作出爬越效果
-	if(!b.dGroup&&!b.crush&&b.maxY-b.gh<=TANK_STEP) continue;
+	if(!b.dGroup&&!b.crush&&b.maxY-b.gh<=TANK_STEP) return;
 	let pnx=0, pnz=0;
 	if(d2>1e-8){
 	const d=Math.sqrt(d2);
@@ -227,11 +230,11 @@ this.pos.x+=sn*this.vel*dt; this.pos.z+=cs*this.vel*dt;
 	this.vel*=facing>0.5?0.35:facing>0.15?0.66:0.92;
 	}
 	hitObstacle=true;
-	}
-	for(const c of CYLS){
-	if(c.r<0.3) continue;
+	});
+	eachCylNear(cxp-3.7,czp-3.7,cxp+3.7,czp+3.7,c=>{
+	if(c.r<0.3) return;
 	// 2026-09-04 越野跨越: 低矮圆柱(油桶/石碾/碎石堆等不可摧毁, 自身高度≤1.3m)直接驶过, 高度由 tankRideH 承接
-	if(c.y1-c.y0<=TANK_STEP) continue;
+	if(c.y1-c.y0<=TANK_STEP) return;
 	const dx=cxp-c.x, dz=czp-c.z;
 	const rr=c.r+1.5, d2=dx*dx+dz*dz;
 	if(d2<rr*rr&&d2>1e-8){
@@ -240,7 +243,7 @@ this.pos.x+=sn*this.vel*dt; this.pos.z+=cs*this.vel*dt;
 	this.vel*=0.75;
 	hitObstacle=true;
 	}
-	}
+	});
 	}
 	}
 if(hitObstacle&&this.isAI) this.stuckT+=dt*2.2;
