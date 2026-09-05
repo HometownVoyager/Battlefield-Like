@@ -299,8 +299,38 @@ break; // 每图抽一栋验证即可
 console.log(`竖向承重链断言: ${nC} 栋抽样, 断裂 ${nFail} ${nFail===0?'✓':'✗'}`);
 global.__pfFail=(global.__pfFail||0)+nFail;
 }
-console.log('--- DESTRUCTIBLES 明细 ---');
-for(const g of DES){
+// ── 2026-09-06 P1-2: 柏林地铁凉亭平顶挂链断言 —— 只炸凉亭三面墙 → 顶必塌、无浮空构件
+//    (旧版平顶是裸 solidBox 无挂链: 墙炸光后 2.6m 石顶+雪帽悬空且可站人; 修=手造 roofRef 挂三墙组) ──
+{
+let pvFail=0, pvN=0;
+const allIds5=vm.runInContext('CAMPAIGNS.map(c=>c.id)',ctx);
+allIds5.forEach((id,i)=>{ if(id==='berlin'){
+const r5=runCampaign(i);
+const D5=vm.runInContext('DESTRUCTIBLES',r5.ctx);
+const BX5=vm.runInContext('BOXES',r5.ctx);
+const RG5=vm.runInContext('BUILD_REG',r5.ctx);
+const des5=vm.runInContext('destroyStructure',r5.ctx);
+for(const reg of RG5){
+if(reg.type!=='metro') continue;
+pvN++;
+const slabBs=BX5.filter(b=>b.building===reg);
+if(!slabBs.length){ console.log(`  ⚠ berlin metro 平顶碰撞盒未挂 building 标记`); pvFail++; continue; }
+// 凉亭承重墙 = roofRef.bands 与平顶盒有交集的存活墙组; 只炸它们 (不触其他建筑)
+const walls=D5.filter(g=>g.roofRef&&!g.dead&&g.roofRef.bands.some(b=>slabBs.includes(b)));
+if(walls.length<2){ console.log(`  ⚠ berlin metro 承重墙识别异常 (${walls.length} 组)`); pvFail++; continue; }
+for(const g of walls) des5(g,false);
+const ref=walls[0].roofRef;
+if(!ref.done){ console.log(`  ⚠ berlin 凉亭三墙全毁 → 平顶仍未坍塌 (挂链失效)`); pvFail++; }
+const alive=slabBs.filter(b=>!b.dead).length;
+if(alive){ console.log(`  ⚠ berlin 凉亭塌顶后浮空平顶碰撞盒=${alive}`); pvFail+=alive; }
+const visAlive=(Array.isArray(ref.m)?ref.m:[ref.m]).filter(m=>m&&m.parent).length;
+if(visAlive){ console.log(`  ⚠ berlin 凉亭塌顶后平顶视觉网格仍在场 (${visAlive})`); pvFail+=visAlive; }
+}
+}});
+console.log(`凉亭平顶挂链断言: ${pvN} 处 metro, 浮空/未塌 ${pvFail} ${pvFail===0?'✓':'✗'}`);
+global.__pfFail=(global.__pfFail||0)+pvFail;
+}
+console.log('--- DESTRUCTIBLES 明细 ---');for(const g of DES){
 console.log(`组@(${g.cx.toFixed(1)},${g.cz.toFixed(1)}) hp=${g.hp} dead=${g.dead} boxes=${g.bi.length} meshes=${g.meshes.length} roofRef=${g.roofRef?'有':'无'}`);
 }
 console.log('--- REG 明细 ---');

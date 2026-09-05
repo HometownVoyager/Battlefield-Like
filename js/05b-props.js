@@ -393,7 +393,7 @@ propTake(x,z,1.8);
 const fit=groundFit(x,z,ry,1.4,1.4);
 const cs=Math.cos(ry), sn=Math.sin(ry);
 // 砖基座 (自带碰撞)
-solidBox(MAT.brick,2.3,0.85,1.9,x,fit.y+0.425,z,ry);
+solidBox(MAT.brick,2.3,0.85,1.6,x,fit.y+0.425,z,ry); // 基座深 1.9→1.6 (2026-09-06 P2-18: 原嵌入厂房纵墙内面 0.15m)
 // 卧式锅炉 (视觉圆柱 + 实体碰撞盒)
 const b=new THREE.Mesh(new THREE.CylinderGeometry(0.82,0.82,2.1,9),MAT.metal);
 b.rotation.order='YXZ';

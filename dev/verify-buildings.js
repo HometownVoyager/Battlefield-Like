@@ -233,6 +233,31 @@ if(px>b.minX&&px<b.maxX&&my>b.minY&&my<b.maxY&&pz>b.minZ&&pz<b.maxZ){ errors.pus
 }
 }
 }
+// 8) 2026-09-06 P1-3: 红十月厂区铁路支线对位 —— 双轨线段不得穿入围墙墙段, 不得穿入高构圆柱(烟囱)
+//    (旧版豁口 [103,107] 与东轨 107.75 错位 2m=钢轨穿墙; 烟囱 L(17.5) 双轨穿基座; 吊罐 L(17) 正压轨心)
+for(const bld of REG){
+if(bld.type!=='factory') continue;
+const ryC=Math.cos(bld.ry), ryS=Math.sin(bld.ry);
+const Lf=(lx,lz)=>[bld.x+lx*ryC+lz*ryS, bld.z-lx*ryS+lz*ryC];
+let hitWall=0, samples=0;
+for(const rx of [17-0.75,17+0.75]){ // 轨距 ±0.75 (局部 x)
+for(let lz=-32;lz<=32;lz+=0.25){ // ±32 覆盖南北围墙行 (z=-70/-8) 的轨线穿越点
+const p=Lf(rx,lz);
+const sy=ctx.heightAt(p[0],p[1])+0.12; // 轨面高 (轨 mesh 无碰撞; 平板车底 g0+0.225 在采样面之上, 车轮为近地圆柱另查)
+samples++;
+for(const b of boxes){ if(b.dead) continue;
+if(p[0]>b.minX&&p[0]<b.maxX&&sy>b.minY&&sy<b.maxY&&p[1]>b.minZ&&p[1]<b.maxZ){ hitWall++; break; }
+}
+}
+const pA=Lf(rx,-30), pB=Lf(rx,30);
+for(const c of cyls){
+if(c.y1-c.y0<4) continue; // 只查高构圆柱 (烟囱 h15); 车轮 r0.4 近地豁免
+const d=seg(pA[0],pA[1],pB[0],pB[1],c.x,c.z);
+if(d<c.r+0.15) errors.push(`红十月烟囱基座@(${c.x.toFixed(1)},${c.z.toFixed(1)}) r=${c.r} 侵入轨线 (净距 ${d.toFixed(2)}<${(c.r+0.15).toFixed(2)})`);
+}
+}
+if(hitWall>0) errors.push(`红十月铁路支线: ${hitWall}/${samples} 轨面采样点落在活碰撞盒内 (轨穿墙/实物)`);
+}
 return {camp,errors,stats:{camps:vm.runInContext('CAMPAIGNS.length',ctx),boxes:boxes.length,cyls:cyls.length,nav:NCL.length,foot:BF.length,stairs:ST.length,reg:REG.length,meshes:vm.runInContext('world.children.length',ctx)}};
 }
 let totalFail=0;

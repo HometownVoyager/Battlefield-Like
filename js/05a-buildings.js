@@ -264,7 +264,7 @@ wallSeg(ctx,{along:'x',at:2.2,from:-1.6,to:1.6,h:H,t,mat:MAT.woodDark,
 ops:[{c:0,w:1.4,ht:2.0,h:0,type:'door'}]});
 wallSeg(ctx,{along:'x',at:-2.2,from:-1.6,to:1.6,h:H,t,mat:MAT.woodDark,ops:[]});
 for(const at of [1.6,-1.6]){
-wallSeg(ctx,{along:'z',at,from:-2.2,to:2.2,h:H,t,mat:MAT.woodDark,ops:[]});
+wallSeg(ctx,{along:'z',at,from:-2.0,to:2.0,h:H,t,mat:MAT.woodDark,ops:[]}); // ±2.2→±2.0 (2026-09-06 P3-10: wallSeg 侧墙自动外伸 t, 原参数反向过咬合 0.1m)
 }
 pitchedRoof(ctx,{axis:'x',w:3.2,d:4.4,y0:H,rise:0.62,mat:tentMatA,gableMat:tentMatB,over:0.45,t:0.2});
 // 内部地铺 + 箱
@@ -475,15 +475,21 @@ for(const at of [2.7,-2.7]){
 g=wallSeg(ctx,{along:'z',at,from:-2.7+t,to:2.7-t,h:H,t,mat:wallMat,destr:true,ops:[]});
 if(g)wallGs.push(g);
 }
-// 平顶 (实心挡弹) —— 与墙同组可毁
+// 平顶 (实心挡弹) —— 手造 roofRef 挂三面墙组: 残余承重墙≤2 (3 墙毁 1) 即整体坍塌
+// (2026-09-06 P1-2: 旧注释"与墙同组可毁"但无任何挂链机制, 墙炸光后石顶悬空 —— 全项目唯一漏网)
 const rp=ctx.L(0,0);
-addSnowCap(solidBox(MAT.stone,7.6,0.34,6.0,rp[0],f.floor+H+0.17,rp[1],ry));
+const rbi=BOXES.length;
+const roofM=solidBox(MAT.stone,7.6,0.34,6.0,rp[0],f.floor+H+0.17,rp[1],ry);
+addSnowCap(roofM);
+const roofRef={m:[roofM],bands:BOXES.slice(rbi),slabs:[],dead:0,done:false,carry:wallGs.filter(w=>w&&!w.dead)};
+for(const g2 of roofRef.carry) g2.roofRef=roofRef;
 // 亭内长椅 + 瓦砾块 (纯视觉, 不进 PROPS —— 足迹内道具会破坏互斥断言)
 let p=ctx.L(1.4,-1.6);
 solidBox(MAT.woodDark,1.8,0.5,0.5,p[0],heightAt(p[0],p[1])+0.25,p[1],ry);
 if(wr(0,1)<0.8){ p=ctx.L(-1.6,0.8); mesh(boxGeo(wr(0.9,1.5),wr(0.45,0.8),wr(0.9,1.5)),MAT.rubble,p[0],f.floor+0.28,p[1],wr(0,3)); }
 coverPoints.push({x:ctx.L(0,0.6)[0],z:ctx.L(0,0.6)[1]},{x:ctx.L(0,-3.6)[0],z:ctx.L(0,-3.6)[1]});
 BUILD_REG.push({type:'metro',x,z,ry,w:7,d:5.4,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+0.34});
+for(const b2 of roofRef.bands) b2.building=BUILD_REG[BUILD_REG.length-1]; // 沙箱煎饼断言: 平顶归属标记
 }
 // 补给库 (破袭模式目标, 可被炸毁) —— 箱堆/沙袋/旗杆整体随朝向摆放
 // 足迹已在 buildWorld 布局前预留(B_FOOT), 此处不再重复登记
@@ -511,7 +517,7 @@ return g;
 // 空间逻辑核算 (局部坐标, x=厂房长轴 28m, z=短轴 20m, 墙高 6.8m):
 //   天车走台顶面 4.6m 与高窗带 4.8~6.3m 视线对齐(站立眼高 6.2 可越护栏 5.55 射出);
 //   走台梁底 4.38m > 钢水包顶 2.2m / 人员 1.8m; 楼梯 11 步×0.55 进深 6.05m 顶步与走台齐平;
-//   厂房内中央 z∈±2.2 为无柱走廊, 钢坯垛排 z=±5.5, 机器贴墙 z=±8.7, 楼梯贴东/西墙 x∈12.4~13.75;
+//   厂房内立柱 z=±0.8、吊罐位于中线 (中央通道有 bump, 2026-09-06 P2-17 口径修正: 旧"中央 z±2.2 无柱走廊"与实现不符), 钢坯垛排 z=±5.5, 机器贴墙 z=±8.7, 楼梯贴东/西墙 x∈12.4~13.75;
 //   围墙四向豁口对齐铁轨支线(x=17 纵贯)与行人口; 平板车皮停支线上 (坦克不可碾)
 function redOctober(x,z,ry){
 const cs=Math.cos(ry),sn=Math.sin(ry);
@@ -581,7 +587,7 @@ const p=L(sx,0);
 factoryLadle(p[0],p[1]);
 }
 // ── 烟囱 (厂房东南角外, 高 15): 全图最高点, 炮兵参照物 ──
-const cp=L(17.5,-24);
+const cp=L(20,-24); // (2026-09-06 P1-3: 原 17.5 双轨均穿入基座, 东移后与东轨 107.75 净距 2.25>1.5、与东围墙 112 净距 0.5)
 const cg0=heightAt(cp[0],cp[1]);
 mesh(new THREE.CylinderGeometry(1.15,1.5,15,10),MAT.brick,cp[0],cg0+7.5,cp[1]);
 mesh(new THREE.CylinderGeometry(1.3,1.2,0.6,10),MAT.stone,cp[0],cg0+15.1,cp[1]);
@@ -612,16 +618,16 @@ world.add(wh);
 }
 coverPoints.push({x:p[0]+cs*2.4,z:p[1]-sn*2.4},{x:p[0]-cs*2.4,z:p[1]+sn*2.4});
 }
-// ── 厂区围墙 (砖 h2.3, 沿四向, 豁口: 西 z-40±2 铁轨/北 x105±2/南 x105±2/东 z-26±2 行人) ──
+// ── 厂区围墙 (砖 h2.3, 沿四向, 豁口: 西 z-39±3 行人/北 x107±2 铁轨/南 x107±2 铁轨/东 z-26±2 行人 —— 2026-09-06 P1-3 对位: 豁口 [105,109] 使双轨 106.25/107.75 居中) ──
 const wy=[[70,-70],[112,-70],[112,-8],[70,-8]];
-stoneWall(70,-70,103,-70,2.3); stoneWall(107,-70,112,-70,2.3);
+stoneWall(70,-70,105,-70,2.3); stoneWall(109,-70,112,-70,2.3);
 stoneWall(112,-70,112,-28,2.3); stoneWall(112,-24,112,-8,2.3);
-stoneWall(70,-8,103,-8,2.3); stoneWall(107,-8,112,-8,2.3);
+stoneWall(70,-8,105,-8,2.3); stoneWall(109,-8,112,-8,2.3);
 stoneWall(70,-36,70,-8,2.3); stoneWall(70,-70,70,-42,2.3);
 // 厂区角落杂物/弹坑
 { const p=L(8,14); if(freeSpot(p[0],p[1],1.5)) rubblePile(p[0],p[1],1.8); }
 { const p=L(-8,18); if(freeSpot(p[0],p[1],2)) crater(p[0],p[1],2.2); }
-{ const p=L(17,10); factoryLadle(p[0],p[1]); } // 厂区南货场钢水包
+{ const p=L(19,10); factoryLadle(p[0],p[1]); } // 厂区南货场钢水包 (2026-09-06 P1-3: 原 17 正压轨心 107; 19.5 会蹭东墙段占位半径 propFree 失败, 收到 19)
 // 厂区整体足迹 (世界坐标 AABB 随 ry) —— 此后ammo箱/火力点/杂物不再落入围墙内
 B_FOOT.push(footRect(...L(1,-1),ry,44,64,1.0));
 BUILD_REG.push({type:'factory',x:fp[0],z:fp[1],ry,w:fw,d:fd,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+WH+2.0});
