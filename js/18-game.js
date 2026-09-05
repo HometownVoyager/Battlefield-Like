@@ -51,7 +51,7 @@ this.deathT=nowT;
 tickets[this.team]=Math.max(0,tickets[this.team]-1);
 this.killerName=attacker?(attacker.name||'敌军'):'';
 this.killerSrc=killSrcLabel(attacker); // 击杀来源: 载具/固定火力点/武器名 (2026-09-04)
-if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+100; addKillfeed(attacker,this,false); }
+if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+SCORE_TABLE.kill; addKillfeed(attacker,this,false); }
 if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀计数
 	if(this.onMG){ releaseEmpl(this.onMG,true); this.onMG=null; }
 	if(this.onAT){ releaseEmpl(this.onAT,true); this.onAT=null; }
@@ -149,7 +149,7 @@ c.uses--;
 this.bandResupCd=4;
 AudioSys.click(900,0.3,0.05);
 showScorePop('绷带已补充');
-if(c.owner&&c.owner!==this){ c.owner.score=(c.owner.score||0)+10; }
+if(c.owner&&c.owner!==this){ c.owner.score=(c.owner.score||0)+SCORE_TABLE.medkit; }
 }
 this.grabAction=null;
 },

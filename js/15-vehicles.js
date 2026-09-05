@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // 15-vehicles.js —— 坦克/炮弹/溅射伤害
 // 源: Index.original.html 第 5637-6206 行
-// 2026-08-24 切分: TANK_DEFS 数据表 → 15a-defs.js (原第10-15行)
+// (2026-09-06 B7a: 切分遗留的 15a-defs.js 死表已删, 数据单源在 00-config FACTIONS[...].tanks)
 // ─────────────────────────────────────────────
 'use strict';
 const tanks=[], shells=[];
@@ -161,7 +161,7 @@ this.pitchG.visible=!(this.playerDriven&&player.tankView);
 	// 深谷激流: 坦克误入河道即熄火受淹 (AI寻路只会走大桥)
 	if(inRiverChannel(this.pos.x,this.pos.z)){
 	this.vel=dampF(this.vel,0,5,dt);
-	this.takeDmg(14*dt,null,true); // 激流属于环境惩罚, 不享受装甲减免
+	this.takeDmg(VEH_RAPIDS_DMG*dt,null,true); // 激流属于环境惩罚, 不享受装甲减免
 	if(this.playerDriven&&Math.random()<dt*2) showScorePop('⚠ 激流熄火! 快倒车离开河道');
 	}
 // 无人闲置的坦克脱战后缓慢检修回血, 修到40%以上AI步兵才会重新接管
@@ -601,11 +601,11 @@ cb.damage(999,attacker,false);
 }
 if(attacker&&attacker.team!==this.team){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+300;
+attacker.score=(attacker.score||0)+SCORE_TABLE.tank;
 addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
-if(attacker.isPlayer) registerKillScore('摧毁坦克',300);
+if(attacker.isPlayer) registerKillScore('摧毁坦克',SCORE_TABLE.tank);
 }
-tickets[this.team]=Math.max(0,tickets[this.team]-(this.def.heavy?6:5));
+tickets[this.team]=Math.max(0,tickets[this.team]-(this.def.heavy?TICKET_COST.tankHeavy:TICKET_COST.tankLight));
 explosionFX(this.pos.clone().add(V3(0,1.4,0)));
 AudioSys.explosion(this.pos.distanceTo(camera.position));
 this.grp.traverse(o=>{ if(o.isMesh){ if(!o.userData.mat0) o.userData.mat0=o.material; o.material=wreckMat; } });

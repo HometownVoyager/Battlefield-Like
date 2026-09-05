@@ -206,9 +206,9 @@ explosionFlora(this.pos,4.5);
 	this.sinkDelay=1.2; this.sinkT=0; this.sunk=false; this._collDropped=false;
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+150;
+attacker.score=(attacker.score||0)+SCORE_TABLE.truck;
 addKillfeed(attacker,this,false);
-if(attacker.isPlayer) registerKillScore('摧毁运输车',150);
+if(attacker.isPlayer) registerKillScore('摧毁运输车',SCORE_TABLE.truck);
 }
 addKillMsg(`运输车被摧毁! 剩余 ${CONVOY_STATE?CONVOY_STATE.left:0} 辆`,attacker?attacker.team:player.team);
 }

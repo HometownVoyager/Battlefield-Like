@@ -21,9 +21,9 @@ return [half+rx/range*half, half+rz/range*half];
 mmC.strokeStyle='rgba(150,130,90,.4)'; mmC.lineWidth=5;
 if(CAMPAIGN.sineRoad){
 mmC.beginPath();
-for(let x=-155;x<=155;x+=10){
-const [px,py]=toMap(x,3*Math.sin(x*0.02));
-x===-155?mmC.moveTo(px,py):mmC.lineTo(px,py);
+for(let x=-(MAP_SIZE/2-5);x<=MAP_SIZE/2-5;x+=10){ // 2026-09-06 B7a/P2-11/12: 旧写死 ±155 与公式复制
+const [px,py]=toMap(x,sineRoadZ(x));
+x===-(MAP_SIZE/2-5)?mmC.moveTo(px,py):mmC.lineTo(px,py);
 }
 mmC.stroke();
 }

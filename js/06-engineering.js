@@ -79,7 +79,7 @@ RISERS.push({m:m2,ty,t:0,dur});
 function updateRisers(dt){
 for(let i=RISERS.length-1;i>=0;i--){
 const r=RISERS[i]; r.t+=dt;
-const k=clamp(r.t/r.dur,0,1), s=k*k*(3-2*k);
+const k=clamp(r.t/r.dur,0,1), s=sstep(k);
 r.m.position.y=r.ty-1.1*(1-s);
 if(k>=1){ r.m.position.y=r.ty; RISERS.splice(i,1); }
 }

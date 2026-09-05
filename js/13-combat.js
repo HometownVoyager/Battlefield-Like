@@ -113,10 +113,14 @@ fireBullet(shooter,eye,dir,mgBulletDef(mdef),muzz);
 muzzleFXWorld(muzz,dir);
 }
 // 迫击炮: 单源弹道 (tof=clamp(dH/42,1.8,4.2) 高抛解) + 弹体创建; 音效/烟/ trauma 与冷却档由调用方处理
+// 高抛弹道速度解 (2026-09-06 B7a/P2-10: 炮位/手持两套公式参数化, tof 由调用方按武器档决定)
+function mortarVel(ox,oz,tx,tz,tof){
+return V3((tx-ox)/tof,0.5*9.8*tof,(tz-oz)/tof);
+}
 function emplMortarShell(mo,shooter,tx,tz){
 const dH=Math.hypot(tx-mo.x,tz-mo.z);
 const tof=clamp(dH/42,1.8,4.2);
-const v=V3((tx-mo.x)/tof,0.5*9.8*tof,(tz-mo.z)/tof);
+const v=mortarVel(mo.x,mo.z,tx,tz,tof);
 shooter._src='迫击炮'; // 击杀来源: 固定迫击炮
 const nPos=V3(mo.x,mo.y+0.25,mo.z);
 const shell=new THREE.Mesh(nadeGeoAT,vmMats.gun); shell.position.copy(nPos); scene.add(shell);

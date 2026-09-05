@@ -125,9 +125,9 @@ case 'mountain':{
 // (rd5~21 上叠 ~9m × 沿谷起伏 0.45~1.55), 山肩上缘再拔 ~7m (rd21~32),
 // 山坡中高处即伏击带 —— 居高临下俯瞰谷道, 山肩以上才是陡面
 const rd=roadDist(x,z);
-const s3=t=>t*t*(3-2*t);
-const side=s3(clamp((rd-5)/16,0,1));
-const rim=s3(clamp((rd-21)/11,0,1));
+
+const side=sstep(clamp((rd-5)/16,0,1));
+const rim=sstep(clamp((rd-21)/11,0,1));
 const rn=1+0.35*Math.sin(x*0.024+z*0.01+1)+0.2*Math.sin(x*0.055-z*0.03+0.7);
 const floor=0.4*Math.sin(x*0.05)+0.2*Math.sin(x*0.12+2);
 return floor+side*9*rn+rim*7*rn;
@@ -140,7 +140,7 @@ case 'taihang':{
 const mt=(cx,cz,H,R)=>{
 const d=Math.hypot(x-cx,z-cz);
 const dh=clamp(1-d/R,0,1);
-return H*dh*dh*(3-2*dh);
+return H*sstep(dh);
 };
 const hM=mt(-135,15,72,135)+mt(30,-60,118,185)+mt(200,-120,78,135);
 const base=1.5+0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)
@@ -154,7 +154,7 @@ case 'xuefeng':{
 // 南北两条山前余脉, 沿脊参数 t 取峰谷表(三峰两垭口); 盘山公路穿两个垭口、绕主峰北腰
 const ri=ridgeInfo(x,z);
 const dh=clamp(1-ri.d/230,0,1);
-const s=dh*dh*(3-2*dh);
+const s=sstep(dh);
 const foot=3.5+2.2*Math.sin(x*0.02+0.7)*Math.cos(z*0.018+1)
 +1.4*Math.sin(x*0.043+2)*Math.sin(z*0.037+0.8)
 +2.8*Math.sin(x*0.014+1.2)*Math.cos(z*0.016+0.9)
@@ -184,7 +184,7 @@ for(const f of FLATS){
 const d=Math.hypot(x-f.x,z-f.z);
 if(d<f.r){
 const t=1-d/f.r;
-const s=t*t*(3-2*t);
+const s=sstep(t);
 h=lerp(h,f.h,s);
 }
 }
@@ -193,7 +193,7 @@ if(METRO){
 const d=Math.hypot(x-METRO.x,z-METRO.z);
 if(d<METRO.r){
 const k=1-d/METRO.r;
-h-=METRO.d*k*k*(3-2*k);
+h-=METRO.d*sstep(k);
 }
 }
 // 诺曼底: 博卡日下沉土路 —— 土路低于两侧田野约 0.45m (战壕下切模板减半)
@@ -201,7 +201,7 @@ if(RURAL_FIELDS.length){
 const rd=roadDist(x,z);
 if(rd<4){
 const k=1-rd/4;
-h-=0.45*k*k*(3-2*k);
+h-=0.45*sstep(k);
 }
 }
 // 战壕: 沿线下凹
@@ -210,7 +210,7 @@ const t=TRENCHES[i];
 const d=segDist(x,z,t.x1,t.z1,t.x2,t.z2);
 if(d<2.4){
 const k=1-d/2.4;
-h-=1.3*k*k*(3-2*k);
+h-=1.3*sstep(k);
 }
 }
 	// 河道: 沿折线下切 (d>2 为深谷激流)
@@ -223,7 +223,7 @@ h-=1.3*k*k*(3-2*k);
 	}
 	if(rd<RIVER.w){
 	const k=1-rd/RIVER.w;
-	h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k);
+	h-=(RIVER.ice?1.2:(RIVER.d||1.9))*sstep(k);
 	}
 	}
 	// 大桥桥面: 桥矩形区域内地面抬升至桥面高度 (两岸衔接, 步兵/车辆直接通行)
@@ -303,8 +303,10 @@ return dir;
 // 各战役的战壕布局 (需在地形网格生成前注册)
 const TRENCHES=[];
 for(const t of (CAMPAIGN.trench||[])) TRENCHES.push({x1:t[0],z1:t[1],x2:t[2],z2:t[3]});
+// 正弦路纵线 (2026-09-06 B7a/P2-12: 地形判定/电线杆/小地图/部署图四处共读, 改公式只动这里)
+function sineRoadZ(x){ return 3*Math.sin(x*0.02); }
 function roadDist(x,z){
-let d=CAMPAIGN.sineRoad?Math.abs(z - 3*Math.sin(x*0.02)):1e9;
+let d=CAMPAIGN.sineRoad?Math.abs(z - sineRoadZ(x)):1e9;
 for(const r of CAMPAIGN.roads){
 d=Math.min(d,segDist(x,z,r[0],r[1],r[2],r[3]));
 }
@@ -343,7 +345,7 @@ r=lerp(r,0.56,0.72); g=lerp(g,0.51,0.72); b=lerp(b,0.44,0.72);
 let td=1e9;
 for(const t2 of TRENCHES){ const dd=segDist(x,z,t2.x1,t2.z1,t2.x2,t2.z2); if(dd<td) td=dd; }
 if(td<3.2){
-const k=1-td/3.2, s=k*k*(3-2*k)*0.92;
+const k=1-td/3.2, s=sstep(k)*0.92;
 const dr=THEME.snow?0.62:0.74, dg=THEME.snow?0.5:0.62, db=THEME.snow?0.36:0.46;
 r=lerp(r,dr,s); g=lerp(g,dg,s); b=lerp(b,db,s);
 }
@@ -379,7 +381,7 @@ let dr=1,dg=1,db=1;
 const kw=fld.t==='wheat'?[1.17,0.99,0.62]:fld.t==='corn'?[0.96,1.13,0.72]:
 fld.t==='rice'?[0.88,1.12,0.72]:fld.t==='pasture'?[0.93,1.11,0.9]:[1.08,0.88,0.66];
 const kr=Math.min(x-fld.x0,fld.x1-x,z-fld.z0,fld.z1-z);
-const k=Math.min(1,kr/2.5); const ks=k*k*(3-2*k);
+const k=Math.min(1,kr/2.5); const ks=sstep(k);
 dr=lerp(1,kw[0],ks); dg=lerp(1,kw[1],ks); db=lerp(1,kw[2],ks);
 if(kr<1.1){ const e=1-kr/1.1; dr*=lerp(1,0.86,e); dg*=lerp(1,0.83,e); db*=lerp(1,0.72,e); }
 r*=dr; g*=dg; b*=db;

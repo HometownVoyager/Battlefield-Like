@@ -158,7 +158,7 @@ for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15a-defs.js','js/15-vehicles.js','js/15b-trucks.js','js/16a-defs.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -638,12 +638,14 @@ var g0=heightAt(t0.pos.x,t0.pos.z);
 // 车底塞 0.9m 矮木箱(无 crush/dGroup=不可摧毁) + 1.1m 油桶圆柱
 BOXES.push({minX:t0.pos.x-1.2,minY:g0,maxX:t0.pos.x+1.2,maxY:g0+0.9,minZ:t0.pos.z-1.2,maxZ:t0.pos.z+1.2,gh:g0});
 CYLS.push({x:t0.pos.x,z:t0.pos.z,r:0.45,y0:g0,y1:g0+1.1});
+buildSpatialIndex(); // 2026-09-06 B5: 直塞碰撞体须入 RGRID 索引 (游戏运行期同类碰撞体都走 addBoxCollider/registerDynCollider+NAV.refresh, 本行与游戏真实路径一致)
 // 底盘目标高度应取较高者(圆柱顶)
 var y1=tankRideH(t0.pos.x,t0.pos.z,t0.pos.y);
 // 车头前方 2.4m 采样点(suspension 前采样臂)再放一块 1.2m 矮盒: 前采样顶明显高于后采样 → 俯仰弹簧前倾
 const snT=Math.sin(t0.yaw), csT=Math.cos(t0.yaw);
 var fx=t0.pos.x+snT*2.4, fz=t0.pos.z+csT*2.4;
 BOXES.push({minX:fx-1.0,minY:g0,maxX:fx+1.0,maxY:g0+1.2,minZ:fz-1.0,maxZ:fz+1.0,gh:g0});
+buildSpatialIndex();
 var sf=tankSurfH(fx,fz); // 前采样点=盒顶
 var px0=t0.pos.x, pz0=t0.pos.z;
 for(let i=0;i<6;i++) t0.update(1/30); // 6帧: 不推离 + y 爬升 + 俯仰发生
@@ -651,6 +653,7 @@ var r={y1,g0,px0,pz0,px1:t0.pos.x,pz1:t0.pos.z,y2:t0.pos.y,alive:t0.alive,susp:t
 r.y2=+r.y2.toFixed(3); r.y1=+r.y1.toFixed(3); r.susp=+r.susp.toFixed(3);
 // 对照组: 1.6m 高墙(不可摧毁但高) 仍应阻挡推离
 BOXES.push({minX:t0.pos.x-1.2,minY:g0,maxX:t0.pos.x+1.2,maxY:g0+1.6,minZ:t0.pos.z-1.2,maxZ:t0.pos.z+1.2,gh:g0});
+buildSpatialIndex();
 var px2=t0.pos.x;
 for(let i=0;i<3;i++) t0.update(1/30);
 r.px2=t0.pos.x;

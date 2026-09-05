@@ -171,7 +171,7 @@ const pip=seatElm('leadPip');
 let ep=null,bd=1e9;
 for(const pl2 of planes){ if(pl2.alive&&pl2.team!==p.team){ const d=pl2.pos.distanceTo(V3(g.x,g.y,g.z)); if(d<bd){ bd=d; ep=pl2; } } }
 if(ep&&bd<280){
-const tof=bd/150;
+const tof=bd/SHELL_SPD; // 提前量用主炮弹速单源 (2026-09-06 B7a/P2-8)
 const lead=ep.pos.clone().addScaledVector(ep.velVec(),tof);
 const v=lead.project(camera);
 if(v.z<1&&Math.abs(v.x)<1.1&&Math.abs(v.y)<1.1){

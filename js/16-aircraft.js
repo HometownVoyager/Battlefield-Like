@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // 16-aircraft.js —— 飞机/防空炮/坠机残骸
 // 源: Index.original.html 第 6207-6607 行
-// 2026-08-24 切分: PLANE_DEFS 数据表 → 16a-defs.js (原第55-60行)
+// (2026-09-06 B7a: 切分遗留的 16a-defs.js 死表已删, 数据单源在 00-config FACTIONS[...].planes)
 // ─────────────────────────────────────────────
 'use strict';
 const planes=[], flakShots=[], planeWrecks=[];
@@ -433,11 +433,11 @@ cb.damage(999,attacker,false);
 }
 if(attacker&&attacker.team!==this.team){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+250;
+attacker.score=(attacker.score||0)+SCORE_TABLE.plane;
 addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
-if(attacker.isPlayer) registerKillScore('击落战机',250);
+if(attacker.isPlayer) registerKillScore('击落战机',SCORE_TABLE.plane);
 }
-tickets[this.team]=Math.max(0,tickets[this.team]-3);
+tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);
 explosionFX(this.pos.clone());
 AudioSys.explosion(this.pos.distanceTo(camera.position));
 // 坠机残骸: 拖着火焰继续坠落, 落地爆炸并留下焦黑残骸
@@ -480,7 +480,7 @@ function fireFlak(gun,shooter,dir){
 const o=V3(gun.x,gun.y,gun.z).addScaledVector(dir,1.6); // 弹壳出生炮轴心 (2026-09-06 P2-20: 旧 +0.4 与炮管视觉错位)
 AudioSys.gunshot('mg',o.distanceTo(camera.position),0);
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*2,dir.y*2,dir.z*2,0.35,3,0.07,1,0,true);
-flakShots.push({pos:o.clone(),vel:dir.clone().multiplyScalar(150),team:shooter.team,owner:shooter,life:2.6});
+flakShots.push({pos:o.clone(),vel:dir.clone().multiplyScalar(SHELL_SPD),team:shooter.team,owner:shooter,life:2.6}); // 弹速引 SHELL_SPD (2026-09-06 B7a/P2-8)
 }
 function updateFlak(dt){
 for(let i=flakShots.length-1;i>=0;i--){

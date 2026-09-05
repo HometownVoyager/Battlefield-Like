@@ -162,7 +162,7 @@ const ctx=vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root,'js/00-config.js'),'utf8'),ctx,{filename:'js/00-config.js'});
 const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
-ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
+ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge;
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 03-terrain 的城市语义全局 (沙箱未加载本体, 同构注入): CITY 常量供 05c/05a 使用

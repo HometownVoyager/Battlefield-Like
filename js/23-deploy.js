@@ -10,8 +10,8 @@ el('blackOv').style.opacity=0;
 CLASSES.forEach((c,i)=>{
 const ws=(EXPERIMENT&&i===5)?playerClassWeapons(player.team,i):TEAM_FACTION[player.team].cls[i];
 let d2=ws.map(k=>WPN_DEFS[k].name).join(' · ');
-if(i===2) d2+=' · AT雷×2 · 燃烧弹[6]×1';
-if(i===4) d2+=' · 医疗箱[B] · 绷带×6';
+if(i===2){ const g=clsGear(i,player.team); d2+=' · AT雷[3]×'+g.atn+' · 燃烧弹[6]×'+(CLASSES[i].incin||0); } // 2026-09-06 B7a/P2-13: 文案由数值表拼接 (旧"×2/×1"与表值脱钩)
+if(i===4) d2+=' · 医疗箱[B] · 绷带×'+(CLASSES[i].bandages||4);
 if(i===5) d2+=EXPERIMENT?' · 燃烧弹[6]×2':' · AT雷×'+(TEAM_FACTION[player.team].atn5||3);
 el('cw'+i).textContent=d2;
 });
@@ -97,7 +97,7 @@ const toM=(x,z)=>[S/2+x/MH*S/2, S/2+z/MH*S/2];
 c.strokeStyle='rgba(150,130,90,.5)'; c.lineWidth=4;
 if(CAMPAIGN.sineRoad){
 c.beginPath();
-for(let x=-155;x<=155;x+=10){ const [px,py]=toM(x,3*Math.sin(x*0.02)); x===-155?c.moveTo(px,py):c.lineTo(px,py); }
+for(let x=-(MAP_SIZE/2-5);x<=MAP_SIZE/2-5;x+=10){ const [px,py]=toM(x,sineRoadZ(x)); x===-(MAP_SIZE/2-5)?c.moveTo(px,py):c.lineTo(px,py); } // 2026-09-06 B7a/P2-11/12
 c.stroke();
 }
 for(const r of CAMPAIGN.roads){
@@ -216,7 +216,7 @@ p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEF
 p.curSlot=0; p.curW=p.slots[0];
 p.nadeCount=gear.nades;
 p.atNades=gear.atn;
-p.maxBandages=p.cls===4?12:4;
+p.maxBandages=CLASSES[p.cls].bandages||4; // 2026-09-06 B7a/P2-13: 绷带上限进兵种表, 文案/数值同源
 p.bandages=p.maxBandages;
 p.smokeCount=gear.smoke;
 p.incinCount=gear.incin;

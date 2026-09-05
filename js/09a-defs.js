@@ -58,7 +58,7 @@ const CLASSES=[
 { name:'冲锋枪手', nades:6, smoke:2 },
 { name:'突击兵', nades:4, smoke:2, incin:2 },
 { name:'狙击手', nades:2, smoke:2 },
-{ name:'医护兵', nades:4, smoke:4 },
+{ name:'医护兵', nades:4, smoke:4, bandages:12 },
 { name:'反坦克兵', nades:2, atn:6, smoke:0 },
 { name:'迫击炮兵', nades:2, smoke:2, deploy:'mortar' },
 { name:'工程兵', nades:2, smoke:2, deploy:'build' },

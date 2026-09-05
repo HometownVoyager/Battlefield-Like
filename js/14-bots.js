@@ -198,7 +198,7 @@ tickets[this.team]=Math.max(0,tickets[this.team]-1);
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
 // 玩家记分唯一入口=onPlayerKill (21-match): 此处只给 Bot/乘员加分, 否则玩家击杀双计 200 (2026-09-06 P0-1)
-if(!attacker.isPlayer) attacker.score=(attacker.score||0)+100;
+if(!attacker.isPlayer) attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
 addKillfeed(attacker,this,isHead);
 if(attacker.isPlayer){ onPlayerKill(this,isHead); }
 }
@@ -426,7 +426,7 @@ if(!empReady(g)) continue; // 占用中/上炮冷却中(下炮后EMP_REARM_T秒)
 if(Math.hypot(g.x-this.pos.x,g.z-this.pos.z)<16){
 // 解除朝向限制: 炮塔可360°回旋, 就近即可上炮; 使用前摇与玩家同规 (0.9s原地操作); 前摇期间即占位
 g.user=this;
-this.emCast={kind:'at',g,t:0,dur:0.9}; this.state='defend'; this.path=null;
+this.emCast={kind:'at',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null;
 return;
 }
 }
@@ -450,7 +450,7 @@ for(const g of AAGUNS){
 if(!empReady(g)) continue;
 if(Math.hypot(g.x-this.pos.x,g.z-this.pos.z)<15){
 g.user=this;
-this.emCast={kind:'aa',g,t:0,dur:0.9}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
+this.emCast={kind:'aa',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
 return;
 }
 }
@@ -622,7 +622,7 @@ for(const mo of MORTARS){
 if(!mo.alive||!empReady(mo)) continue;
 if(Math.hypot(mo.x-this.pos.x,mo.z-this.pos.z)<(this.cls===6?18:11)){
 mo.user=this;
-this.emCast={kind:'mortar',g:mo,t:0,dur:0.9}; this.state='defend'; this.path=null;
+this.emCast={kind:'mortar',g:mo,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null;
 return;
 }
 }
@@ -632,7 +632,7 @@ for(const mg of MG42S){
 if(!empReady(mg)) continue;
 if(Math.hypot(mg.x-this.pos.x,mg.z-this.pos.z)<14){
 mg.user=this;
-this.emCast={kind:'mg',g:mg,t:0,dur:0.9}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
+this.emCast={kind:'mg',g:mg,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
 return;
 }
 }
@@ -909,7 +909,7 @@ this.vel.set(0,0,0);
 this.crouch=true;
 if(this.bandageT<=0){
 this.bandages=Math.max(0,this.bandages-1);
-this.hp=Math.min(100,this.hp+45);
+this.hp=Math.min(100,this.hp+BANDAGE_HEAL);
 this.crouch=false;
 }
 this.updateMesh(dt,0);
@@ -1283,8 +1283,7 @@ const eye=this.eyePos();
 const tx=this.lastSeenPos.x+rand(-7,7), tz=this.lastSeenPos.z+rand(-7,7);
 const dist2=Math.hypot(tx-this.pos.x,tz-this.pos.z);
 const tof=clamp(dist2/15,1.7,3.4);
-const v=V3((tx-eye.x)/tof,0,(tz-eye.z)/tof);
-v.y=0.5*9.8*tof;
+const v=mortarVel(eye.x,eye.z,tx,tz,tof);
 const m=new THREE.Mesh(nadeGeoAT,vmMats.gun);
 m.position.copy(eye); scene.add(m);
 nades.push({m,pos:eye.clone(),vel:v,fuse:9,thrower:this,team:this.team,spin:V3(4,0,1),bounces:0,mortar:true});
@@ -1408,7 +1407,7 @@ if(!found) yaw+=Math.PI*(Math.random()<0.5?0.5:-0.5);
 	const wf=nowT-(this.wireT||-9)<0.3?0.42:1;
 	// 深谷激流: 涉水大幅减速并持续受创 (寻路本不走河道, 误入/被冲入时尽快脱身)
 	const riv=inRiverChannel(this.pos.x,this.pos.z);
-	if(riv) this.damage(8*dt,null,false);
+	if(riv) this.damage(RAPIDS_DMG*dt,null,false);
 	this.vel.x=Math.sin(yaw)*speed*cr*wf*(riv?0.4:1);
 	this.vel.z=Math.cos(yaw)*speed*cr*wf*(riv?0.4:1);
 this.pos.x+=this.vel.x*dt;

@@ -334,6 +334,18 @@ const MG_BULLET_DEF={dmg:40,headMul:2.0,snd:'mg',tracer:2,vehDmg:9};      // 载
 const mgBulletDef=mdef=>({dmg:mdef.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:2.5}); // 固定重机枪弹 (座子 def 参数化; headMul 统一 1.9)
 const AT_CREW_DIST=0.9;   // 反坦克炮炮手站位: 炮后方距离 (旧 1.2/1.3 会嵌进后方沙袋墙 0.35m)
 const EMPL_AA_CD=0.34;    // 防空炮射速间隔: 玩家/Bot 同档 (D1=c; Bot 强度差异交 DIFF_TABLE 散布表达)
+// ===== 记分/票数单源 (2026-09-06 B7a/P2-9: 原散布 6 文件的结算字面量收拢) =====
+// ===== 包扎/激流/前摇单源 (2026-09-06 B7a/P2-10) =====
+const BANDAGE_HEAL=45;   // 包扎一次回血 (玩家/Bot 同参)
+const RAPIDS_DMG=8;      // 激流持续伤 /s (涉水步兵)
+const VEH_RAPIDS_DMG=14; // 激流持续伤 /s (载具, 不吃装甲减免)
+const EM_CAST_DUR=0.9;   // 固定火力点使用前摇 (玩家 20-player 与 Bot emCast 同参)
+// ===== 记分/票数单源 (2026-09-06 B7a/P2-9: 原散布 6 文件的结算字面量收拢) =====
+// smoothstep 单源 (2026-09-06 B7a/P3-8: 旧 03-terrain/06-engineering ≥9 处内联 t*t*(3-2*t))
+const sstep=t=>t*t*(3-2*t);
+const SCORE_TABLE={kill:100,head:125,tank:300,plane:250,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};
+const TICKET_COST={tankLight:5,tankHeavy:6,plane:3};
+const TICKET_CAP=999;
 const EMPL_MG_DEF={rpm:1100,dmg:26,heatPS:0.012,name:'重机枪'}; // 机枪座 def 缺省兜底 (旧两处字面量 dmg 26/28 分叉已统一)
 // 超大地图战役(如雪峰山 800×800)在战役条目里指定 mapSize; 其余沿用标准 320
 const MAP_SIZE=CAMPAIGN.mapSize||320;

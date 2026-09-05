@@ -372,7 +372,7 @@ if(inRiverChannel(x,z)) return false;
 if(onBridge(x,z,3)) return false;
 for(const f of FLATS){ if(Math.hypot(x-f.x,z-f.z)<f.r*flatK) return false; }
 if(!freeSpot(x,z,1)) return false;
-return Math.abs(x)<150&&Math.abs(z)<150;
+return Math.abs(x)<MAP_SIZE/2-10&&Math.abs(z)<MAP_SIZE/2-10; // 2026-09-06 B7a/P2-11: 旧写死 ±150 (扩图即失效)
 };
 let placed=0, tries=0;
 while(placed<52&&tries<400){ tries++;
@@ -992,8 +992,8 @@ CROP_FIELDS.push({x0:f.x0,x1:f.x1,z0:f.z0,z1:f.z1,h:f.t==='wheat'?1.15:f.t==='co
 }
 }
 if(CAMPAIGN.sineRoad){
-for(let x=-124;x<=124;x+=28){
-const z=3*Math.sin(x*0.02)+6.5;
+for(let x=-(MAP_SIZE/2-36);x<=MAP_SIZE/2-36;x+=28){ // 2026-09-06 B7a/P2-11: 旧写死 ±124
+const z=sineRoadZ(x)+6.5;
 const g0=heightAt(x,z);
 mesh(new THREE.CylinderGeometry(0.12,0.16,6.5,6),MAT.woodDark,x,g0+3.25,z);
 mesh(boxGeo(0.1,0.12,1.8),MAT.woodDark,x,g0+5.8,z);

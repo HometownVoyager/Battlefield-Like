@@ -73,8 +73,8 @@ drawFlagTex(f);
 addKillMsg(`${TEAM_NAME[attacker]} 占领了 ${f.id} 点`,attacker);
 for(const c of combatants){
 if(c.alive&&c.team===attacker&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
-c.score=(c.score||0)+150;
-if(c.isPlayer) showKillPop('占领 '+f.id+' 点',150);
+c.score=(c.score||0)+SCORE_TABLE.flag;
+if(c.isPlayer) showKillPop('占领 '+f.id+' 点',SCORE_TABLE.flag);
 }
 }
 	// 占满全部旗点 → 敌方兵力立即归零进入清场 (2026-09-04 用户指定: 攻防/征服任一方占满都生效 —
@@ -88,7 +88,7 @@ if(c.isPlayer) showKillPop('占领 '+f.id+' 点',150);
 	}
 	}else if(GAMEMODE==='assault'&&attacker===ATK){
 	// 占旗返还: +40实测让攻方票数越打越多(太行山330→998), 2026-09-01 用户指定降为+10
-	tickets[ATK]=Math.min(tickets[ATK]+10,999);
+	tickets[ATK]=Math.min(tickets[ATK]+SCORE_TABLE.flagReturn,TICKET_CAP);
 	}
 	}
 }
@@ -146,7 +146,7 @@ if(!matchOver){
 	if(!d.destroyed&&d.g&&d.g.dead){
 	d.destroyed=true;
 	addKillMsg('补给库 '+d.id+' 被摧毁!',ATK);
-	tickets[ATK]=Math.min(tickets[ATK]+35,999);
+	tickets[ATK]=Math.min(tickets[ATK]+SCORE_TABLE.depot,TICKET_CAP);
 	}
 	if(!d.destroyed) left++;
 	}
@@ -278,9 +278,9 @@ AudioSys.click(600+Math.min(killStreakN,8)*110,0.3,0.05);
 }
 function resetKillStreak(){ killStreakN=0; }
 function onPlayerKill(victim,isHead){
-player.score+=isHead?125:100;
+player.score+=isHead?SCORE_TABLE.head:SCORE_TABLE.kill;
 player.lifeKills=(player.lifeKills||0)+1;
-registerKillScore(isHead?'爆头击杀':'击杀',isHead?125:100);
+registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 const hm=el('hitmark');
 hm.classList.add('kill');
 hm.style.opacity=1;

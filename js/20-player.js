@@ -32,7 +32,6 @@ return g;
 }
 function mkChuteForBot(){ return mkChute(0.78); }
 // 固定火力点使用前摇 (2026-09-02 用户指定): 按F后需原地操作 EM_CAST_DUR 秒才上机, 移动/再按F/受伤取消
-const EM_CAST_DUR=0.9;
 function mountMG(mg){
 player.onMG=mg; mg.user=player;
 player.pos.x=mg.x-Math.sin(mg.face)*0.85;
@@ -310,7 +309,7 @@ if(p.bandaging>0){
 p.bandaging-=dt;
 if(p.bandaging<=0){
 p.bandages--;
-p.hp=Math.min(100,p.hp+45);
+p.hp=Math.min(100,p.hp+BANDAGE_HEAL);
 showScorePop('包扎完成 +45');
 AudioSys.click(1200,0.3,0.06);
 }
@@ -437,7 +436,7 @@ p.pos.y=gh; p.vel.y=0; p.onGround=true;
 p.landDip=Math.max(0,p.landDip-dt*3);
 // 激流: 持续受创并被冲向下游 (桥面不受影响)
 if(inRiverChannel(p.pos.x,p.pos.z)){
-p.damage(8*dt,null,false);
+p.damage(RAPIDS_DMG*dt,null,false);
 const rd=riverDirAt(p.pos.x,p.pos.z);
 if(rd){ p.pos.x+=rd[0]*1.5*dt; p.pos.z+=rd[1]*1.5*dt; }
 if(nowT-(p._rapidsHintT||-9)>2.5){ p._rapidsHintT=nowT; showScorePop('⚠ 雨季激流! 快离开河道或上桥'); }

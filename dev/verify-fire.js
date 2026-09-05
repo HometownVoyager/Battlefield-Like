@@ -137,7 +137,7 @@ const load=(f)=>vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{f
 load('js/00-config.js');
 const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
-ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist;
+ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02);
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge;
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 ctx.RURAL_FIELDS=CAMP.fields||[];
