@@ -304,7 +304,9 @@ solidBox(MAT.wood,B.w,0.5,B.len,B.x,dy-0.25,B.z,B.yaw);
 // 桥面铺板层 (视觉)
 const deck2=mesh(boxGeo(B.w+0.7,0.1,B.len-0.6),MAT.woodDark,B.x,dy+0.02,B.z,B.yaw,false,true);
 addSnowCap(deck2);
-// 护栏立柱 + 双横杆 (碰撞体挡人坠河, 立柱位于桥缘不占中央通道)
+// 护栏立柱 + 双横杆 (立柱位于桥缘不占中央通道)
+// 2026-09-06 P1-4: 旧版横杆纯视觉(mesh)与注释"碰撞体挡人坠河"不符, 侧移可穿栏坠河 ——
+// 每侧补 1 道沿桥轴的细 solidBox 碰撞杆 (截面 0.12, 顶面=桥面+1.0m, 与视觉横杆带同位; 顺带挡弹=护栏矮掩体效应, 符合护栏语义)
 for(const side of [-1,1]){
 const v=side*(B.w/2-0.18);
 for(let u=-B.len/2+0.9;u<=B.len/2-0.9;u+=2.4){
@@ -315,6 +317,16 @@ for(const hy of [0.5,0.98]){
 const p=bridgePt(0,v);
 mesh(boxGeo(0.09,0.09,B.len-1.6),MAT.woodDark,p[0],dy+hy,p[1],B.yaw);
 }
+const rp2=bridgePt(0,v);
+solidBox(MAT.woodDark,0.12,0.12,B.len-1.6,rp2[0],dy+0.94,rp2[1],B.yaw); // 顶面 dy+1.0
+}
+// 石砌桥台 (西端): 补 deck 端面外露 + 台阶侧石 (2026-09-06 P3-10; bridgeDeckY 取两岸 max 的副作用。
+// 0.42m 台阶<0.45 步高标准保留可通行; 顶面与桥面齐平, 桥台不进 NAV 占用格(<gh+0.5)不封过河走廊)
+{
+const ab=bridgePt(-B.len/2-0.55,0);
+const gA=heightAt(ab[0],ab[1]);
+const hAb=dy-gA;
+if(hAb>0.25) solidBox(MAT.stone,B.w+0.6,hAb,1.1,ab[0],gA+hAb/2,ab[1],B.yaw);
 }
 // 桥下木排架桩 (深入激流, 纯视觉)
 for(const u of [-B.len/2+1.4,-6.5,6.5,B.len/2-1.4]){
