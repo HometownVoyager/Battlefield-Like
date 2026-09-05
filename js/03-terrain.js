@@ -172,6 +172,13 @@ return 1.4*Math.sin(x*0.021)*Math.cos(z*0.024)
 }
 }
 function heightAt(x,z,noBridge){
+// 2026-09-06 B6/P1-5 快路: 所在 3m 格距全部修正特征(FLATS/地铁下沉/土路/壕沟/河道/桥面)都超出
+// 特征半径+格半对角余量 ⇒ 各修正项在该格恒为 0, 直接返回 rawHeight —— 省 FLATS/沟壑/河道逐项距离遍历。
+// 零插值: 快路返回值与原函数逐位一致; 带内格走原函数全程精修 (等价探针 _probe_equiv 扩展验证)。
+{
+const iI=Math.floor((x+HGRID.off)/HGRID.res), jJ=Math.floor((z+HGRID.off)/HGRID.res);
+if(!(window.HGRID_OFF)&&iI>=0&&jJ>=0&&iI<HGRID.N&&jJ<HGRID.N&&hgridClear(iI,jJ)>0) return rawHeight(x,z);
+}
 let h=rawHeight(x,z);
 for(const f of FLATS){
 const d=Math.hypot(x-f.x,z-f.z);
@@ -226,6 +233,32 @@ h-=1.3*k*k*(3-2*k);
 	if(dy>h) h=dy;
 	}
 	return h;
+}
+// ===== 高度查询修正带清空场 (2026-09-06 B6/P1-5): 3m 粗格惰性缓存"格心到最近修正特征的带外距离" =====
+// 特征集: FLATS 平台/地铁站厅下沉/博卡日土路/壕沟/河道/桥面抬升。格心带距>0 ⇒ 全格点各修正项恒为 0
+// (smoothstep 在特征半径外精确为 0), 快路直接返回 rawHeight。惰性首触填充, 无启动停顿。零插值保证逐位等价。
+const HGRID={res:3, N:Math.ceil((MAP_SIZE+120)/3), off:(MAP_SIZE+120)/2, data:null};
+function hgridClear(iI,jJ){
+let d=HGRID.data;
+if(d===null){ d=HGRID.data=new Float32Array(HGRID.N*HGRID.N); d.fill(-1); }
+const idx=jJ*HGRID.N+iI, cached=d[idx];
+if(cached>=0) return cached;
+const cx=iI*HGRID.res-HGRID.off+HGRID.res/2, cz=jJ*HGRID.res-HGRID.off+HGRID.res/2;
+const PAD=2.2; // 格半对角≈2.12 + 余量
+let m=1e9;
+for(let k=0;k<FLATS.length;k++){ const f=FLATS[k]; const dd=Math.hypot(cx-f.x,cz-f.z)-f.r; if(dd<m) m=dd; }
+if(METRO){ const dd=Math.hypot(cx-METRO.x,cz-METRO.z)-METRO.r; if(dd<m) m=dd; }
+if(RURAL_FIELDS.length){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; }
+for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
+if(RIVER){
+const P=RIVER.pts; let rd=1e9;
+for(let k=0;k<P.length-1;k++){ const dd=segDist(cx,cz,P[k][0],P[k][1],P[k+1][0],P[k+1][1]); if(dd<rd) rd=dd; }
+const dd=rd-RIVER.w; if(dd<m) m=dd;
+}
+if(BRIDGE) m=-1; // 桥面抬升带 (noBridge 双语义共存): 恒走精修
+const clear=m-PAD;
+d[idx]=clear;
+return clear;
 }
 // 桥面高度: 取桥两端外侧的岸边地面高度 (惰性求值, 采样点在桥矩形外避免递归)
 let _bridgeDeckY=null;
@@ -378,27 +411,44 @@ for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.boxCells[j*N+i].push(bi);
 }
 return b;
 }
+// 2026-09-06 B6/P1-6: rayBox 标量化 + 共享结果槽 (旧实现每次分配 5 个临时数组+结果对象, 高烈度战斗每帧数千次=GC 大头);
+// 结果槽仅供 raycastWorld 内部即时消费 (best 改善才回写 bn, 槽内容即当前最优命中), 无外部长期持有
+const _rbR={t:0,nx:0,ny:0,nz:0};
 function rayBox(o,dir,b,maxD){
-let tmin=0,tmax=maxD, n=[0,0,0];
-const oo=[o.x,o.y,o.z], dd=[dir.x,dir.y,dir.z];
-const mn=[b.minX,b.minY,b.minZ], mx=[b.maxX,b.maxY,b.maxZ];
-let axis=-1, sign=0;
-for(let i=0;i<3;i++){
-if(Math.abs(dd[i])<1e-9){
-if(oo[i]<mn[i]||oo[i]>mx[i]) return null;
-} else {
-const inv=1/dd[i];
-let t1=(mn[i]-oo[i])*inv, t2=(mx[i]-oo[i])*inv;
-let s=-1;
+let tmin=0,tmax=maxD, axis=-1, sign=0;
+let dd=dir.x;
+if(dd<1e-9&&dd>-1e-9){ if(o.x<b.minX||o.x>b.maxX) return null; }
+else{
+const inv=1/dd;
+let t1=(b.minX-o.x)*inv, t2=(b.maxX-o.x)*inv, s=-1;
 if(t1>t2){ const tmp=t1; t1=t2; t2=tmp; s=1; }
-if(t1>tmin){ tmin=t1; axis=i; sign=s; }
+if(t1>tmin){ tmin=t1; axis=0; sign=s; }
 if(t2<tmax) tmax=t2;
 if(tmin>tmax) return null;
 }
+dd=dir.y;
+if(dd<1e-9&&dd>-1e-9){ if(o.y<b.minY||o.y>b.maxY) return null; }
+else{
+const inv=1/dd;
+let t1=(b.minY-o.y)*inv, t2=(b.maxY-o.y)*inv, s=-1;
+if(t1>t2){ const tmp=t1; t1=t2; t2=tmp; s=1; }
+if(t1>tmin){ tmin=t1; axis=1; sign=s; }
+if(t2<tmax) tmax=t2;
+if(tmin>tmax) return null;
+}
+dd=dir.z;
+if(dd<1e-9&&dd>-1e-9){ if(o.z<b.minZ||o.z>b.maxZ) return null; }
+else{
+const inv=1/dd;
+let t1=(b.minZ-o.z)*inv, t2=(b.maxZ-o.z)*inv, s=-1;
+if(t1>t2){ const tmp=t1; t1=t2; t2=tmp; s=1; }
+if(t1>tmin){ tmin=t1; axis=2; sign=s; }
+if(t2<tmax) tmax=t2;
+if(tmin>tmax) return null;
 }
 if(tmin<=0.0001) return null;
-n[axis]=sign;
-return { t:tmin, nx:n[0], ny:n[1], nz:n[2] };
+_rbR.t=tmin; _rbR.nx=axis===0?sign:0; _rbR.ny=axis===1?sign:0; _rbR.nz=axis===2?sign:0;
+return _rbR;
 }
 function rayCyl(o,dir,c,maxD){
 if(c.dead) return null; // 已倒伏/烧毁的树等: 碰撞体即杀 (r=0 防御 + 显式跳过)

@@ -83,12 +83,34 @@ if(f%30===0) COMPARE();
 return {samples,maxPushDiff,pushBad,shDiff,shBad,rideDiff,rideBad,surfDiff,surfBad,
 boxes:BOXES.length,cyls:CYLS.length,alive:soldiers.filter(s=>s.alive).length,tanks:tanks.filter(t=>t.alive).length};
 })()`,ctx);
-console.log(`== B5 RGRID 等价性探针: 战役#${campIdx} ${SIM_SECONDS}s 模拟内逐调用比对 ==`);
+console.log(`== B5/B6 等价性探针: 战役#${campIdx} ${SIM_SECONDS}s 模拟内逐调用比对 ==`);
 console.log(`collideMove 采样=${result.samples} 最大推出差=${(result.maxPushDiff*100).toFixed(3)}cm 超差(≥1cm)=${result.pushBad}`);
 console.log(`standHeight   最大差=${(result.shDiff*1000).toFixed(3)}mm 超差=${result.shBad}`);
 console.log(`tankRideH     最大差=${(result.rideDiff*1000).toFixed(3)}mm 超差=${result.rideBad}`);
 console.log(`tankSurfH     最大差=${(result.surfDiff*1000).toFixed(3)}mm 超差=${result.surfBad}`);
 console.log(`世界: BOXES=${result.boxes} CYLS=${result.cyls} 存活=${result.alive}人/${result.tanks}车`);
-const pass=result.pushBad===0&&result.shBad===0&&result.rideBad===0&&result.surfBad===0;
+// ── T6.1 heightAt 修正带清空场: 10 万随机点 (含特征带偏置) 双路径逐位比对 ──
+const hres=vm.runInContext(`(()=>{
+let maxD=0, bad=0;
+const SPAN=(CAMPAIGN.mapSize||320);
+for(let i=0;i<100000;i++){
+// 70% 全图均匀 + 30% 特征带偏置 (FLATS/河道附近)
+let x,z;
+if(i%10<7){ x=(Math.random()-0.5)*SPAN; z=(Math.random()-0.5)*SPAN; }
+else{
+const f=FLATS[Math.floor(Math.random()*FLATS.length)];
+x=f.x+(Math.random()-0.5)*f.r*3; z=f.z+(Math.random()-0.5)*f.r*3;
+if(RIVER&&i%3===0){ const p=RIVER.pts[Math.floor(Math.random()*(RIVER.pts.length-1))]; x=p[0]+(Math.random()-0.5)*RIVER.w*3; z=p[1]+(Math.random()-0.5)*RIVER.w*3; }
+}
+window.HGRID_OFF=true;  const a=heightAt(x,z);
+window.HGRID_OFF=false; const b=heightAt(x,z);
+const d=Math.abs(a-b);
+if(d>maxD) maxD=d;
+if(d>=0.001) bad++;
+}
+return {maxD,bad};
+})()`,ctx);
+console.log(`heightAt 10万点: 最大差=${(hres.maxD*1000).toFixed(4)}mm 超差(≥1mm)=${hres.bad}`);
+const pass=result.pushBad===0&&result.shBad===0&&result.rideBad===0&&result.surfBad===0&&hres.bad===0;
 console.log(pass?'等价性通过 ✓':'等价性失败 ✗');
 process.exit(pass?0:1);

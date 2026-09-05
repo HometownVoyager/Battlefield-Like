@@ -8,11 +8,15 @@
 const trucks=[];
 let CONVOY_STATE=null;
 // 车队路径: 道路折线 (roads[0]) 收起为航点链 (roads 需按行车方向顺序书写)
+let _convoyPathCache=null;
 function convoyPath(){
+// 2026-09-06 B6/P2-27: 模块级缓存 (道路表局内不变; 调用方只读遍历, 每帧重建路径数组是纯浪费)
+if(_convoyPathCache) return _convoyPathCache;
 const R=CAMPAIGN.roads||[];
 if(!R.length) return [];
 const P=[[R[0][0],R[0][1]]];
 for(const r of R) P.push([r[2],r[3]]);
+_convoyPathCache=P;
 return P;
 }
 const truckTarpMat=new THREE.MeshLambertMaterial({color:0x6a5a44});

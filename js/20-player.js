@@ -560,6 +560,10 @@ if(w.mag===0&&w.def.type!=='bolt'){ setTimeout(tryReload,350); }
 else if(w.mag===0){ setTimeout(tryReload,1000); }
 }
 function updateInteractHint(){
+// 2026-09-06 B6/P2-25: 10Hz 节流 (状态签名瞬变时旁路立即刷新 —— 上下载具/阵位/阵亡/观战切换不受节流影响)
+const sig=(player.onVehicle?1:0)|(player.onMG?2:0)|(player.onMortar?4:0)|(player.onAT?8:0)|(player.onAA?16:0)|(player.spectator?32:0)|(player.alive?64:0)|(player.useCast?128:0);
+if(sig===updateInteractHint._sig&&nowT-updateInteractHint._t<0.1) return;
+updateInteractHint._sig=sig; updateInteractHint._t=nowT;
 // 兵种技能常驻小提示 (右下角)
 const tip=document.getElementById('clsTip');
 	let tt='';

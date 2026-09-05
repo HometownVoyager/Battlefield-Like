@@ -239,24 +239,27 @@ function updateWeather(dt){
 if(precipObj){
 precipObj.position.set(camera.position.x,camera.position.y-8,camera.position.z);
 const pos=precipObj.geometry.attributes.position;
+const arr=pos.array; // 2026-09-06 B6/P3-10: 直写数组替代逐顶点 getter/setter (粒子量大, 纯热路径)
 if(WEATHER==='snow'){
 for(let i=0;i<pos.count;i++){
-let y=pos.getY(i)-dt*3.2;
-let x=pos.getX(i)+Math.sin(nowT*1.4+i*0.7)*dt*0.9;
-if(y<0){ y+=24; x=rand(-26,26); pos.setZ(i,rand(-26,26)); }
-pos.setY(i,y); pos.setX(i,x);
+const i3=i*3;
+let y=arr[i3+1]-dt*3.2;
+let x=arr[i3]+Math.sin(nowT*1.4+i*0.7)*dt*0.9;
+if(y<0){ y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); }
+arr[i3+1]=y; arr[i3]=x;
 }
 } else {
 const sp=WEATHER==='storm'?36:27;
 for(let i=0;i<pos.count;i+=2){
-let y=pos.getY(i)-dt*sp;
+const i3=i*3;
+let y=arr[i3+1]-dt*sp;
 if(y<0){
 y+=26;
 const nx=rand(-24,24),nz=rand(-24,24);
-pos.setX(i,nx); pos.setZ(i,nz);
-pos.setX(i+1,nx); pos.setZ(i+1,nz);
+arr[i3]=nx; arr[i3+2]=nz;
+arr[i3+3]=nx; arr[i3+5]=nz;
 }
-pos.setY(i,y); pos.setY(i+1,y-0.7);
+arr[i3+1]=y; arr[i3+4]=y-0.7;
 }
 }
 pos.needsUpdate=true;

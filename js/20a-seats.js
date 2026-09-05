@@ -3,6 +3,8 @@
 // 2026-08-24 由 20-player.js 切分: 原第 388-609 行 (玩家本体/交互/相机仍在 20-player.js)
 // ─────────────────────────────────────────────
 'use strict';
+// 2026-09-06 B6/P2-26: 座驾 HUD 元素引用缓存 (原每帧多次 getElementById)
+const seatElm=id=>updatePlayerTank._els[id]||(updatePlayerTank._els[id]=document.getElementById(id));
 function updatePlayerTank(dt){
 const p=player, t=p.onVehicle;
 if(!t.alive){ p.onVehicle=null; return; }
@@ -47,7 +49,11 @@ t.firePlayerMG(dir);
 }
 p.pos.copy(t.pos);
 p.vel.set(0,0,0);
-const pip=document.getElementById('tankPip');
+// 2026-09-06 B6/P2-26: DOM 引用缓存 + 落点 pip 10Hz 节流 (原每帧 36 步弹道迭代+射线+2 次 getElementById)
+
+if(nowT-updatePlayerTank._pipT>=0.1){
+updatePlayerTank._pipT=nowT;
+const pip=seatElm('tankPip');
 {
 const sp2=t.aimDir().multiplyScalar(SHELL_SPD);
 const simP=t.muzzle.clone();
@@ -78,22 +84,25 @@ const mgw=raycastWorld(mgSrc.clone().addScaledVector(mgDir,2.5),mgDir,mgD);
 let mgHit;
 if(mgw) mgHit=mgSrc.addScaledVector(mgDir,mgw.dist+2.5); else mgHit=mgSrc.clone().addScaledVector(mgDir,mgD);
 const mgv=mgHit.project(camera);
-const mpip=document.getElementById('mgPip');
+const mpip=seatElm('mgPip');
 if(mgv.z<1){
 mpip.style.display='block';
 mpip.style.left=((mgv.x*0.5+0.5)*innerWidth)+'px';
 mpip.style.top=((1-(mgv.y*0.5+0.5))*innerHeight)+'px';
 } else mpip.style.display='none';
 }
-document.getElementById('heatFill').style.width=(clamp(1-t.cannonCd/t.def.reload,0,1)*100)+'%';
-document.getElementById('heatFill').style.background=t.cannonCd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e83a1a)';
+}
+const _heat=seatElm('heatFill');
+_heat.style.width=(clamp(1-t.cannonCd/t.def.reload,0,1)*100)+'%';
+_heat.style.background=t.cannonCd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e83a1a)';
 updateInteractHint();
 }
+updatePlayerTank._els={}; updatePlayerTank._pipT=0;
 function updatePlayerPlane(dt){
 const p=player, pl=p.onVehicle;
 if(!pl.alive){ p.onVehicle=null; return; }
-document.getElementById('heatFill').style.width=(pl.bombs/pl.def.bombs*100)+'%';
-document.getElementById('heatFill').style.background='#9fc0e8';
+seatElm('heatFill').style.width=(pl.bombs/pl.def.bombs*100)+'%';
+seatElm('heatFill').style.background='#9fc0e8';
 updateInteractHint();
 }
 function updatePlayerMortar(dt){
@@ -123,7 +132,7 @@ addTrauma(0.12);
 }
 // 炮管俯仰随视角(高抛→炮管更竖直), 开火后阻尼回位
 m.tube.rotation.x=dampF(m.tube.rotation.x,0.62-(p.pitch-0.95)*0.3,5,dt);
-document.getElementById('heatFill').style.width=(clamp(1-m.cd/3.2,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-m.cd/3.2,0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerAT(dt){
@@ -144,7 +153,7 @@ const dir=camForward();
 emplATFire(g,p,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-combat, 与 Bot 同一份)
 addTrauma(0.45);
 }
-document.getElementById('heatFill').style.width=(clamp(1-g.cd/4.5,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-g.cd/4.5,0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerAA(dt){
@@ -158,7 +167,7 @@ p.pos.x=g.x; p.pos.z=g.z-0.9;
 p.pos.y=standHeight(p.pos.x,p.pos.z,p.pos.y+1);
 p.vel.set(0,0,0);
 // 提前量指示圈
-const pip=document.getElementById('leadPip');
+const pip=seatElm('leadPip');
 let ep=null,bd=1e9;
 for(const pl2 of planes){ if(pl2.alive&&pl2.team!==p.team){ const d=pl2.pos.distanceTo(V3(g.x,g.y,g.z)); if(d<bd){ bd=d; ep=pl2; } } }
 if(ep&&bd<280){
@@ -180,7 +189,7 @@ addTrauma(0.1);
 p.recoilPitch+=0.004;
 p.lastFiredT=nowT;
 }
-document.getElementById('heatFill').style.width=(clamp(1-g.cd/EMPL_AA_CD,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-g.cd/EMPL_AA_CD,0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerMG(dt){
@@ -206,6 +215,6 @@ AudioSys.gunshot('mg',0,0);
 emplMGFire(mg,p,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-combat, 与 Bot 同一份; headMul 统一 1.9)
 if(mg.heat>=1){ AudioSys.metalSlide(0.4,0.3,400,200); } // 过热提示: emplMGFire 内已累加热量
 }
-document.getElementById('heatFill').style.width=(mg.heat*100)+'%';
+seatElm('heatFill').style.width=(mg.heat*100)+'%';
 updateInteractHint();
 }

@@ -23,6 +23,7 @@ RGRID.stampB=new Int32Array(BOXES.length+96);
 RGRID.stampC=new Int32Array(CYLS.length+16);
 }
 const _rcP=V3(), _rcN=V3();
+const _rcResult={dist:0,point:null,normal:null,kind:null}; // 共享结果槽 (2026-09-06 B6/P1-6): 全库 28 调用点均即时消费不长期持有
 function raycastWorld(o,dir,maxD){
 let best=maxD, bn=null, kind=null;
 if(RGRID.boxCells){
@@ -84,7 +85,8 @@ t+=step;
 if(!bn) return null;
 _rcP.set(o.x+dir.x*best,o.y+dir.y*best,o.z+dir.z*best);
 _rcN.set(bn.nx,bn.ny,bn.nz);
-return { dist:best, point:_rcP, normal:_rcN, kind };
+_rcResult.dist=best; _rcResult.point=_rcP; _rcResult.normal=_rcN; _rcResult.kind=kind;
+return _rcResult;
 }
 // ── RGRID 邻近候选遍历 (2026-09-06 B5/P0-2): 移动碰撞/站高/坦克足印查询不再全场景扫描 BOXES/CYLS ──
 // 候选集 ⊇ 真命中集 (命中判定仍走各调用方的原精确测试, 结果与全量遍历一致);
