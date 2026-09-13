@@ -211,7 +211,7 @@ killCyl(tr.cyl);
 const l=Math.hypot(dx,dz);
 if(l<0.05){ const a=rand(0,TAU); dx=Math.sin(a); dz=Math.cos(a); }
 else { dx/=l; dz/=l; }
-tr.fall={t:0,dx,dz,dur:rand(0.9,1.3)};
+tr.fall={t:0,dx,dz,dur:rand(0.9,1.2)*(0.7+0.35*tr.s),hit:false}; // 大树惯性大, 倒得略慢
 FALLING.push(tr);
 const gy=tr.g0+0.25;
 for(let k=0;k<5;k++) spawnP(PT.dirt,tr.x+rand(-0.6,0.6),gy,tr.z+rand(-0.6,0.6),dx*rand(1,2.5)+rand(-1,1),rand(0.5,1.5),dz*rand(1,2.5)+rand(-1,1),rand(0.25,0.5),0.7,rand(0.5,0.9),0.85,3);
@@ -237,7 +237,11 @@ _fe=new THREE.Euler(); _fc=new THREE.Vector3(); _charCol=new THREE.Color(0x241d1
 function treeInstanceMatrices(tr,th,dy=0){
 fireTmp();
 // 绕根部水平轴旋转: 轴=(dz,0,-dx) —— 树冠倒向 (dx,dz); dy=整体垂直偏移 (残骸沉入地下用)
+// 2026-09-12 修复: 锚点位置与实例姿态必须同转 —— 旧版只旋转锚点、姿态恒竖直,
+// 倒伏全程树干/叶面保持直立沿弧线"滑行", 观感诡异; 现按同一轴角写出旋转四元数
+// (trunk 直接套用, 叶面 premultiply 叠加在原朝向之上), 呈现真实翻倒。
 const ax=_fa.set(tr.fall.dz,0,-tr.fall.dx);
+_fq.setFromAxisAngle(ax,th);
 const cs=Math.cos(th), sn=Math.sin(th);
 const px=tr.x, py=tr.g0, pz=tr.z;
 const rot=(ox,oy,oz,out)=>{
@@ -250,10 +254,10 @@ return out;
 };
 const im=TREE_IM.trunks;
 rot(0,2.2*tr.s,0,_fp); _fp.y+=dy;
-_fm.compose(_fp,_fq.identity(),_fs.setScalar(tr.s));
+_fm.compose(_fp,_fq,_fs.setScalar(tr.s));
 im.setMatrixAt(tr.ti,_fm);
 const lm=TREE_IM.leaves;
-for(let i=0;i<3;i++){
+if(!tr.charred) for(let i=0;i<3;i++){
 rot(0,(3.4+i*0.6)*tr.s,0,_fp); _fp.y+=dy;
 _fe.set(tr.lf[i][1],tr.lf[i][0],0);
 _fq2.setFromEuler(_fe);
@@ -267,14 +271,35 @@ lm.instanceMatrix.needsUpdate=true;
 rot(0,3.6*tr.s,0,_fc); _fc.y+=dy;
 tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
 }
+// 触地瞬间: 树冠沿线扬尘 + 近距离镜头轻震 (倒伏的"重量感")
+function treeFallImpact(tr){
+const f=tr.fall, gy=tr.g0+0.25, reach=3.4*tr.s;
+for(let k=0;k<6;k++){
+const rr=reach*rand(0.55,1.05);
+spawnP(PT.dirt,tr.x+f.dx*rr+rand(-0.8,0.8),gy+rand(0.1,0.5),tr.z+f.dz*rr+rand(-0.8,0.8),f.dx*rand(0.5,1.4)+rand(-0.8,0.8),rand(0.4,1.1),f.dz*rand(0.5,1.4)+rand(-0.8,0.8),rand(0.3,0.6),0.8,rand(0.5,0.9),0.85,3);
+}
+spawnP(PT.smoke,tr.x+f.dx*reach*0.7,gy+0.5,tr.z+f.dz*reach*0.7,f.dx*0.4,0.7,f.dz*0.4,1.2,1.6,rand(0.9,1.4),0.5,0.1);
+if(Math.hypot(tr.x-camera.position.x,tr.z-camera.position.z)<25&&typeof addTrauma==='function') addTrauma(0.08);
+}
 function updateFallingTrees(dt){
 for(let i=FALLING.length-1;i>=0;i--){
 const tr=FALLING[i];
 const f=tr.fall;
 f.t+=dt;
-const k=Math.min(1,f.t/f.dur);
-treeInstanceMatrices(tr,1.5*k*k);
-if(f.t>=f.dur+0.25){
+let th;
+if(f.t<f.dur){
+const k=f.t/f.dur;
+// 角加速 (重力矩随倾角增大越倒越快) 但掺 25% 线性项: 纯 k² 起步前 ~0.4s 倾角近乎为零,
+// 观感像"碾压后隔了很久才倒"; 现接触后 0.2s 内即可见树头倾斜
+th=1.5*k*(0.75*k+0.25);
+}else{
+if(!f.hit){ f.hit=true; treeFallImpact(tr); }
+// 触地回弹: 树冠砸地后树干小幅回弹震荡并快速衰减 (只向直立侧回弹, 避免砸进地里)
+const u=f.t-f.dur;
+th=clamp(1.5-0.09*Math.exp(-3.5*u)*Math.sin(10.5*u),1.32,1.5);
+}
+treeInstanceMatrices(tr,th);
+if(f.t>=f.dur+0.7){
 tr.restCrown={x:tr.cx||tr.x,y:tr.cy||tr.g0+3.4*tr.s,z:tr.cz||tr.z};
 FALLING.splice(i,1);
 // 倒树残骸登记沉入: 原地停留一段时间后连干带冠沉入地下 (见 updateTreeSinks)
@@ -371,24 +396,51 @@ vanishFlora(rec,true);
 }
 }
 }
-// ===== 坦克碾压: 行进中撞上树 → 顺势撞倒; 灌木直接碾没 =====
+// ===== 坦克碾压: 车体碰到树/枯树 → 撞倒/碾碎; 灌木直接碾没 =====
+// 距离度量与 15-vehicles 的三圆碰撞模型对齐 (舱段 ±1.95 + 圆半径 1.55):
+// 取"树干中心到车体轴向舱段的垂距"。旧版按坦克中心到树心的距离判定 (阈值~2.2m),
+// 而树干圆柱在车头圆处 (中心距 ~3.5-3.8m) 就把坦克拦停减速 —— 正面冲撞永远够不到
+// 碾压半径, 只有侧身擦过 (圆柱推挤沿径向、不减速前进) 才偶发触发, 行为不一致。
+// 现改为车体接触即撞倒: 阈值略大于圆柱拦截半径 (1.5+c.r), 同帧先碾倒再杀碰撞体,
+// 正面/侧面/倒车行为一致。倒向 = 车辆运动方向 (倒车撞树则向车尾倒)。
 function floraCrushTank(t){
 if(Math.abs(t.vel)<0.8) return;
 const sn=Math.sin(t.yaw), cs=Math.cos(t.yaw);
 const hits=[];
 floraNear(t.pos.x,t.pos.z,4.5,rec=>hits.push(rec));
+const mv=Math.sign(t.vel)||1;
+let hitAny=false;
 for(const rec of hits){
-const d=Math.hypot(rec.x-t.pos.x,rec.z-t.pos.z);
+const rx=rec.x-t.pos.x, rz=rec.z-t.pos.z;
+const aRaw=rx*sn+rz*cs;
+const aC=clamp(aRaw,-1.95,1.95);
+const d=Math.hypot(rx-sn*aC,rz-cs*aC);
+// 各向异性接触半径: 树在舱段端点之外 (正对车头/车尾) 用鼻端精确半径 1.55 (与三圆碰撞模型一致,
+// 不提前压树); 树在车身侧旁用 1.9 (贴合履带/挡泥板视觉半宽 ~2.0, 旧版侧擦可碾的量级)
+const rad=(Math.abs(aRaw)>1.95?1.55:1.9);
 if(rec.kind==='tree'){
 if(!rec.alive) continue;
-if(d<1.85+0.35*rec.s){
-treeFall(rec,sn+rand(-0.2,0.2),cs+rand(-0.2,0.2));
-t.vel*=0.965;
+if(d<rad+0.35*rec.s){
+treeFall(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2));
+hitAny=true;
 spawnP(PT.dirt,rec.x,rec.g0+0.6,rec.z,rand(-1.5,1.5),rand(1,3),rand(-1.5,1.5),0.3,0.6,0.5,0.85,3);
+}
+}else if(rec.kind==='dead'){
+// 枯树 (无叶枯木): 一碰即碎 —— 同样按车体接触判定, 不再被树干圆柱拦在触碰距离外
+if(d<rad+0.3){
+vanishFlora(rec,false);
+hitAny=true;
+spawnP(PT.dirt,rec.x,rec.g0+0.5,rec.z,rand(-1.5,1.5),rand(1,2.5),rand(-1.5,1.5),0.3,0.6,0.5,0.85,3);
 }
 }else if(d<2.0){
 vanishFlora(rec,false);
+hitAny=true;
 }
+}
+if(hitAny){
+t.vel*=0.94;
+t.suspPV=(t.suspPV||0)-Math.sign(t.vel)*0.12;
+if(t.playerDriven&&typeof addTrauma==='function') addTrauma(0.1);
 }
 }
 // ===== 火焰网格主更新 =====
@@ -558,4 +610,126 @@ if(FBURN[ci2]>0&&FUEL[ci2]>0){ onFire=true; att=FATT[ci2]; break; }
 }
 if(onFire) t.takeDmg(3,att);
 }
+}
+
+// ═══════════ 树爆 (2026-09-13 许特根雾林 woodline 专属环境机制) ═══════════
+// 历史原型: 许特根森林战役的标志性杀伤 —— 炮弹在树梢高度空爆, 弹片/木刺自上而下泼洒,
+// 林冠下暴露人员无处可躲, 唯有顶盖(建筑/碉堡/掩体=coldSheltered 同判定)与壕沟(低于炸点地面
+// TREEBURST.deep 米)能保命; 防火带开阔地无树冠, 炸点不落在那 (安全带, 但暴露于直射火)。
+// 玩家与 Bot 一视同仁 (同质化纲领第2条): Bot 经 tbThreat 逃离弹着圈 (与火情规避同一路径);
+// 玩家有 prep 秒炮弹啸音 + HUD 红字预警。炸点只落在旗圈/走廊热区附近, 开局 6s 后首轮。
+const TB_THREATS=[];  // 活动弹着威胁 {x,z,r,t} (t=剩余秒) —— Bot 逃离/选点过滤用
+let tbT=6;            // 开局 6s 后第一轮齐射
+const TB_PENDING=[];  // 在途炮弹 {x,z,t}
+function tbThreat(x,z,clear){
+let bd=1e9, bx=0, bz=0;
+for(const s of TB_THREATS){
+const dd=Math.hypot(x-s.x,z-s.z)-s.r;
+if(dd<bd){ bd=dd; bx=s.x; bz=s.z; }
+}
+if(bd>clear) return null;
+return {dx:bx-x, dz:bz-z};
+}
+// 遮蔽判定: 头顶有静态顶盖 (建筑/碉堡/掩体) 或身处壕沟/弹坑底 (低于炸点地面 deep 米)
+function tbSheltered(px,py,pz,gy){
+if(coldSheltered(px,py,pz)) return true;
+return (py||0)<=gy-TREEBURST.deep;
+}
+// 热区: 旗圈附近 (拉锯焦点) + 中线走廊随机点 —— 树爆只落在战区, 后方基地不受袭扰
+function tbPickZone(){
+const fs=CAMPAIGN.flags;
+const f=fs[Math.floor(Math.random()*fs.length)];
+if(Math.random()<0.75) return {x:f.x+rand(-26,26), z:f.z+rand(-26,26)};
+return {x:rand(-180,180), z:rand(-90,90)};
+}
+function updateTreeBursts(dt){
+if(!CAMPAIGN.wood) return;
+// 在途炮弹倒计时 → 引爆
+for(let i=TB_PENDING.length-1;i>=0;i--){
+const s=TB_PENDING[i];
+s.t-=dt;
+if(s.t>0) continue;
+TB_PENDING.splice(i,1);
+tbDetonate(s.x,s.z);
+}
+// 威胁寿命衰减
+for(let i=TB_THREATS.length-1;i>=0;i--){
+TB_THREATS[i].t-=dt;
+if(TB_THREATS[i].t<=0) TB_THREATS.splice(i,1);
+}
+// 玩家 HUD 红字预警: 在途弹着圈内的暴露人员 (每帧判定, 独立元素 #tbTip —— 不与严寒提示互抢)
+if(player&&player.alive&&!player.onVehicle&&typeof tbHudShow==='function'){
+let warn=false;
+for(const s of TB_PENDING){
+const d=Math.hypot(s.x-player.pos.x,s.z-player.pos.z);
+if(d<TREEBURST.r*1.3&&!tbSheltered(player.pos.x,player.pos.y,player.pos.z,heightAt(player.pos.x,player.pos.z))){ warn=true; break; }
+}
+if(warn) tbHudShow('⚠ 树爆! 弹片自树冠泼下 — 找顶盖(建筑/碉堡)或卧倒壕沟');
+else tbHudHide();
+}
+// 齐射生成
+tbT-=dt;
+if(tbT>0) return;
+tbT=rand(TREEBURST.minGap,TREEBURST.maxGap);
+const cz=tbPickZone();
+const nShells=Math.round(rand(TREEBURST.shells[0],TREEBURST.shells[1]));
+for(let k=0;k<nShells;k++){
+const a=Math.random()*TAU, rr=Math.random()*TREEBURST.spread;
+TB_PENDING.push({x:cz.x+Math.sin(a)*rr, z:cz.z+Math.cos(a)*rr, t:TREEBURST.prep+k*TREEBURST.gap});
+}
+// 炮击预警: 玩家在热区附近 → 啸音提示 (齐射一次); 弹着圈内的玩家另有 HUD 红字 (每帧段)
+if(player&&player.alive){
+const dNear=Math.min.apply(null,TB_PENDING.map(s=>Math.hypot(s.x-player.pos.x,s.z-player.pos.z)));
+if(dNear<260) AudioSys.mortarThunk(clamp(dNear,12,160));
+}
+}
+function tbDetonate(x,z){
+const gy=heightAt(x,z), by=gy+TREEBURST.h;
+const dCam=Math.hypot(x-camera.position.x,z-camera.position.z);
+// 视觉: 林冠空爆闪光+黑烟 + 下落木刺火星 + 地面尘环 (距相机 200m 限流)
+if(dCam<200){
+spawnP(PT.flash,x,by,z,rand(-1,1),rand(0.5,1.5),rand(-1,1),rand(2.2,3.2),1.8,rand(0.4,0.6),0.95,-1,true);
+for(let k=0;k<5;k++){
+spawnP(PT.dark,x+rand(-2,2),by+rand(-1,1),z+rand(-2,2),rand(-2,2),rand(-0.5,1),rand(-2,2),rand(1.2,2),1.9,rand(1.2,2.2),0.5,0.1);
+}
+if(SETTINGS.quality>=1){
+for(let k=0;k<8;k++){
+spawnP(PT.spark,x+rand(-1.5,1.5),by+rand(-1,1),z+rand(-1.5,1.5),rand(-6,6),rand(-9,-3),rand(-6,6),0.12,-0.06,rand(0.5,0.9),0.8,4,true);
+}
+}
+spawnP(PT.dark,x,gy+0.6,z,0,rand(1.2,2),0,rand(1.8,2.6),1.9,rand(1,1.6),0.4,0.1);
+}
+if(dCam<180) AudioSys.explosion(dCam);
+// 留疤: 小弹坑 (运行期 crater, 不涉种子)
+if(typeof crater==='function'&&dCam<150) crater(x,z,1.5,true);
+// 杀伤: 半径内暴露人员 (玩家+Bot 一视同仁; 载具内乘员由车体承伤), 中心线性平方衰减
+for(const s of combatants){
+if(!s.alive||s.onVehicle) continue;
+const d=Math.hypot(s.pos.x-x,s.pos.z-z);
+if(d>=TREEBURST.r) continue;
+if(tbSheltered(s.pos.x,s.pos.y,s.pos.z,gy)) continue;
+const k=1-d/TREEBURST.r;
+s.damage(TREEBURST.dmg*k*k,null,false);
+if(s.isPlayer) addTrauma(0.3);
+}
+for(const t of tanks){
+if(!t.alive) continue;
+const d=Math.hypot(t.pos.x-x,t.pos.z-z);
+if(d>=TREEBURST.r) continue;
+const k=1-d/TREEBURST.r;
+t.takeDmg(TREEBURST.tankDmg*k*k,null);
+}
+// 弹着威胁登记: Bot 在圈内逃离 6s (复用火情规避路径)
+TB_THREATS.push({x,z,r:TREEBURST.r+4,t:6});
+}
+
+// 树爆 HUD (#tbTip): 独立于严寒提示 (双方各用各的元素, 状态键比较防重复写 DOM)
+function tbHudShow(line){
+const elm=document.getElementById('tbTip');
+if(!elm) return;
+if(elm._line!==line){ elm._line=line; elm.innerHTML=line; elm.style.display='block'; }
+}
+function tbHudHide(){
+const elm=document.getElementById('tbTip');
+if(elm&&elm._line){ elm._line=null; elm.style.display='none'; }
 }

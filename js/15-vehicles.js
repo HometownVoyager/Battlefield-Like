@@ -14,6 +14,13 @@ const SHELL_SPD=150;
 function vehHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+2.6}; }
 function truckHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5}; }
 // ── 载具步兵碰撞/推出/碾压单源 (2026-09-06 B7b/P2-3): Tank/Truck 逐行同构块参数化 ──
+// ── 厂房坦克产能 (2026-09-06 斯大林格勒点位改版): 苏军持"厂房"旗 → 重生倍速 + 出厂区 ──
+// FACTORY_FLAG 缓存旗点对象 (05c 已建 FLAGS); tankRespawnMul=重生倒计时消耗倍率 ——
+// 占领/失守瞬间自动作用于全部未重生完的该队坦克, 无需翻转钩子; 仅苏军(队0)享受, 德军恒 1
+const FACTORY_FLAG=FACTORY_FLAG_ID?FLAGS.find(f=>f.id===FACTORY_FLAG_ID):null;
+function tankRespawnMul(team){
+return (team===0&&FACTORY_FLAG&&FACTORY_FLAG.owner===0)?FACTORY_SPEED_MUL:1;
+}
 function vehiclePushSoldiers(veh,hx,hz,o){
 const csb=Math.cos(veh.yaw), snb=Math.sin(veh.yaw);
 for(const s of combatants){
@@ -119,7 +126,7 @@ this.buildMesh();
 this.muzzle=V3();
 this.engine=AudioSys.createEngine('tank');
 tanks.push(this);
-this.respawn(true); // 开局首次生成不播报
+this.respawn(true,true); // 开局首次生成不播报 (initial=true: 恒走主基地, 厂房产能只作用于战损重生)
 }
 buildMesh(){
 const D=this.def;
@@ -187,7 +194,7 @@ update(dt){
 // (旧实现只在 20-player 相机分支里切 visible, 下车后无人恢复 → 车外看坦克光秃秃没炮管)
 this.pitchG.visible=!(this.playerDriven&&player.tankView);
 	if(!this.alive){
-	this.respawnT-=dt;
+	this.respawnT-=dt*tankRespawnMul(this.team); // 厂房在手: 苏军坦克重生倒计时倍速消耗 (22~29s)
 	this.engine.update(0,0);
 	// 兵力票归零 → 该队坦克封重生 (清场阶段敌方不再补充载具, 2026-09-04)
 	if(this.respawnT<=0&&!matchOver&&tickets[this.team]>0) this.respawn();
@@ -213,7 +220,34 @@ this.crewBot.dismountVehicle(true);
 if(this.crewBot&&this.crewBot.alive&&!this.playerDriven){ this.driveAI(dt); this.turretAI(dt); }
 else if(!this.playerDriven){ this.vel=dampF(this.vel,0,4,dt); }
 const sn=Math.sin(this.yaw), cs=Math.cos(this.yaw);
-this.pos.x+=sn*this.vel*dt; this.pos.z+=cs*this.vel*dt;
+// 坡度物理 (2026-09-12 百团改版, 全战役生效): 上坡 30°起渐进减速, TANK_SLOPE_MAX(70°)以上封死(等高线滑移);
+// 下坡永不硬封、只走减速带 —— 这是防卡死阀门: 对称封坡时, 凸形崖壁上"最后一步中点坡度≤限值但落点局部
+// 坡度>限值", 倒车第一步中点坡度更大 → 进退不得。下坡放行后: 直壁下崖=单向慢爬 (沟壑=史实反坦克壕,
+// 下去就得出坡道/渡口), AI 坦克由 OCC 沟壁占用格挡住不会下崖。
+let mvx=sn*this.vel*dt, mvz=cs*this.vel*dt;
+{
+const dist=Math.hypot(mvx,mvz);
+if(dist>1e-5){
+const h0=heightAt(this.pos.x,this.pos.z), h1=heightAt(this.pos.x+mvx,this.pos.z+mvz);
+const dh1=h1-h0;
+const sl=Math.abs(dh1)/dist, lim=Math.tan(TANK_SLOPE_MAX*DEG);
+if(dh1>0&&sl>lim){
+const gx=heightAt(this.pos.x+2,this.pos.z)-heightAt(this.pos.x-2,this.pos.z);
+const gz=heightAt(this.pos.x,this.pos.z+2)-heightAt(this.pos.x,this.pos.z-2);
+const gl=Math.hypot(gx,gz);
+if(gl>1e-4){
+const cx2=-gz/gl, cz2=gx/gl, t2=(mvx*cx2+mvz*cz2)*0.9;
+mvx=cx2*t2; mvz=cz2*t2;
+}else{ mvx=0; mvz=0; }
+this.vel*=0.55;
+}else if(sl>Math.tan(30*DEG)){
+// 30°→70° 减速至 30%; 下坡超过 70° 时公式会外推出负系数(=不动点冻结), 故钳 12% 爬行挡下限
+const f=Math.max(0.12,1-(sl-Math.tan(30*DEG))/(lim-Math.tan(30*DEG))*0.7);
+mvx*=f; mvz*=f;
+}
+}
+}
+this.pos.x+=mvx; this.pos.z+=mvz;
 	// 底盘对齐碰撞: 沿车体轴线三个圆, 两遍推挤解算减少楔入卡死;
 	// 按撞击法线与行进方向的夹角保留车速: 直撞重挫, 斜擦可贴墙滑行
 	// (旧实现任意接触 vel*=0.5, 轻微擦碰就降到爬行, 极易进退两难)
@@ -563,7 +597,7 @@ gunEvents.push({x:origin.x,z:origin.z,team:this.team,t:nowT,shooter});
 }
 firePlayerMG(dir){
 if(this.mgT>0) return;
-this.mgT=0.08;
+this.mgT=0.08*(player.streakBuff?player.streakBuff.reloadMul:1); // 连杀增益: 同轴机枪射速 (2026-09-12)
 const o=this.coaxMuzzle();
 player._src=this.name; // 玩家同轴机枪击杀来源: 载具名
 fireBullet(player,o,dir,MG_BULLET_DEF,o);
@@ -603,9 +637,10 @@ cb.damage(999,attacker,false);
 }
 if(attacker&&attacker.team!==this.team){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+SCORE_TABLE.tank;
+// 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
+if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁坦克',SCORE_TABLE.tank);
+else attacker.score=(attacker.score||0)+SCORE_TABLE.tank;
 addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
-if(attacker.isPlayer) registerKillScore('摧毁坦克',SCORE_TABLE.tank);
 }
 tickets[this.team]=Math.max(0,tickets[this.team]-(this.def.heavy?TICKET_COST.tankHeavy:TICKET_COST.tankLight));
 explosionFX(this.pos.clone().add(V3(0,1.4,0)));
@@ -632,7 +667,7 @@ onHalf(){ if(self.wreckBs){ for(const b of self.wreckBs) killDynCollider(b); sel
 onDone(){ self.grp.visible=false; self.sinkJob=null; }
 });
 }
-respawn(silent){
+respawn(silent,initial){
 // 出生在基地前方开阔地, 避免卡基地围墙; 空车等待步兵上车
 // 无基地战役(劫道): 出生在本阵营主力前出点旁 (护运坦克=谷口集结地)
 // 提前结清上一轮残骸的下沉任务与火源 (残骸模型体重生复用)
@@ -641,12 +676,22 @@ if(this.fireSrc){ removeFireSource(this.fireSrc); this.fireSrc=null; }
 const bp=basePos(this.team);
 // 同variant多车(东线4辆/西线3辆)按队内序号错位前后排, 避免叠在同一点 (2026-09-02 加载具配套)
 const ord=tanks.filter(t=>t.team===this.team).indexOf(this);
+// 厂房产能 (2026-09-06 斯大林格勒): 苏军持"厂房"旗 → 战损坦克重生在红十月厂区西停车场
+// (双列×4 位, 列距 8m 行距 11m, 车头朝南对车辆大门); 沦陷/中立 → 回主基地, 加速同步失效;
+// 开局首生成(initial)不走此分支 —— 开局坦克仍从主基地出发投入战线
+if(!initial&&this.team===0&&FACTORY_FLAG&&FACTORY_FLAG.owner===0&&FACTORY_SPAWN&&BASES.length){
+const fcol=Math.floor(ord/4), frow=ord%4;
+this.pos.set(FACTORY_SPAWN.x+fcol*8,0,FACTORY_SPAWN.z+(frow-1.5)*11);
+this.pos.y=heightAt(this.pos.x,this.pos.z);
+this.yaw=FACTORY_SPAWN.yaw||0;
+} else {
 const colSide=this.variant===0?1:-1;
 const rowN=Math.floor(ord/2);
 const zo=BASES.length? colSide*10-rowN*16 : (this.variant===0?4:-4)-rowN*8;
 this.pos.set(bp.x+(this.team===0?15:-15),0,bp.z+zo);
 this.pos.y=heightAt(this.pos.x,this.pos.z);
 this.yaw=this.team===0?HPI:-HPI;
+}
 this.turretYaw=0; this.turretPitch=0;
 this.hp=this.maxHp; this.alive=true; this.isAI=true; this.playerDriven=false;
 this.crew.alive=true;

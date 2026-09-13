@@ -38,15 +38,46 @@ for(const c of [[0.20,44,0.055],[0.50,112,0.075],[0.84,52,0.06]]) h+=c[1]*xfGaus
 for(const c of [[0.32,27,0.05],[0.655,31,0.05]]) h+=c[1]*xfGauss(t,c[0],c[2]);
 return h;
 }
+// 地貌语义表 (2026-09-10 三图改造): 淞沪水网 / 百团沟壑 / 莫斯科雪岭 ——
+// 与 CITY/RURAL_FIELDS 同约定: 表本体在 config 战役条目, 全链路共读, 严禁布局另写坐标
+// DELTA/DELTA_CHANS 已在 00-config 定义 (RIVER 表旁); 此处只补 LOESS/ALPINE
+// 必须在 FLATS 初始化之前 (addFlat 调 rawHeight, rawHeight 读这些表 —— TDZ)
+const LOESS=CAMPAIGN.loess||null;
+const ALPINE=CAMPAIGN.alpine||null;
+// 雾林守线语义 (2026-09-13 许特根改版): 北谷(卡尔小径)判定 —— rawHeight/色带/OCC 共用 (表本体在 config.wood)
+function woodRavineDist(x,z){
+if(!WOOD||!WOOD.ravine) return 1e9;
+let gd=1e9;
+const P=WOOD.ravine.pts;
+for(let i=0;i<P.length-1;i++){
+const d=segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]);
+if(d<gd) gd=d;
+}
+return gd;
+}
+// 谷堑口遮罩: 走廊内=1 (谷壑压平剩 12% 残深=缓坡), 走廊外 5m 渐灭 —— 车辆/步兵/Bot 的合法过谷通道
+function woodRampMask(x,z){
+if(!WOOD||!WOOD.ravine) return 0;
+let m=0;
+for(const r of (WOOD.ravine.ramps||[])){
+const w=r.w||5;
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+const k=d<=w?1:clamp(1-(d-w)/5,0,1);
+if(k>m) m=k;
+}
+return m;
+}
 // 平整区: 基地+旗点自动生成 (高度自适应当地地形, 避免高原/悬崖)
 const FLATS=[];
 {
-// 雪峰山/太行山 800 大地图: 旗点平台必须取当地全高 (山顶旗点若取 0.55 会被削成盆地边缘悬崖)
-const fullH=CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang';
+// 雪峰山/太行山/百团 640 大地图: 旗点平台必须取当地全高 (山顶/塬面旗点若取 0.55 会被削成盆地边缘悬崖)
+const fullH=CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods';
 const addFlat=(x,z,r,h)=>FLATS.push({x,z,r,h:h!==undefined?h:rawHeight(x,z)*0.55});
 // 超大地图: 基地平台同样取全高 —— 山后要塞(太行山日军基地)在山坡上, 0.55 系数会挖出盆地边缘悬崖
+// 许特根 (woods): 基地/旗点取全高 (林间缓丘上 0.55 同样挖盆); 岭上村台地独立登记 (石屋群需整片平地)
 for(const b of CAMPAIGN.bases) addFlat(b.x,b.z,20,fullH?rawHeight(b.x,b.z):undefined);
 for(const f of CAMPAIGN.flags) addFlat(f.x,f.z,f.r+12,fullH?rawHeight(f.x,f.z):undefined);
+if(WOOD&&WOOD.village){ const V=WOOD.village; addFlat(V.x,V.z,V.r,rawHeight(V.x,V.z)); }
 for(const s of (CAMPAIGN.spawns||[])) addFlat(s.x,s.z,8);
 if(CAMPAIGN.terr==='rolling') addFlat(0,0,34);
 }
@@ -56,6 +87,36 @@ const RURAL_FIELDS=CAMPAIGN.fields||[];
 // 顶点色带/heightAt 下沉/布局建筑避让/小地图 共读 (严禁布局另写一套坐标)
 const CITY=CAMPAIGN.city||null;
 const METRO=(CITY&&CITY.metro)||null;
+// 地铁下沉特征 (2026-09-09 柏林地铁网): 圆=旗点广场浅下沉 (缓坡可走), halls[]/tunnel=矩形深下沉
+// (近垂直边缘 + 挡土墙收边, 见 05a metroStation); 各特征独立取深度后取 max (重叠区不叠加深)
+const METRO_FALL=0.4; // 矩形下沉边缘过渡带 (m): 近垂直, 由挡土墙遮住地形断口
+// 站厅/隧道矩形表 (03-terrain/05-world/沙箱共读一份; 表本体在 config.metro —— 严禁布局另写坐标)
+const METRO_RECTS=[];
+if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
+function rectDist(x,z,x0,z0,x1,z1){
+const dx=Math.max(x0-x,0,x-x1), dz=Math.max(z0-z,0,z-z1);
+return Math.hypot(dx,dz);
+}
+function metroDep(x,z){
+if(!METRO) return 0;
+let dep=0;
+const d0=Math.hypot(x-METRO.x,z-METRO.z);
+if(d0<METRO.r) dep=Math.max(dep,METRO.d*sstep(1-d0/METRO.r));
+for(const s of METRO_RECTS){
+const dd=rectDist(x,z,s.x0,s.z0,s.x1,s.z1);
+if(dd<METRO_FALL) dep=Math.max(dep,(s.d||METRO.d)*sstep(1-dd/METRO_FALL));
+}
+return dep;
+}
+function metroClear(x,z){ // 到最近地铁特征的带外距离 (hgridClear 用)
+if(!METRO) return 1e9;
+let m=Math.hypot(x-METRO.x,z-METRO.z)-METRO.r;
+for(const s of METRO_RECTS){
+const dd=rectDist(x,z,s.x0,s.z0,s.x1,s.z1)-METRO_FALL;
+if(dd<m) m=dd;
+}
+return m;
+}
 // 街道距离: 街内=0, 街外=到最近街道矩形的距离 (建筑避让/植被/草丛让位共用)
 function streetDist(x,z){
 if(!CITY) return 1e9;
@@ -74,6 +135,11 @@ function cityUrban(x,z){
 if(!CITY) return false;
 if(CITY.blocks) for(const s of CITY.blocks){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true; }
 if(CITY.yard&&x>=CITY.yard.x0&&x<=CITY.yard.x1&&z>=CITY.yard.z0&&z<=CITY.yard.z1) return true;
+// 2026-09-09 柏林地铁站厅/隧道区: 也算建成区 (地面压土色 + 植被让位, 防树/草长进下沉庭院)
+if(METRO){
+if(Math.hypot(x-METRO.x,z-METRO.z)<METRO.r) return true;
+for(const s of METRO_RECTS) if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true;
+}
 return false;
 }
 function fieldAt(x,z){
@@ -82,18 +148,134 @@ if(x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1) return f;
 }
 return null;
 }
+// 百团沟壑判定 (2026-09-12 立体化): 到最近沟壑折线的距离 + 坡道堑口遮罩 —— rawHeight/色带/OCC 共用
+function gullyDist(x,z){
+if(!LOESS||!LOESS.gullies) return 1e9;
+let gd=1e9;
+for(const g of LOESS.gullies){
+for(let i=0;i<g.length-1;i++){
+const d=segDist(x,z,g[i][0],g[i][1],g[i+1][0],g[i+1][1]);
+if(d<gd) gd=d;
+}
+}
+return gd;
+}
+// 坡道堑口遮罩: 走廊内=1 (沟壁压平为缓坡), 走廊外 5m smoothstep 渐灭 —— 坦克/步兵/Bot 的合法过沟通道
+function rampMask(x,z){
+if(!LOESS||!LOESS.ramps) return 0;
+let m=0;
+for(const r of LOESS.ramps){
+const w=r.w||9;
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+const k=d<=w?1:clamp(1-(d-w)/5,0,1);
+if(k>m) m=k;
+}
+return m;
+}
 function rawHeight(x,z){
 switch(CAMPAIGN.terr){
 case 'urban':
 return 0.45*Math.sin(x*0.03)*Math.cos(z*0.028)
 + 0.25*Math.sin(x*0.09+1)*Math.sin(z*0.07+0.5);
-case 'delta':
-return 0.55*Math.sin(x*0.018)*Math.cos(z*0.02)
+case 'delta':{
+// 淞沪圩田 (2026-09-12 中等起伏剖面): 基础微丘 + 田埂堤路抬高 + 圩田下沉 + 支流下切 + 鱼塘
+// 剖面: 田面 -0.65 / 田埂 +1.35 / 支流 -1.35 / 主河 -2.8 (heightAt RIVER) / 丝厂地坪 foundation 拾平
+let h=0.55*Math.sin(x*0.018)*Math.cos(z*0.02)
 + 0.35*Math.sin(x*0.06+2)*Math.sin(z*0.05+1) - 0.15;
-case 'loess':
-return 3.8*Math.sin(x*0.018+0.5)*Math.cos(z*0.021)
-+ 2.0*(1-Math.abs(Math.sin(x*0.03+z*0.012+1)))
-+ 0.8*Math.sin(x*0.1+3)*Math.cos(z*0.09+1.2)-0.6;
+if(DELTA){
+// 田埂/堤路: +1.35m, 半宽 2.2m 可走走廊
+if(DELTA.ridges){
+for(const r of DELTA.ridges){
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+if(d<2.2) h+=1.35*sstep(1-d/2.2);
+}
+}
+// 圩田田面下沉 -0.65 (矩形内; 边缘 sstep 过渡, 不切田埂)
+if(DELTA.paddy){
+for(const p of DELTA.paddy){
+const mx=(x-p.x0)*(x-p.x1), mz=(z-p.z0)*(z-p.z1);
+if(mx<=0&&mz<=0){
+const dEdge=Math.min(x-p.x0,p.x1-x,z-p.z0,p.z1-z);
+if(dEdge>1.5) h-=0.65; else h-=0.65*sstep(dEdge/1.5);
+}
+}
+}
+// 鱼塘/藕塘: 圆形浅塘下切 (不进激流)
+if(DELTA.ponds){
+for(const pd of DELTA.ponds){
+const d=Math.hypot(x-pd.x,z-pd.z);
+if(d<pd.r+1.2){
+const k=clamp(1-d/(pd.r+1.2),0,1);
+h-=(pd.t==='lotus'?0.55:0.75)*sstep(k);
+}
+}
+}
+// 支流汊港下切
+for(const ch of DELTA_CHANS){
+for(let i=0;i<ch.length-1;i++){
+const d=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
+if(d<DELTA.w) h-=(DELTA.d||1.35)*sstep(1-d/DELTA.w);
+}
+}
+// 丝厂地标地坪: 微抬 +0.3, 压平圈 (foundation 再取最高点)
+if(DELTA.landmark){
+const L=DELTA.landmark;
+const d=Math.hypot(x-L.x,z-L.z);
+if(d<14) h+=0.3*sstep(1-d/14);
+}
+}
+return h;
+}
+case 'loess':{
+// 百团黄土 640 大地图 (2026-09-12 立体化): 川地基底 + 塬面高台 + 黄土峁 + 深沟大壑 + 坡道堑口 + 沟底渡台
+// 剖面数字账: 沟底(gd<3, 平坦) → 崩积坡(3..12, 8m落差/9m水平≈42°慢爬区) → 陡崖(12..14, 6m落差/1.8m≈73~79°,
+// 坦克70°/步兵65°上限物理封死) → 塬缘=崖顶; 坡道走廊内沟壑压平剩12%残深(跨沟≈28m 缓坡≈4°)
+const base=1.5*Math.sin(x*0.016+0.5)*Math.cos(z*0.019)
++ 0.8*(1-Math.abs(Math.sin(x*0.028+z*0.011+1)))
++ 0.4*Math.sin(x*0.09+3)*Math.cos(z*0.08+1.2)+0.6;
+let h=base;
+if(LOESS){
+// 塬面高台: 矩形内=台面高, 边距 14m smoothstep 过渡 (塬坡≈33°, sstep 局部≈44°: 慢爬区)
+if(LOESS.terraces){
+for(const t2 of LOESS.terraces){
+const d=rectDist(x,z,t2.x0,t2.z0,t2.x1,t2.z1);
+const m=sstep(clamp(1-d/14,0,1));
+h=lerp(h,t2.h,m);
+}
+}
+// 黄土峁: 抛物面穹顶 (边缘坡度 2h/R≈20~29°, 坦克可爬; 顶部平缓宜布旗)
+if(LOESS.maos){
+for(const m2 of LOESS.maos){
+const d=Math.hypot(x-m2.x,z-m2.z);
+if(d<m2.r){
+const k=1-d/m2.r;
+const mh=base+m2.h*k*(2-k);
+if(mh>h) h=mh;
+}
+}
+}
+// 深沟大壑: 三段剖面下切 (坡道走廊内压平)
+const W=LOESS.w||14, D=LOESS.d||14, GB=LOESS.bottom||3, TE=LOESS.talus||12;
+const gd=gullyDist(x,z);
+if(gd<W){
+let dep;
+if(gd<GB) dep=D;
+else if(gd<TE) dep=D-8*sstep((gd-GB)/(TE-GB));
+else dep=(D-8)*(1-sstep((gd-TE)/(W-TE)));
+dep*=1-0.88*rampMask(x,z);
+h-=dep;
+}
+// 沟底渡台: 沟壑内的低台 (回填至绝对高, 台缘 12m 缓坡≈49°=天然渡口, 沟底库旗点立足台)
+if(LOESS.benches){
+for(const b2 of LOESS.benches){
+const d=rectDist(x,z,b2.x0,b2.z0,b2.x1,b2.z1);
+const m=sstep(clamp(1-d/12,0,1));
+h=lerp(h,b2.h,m);
+}
+}
+}
+return h;
+}
 case 'jungle':
 return 2.3*Math.sin(x*0.014)*Math.cos(z*0.017+1)
 + 1.25*Math.sin(x*0.05+1.2)*Math.sin(z*0.043+2)
@@ -103,23 +285,49 @@ return 1.9*Math.sin(x*0.016+0.3)*Math.cos(z*0.014+2)
 + 1.0*Math.sin(x*0.045+0.7)*Math.sin(z*0.05+1.4)
 + 0.4*Math.sin(x*0.11+1)*Math.cos(z*0.1+0.6);
 case 'alpine':{
-// 雪岭: 山脊线噪声, 真正的山地起伏
-const r1=1-Math.abs(Math.sin(x*0.021+z*0.009));
-const r2=1-Math.abs(Math.sin(z*0.026-x*0.007+1.3));
-const r3=1-Math.abs(Math.sin((x+z)*0.014+2.6));
-return r1*r1*6.5+r2*r2*4.2+r3*r3*2.5
-+1.3*Math.sin(x*0.05)*Math.cos(z*0.045)-2.6;
+// 莫斯科雪岭: 主脊距离场 (语义表 ridges/ridgeH) + 山麓丘陵 —— 雪线以上裸岩, 以下松林
+const base=1.2*Math.sin(x*0.021)*Math.cos(z*0.024)
++ 0.7*Math.sin(x*0.052+1.7)*Math.sin(z*0.043+0.6)
++ 0.35*Math.sin(x*0.11+3.1)*Math.cos(z*0.09+1.2);
+if(ALPINE){
+let bd=1e9, bh=0;
+const R=ALPINE.ridges[0], RH=ALPINE.ridgeH;
+for(let i=0;i<R.length-1;i++){
+const abx=R[i+1][0]-R[i][0], abz=R[i+1][1]-R[i][1];
+const t=clamp(((x-R[i][0])*abx+(z-R[i][1])*abz)/(abx*abx+abz*abz),0,1);
+const px=R[i][0]+abx*t, pz=R[i][1]+abz*t;
+const d=Math.hypot(x-px,z-pz);
+if(d<bd){ bd=d; bh=RH[i]+(RH[i+1]-RH[i])*t; }
+}
+const s=sstep(clamp(1-bd/70,0,1));
+return base+s*s*bh;
+}
+return base;
 }
 case 'steppe':
 // 草原遭遇战: 开阔波状草原, 低幅缓坡 (视线通透, 装甲对轰场)
 return 0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)
 + 0.45*Math.sin(x*0.052+1.5)*Math.sin(z*0.045+0.8)
 + 0.18*Math.sin(x*0.14+2)*Math.cos(z*0.12+0.4);
-case 'woods':
-// 雾林守线: 中等起伏林间坡地
-return 1.1*Math.sin(x*0.02+0.8)*Math.cos(z*0.019+1.4)
-+ 0.55*Math.sin(x*0.06+2)*Math.sin(z*0.055+1)
-+ 0.25*Math.sin(x*0.13+1)*Math.cos(z*0.11+2.4);
+case 'woods':{
+// 雾林守线 (2026-09-13 许特根改版): 林间缓丘基底 + 北谷(卡尔小径)三段剖面 + 谷堑口
+// 剖面数字账: 谷底(gd<5, 泥径平坦) → 崩积坡(5..12, 5.2m落差/7m≈37°湿滑慢爬) → 谷缘陡唇(12..15,
+// 3.3m落差/3m≈48~55°, 步兵>40°减速可攀/Bot 由 OCC 挡住走堑口) ; 车辆堑口走廊内谷壑压平剩12%残深
+// (≈1.0m 缓坡, 坦克经主防火道纵穿北谷); 岭上村=FLATS 全高台地
+const base=0.95*Math.sin(x*0.018+0.8)*Math.cos(z*0.017+1.4)
++0.5*Math.sin(x*0.05+2)*Math.sin(z*0.045+1)
++0.22*Math.sin(x*0.11+1)*Math.cos(z*0.09+2.4);
+if(!WOOD||!WOOD.ravine) return base;
+const W2=WOOD.ravine, D2=W2.d||8.5, GB=W2.bottom||5, TE=W2.talus||12;
+const gd=woodRavineDist(x,z);
+if(gd>=W2.w) return base;
+let dep;
+if(gd<GB) dep=D2;
+else if(gd<TE) dep=D2-5.2*sstep((gd-GB)/(TE-GB));
+else dep=(D2-5.2)*(1-sstep((gd-TE)/(W2.w-TE)));
+dep*=1-0.88*woodRampMask(x,z);
+return base-dep*(1+0.06*Math.sin(x*0.012+2)); // 沿谷缓倾 (谷势感)
+}
 case 'mountain':{
 // 断崖公路 · 伏击山谷: 谷底走廊随公路蜿蜒(rd<5 低平), 两侧 25° 左右山坡渐起
 // (rd5~21 上叠 ~9m × 沿谷起伏 0.45~1.55), 山肩上缘再拔 ~7m (rd21~32),
@@ -188,16 +396,11 @@ const s=sstep(t);
 h=lerp(h,f.h,s);
 }
 }
-// 柏林地铁站厅广场: 圆形下沉 (在 FLATS 之后叠加以保证旗点平台不被抬走)
-if(METRO){
-const d=Math.hypot(x-METRO.x,z-METRO.z);
-if(d<METRO.r){
-const k=1-d/METRO.r;
-h-=METRO.d*sstep(k);
-}
-}
+// 柏林地铁站厅/广场: 圆形+矩形下沉 (在 FLATS 之后叠加以保证旗点平台不被抬走)
+if(METRO) h-=metroDep(x,z);
 // 诺曼底: 博卡日下沉土路 —— 土路低于两侧田野约 0.45m (战壕下切模板减半)
-if(RURAL_FIELDS.length){
+// 城市组不适用 (斯大林格勒田地旗复用农田表, 但城区道路不参与下沉 → !CITY 门控, 2026-09-06)
+if(RURAL_FIELDS.length&&!CITY){
 const rd=roadDist(x,z);
 if(rd<4){
 const k=1-rd/4;
@@ -213,7 +416,7 @@ const k=1-d/2.4;
 h-=1.3*sstep(k);
 }
 }
-	// 河道: 沿折线下切 (d>2 为深谷激流)
+	// 河道: 沿折线下切 (d>2 为深谷激流); ford 徒涉滩: 滩心下切按 8% 计 (2026-09-12 胡康巨桥改版)
 	if(RIVER){
 	let rd=1e9;
 	const P=RIVER.pts;
@@ -223,14 +426,16 @@ h-=1.3*sstep(k);
 	}
 	if(rd<RIVER.w){
 	const k=1-rd/RIVER.w;
-	h-=(RIVER.ice?1.2:(RIVER.d||1.9))*sstep(k);
+	h-=(RIVER.ice?1.2:(RIVER.d||1.9))*sstep(k)*(1-0.92*fordAt(x,z));
 	}
 	}
+	// 支流汊港 (淞沪 delta.channels): 浅切, 不进激流语义 (rawHeight 已含, 此处仅 HGRID 带外快路需要)
+	// 注: rawHeight 内已下切; 此处不重复叠加
 	// 大桥桥面: 桥矩形区域内地面抬升至桥面高度 (两岸衔接, 步兵/车辆直接通行)
 	// noBridge: 采样真实河床/地面 (水面高度计算用, 避免把桥面当河床)
-	if(!noBridge&&BRIDGE&&onBridge(x,z)){
-	const dy=bridgeDeckY();
-	if(dy>h) h=dy;
+	if(!noBridge&&BRIDGES.length){
+	const dy=onBridge(x,z); // 返回桥面高度或 false
+	if(dy!==false&&dy>h) h=dy;
 	}
 	return h;
 }
@@ -247,45 +452,149 @@ const cx=iI*HGRID.res-HGRID.off+HGRID.res/2, cz=jJ*HGRID.res-HGRID.off+HGRID.res
 const PAD=2.2; // 格半对角≈2.12 + 余量
 let m=1e9;
 for(let k=0;k<FLATS.length;k++){ const f=FLATS[k]; const dd=Math.hypot(cx-f.x,cz-f.z)-f.r; if(dd<m) m=dd; }
-if(METRO){ const dd=Math.hypot(cx-METRO.x,cz-METRO.z)-METRO.r; if(dd<m) m=dd; }
-if(RURAL_FIELDS.length){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; }
+if(METRO){ const dd=metroClear(cx,cz); if(dd<m) m=dd; }
+if(RURAL_FIELDS.length&&!CITY){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; } // !CITY 门控同 heightAt 下沉项
 for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
 if(RIVER){
 const P=RIVER.pts; let rd=1e9;
 for(let k=0;k<P.length-1;k++){ const dd=segDist(cx,cz,P[k][0],P[k][1],P[k+1][0],P[k+1][1]); if(dd<rd) rd=dd; }
 const dd=rd-RIVER.w; if(dd<m) m=dd;
 }
-if(BRIDGE) m=-1; // 桥面抬升带 (noBridge 双语义共存): 恒走精修
+// 支流汊港 (淞沪): rawHeight 内下切 —— 带外快路必须感知, 否则修正项漏算
+if(DELTA_CHANS.length){
+const cw=DELTA.w||3.4;
+for(const ch of DELTA_CHANS){
+for(let k=0;k<ch.length-1;k++){
+const dd=segDist(cx,cz,ch[k][0],ch[k][1],ch[k+1][0],ch[k+1][1])-cw;
+if(dd<m) m=dd;
+}
+}
+}
+// 田埂微抬 (淞沪 ridges): rawHeight 内, 带宽 2.2
+if(DELTA&&DELTA.ridges){
+for(const r of DELTA.ridges){
+const dd=segDist(cx,cz,r.x0,r.z0,r.x1,r.z1)-2.2;
+if(dd<m) m=dd;
+}
+}
+// 圩田下沉 (淞沪 paddy): rawHeight 内, 边缘过渡 1.5
+if(DELTA&&DELTA.paddy){
+for(const p of DELTA.paddy){
+const mx0=Math.abs(cx-p.x0), mx1=Math.abs(cx-p.x1), mz0=Math.abs(cz-p.z0), mz1=Math.abs(cz-p.z1);
+// 矩形外最近边距离近似
+let dd=1e9;
+if(cx<p.x0) dd=Math.min(dd,p.x0-cx); if(cx>p.x1) dd=Math.min(dd,cx-p.x1);
+if(cz<p.z0) dd=Math.min(dd,p.z0-cz); if(cz>p.z1) dd=Math.min(dd,cz-p.z1);
+if(cx>=p.x0&&cx<=p.x1&&cz>=p.z0&&cz<=p.z1) dd=-1; // 内部
+const e=dd-1.5; if(e<m) m=e;
+}
+}
+// 鱼塘/藕塘 (淞沪 ponds): rawHeight 内
+if(DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+const dd=Math.hypot(cx-pd.x,cz-pd.z)-(pd.r+1.2);
+if(dd<m) m=dd;
+}
+}
+// 黄土深沟 (百团): rawHeight 内下切 —— 沟壑带 + 塬面/峁/渡台高程带 (2026-09-12 立体化)
+if(LOESS&&LOESS.gullies){
+const gw=(LOESS.w||14);
+for(const g of LOESS.gullies){
+for(let k=0;k<g.length-1;k++){
+const dd=segDist(cx,cz,g[k][0],g[k][1],g[k+1][0],g[k+1][1])-gw;
+if(dd<m) m=dd;
+}
+}
+if(LOESS.terraces) for(const t2 of LOESS.terraces){ const dd=rectDist(cx,cz,t2.x0,t2.z0,t2.x1,t2.z1)-14; if(dd<m) m=dd; }
+if(LOESS.maos) for(const m2 of LOESS.maos){ const dd=Math.hypot(cx-m2.x,cz-m2.z)-m2.r; if(dd<m) m=dd; }
+if(LOESS.benches) for(const b2 of LOESS.benches){ const dd=rectDist(cx,cz,b2.x0,b2.z0,b2.x1,b2.z1)-12; if(dd<m) m=dd; }
+}
+// 莫斯科主脊 (alpine): rawHeight 内 ridge 场 —— 带外距离 70m
+if(ALPINE){
+const R=ALPINE.ridges[0];
+for(let k=0;k<R.length-1;k++){
+const dd=segDist(cx,cz,R[k][0],R[k][1],R[k+1][0],R[k+1][1])-70;
+if(dd<m) m=dd;
+}
+}
+if(BRIDGES.length) m=-1; // 桥面抬升带 (noBridge 双语义共存): 恒走精修
 const clear=m-PAD;
 d[idx]=clear;
 return clear;
 }
 // 桥面高度: 取桥两端外侧的岸边地面高度 (惰性求值, 采样点在桥矩形外避免递归)
-let _bridgeDeckY=null;
-function bridgeDeckY(){
-if(_bridgeDeckY===null){
-const B=BRIDGE;
-const dx=Math.sin(B.yaw), dz=Math.cos(B.yaw);
-const e=B.len/2+3;
-_bridgeDeckY=Math.max(heightAt(B.x-dx*e,B.z-dz*e), heightAt(B.x+dx*e,B.z+dz*e));
+// 多桥: 每座桥独立缓存 deckY (淞沪石拱桥×2 共用 BRIDGES 表)
+const _bridgeDeckY=new Map();
+function bridgeDeckY(B){
+const b=B||BRIDGE;
+if(!b) return 0;
+if(!_bridgeDeckY.has(b)){
+const dx=Math.sin(b.yaw), dz=Math.cos(b.yaw);
+const e=b.len/2+3;
+_bridgeDeckY.set(b, Math.max(heightAt(b.x-dx*e,b.z-dz*e), heightAt(b.x+dx*e,b.z+dz*e)));
 }
-return _bridgeDeckY;
+return _bridgeDeckY.get(b);
 }
-// 是否在大桥桥面上 (m 为外扩余量)
+// 是否在大桥桥面上 (m 为外扩余量): 返回桥面高度 (number) 或 false
+// 多桥扫描 BRIDGES; heightAt 取最高桥面 (重叠罕见, 取 max 安全)
 function onBridge(x,z,m=0){
-if(!BRIDGE) return false;
-const lx=x-BRIDGE.x, lz=z-BRIDGE.z;
-const ax=lx*Math.sin(BRIDGE.yaw)+lz*Math.cos(BRIDGE.yaw);
-const pv=lx*Math.cos(BRIDGE.yaw)-lz*Math.sin(BRIDGE.yaw);
-return Math.abs(ax)<BRIDGE.len/2+m&&Math.abs(pv)<BRIDGE.w/2+m;
+let hit=false;
+for(const B of BRIDGES){
+const lx=x-B.x, lz=z-B.z;
+const ax=lx*Math.sin(B.yaw)+lz*Math.cos(B.yaw);
+const pv=lx*Math.cos(B.yaw)-lz*Math.sin(B.yaw);
+if(Math.abs(ax)<B.len/2+m&&Math.abs(pv)<B.w/2+m){
+const dy=bridgeDeckY(B);
+hit=(hit===false)?dy:Math.max(hit,dy);
 }
-// 是否在深谷河道内 (桥面豁免): Bot/坦克寻路阻挡 + 徒涉激流判定的统一依据
+}
+return hit;
+}
+// 徒涉滩强度场 (0..1, 1=滩心): RIVER.ford={x,z,r} 滩心全效, r..r+9 平滑过渡到 0
+// 消费: heightAt 下切缩放 / inRiverChannel 激流豁免 / inShallowChannel 涉水减速 (2026-09-12 胡康巨桥改版)
+function fordAt(x,z){
+if(!RIVER||!RIVER.ford) return 0;
+const F=RIVER.ford;
+const d=Math.hypot(x-F.x,z-F.z);
+if(d>=F.r+9) return 0;
+if(d<=F.r) return 1;
+const k=1-(d-F.r)/9;
+return k*k*(3-2*k);
+}
+// 是否在深谷河道内 (桥面/徒涉滩豁免): Bot/坦克寻路阻挡 + 徒涉激流判定的统一依据
 function inRiverChannel(x,z){
 if(!RIVER||!(RIVER.d>2)) return false;
-if(onBridge(x,z)) return false;
+if(onBridge(x,z)!==false) return false;
+if(fordAt(x,z)>0.5) return false; // 徒涉滩心: 可涉渡 (OCC 放行+激流伤害豁免)
 const P=RIVER.pts;
 for(let i=0;i<P.length-1;i++){
 if(segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1])<RIVER.w*0.8) return true;
+}
+return false;
+}
+// 是否在浅水河道/支流/鱼塘/徒涉滩内 (涉水减速, 无激流伤害): 主河 d<=2 或支流汊港 或 鱼塘藕塘 或 ford 滩心
+// 2026-09-12: 主河已加深 d=2.8 → 激流; 浅水=支流+鱼塘+胡康徒涉滩
+function inShallowChannel(x,z){
+if(onBridge(x,z)!==false) return false;
+if(fordAt(x,z)>0.5) return true;
+if(RIVER&&!(RIVER.d>2)){
+const P=RIVER.pts;
+for(let i=0;i<P.length-1;i++){
+if(segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1])<RIVER.w*0.75) return true;
+}
+}
+if(DELTA_CHANS.length){
+for(const ch of DELTA_CHANS){
+for(let i=0;i<ch.length-1;i++){
+if(segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1])<(DELTA.w||3.4)*0.8) return true;
+}
+}
+}
+// 鱼塘/藕塘: 圆内视作浅水 (减速无伤害)
+if(DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+if(Math.hypot(x-pd.x,z-pd.z)<pd.r) return true;
+}
 }
 return false;
 }
@@ -349,17 +658,108 @@ const k=1-td/3.2, s=sstep(k)*0.92;
 const dr=THEME.snow?0.62:0.74, dg=THEME.snow?0.5:0.62, db=THEME.snow?0.36:0.46;
 r=lerp(r,dr,s); g=lerp(g,dg,s); b=lerp(b,db,s);
 }
-// 雪峰山: 山体分带 —— 山麓稻绿 / 中坡松林深绿 / 林线以上裸岩灰 (主峰与峰顶)
-if(CAMPAIGN.terr==='xuefeng'){
+// 淞沪圩田色带 (2026-09-12): 支流泥滩褐 + 田埂土黄 + 圩田浸水绿 + 鱼塘/藕塘水面
+if(CAMPAIGN.terr==='delta'){
+// 支流: 沟缘泥滩
+if(DELTA_CHANS.length){
+const w=DELTA.w||3.4;
+let cd=1e9;
+for(const ch of DELTA_CHANS){
+for(let i=0;i<ch.length-1;i++){
+const d=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
+if(d<cd) cd=d;
+}
+}
+if(cd<w+2){
+const t=1-clamp(cd/(w+2),0,1);
+r=lerp(r,0.55,t*0.85); g=lerp(g,0.48,t*0.85); b=lerp(b,0.36,t*0.85);
+}
+}
+// 圩田田面: 浸水暗绿 (比 rice 色带更深, 读出下沉)
+if(DELTA&&DELTA.paddy){
+for(const p of DELTA.paddy){
+if(x>=p.x0&&x<=p.x1&&z>=p.z0&&z<=p.z1){
+const dEdge=Math.min(x-p.x0,p.x1-x,z-p.z0,p.z1-z);
+const t=clamp(dEdge/2.5,0,1);
+r=lerp(r,0.42,t*0.55); g=lerp(g,0.58,t*0.55); b=lerp(b,0.38,t*0.55);
+break;
+}
+}
+}
+// 田埂: 土黄细带
+if(DELTA&&DELTA.ridges){
+let rdg=1e9;
+for(const rr of DELTA.ridges){
+const d=segDist(x,z,rr.x0,rr.z0,rr.x1,rr.z1);
+if(d<rdg) rdg=d;
+}
+if(rdg<2.2){
+const t=1-rdg/2.2;
+r=lerp(r,0.92,t*0.7); g=lerp(g,0.78,t*0.7); b=lerp(b,0.52,t*0.7);
+}
+}
+// 鱼塘/藕塘: 藕=深绿浮叶, 鱼=青蓝水面
+if(DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+const d=Math.hypot(x-pd.x,z-pd.z);
+if(d<pd.r+0.8){
+const t=1-clamp(d/(pd.r+0.8),0,1);
+if(pd.t==='lotus'){ r=lerp(r,0.28,t*0.8); g=lerp(g,0.48,t*0.8); b=lerp(b,0.26,t*0.8); }
+else { r=lerp(r,0.32,t*0.75); g=lerp(g,0.48,t*0.75); b=lerp(b,0.52,t*0.75); }
+break;
+}
+}
+}
+}
+// 百团黄土沟壑色带 (2026-09-12 立体化): 沟底/渡台暗褐 / 沟壁陡崖崩积坡赭黄(愈深愈红) / 塬面峁顶麦黄 / 川地灰黄
+if(CAMPAIGN.terr==='loess'&&LOESS){
+const gd=gullyDist(x,z);
 const hy=pos.getY(i);
-if(hy>78){
-const k=clamp((hy-78)/22,0,1)*0.85;
-r=lerp(r,0.72,k); g=lerp(g,0.72,k); b=lerp(b,0.68,k);
-}else if(hy>34){
-const k=clamp((hy-34)/44,0,1)*0.62;
-r=lerp(r,0.52,k); g=lerp(g,1.04,k); b=lerp(b,0.5,k);
+const W=LOESS.w||14, GB=LOESS.bottom||3;
+if(gd<W){
+if(gd<GB||hy<-3){
+// 沟底/渡台: 阴湿暗褐
+r=lerp(r,0.52,0.7); g=lerp(g,0.44,0.7); b=lerp(b,0.32,0.7);
 }else{
-r*=0.94; g*=1.1; b*=0.86;
+// 沟壁: 崩积坡+陡崖赭黄, 愈近沟底愈红 (深度条带)
+const k=clamp((hy+3)/12,0,1);
+r=lerp(r,0.78,0.55+0.25*(1-k)); g=lerp(g,0.56,0.55+0.25*(1-k)); b=lerp(b,0.36,0.55+0.25*(1-k));
+}
+}else if(hy>7.2){
+// 塬面/峁顶: 麦黄
+r*=1.06; g*=0.96; b*=0.78;
+}
+}
+// 雾林守线色带 (2026-09-13 许特根改版): 北谷湿泥/谷壁腐殖土 + 堑口土道 + 林地腐叶斑驳
+if(CAMPAIGN.terr==='woods'&&WOOD&&WOOD.ravine){
+const gd=woodRavineDist(x,z), W2=WOOD.ravine;
+if(gd<W2.w){
+if(gd<W2.bottom||woodRampMask(x,z)>0.35){
+// 谷底泥径/堑口: 湿泥深褐 (车辙感)
+r=lerp(r,0.44,0.72); g=lerp(g,0.37,0.72); b=lerp(b,0.27,0.72);
+}else{
+// 谷壁: 腐殖土棕 (湿滑崩积坡+陡唇)
+r=lerp(r,0.55,0.6); g=lerp(g,0.46,0.6); b=lerp(b,0.33,0.6);
+}
+}else{
+// 林地: 腐叶斑驳 (低频色斑调制, 落叶林地面不是均匀绿)
+const m2=0.5+0.5*Math.sin(x*0.055+Math.sin(z*0.043)*1.7)*Math.cos(z*0.061+1.2);
+r=lerp(r,0.82,0.22*m2); g=lerp(g,0.74,0.18*m2); b=lerp(b,0.6,0.16*m2);
+}
+}
+// 莫斯科雪岭分带: 雪线以上裸岩灰白 / 雪线附近松林深绿 / 山麓雪覆浅灰
+if(CAMPAIGN.terr==='alpine'&&ALPINE){
+const hy=pos.getY(i);
+const sl=ALPINE.snowline||14;
+if(hy>sl+4){
+const k=clamp((hy-sl-4)/8,0,1)*0.85;
+r=lerp(r,0.78,k); g=lerp(g,0.78,k); b=lerp(b,0.76,k);
+}else if(hy>sl-2){
+// 雪线带: 针叶深绿
+r=lerp(r,0.42,0.45); g=lerp(g,0.58,0.45); b=lerp(b,0.42,0.45);
+}else{
+// 山麓: 雪覆浅灰绿
+r=lerp(r,0.92,0.35); g=lerp(g,0.94,0.35); b=lerp(b,0.92,0.35);
 }
 }
 // 太行山: 山体分带 —— 低坡灌丛褐绿 / 中坡林带深绿 / 山顶裸岩灰白 (陡环风化带)
@@ -524,9 +924,9 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	if(heightAt(x,z)>15&&roadDist(x,z)>20) d[j*N+i]=1;
 	}
 	}
-	// 雪峰山: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— 主峰锥面/崖壁阻 Bot/坦克寻路,
-	// 随后按公路/旗圈/基地/战壕走廊强制打通 (垭口-盘山公路-主峰平台保持可达)
-	if(CAMPAIGN.id==='xuefeng'){
+	// 雪峰山/太行山/莫斯科雪岭: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— Bot/坦克寻路阻断,
+	// 随后按公路/旗圈/基地/战壕走廊强制打通 (垭口-公路-旗点平台保持可达)
+	if(CAMPAIGN.id==='xuefeng'||CAMPAIGN.id==='taihang'||CAMPAIGN.id==='moscow'){
 	const step=4, th=0.95;
 	for(let j=4;j<N-4;j+=step)for(let i=4;i<N-4;i+=step){
 	const x=i-off, z=j-off;
@@ -555,6 +955,86 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	for(const t of TRENCHES){
 	const l=Math.hypot(t.x2-t.x1,t.z2-t.z1)||1;
 	for(let u=0;u<=1;u+=4/l) clear(t.x1+(t.x2-t.x1)*u, t.z1+(t.z2-t.z1)*u, 4.5);
+	}
+	for(const f of CAMPAIGN.flags) clear(f.x,f.z,f.r+8);
+	for(const b of CAMPAIGN.bases) clear(b.x,b.z,26);
+	// 莫斯科: 垭口走廊强制打通 (passes 语义表)
+	if(ALPINE&&ALPINE.passes) for(const p of ALPINE.passes) clear(p.x,p.z,p.r);
+	}
+	// 百团沟壑 (2026-09-12 立体化重写): 沟壁带(talus..w)记占用 —— Bot 不翻崖不穿壁;
+	// 沟底(gd<bottom)留白=可通行 (坡道网络+渡口把沟底变成渗透路线, 与坡度物理同口径);
+	// 坡道走廊/渡台/铁路桥桥位/道路/旗圈/基地逐级打通
+	if(CAMPAIGN.id==='baituan'&&LOESS){
+	const W=LOESS.w||14, GB=LOESS.bottom||3;
+	const clear=(x,z,r)=>{
+	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
+	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
+	for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+	const xx=i*res-off, zz=j*res-off;
+	if((xx-x)*(xx-x)+(zz-z)*(zz-z)<=r*r) d[j*N+i]=0;
+	}
+	};
+	const clearCorr=(x0,z0,x1,z1,r)=>{
+	const l=Math.hypot(x1-x0,z1-z0)||1;
+	for(let u=0;u<=1;u+=2.5/l) clear(x0+(x1-x0)*u, z0+(z1-z0)*u, r);
+	};
+	for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
+	const x=i*res-off, z=j*res-off;
+	const gd=gullyDist(x,z);
+	if(gd<=GB||gd>=W) continue;       // 沟底留白 (渗透路线) / 带外
+	// 沟壁带: 4×4 厚墙标记 (寻路节点间隔 5m, 薄墙会被跨跳) —— 步进采样, 带≥9m 宽足够覆盖
+	for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
+	const jj=j+l2, ii=i+k2;
+	if(jj<N&&ii<N) d[jj*N+ii]=1;
+	}
+	}
+	// 坡道走廊 (半宽+3 渐灭) —— Bot 过沟的合法通道
+	for(const r2 of (LOESS.ramps||[])) clearCorr(r2.x0,r2.z0,r2.x1,r2.z1,(r2.w||9)+3);
+	// 渡台 (沟底库旗点立足台)
+	for(const b2 of (LOESS.benches||[])){
+	const mx=(b2.x0+b2.x1)/2, mz=(b2.z0+b2.z1)/2;
+	clear(mx,mz,Math.max(b2.x1-b2.x0,b2.z1-b2.z0)/2+4);
+	}
+	// 铁路桥桥位 (巷沟上的拉锯通道; NAV_CLEARS 之外这里同步放行占用格)
+	for(const B2 of BRIDGES) clear(B2.x,B2.z,B2.len/2+6);
+	// 道路/旗点/基地走廊 (参照 xuefeng 口径)
+	for(const r of CAMPAIGN.roads){
+	const l=Math.hypot(r[2]-r[0],r[3]-r[1])||1;
+	for(let u=0;u<=1;u+=5/l) clear(r[0]+(r[2]-r[0])*u, r[1]+(r[3]-r[1])*u, 9);
+	}
+	for(const f of CAMPAIGN.flags) clear(f.x,f.z,f.r+8);
+	for(const b of CAMPAIGN.bases) clear(b.x,b.z,26);
+	for(const s2 of (CAMPAIGN.spawns||[])) clear(s2.x,s2.z,10);
+	}
+	// 雾林守线北谷 (2026-09-13 许特根改版): 谷壁带(bottom..w)记占用 —— Bot 不攀湿滑谷壁,
+	// 过谷走堑口 (车辆堑口=主防火道纵穿, 步兵堑口×2); 谷底留白=泥径渗透路线 (卡尔小径拉锯)
+	if(CAMPAIGN.id==='woodline'&&WOOD&&WOOD.ravine){
+	const W2=WOOD.ravine, GB=W2.bottom||5;
+	const clear=(x,z,r)=>{
+	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
+	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
+	for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+	const xx=i*res-off, zz=j*res-off;
+	if((xx-x)*(xx-x)+(zz-z)*(zz-z)<=r*r) d[j*N+i]=0;
+	}
+	};
+	const clearCorr=(x0,z0,x1,z1,r)=>{
+	const l=Math.hypot(x1-x0,z1-z0)||1;
+	for(let u=0;u<=1;u+=2.5/l) clear(x0+(x1-x0)*u, z0+(z1-z0)*u, r);
+	};
+	for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
+	const x=i*res-off, z=j*res-off;
+	const gd=woodRavineDist(x,z);
+	if(gd<=GB||gd>=W2.w) continue;   // 谷底留白 (泥径可走) / 带外
+	for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
+	const jj=j+l2, ii=i+k2;
+	if(jj<N&&ii<N) d[jj*N+ii]=1;
+	}
+	}
+	for(const r2 of (W2.ramps||[])) clearCorr(r2.x0,r2.z0,r2.x1,r2.z1,(r2.w||5)+4);
+	for(const r of CAMPAIGN.roads){
+	const l=Math.hypot(r[2]-r[0],r[3]-r[1])||1;
+	for(let u=0;u<=1;u+=5/l) clear(r[0]+(r[2]-r[0])*u, r[1]+(r[3]-r[1])*u, 9);
 	}
 	for(const f of CAMPAIGN.flags) clear(f.x,f.z,f.r+8);
 	for(const b of CAMPAIGN.bases) clear(b.x,b.z,26);

@@ -31,7 +31,9 @@ if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
 // 高画质: 软阴影 + 电影感滤镜; 低画质硬阴影无滤镜
 renderer.shadowMap.type=q===2?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
 renderer.domElement.style.filter=q===2?'saturate(1.1) contrast(1.06) brightness(1.02)':(q===1?'saturate(1.04) contrast(1.02)':'none');
-scene.fog.far = (q===0?240:(q===1?340:420))*((WEATHER==='rain'||WEATHER==='storm')?0.78:(WEATHER==='snow'?0.85:1))*(CAMPAIGN.theme==='deepjungle'?0.72:((CAMPAIGN.mapSize||320)>=640?1.35:1));
+// 2026-09-12 巨桥改版: 主题系数与图幅系数相乘 (旧版互斥三元 —— deepjungle 640 大图永远吃不到放宽)
+// 2026-09-13 许特根改版: deepjungle 硬编码 0.72 抽成主题字段 THEME.fogMul (woods=0.42 能见度极低)
+scene.fog.far = (q===0?240:(q===1?340:420))*((WEATHER==='rain'||WEATHER==='storm')?0.78:(WEATHER==='snow'?0.85:1))*(THEME.fogMul||1)*((CAMPAIGN.mapSize||320)>=640?1.35:1);
 }
 addEventListener('resize',()=>{
 camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
@@ -268,7 +270,7 @@ g.fillStyle='#23241f'; g.fillRect(6,y+2,w-12,2);
 //       SVG 生成仅用 Math.random(rand/randi), 不触碰 wr/wri 布局种子流 → 布局指纹零漂移.
 //       生成器全部登记在 SVGTEX (dev/verify-svgtex.js 逐条校验 XML 合法性/平铺周期).
 // ─────────────────────────────────────────────
-const SVG_OK=(typeof Image!=='undefined');
+const SVG_OK=(typeof Image!=='undefined')&&!/(?:\?|&)nosvg/.test(location.search); // ?nosvg=1: 跳过 SVG 重绘, 恒用 Canvas 兜底版 (排障 A/B 开关)
 function svgURI(w,h,body){
 return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`);
 }
@@ -276,13 +278,29 @@ function svgUpgrade(tex,w,h,body,name){
 if(!SVG_OK) return tex;
 try{
 const img=new Image();
-img.onload=()=>{ try{
-const c=tex.image, g=c.getContext('2d');
-g.globalAlpha=1;
-g.clearRect(0,0,c.width,c.height);
-}catch(e){ return; }
-try{ g.drawImage(img,0,0,c.width,c.height); tex.needsUpdate=true; }
-catch(e){ console.warn('[SVG] 贴图重绘绘制失败: '+(name||'?'), e&&e.message); }
+img.onload=()=>{
+let c,g;
+try{ c=tex.image; g=c.getContext('2d'); if(!g) return; }catch(e){ return; }
+let snap=null;
+try{ snap=g.getImageData(0,0,c.width,c.height); }catch(e){} // 重绘前快照兜底版 (data: 图不污染画布, 不会抛)
+try{ g.globalAlpha=1; g.clearRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height); }
+catch(e){ console.warn('[SVG] 贴图重绘绘制失败(保留兜底版): '+(name||'?'), e&&e.message); if(snap) g.putImageData(snap,0,0); return; }
+// 内容校验: 个别浏览器 SVG 滤镜栅格化异常时会"绘制成功但全透明/全黑" → 采样判定后回滚, 避免整场挂图材质变黑
+if(snap){
+const d=g.getImageData(0,0,c.width,c.height).data;
+let n=0,op=0,black=0;
+for(let i=0;i<d.length;i+=148){
+n++;
+if(d[i+3]>10) op++;
+if(d[i+3]>200&&d[i]+d[i+1]+d[i+2]<24) black++;
+}
+if(op===0||black/n>0.995){
+g.putImageData(snap,0,0);
+console.warn('[SVG] 重绘结果异常('+(op===0?'全透明':'全黑')+'), 已回滚兜底版: '+(name||'?'));
+return;
+}
+}
+tex.needsUpdate=true;
 };
 img.onerror=()=>{ console.warn('[SVG] 贴图重绘加载失败(停留在兜底版): '+(name||'?')); };
 img.src=svgURI(w,h,body);

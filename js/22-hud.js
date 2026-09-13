@@ -53,7 +53,7 @@ mmC.moveTo(a0,b0); mmC.lineTo(a1,b1); mmC.lineTo(a2,b2); mmC.lineTo(a3,b3);
 mmC.closePath(); mmC.fill();
 }
 }
-// 河道与大桥: 标出激流屏障和唯一通道
+// 河道与大桥: 标出激流屏障和通道 (主河 + 淞沪支流 + 多桥)
 if(RIVER){
 mmC.strokeStyle='rgba(70,110,150,.8)'; mmC.lineWidth=7;
 mmC.beginPath();
@@ -62,12 +62,101 @@ const [px,py]=toMap(pt[0],pt[1]);
 i===0?mmC.moveTo(px,py):mmC.lineTo(px,py);
 });
 mmC.stroke();
+// 徒涉滩 (胡康 ford, 2026-09-12 巨桥改版): 浅青白虚线圈 = 可涉渡口 (旋转不变圆, 免算河向)
+if(RIVER.ford){
+const F=RIVER.ford, [fx,fy]=toMap(F.x,F.z);
+mmC.strokeStyle='rgba(205,230,240,.95)'; mmC.lineWidth=2.5;
+mmC.setLineDash([4,3]);
+mmC.beginPath(); mmC.arc(fx,fy,Math.max(6,F.r/range*half*0.8),0,TAU); mmC.stroke();
+mmC.setLineDash([]);
 }
-if(BRIDGE){
-const bx=Math.sin(BRIDGE.yaw)*(BRIDGE.len/2), bz=Math.cos(BRIDGE.yaw)*(BRIDGE.len/2);
-const [ax,ay]=toMap(BRIDGE.x-bx,BRIDGE.z-bz), [bx2,by2]=toMap(BRIDGE.x+bx,BRIDGE.z+bz);
+}
+// 支流汊港 (淞沪): 细蓝线
+if(typeof DELTA_CHANS!=='undefined'&&DELTA_CHANS.length){
+mmC.strokeStyle='rgba(70,110,150,.55)'; mmC.lineWidth=4;
+for(const ch of DELTA_CHANS){
+mmC.beginPath();
+ch.forEach((pt,i)=>{
+const [px,py]=toMap(pt[0],pt[1]);
+i===0?mmC.moveTo(px,py):mmC.lineTo(px,py);
+});
+mmC.stroke();
+}
+}
+// 鱼塘/藕塘 (淞沪): 色块 + 丝厂地标标记
+if(typeof DELTA!=='undefined'&&DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+const [px,py]=toMap(pd.x,pd.z);
+const rr=pd.r*0.55;
+mmC.beginPath(); mmC.arc(px,py,rr,0,TAU);
+mmC.fillStyle=pd.t==='lotus'?'rgba(70,120,60,.45)':'rgba(70,110,150,.45)';
+mmC.fill();
+}
+}
+if(typeof DELTA!=='undefined'&&DELTA&&DELTA.landmark){
+const L=DELTA.landmark;
+const [px,py]=toMap(L.x,L.z);
+// 丝厂: 棕色方块 + "丝"
+mmC.fillStyle='rgba(160,100,70,.85)';
+mmC.fillRect(px-5,py-5,10,10);
+mmC.fillStyle='#fff'; mmC.font='bold 8px sans-serif'; mmC.textAlign='center';
+mmC.fillText('丝',px,py+3);
+}
+// 多桥: 每座画一段桥位线
+if(typeof BRIDGES!=='undefined'&&BRIDGES.length){
 mmC.strokeStyle='#d8c890'; mmC.lineWidth=5;
+for(const B of BRIDGES){
+const bx=Math.sin(B.yaw)*(B.len/2), bz=Math.cos(B.yaw)*(B.len/2);
+const [ax,ay]=toMap(B.x-bx,B.z-bz), [bx2,by2]=toMap(B.x+bx,B.z+bz);
 mmC.beginPath(); mmC.moveTo(ax,ay); mmC.lineTo(bx2,by2); mmC.stroke();
+}
+}
+// 百团沟壑 (语义分区, 2026-09-12 补画——README 漂移修正): 沟壑赭色带 + 坡道堑口浅色通道线
+if(typeof LOESS!=='undefined'&&LOESS&&LOESS.gullies){
+mmC.strokeStyle='rgba(158,108,58,.8)'; mmC.lineWidth=6;
+for(const g of LOESS.gullies){
+mmC.beginPath();
+g.forEach((pt,i)=>{
+const [px,py]=toMap(pt[0],pt[1]);
+i===0?mmC.moveTo(px,py):mmC.lineTo(px,py);
+});
+mmC.stroke();
+}
+if(LOESS.ramps){
+mmC.strokeStyle='rgba(230,212,160,.95)'; mmC.lineWidth=2.5;
+for(const r of LOESS.ramps){
+const [ax,ay]=toMap(r.x0,r.z0), [bx2,by2]=toMap(r.x1,r.z1);
+mmC.beginPath(); mmC.moveTo(ax,ay); mmC.lineTo(bx2,by2); mmC.stroke();
+}
+}
+}
+// 雾林守线语义 (2026-09-13 许特根改版): 北谷灰蓝带 + 堑口浅色通道 + 西墙深灰双线 (缺口留白)
+if(typeof WOOD!=='undefined'&&WOOD&&WOOD.ravine){
+mmC.strokeStyle='rgba(96,108,104,.85)'; mmC.lineWidth=7;
+mmC.beginPath();
+WOOD.ravine.pts.forEach((pt,i)=>{
+const [px,py]=toMap(pt[0],pt[1]);
+i===0?mmC.moveTo(px,py):mmC.lineTo(px,py);
+});
+mmC.stroke();
+mmC.strokeStyle='rgba(224,216,180,.95)'; mmC.lineWidth=2.5;
+for(const r of WOOD.ravine.ramps){
+const [ax,ay]=toMap(r.x0,r.z0), [bx2,by2]=toMap(r.x1,r.z1);
+mmC.beginPath(); mmC.moveTo(ax,ay); mmC.lineTo(bx2,by2); mmC.stroke();
+}
+}
+if(typeof WOOD!=='undefined'&&WOOD&&WOOD.belt){
+const B=WOOD.belt;
+mmC.strokeStyle='rgba(70,72,66,.9)'; mmC.lineWidth=4;
+for(const bx of [B.x0,B.x1]){
+mmC.beginPath();
+let [px,py]=toMap(bx,-B.spanZ);
+mmC.moveTo(px,py);
+[px,py]=toMap(bx,-B.gapZ); mmC.lineTo(px,py);
+[px,py]=toMap(bx,B.gapZ); mmC.moveTo(px,py);
+[px,py]=toMap(bx,B.spanZ); mmC.lineTo(px,py);
+mmC.stroke();
+}
 }
 for(const f of FLAGS){
 const [px,py]=toMap(f.x,f.z);
@@ -88,7 +177,8 @@ if(px<0||py<0||px>S||py>S) continue;
 if(s.team===player.team){
 mmC.fillStyle='#7dd87d';
 mmC.beginPath(); mmC.arc(px,py,2.5,0,TAU); mmC.fill();
-} else if(nowT-s.lastFiredT<2.5){
+}else{
+// 全部敌人实时显示 (2026-09-06 用户指定: 原仅开火后 2.5s 显形)
 mmC.fillStyle='#ff5040';
 mmC.beginPath(); mmC.arc(px,py,3,0,TAU); mmC.fill();
 }
@@ -162,6 +252,152 @@ mmC.strokeStyle='rgba(210,200,160,.4)'; mmC.lineWidth=1.5;
 mmC.beginPath(); mmC.arc(half,half,half-2,0,TAU); mmC.stroke();
 }
 const cpC=el('compass').getContext('2d');
+// ── 战场大地图 (M 开关): 左上小地图的全域放大版 —— 北向固定, 居中面板非全屏 ──
+let bigmapOn=false;
+function toggleBigMap(){
+bigmapOn=!bigmapOn;
+el('bigmapWrap').classList.toggle('hidden',!bigmapOn);
+AudioSys.click(bigmapOn?1200:800,0.25,0.05);
+}
+function drawBigMap(){
+const c=el('bigmap').getContext('2d'), S=520;
+c.clearRect(0,0,S,S);
+c.fillStyle='#141a10'; c.fillRect(0,0,S,S);
+// 全域比例: 缩放随地图尺寸 (同部署图 MH 口径)
+const MH=MAP_SIZE/2+10;
+const toM=(x,z)=>[S/2+x/MH*S/2, S/2+z/MH*S/2];
+c.strokeStyle='rgba(150,130,90,.5)'; c.lineWidth=4;
+if(CAMPAIGN.sineRoad){
+c.beginPath();
+for(let x=-(MAP_SIZE/2-5);x<=MAP_SIZE/2-5;x+=10){ const [px,py]=toM(x,sineRoadZ(x)); x===-(MAP_SIZE/2-5)?c.moveTo(px,py):c.lineTo(px,py); }
+c.stroke();
+}
+for(const r of CAMPAIGN.roads){
+c.beginPath();
+const [ax,ay]=toM(r[0],r[1]), [bx2,by2]=toM(r[2],r[3]);
+c.moveTo(ax,ay); c.lineTo(bx2,by2); c.stroke();
+}
+if(CAMPAIGN.city){
+c.fillStyle='rgba(175,175,165,.38)';
+for(const s of CAMPAIGN.city.streets){
+const [ax,ay]=toM(s.x0,s.z0), [bx2,by2]=toM(s.x1,s.z1);
+c.fillRect(ax,ay,bx2-ax,by2-ay);
+}
+}
+if(CROP_FIELDS.length){
+c.fillStyle='rgba(160,185,95,.4)';
+for(const cf of CROP_FIELDS){
+c.beginPath();
+const [a0,b0]=toM(cf.x0,cf.z0),[a1,b1]=toM(cf.x1,cf.z0),[a2,b2]=toM(cf.x1,cf.z1),[a3,b3]=toM(cf.x0,cf.z1);
+c.moveTo(a0,b0); c.lineTo(a1,b1); c.lineTo(a2,b2); c.lineTo(a3,b3);
+c.closePath(); c.fill();
+}
+}
+if(RIVER){
+c.strokeStyle='rgba(70,110,150,.85)'; c.lineWidth=9;
+c.beginPath();
+RIVER.pts.forEach((pt,i)=>{ const [px,py]=toM(pt[0],pt[1]); i===0?c.moveTo(px,py):c.lineTo(px,py); });
+c.stroke();
+// 徒涉滩 (胡康 ford): 虚线圈=可涉渡口
+if(RIVER.ford){
+const F=RIVER.ford, [fx,fy]=toM(F.x,F.z);
+c.strokeStyle='rgba(205,230,240,.95)'; c.lineWidth=3;
+c.setLineDash([7,5]);
+c.beginPath(); c.arc(fx,fy,F.r/MH*(S/2)*0.8,0,TAU); c.stroke();
+c.setLineDash([]);
+}
+}
+// 多桥: 每座画一段桥位线 (2026-09-12 巨桥改版: 单桥 BRIDGE → BRIDGES 循环, 双桥都要上大地图)
+if(typeof BRIDGES!=='undefined'&&BRIDGES.length){
+c.strokeStyle='#d8c890'; c.lineWidth=7;
+for(const B of BRIDGES){
+const bx=Math.sin(B.yaw)*(B.len/2), bz=Math.cos(B.yaw)*(B.len/2);
+const [ax,ay]=toM(B.x-bx,B.z-bz), [bx2,by2]=toM(B.x+bx,B.z+bz);
+c.beginPath(); c.moveTo(ax,ay); c.lineTo(bx2,by2); c.stroke();
+}
+}
+if(BASES.length) [0,1].forEach(t=>{
+const [px,py]=toM(BASES[t].x,BASES[t].z);
+c.fillStyle=t===0?'#4a70b0':'#b05a4a';
+c.fillRect(px-8,py-8,16,16);
+c.fillStyle='#fff'; c.font='10px sans-serif'; c.textAlign='center';
+c.fillText(TEAM_NAME[t][0],px,py+3);
+});
+if(SUPPLY_POINTS.length) for(const sp of SUPPLY_POINTS){
+const [px,py]=toM(sp.x,sp.z);
+c.fillStyle='#48b06a'; c.fillRect(px-4,py-4,8,8);
+}
+for(const f of FLAGS){
+const [px,py]=toM(f.x,f.z);
+c.beginPath(); c.arc(px,py,13,0,TAU);
+c.fillStyle=f.owner===0?'rgba(90,140,220,.85)':f.owner===1?'rgba(220,110,90,.85)':'rgba(150,150,140,.7)';
+c.fill();
+if(f.capTeam!==-1&&f.cap>0.03){
+c.beginPath(); c.arc(px,py,15,-HPI,-HPI+f.cap*TAU);
+c.strokeStyle='#fff'; c.lineWidth=2; c.stroke();
+}
+c.fillStyle='#fff'; c.font=f.id.length>1?'bold 9px sans-serif':'bold 13px sans-serif'; c.textAlign='center';
+c.fillText(f.id,px,py+(f.id.length>1?3:4));
+}
+for(const sp of (CAMPAIGN.spawns||[])){
+const [px,py]=toM(sp.x,sp.z);
+c.save(); c.translate(px,py); c.rotate(HPI/4);
+c.fillStyle=sp.team===0?'#4a70b0':'#b05a4a';
+c.fillRect(-6,-6,12,12);
+c.restore();
+}
+for(const s of soldiers){
+if(!s.alive||s.onVehicle) continue;
+const [px,py]=toM(s.pos.x,s.pos.z);
+if(s.team===player.team){
+c.fillStyle='#7dd87d';
+c.beginPath(); c.arc(px,py,2.5,0,TAU); c.fill();
+}else{
+// 全部敌人实时显示 (2026-09-06 用户指定: 原仅开火后 2.5s 显形)
+c.fillStyle='#ff5040';
+c.beginPath(); c.arc(px,py,3,0,TAU); c.fill();
+}
+}
+for(const t of tanks){
+if(!t.alive) continue;
+const [px,py]=toM(t.pos.x,t.pos.z);
+c.fillStyle=t.team===0?'#6da5e8':'#e87a68';
+c.fillRect(px-4,py-4,8,8);
+c.strokeStyle='#fff'; c.lineWidth=1; c.strokeRect(px-4,py-4,8,8);
+}
+for(const t of trucks){
+if(!t.alive) continue;
+const [px,py]=toM(t.pos.x,t.pos.z);
+c.fillStyle='#ffd050';
+c.fillRect(px-3.5,py-3.5,7,7);
+c.strokeStyle='#554a20'; c.lineWidth=1; c.strokeRect(px-3.5,py-3.5,7,7);
+}
+for(const pl of planes){
+if(!pl.alive) continue;
+const [px,py]=toM(pl.pos.x,pl.pos.z);
+c.save(); c.translate(px,py); c.rotate(Math.PI-pl.yaw);
+c.fillStyle=pl.team===0?'#9dc5f8':'#f8a898';
+c.beginPath(); c.moveTo(0,-5); c.lineTo(4,4); c.lineTo(0,2); c.lineTo(-4,4); c.closePath(); c.fill();
+c.restore();
+}
+// 巡飞弹 (TV制导中): 青色菱形实时位置 + 白心
+if(player.loiter&&!player.loiter.dead){
+const [px,py]=toM(player.loiter.pos.x,player.loiter.pos.z);
+c.save(); c.translate(px,py); c.rotate(HPI/4);
+c.fillStyle='#3ee8d8'; c.fillRect(-6,-6,12,12);
+c.strokeStyle='#06332e'; c.lineWidth=1.5; c.strokeRect(-6,-6,12,12);
+c.fillStyle='#fff'; c.fillRect(-1.5,-1.5,3,3);
+c.restore();
+}
+// 玩家: 白色箭头 (地图北向固定, 箭头指向实际朝向)
+if(player.alive){
+const [px,py]=toM(player.pos.x,player.pos.z);
+c.save(); c.translate(px,py); c.rotate(-player.yaw);
+c.fillStyle='#fff';
+c.beginPath(); c.moveTo(0,-7); c.lineTo(5,6); c.lineTo(0,3); c.lineTo(-5,6); c.closePath(); c.fill();
+c.restore();
+}
+}
 function drawCompass(){
 const W=460,H=26;
 cpC.clearRect(0,0,W,H);
@@ -191,6 +427,20 @@ cpC.fillStyle='#ffd77a'; cpC.fillRect(W/2-1,2,2,6);
 }
 let hudSlowT=0;
 function updateHUD(dt){
+// 连杀奖励增益角标 (2026-09-11): 档位配色 lv0金/lv1橙/lv2炽红, 剩余秒数每帧刷新, 到期即撤
+const sb=el('streakBuff');
+if(player.streakBuff){
+const rem=player.streakBuff.until-nowT;
+if(rem<=0) player.streakBuff=null;
+else { sb.style.display='block'; sb.className='lv'+(player.streakBuff.lv||0);
+// 骑乘形态标注 (2026-09-12 "增益跟着人走"): 角标实时显示当前形态下实际生效的增益项
+let ctx='';
+if(player.onVehicle) ctx=player.onVehicle.kind==='plane'?' · 航炮加速':' · 主炮加速';
+else if(player.onMG) ctx=' · 枪管降温';
+else if(player.onAT||player.onAA||player.onMortar) ctx=' · 射速提升';
+sb.innerHTML=`⚔ ${player.streakBuff.name} · 得分×${player.streakBuff.mul}${ctx}<span class="sbT">${Math.ceil(rem)}s</span>`; }
+}
+if(!player.streakBuff) sb.style.display='none';
 const w=player.curW;
 if(player.onVehicle&&player.onVehicle.kind==='plane'){
 const t=player.onVehicle;
@@ -260,9 +510,9 @@ hudSlowT=0.1;
 	const t1s=Math.ceil(tickets[1]);
 	const f0=fieldCount(0), f1=fieldCount(1);
 	let modeLine='';
-	if(GAMEMODE==='assault') modeLine=`<div style="font-size:11px;color:#ffd77a">攻防战 · 攻方占超一半且守方仅余1点→守方兵力流失 · 任意一方占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜</div>`;
+	if(GAMEMODE==='assault') modeLine=`<div style="font-size:11px;color:#ffd77a">攻防战 · 攻方占超一半且守方仅余1点→守方兵力流失 · 任意一方占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜${CAMPAIGN.id==='songhu'?' · <span style="color:#9fd4e8">浅滩涉水减速 · 深水主河须过石桥</span>':''}</div>`;
 	else if(GAMEMODE==='demolition') modeLine=`<div style="font-size:11px;color:#ffd77a">破袭战 · 剩余补给库: ${DEPOTS.filter(d=>!d.destroyed).length}/${DEPOTS.length}</div>`;
-	else if(GAMEMODE==='conquest') modeLine=`<div style="font-size:11px;color:#ffd77a">${CAMPAIGN.bridge?'拉锯战 · 激流不可徒涉 · 大桥是唯一通道':'征服战 · 一方占超一半且对方仅余1点→对方兵力流失 · 占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜'}</div>`;
+	else if(GAMEMODE==='conquest') modeLine=`<div style="font-size:11px;color:#ffd77a">${CAMPAIGN.bridge?'拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉':'征服战 · 一方占超一半且对方仅余1点→对方兵力流失 · 占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜'}</div>`;
 	else if(GAMEMODE==='clash') modeLine=`<div style="font-size:11px;color:#ffd77a">遭遇战 · 无旗点 · 兵力打空后需清场残敌方胜</div>`;
 	else if(GAMEMODE==='convoy'){ const cs=(typeof CONVOY_STATE!=='undefined'&&CONVOY_STATE)?` · 剩余 ${CONVOY_STATE.left} 辆 · 已突围 ${CONVOY_STATE.esc}`:''; modeLine=`<div style="font-size:11px;color:#ffd77a">劫道战 · 毁车过半→劫道方胜, 突围过半→护运方胜 · 劫道方补给 ${Math.round(((CAMPAIGN.convoy&&CAMPAIGN.convoy.supplyLife)||600)/60)} 分钟后失效 · 护运方贴车补${cs}</div>`; }
 	let wipeLine='';
@@ -283,6 +533,9 @@ const fi=el('fi'+f.id);
 fi.className=(f.owner===0?'f0':f.owner===1?'f1':'')+(f.capTeam!==-1&&f.cap>0.03?' fc':'');
 });
 drawMinimap();
+// 大地图: 阵亡/退出部署时自动收起, 存活期间按帧刷新
+if(bigmapOn&&(!player.alive||!player.deployed)){ bigmapOn=false; el('bigmapWrap').classList.add('hidden'); }
+if(bigmapOn) drawBigMap();
 drawCompass();
 // 小队HUD
 const sqEl=el('squadHUD');

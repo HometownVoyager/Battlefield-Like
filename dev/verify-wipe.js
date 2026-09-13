@@ -72,7 +72,7 @@ updateMatrix(){}
 lookAt(){return this;}
 clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry;if(this.material)c.material=this.material;c.position=new V3(this.position.x,this.position.y,this.position.z);c.rotation=new Euler();if(this.rotation.x||this.rotation.y||this.rotation.z)c.rotation.set(this.rotation.x,this.rotation.y,this.rotation.z);c.scale=new V3(this.scale.x,this.scale.y,this.scale.z);c.visible=this.visible;c.castShadow=this.castShadow;c.name=this.name;return c;}};
 class Geo{constructor(...a){this.attributes={};this.parameters={};}translate(){return this;}rotateX(){return this;}rotateY(){return this;}rotateZ(){return this;}setAttribute(n,a){this.attributes[n]=a;return this;}setIndex(){return this;}setFromPoints(){return this;}computeVertexNormals(){return this;}dispose(){}}
-class _PlaneGeo extends Geo{constructor(w=1,h=1,sg=1,sh=1){super(w,h);const gx=(sg||1)+1,gy=(sh||1)+1;this.attributes.position={count:gx*gy,getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}};}}
+class _PlaneGeo extends Geo{constructor(w=1,h=1,sg=1,sh=1){super(w,h);const gx=(sg||1)+1,gy=(sh||1)+1;this.attributes.position={count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}};}}
 class BufAttr{constructor(a,n){this.array=a;this.itemSize=n;this.count=(a&&a.length)||0;}
 set(){return this;}
 getX(i){return (this.array&&this.array[i*this.itemSize])||0;}
@@ -257,8 +257,9 @@ return null;
 if(err){ ok(false,'T2 开局 '+(err||'')); return; }
 const r=vm.runInContext(`(()=>{
 var ret={};
-// 静态摆盘: 队0(防守方)全单位移回西基地, 队1(进攻方)4人在 D 点内
-const D=FLAGS.find(f=>f.id==='D');
+// 静态摆盘: 队0(防守方)全单位移回西基地, 队1(进攻方)4人在 S 点内
+// 2026-09-12: 淞沪改五旗环形后无 D 点, 用南圩 S 作待夺旗
+const D=FLAGS.find(f=>f.id==='S')||FLAGS[FLAGS.length-1];
 for(const s of soldiers){
 if(!s.alive) continue;
 if(s.team===0){ s.pos.set(-142,0,0); s.onVehicle=null; }
@@ -273,13 +274,13 @@ for(const s of soldiers){
 if(nIn>=4) break;
 if(s.alive&&s.team===1&&!s.onVehicle){ s.pos.set(D.x,0,D.z); nIn++; }
 }
-// 其余旗点已归队1 (A 初始归队1; B/C 现改归队1)
-FLAGS.forEach(f=>{ if(f.id!=='D'){ f.owner=1; f.cap=0; f.capTeam=-1; } });
+// 其余旗点已归队1 (A 开局可中立/归队1; B/C/E/S 现改归队1)
+FLAGS.forEach(f=>{ if(f.id!==D.id){ f.owner=1; f.cap=0; f.capTeam=-1; } });
 ret.fgy=D.gy; ret.nIn=nIn; ret.D=[D.x,D.z,D.r];
 ret.tk0Before=tickets[0];
 return ret;
 })()`,ctx);
-ok(r.nIn>=4,'T2 前置: '+r.nIn+'名攻方步兵在 D 点');
+ok(r.nIn>=4,'T2 前置: '+r.nIn+'名攻方步兵在待夺旗 (S)');
 // 推进占领: 只跑 updateFlags (世界静止), 直到 D 易主
 const cap=vm.runInContext(`(()=>{
 for(let i=0;i<1200&&FLAGS.every(f=>f.owner===1)===false;i++) updateFlags(1/30);
@@ -486,7 +487,7 @@ const err=vm.runInContext(`${HOOK}
 try{
 document.getElementById('startBtn').onclick();
 tickets[0]=0;
-// 旗权摆成"队1未全占": A归队1, B/C/D归队0 (与淞沪开局 1-3 类似)
+// 旗权摆成"队1未全占": A归队1, B/C/E/S归队0 (与淞沪开局 1-4 类似)
 FLAGS.forEach(f=>{ f.owner=(f.id==='A')?1:0; f.cap=0; f.capTeam=-1; });
 // 全清队0 (人+坦克), 队1活口挪到远角防止步进期间占旗
 for(const s of soldiers){ if(s.alive&&s.team===0) s.die(null,false); }

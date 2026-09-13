@@ -32,7 +32,7 @@ if(r2) D=r2.t;
 t.turretPitch=dampF(t.turretPitch,wantPitch,6,dt);
 p.fireT-=dt;
 // 准星汇聚: 主炮朝相机瞄准点开火
-if(mouseDown&&t.cannonCd<=0&&!matchOver){ t.fireCannon(); }
+if(mouseDown&&t.cannonCd<=0&&!matchOver){ t.fireCannon(); if(p.streakBuff){ t.cannonCd*=p.streakBuff.reloadMul; t.cdMax=t.cannonCd; } } // 连杀增益: 主炮加速 (2026-09-12)
 // 同轴机枪(右键)
 if(mouse2Down&&!matchOver){
 const cd=camForward();
@@ -93,7 +93,7 @@ mpip.style.top=((1-(mgv.y*0.5+0.5))*innerHeight)+'px';
 }
 }
 const _heat=seatElm('heatFill');
-_heat.style.width=(clamp(1-t.cannonCd/t.def.reload,0,1)*100)+'%';
+_heat.style.width=(clamp(1-t.cannonCd/(t.cdMax||t.def.reload),0,1)*100)+'%';
 _heat.style.background=t.cannonCd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e83a1a)';
 updateInteractHint();
 }
@@ -125,14 +125,14 @@ mortarMarker.rotation.y+=dt*1.2;
 const mscale=0.85+Math.sin(nowT*3.2)*0.08;
 mortarMarker.scale.setScalar(mscale);
 if(mouseDown&&m.cd<=0&&!matchOver){
-m.cd=3.2; // 玩家冷却档 (Bot AI rand(4.2,6.5) 显式节奏分叉)
+m.cd=3.2*(p.streakBuff?p.streakBuff.reloadMul:1); m.cdMax=m.cd; // 玩家冷却档 (Bot AI rand(4.2,6.5) 显式节奏分叉); 连杀增益: 射速提升 (2026-09-12)
 emplMortarShell(m,p,vo.x,vo.z); // 弹道/弹体/击杀来源/炮口烟单源 (13-combat)
 AudioSys.metalSlide(0.35,0.18,140,50);
 addTrauma(0.12);
 }
 // 炮管俯仰随视角(高抛→炮管更竖直), 开火后阻尼回位
 m.tube.rotation.x=dampF(m.tube.rotation.x,0.62-(p.pitch-0.95)*0.3,5,dt);
-seatElm('heatFill').style.width=(clamp(1-m.cd/3.2,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-m.cd/(m.cdMax||3.2),0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerAT(dt){
@@ -151,9 +151,11 @@ p.vel.set(0,0,0);
 if(mouseDown&&g.cd<=0&&!matchOver){
 const dir=camForward();
 emplATFire(g,p,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-combat, 与 Bot 同一份)
+if(p.streakBuff) g.cd*=p.streakBuff.reloadMul; // 连杀增益: 装填加速 (2026-09-12)
+g.cdMax=g.cd;
 addTrauma(0.45);
 }
-seatElm('heatFill').style.width=(clamp(1-g.cd/4.5,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-g.cd/(g.cdMax||4.5),0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerAA(dt){
@@ -181,7 +183,7 @@ pip.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px';
 } else pip.style.display='none';
 } else pip.style.display='none';
 if(mouseDown&&g.cd<=0&&!matchOver){
-g.cd=EMPL_AA_CD; // 与 Bot 同档单源 (D1=c)
+g.cd=EMPL_AA_CD*(p.streakBuff?p.streakBuff.reloadMul:1); g.cdMax=g.cd; // 与 Bot 同档单源 (D1=c); 连杀增益: 射速提升 (2026-09-12)
 p._src='防空炮'; // 击杀来源: 固定防空炮
 const dir=camForward();
 fireFlak(g,p,dir);
@@ -189,7 +191,7 @@ addTrauma(0.1);
 p.recoilPitch+=0.004;
 p.lastFiredT=nowT;
 }
-seatElm('heatFill').style.width=(clamp(1-g.cd/EMPL_AA_CD,0,1)*100)+'%';
+seatElm('heatFill').style.width=(clamp(1-g.cd/(g.cdMax||EMPL_AA_CD),0,1)*100)+'%';
 updateInteractHint();
 }
 function updatePlayerMG(dt){
@@ -212,7 +214,9 @@ p.pitch=clamp(p.pitch+0.0012,-0.7,0.45);
 p.yaw+=rand(-1,1)*0.0018;
 addTrauma(0.06);
 AudioSys.gunshot('mg',0,0);
+const h0=mg.heat;
 emplMGFire(mg,p,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-combat, 与 Bot 同一份; headMul 统一 1.9)
+if(p.streakBuff&&mg.heat>h0) mg.heat=h0+(mg.heat-h0)*p.streakBuff.reloadMul; // 连杀增益: 枪管降温——只放缓积热, 散热速率不变 (2026-09-12)
 if(mg.heat>=1){ AudioSys.metalSlide(0.4,0.3,400,200); } // 过热提示: emplMGFire 内已累加热量
 }
 seatElm('heatFill').style.width=(mg.heat*100)+'%';

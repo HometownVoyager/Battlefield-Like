@@ -16,6 +16,8 @@ if(gamePaused) return;
 keys[e.code]=true;
 // 实验模式: P 切换 AI 调试层 (bot 状态标签+寻路线), 仅供调参
 if(e.code==='KeyP'&&EXPERIMENT&&typeof BotDebug!=='undefined') BotDebug.toggle();
+// 战场大地图: M 开关 (全域北向视图; 仅部署存活时, 暂停/菜单/部署界面不响应)
+if(e.code==='KeyM'&&player.deployed&&player.alive) toggleBigMap();
 // 观战模式: 双击空格 = MC创造式悬停飞行开关 (无重力可悬停; 若在气动飞行中则切为悬停)
 if(e.code==='Space'&&player.spectator&&player.alive&&!player.onVehicle&&!player.loiter){
 const tapT=performance.now();
@@ -204,11 +206,13 @@ if(MOBILE){ pointerLocked=true; return; }
 try{ const r=renderer.domElement.requestPointerLock(); if(r&&r.catch) r.catch(()=>{}); }catch(e){}
 }
 function tryReload(){
+if(player.spectator) return; // 观战: 弹药每0.5s自动回满, 永不换弹 —— 拦截手动R/空仓点击/打空自动换弹/巡飞弹引爆后的自动换弹 (2026-09-11 修复不定时换弹)
 const w=player.curW;
 if(!w||player.onMG||player.onVehicle||player.onAT||player.onAA) return;
 if(VM.state!=='idle') return;
 if(w.mag>=w.def.mag||w.reserve<=0) return;
-VM.state='reload'; VM.stateT=0; VM.stateDur=w.def.reload;
+VM.state='reload'; VM.stateT=0;
+VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1); // 连杀增益: 换弹加速 (2026-09-11)
 vmSndFlags={};
 }
 function switchSlot(i){

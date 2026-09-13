@@ -23,6 +23,7 @@ const wipeT=[null,null]; // 各队倒计时剩余秒数, null=未进入 (仅归�
 function resetMatchState(){ // 对局态复位唯一入口 (2026-09-06 B7b/P2-14: 替代 22-hud startGame 的跨文件直写)
 wipeAnnounced[0]=false; wipeAnnounced[1]=false;
 wipeT[0]=null; wipeT[1]=null;
+killStreakN=0; killStreakT=-99; player.streakBuff=null; // 连杀计数/增益随新对局复位 (2026-09-11)
 }
 function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
 if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
@@ -109,8 +110,17 @@ if(f.cap<=0){ f.cap=0; f.capTeam=-1; }
 }
 if(f.owner>=0) owned[f.owner]++;
 f.flagMesh.position.y=dampF(f.flagMesh.position.y,f.owner!==-1?f.poleTop-f.cap*2:f.gy+3.2+f.cap*2.4,4,dt);
-f.flagMesh.rotation.y=Math.sin(nowT*1.6+f.x)*0.22;
-f.flagMesh.scale.x=1+Math.sin(nowT*5+f.z)*0.06;
+// 布料波: 挂边铰接于杆缘(微幅风向偏转) + 沿幅面两轴正弦涟漪 —— 越靠旗尾摆幅越大, 挂边恒贴旗杆
+f.flagMesh.rotation.y=Math.sin(nowT*1.3+f.x)*0.12;
+{
+const fp=f.flagGeo.attributes.position, fb=f.flagBase;
+for(let i=0;i<fp.count;i++){
+const bx=fb[i*3], by=fb[i*3+1], w=bx/2.4; // w: 0=挂边 1=旗尾
+fp.setZ(i,(Math.sin(nowT*4.2+bx*2.6+f.x*0.7)+Math.sin(nowT*7.3+by*4.1+f.z*0.5)*0.45)*0.13*w);
+fp.setX(i,bx+Math.sin(nowT*2.2+f.z)*0.07*w*w);
+}
+fp.needsUpdate=true;
+}
 }
 if(!matchOver){
 	// 终局前奏: 胜负已定但尚未冻结 —— 剩余判定全部旁路, 倒计时结束后 endMatch
@@ -252,24 +262,41 @@ s.textContent=txt; s.style.opacity=1;
 clearTimeout(scorePopT);
 scorePopT=setTimeout(()=>s.style.opacity=0,1400);
 }
-// —— 玩家击杀播报: 右下角得分列表 (每次击杀/摧毁独立成行) + 中下连杀横幅 ——
-const MK_NAMES={2:'双杀',3:'三连杀',4:'四连杀',5:'五连杀',6:'六连杀'};
+// —— 玩家击杀播报: 右下角得分列表 (每次击杀/摧毁独立成行) + 中下连杀横幅 + 连杀奖励 ——
+const MK_NAMES={2:'双杀',3:'三连杀',4:'四连杀',5:'五连杀',6:'六连杀',7:'七连杀',8:'八连杀',9:'九连杀'};
 const KILL_STREAK_WIN=5; // 连杀窗口: 距上次击杀超过该秒数则重新计数
 let killStreakN=0, killStreakT=-99;
-function showKillPop(label,score){
+// 连杀奖励 (2026-09-11): 档位表在 00-config STREAK_REWARDS —— 命中 3/6/9 杀时发放/升级增益
+// (player.streakBuff, 效果接线: 移速 20-player / 换弹 19-input / 减伤 18-game), 得分按当前档位 mul 结算。
+function streakTierOf(n){ // 当前连杀数命中的最高档 (未达 3 杀返回 null)
+let hit=null;
+for(const t of STREAK_REWARDS) if(n>=t.at) hit=t;
+return hit;
+}
+function grantStreakBuff(tier,lv){
+player.streakBuff={name:tier.name, lv, mul:tier.mul, speedMul:tier.speedMul, reloadMul:tier.reloadMul, dmgCut:tier.dmgCut, until:nowT+tier.dur};
+showScorePop(`连杀奖励 · ${tier.name} (得分×${tier.mul}, ${tier.dur}s)`);
+AudioSys.click(660,0.22,0.05);
+setTimeout(()=>AudioSys.click(990,0.3,0.06),120);
+}
+function showKillPop(label,score,mul){
 const box=el('killPops');
 const d=document.createElement('div');
 d.className='kp';
-d.innerHTML=`<span class="kpLabel">${label}</span><span class="kpScore">+${score}</span>`;
+d.innerHTML=`<span class="kpLabel">${label}</span>${mul&&mul>1?`<span class="kpMul">×${mul}</span>`:''}<span class="kpScore">+${score}</span>`;
 box.appendChild(d);
 while(box.children.length>5) box.firstChild.remove();
 setTimeout(()=>{ d.classList.add('out'); setTimeout(()=>d.remove(),500); },2600);
 }
-function registerKillScore(label,score,countStreak){
-showKillPop(label,score);
-if(countStreak===false||matchOver) return;
+// 连杀结算唯一入口 (击杀/摧毁载具共用): 刷新计数 → 弹得分角标(按档位倍率) → 连杀横幅 → 命中 3/6/9 发放奖励。
+// 返回实得分数 (含连杀倍率), 调用方据此外加 player.score —— 记分单源不破坏 (verify-wipe T14)。
+function registerKillScore(label,base,countStreak){
+if(countStreak===false||matchOver){ showKillPop(label,base); return base; }
 if(nowT-killStreakT>KILL_STREAK_WIN) killStreakN=0;
 killStreakN++; killStreakT=nowT;
+const tier=streakTierOf(killStreakN);
+const got=Math.round(base*(tier?tier.mul:1));
+showKillPop(label,got,tier?tier.mul:1);
 if(killStreakN>=2){
 const b=el('mkBanner');
 b.textContent=(MK_NAMES[killStreakN]||killStreakN+' 连杀')+'!';
@@ -279,12 +306,15 @@ void b.offsetWidth; // 强制重排以重播弹出动画 (同一爆炸连杀时�
 b.classList.add('show');
 AudioSys.click(600+Math.min(killStreakN,8)*110,0.3,0.05);
 }
+const tierHit=STREAK_REWARDS.find(t=>t.at===killStreakN); // 恰好踩中 3/6/9 档才发放 (同一条命每档一次)
+if(tierHit) grantStreakBuff(tierHit,STREAK_REWARDS.indexOf(tierHit));
+return got;
 }
-function resetKillStreak(){ killStreakN=0; }
+function resetKillStreak(){ killStreakN=0; player.streakBuff=null; }
 function onPlayerKill(victim,isHead){
-player.score+=isHead?SCORE_TABLE.head:SCORE_TABLE.kill;
+const got=registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
+player.score+=got;
 player.lifeKills=(player.lifeKills||0)+1;
-registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 const hm=el('hitmark');
 hm.classList.add('kill');
 hm.style.opacity=1;

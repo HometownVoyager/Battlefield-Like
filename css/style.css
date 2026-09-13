@@ -70,6 +70,10 @@ body.mobile #ctrlHelp { display:none; }
 #stamBar { height:100%; width:100%; background:rgba(220,220,190,.65); }
 #minimapWrap { position:absolute; left:18px; top:18px; width:190px; height:190px; border:2px solid rgba(210,200,160,.35); border-radius:4px; background:rgba(10,14,8,.72); overflow:hidden; }
 #minimap { width:100%; height:100%; }
+/* 战场大地图 (M): 锚定左上角从小地图位置展开 —— 尺寸受视口宽高双约束, 不遮成整屏 */
+#bigmapWrap { position:absolute; left:18px; top:18px; width:560px; max-width:min(62vw,76vh); border:2px solid rgba(210,200,160,.4); border-radius:6px; background:rgba(10,14,8,.88); overflow:hidden; box-shadow:0 8px 40px rgba(0,0,0,.6); }
+#bigmap { display:block; width:100%; height:auto; }
+#bigmapTitle { text-align:center; font-size:12px; letter-spacing:3px; color:#d8cfa8; padding:5px 0; background:rgba(22,28,16,.92); }
 #topBar { position:absolute; top:14px; left:50%; transform:translateX(-50%); text-align:center; color:#ddd; text-shadow:0 1px 3px #000; }
 #tickets { font-size:17px; font-weight:600; letter-spacing:1px; }
 #tickets .tl { color:#8fc1ff; } #tickets .tr { color:#ff9c8a; }
@@ -99,8 +103,14 @@ body.mobile #ctrlHelp { display:none; }
 #mkBanner.hot { color:#ff9552; text-shadow:0 0 20px rgba(255,90,30,.65), 0 2px 8px #000; }
 #mkBanner.show { animation:mkPop 1.5s ease-out forwards; }
 @keyframes mkPop { 0% { opacity:0; transform:translate(-50%,-50%) scale(1.7); } 12% { opacity:1; transform:translate(-50%,-50%) scale(1); } 75% { opacity:1; transform:translate(-50%,-50%) scale(1); } 100% { opacity:0; transform:translate(-50%,-50%) scale(1.05); } }
+/* 连杀奖励增益角标 (右下·击杀得分列表上方): 档位越高颜色越炽 (lv0 金 / lv1 橙 / lv2 炽红) */
+#streakBuff { position:absolute; right:26px; bottom:176px; display:none; padding:5px 12px; background:rgba(0,0,0,.5); border-radius:3px; border-right:3px solid #d8b25a; font-size:14px; font-weight:700; letter-spacing:1px; color:#ffd77a; text-shadow:0 1px 3px #000; pointer-events:none; }
+#streakBuff.lv1 { color:#ffb46a; border-right-color:#ff9552; }
+#streakBuff.lv2 { color:#ff8a5c; border-right-color:#ff6a3d; text-shadow:0 0 10px rgba(255,90,30,.5), 0 1px 3px #000; }
+#streakBuff .sbT { font-size:12px; font-weight:400; opacity:.85; margin-left:8px; }
 /* 触屏模式: 右下被触控键占用, 得分列表移到右上击杀播报下方 */
 body.mobile #killPops { bottom:auto; top:188px; }
+body.mobile #streakBuff { bottom:auto; top:158px; }
 #capPanel { position:absolute; left:50%; bottom:110px; transform:translateX(-50%); width:240px; text-align:center; color:#eee; text-shadow:0 1px 3px #000; display:none; }
 #capLetter { font-size:26px; font-weight:700; }
 #capBarWrap { width:100%; height:7px; background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.3); margin-top:4px; }
@@ -110,6 +120,7 @@ body.mobile #killPops { bottom:auto; top:188px; }
 #interact b { color:#ffd77a; }
 #coldTip { position:absolute; left:50%; top:66%; transform:translateX(-50%); color:#9fd8ff; font-size:14px; text-shadow:0 1px 4px #000; background:rgba(8,16,28,.55); padding:5px 14px; border-radius:4px; border:1px solid rgba(140,190,240,.35); display:none; }
 #coldTip b { color:#ff9c8a; }
+#tbTip { position:absolute; left:50%; top:70%; transform:translateX(-50%); color:#ffb08a; font-size:15px; font-weight:bold; text-shadow:0 1px 4px #000; background:rgba(28,10,6,.6); padding:5px 14px; border-radius:4px; border:1px solid rgba(255,150,90,.45); display:none; }
 #braceInd { position:absolute; left:50%; top:56%; transform:translateX(-50%); font-size:12px; letter-spacing:2px; color:rgba(255,232,160,.92); text-shadow:0 1px 3px #000; display:none; pointer-events:none; }
 #braceInd.on { color:#ffe8a0; background:rgba(0,0,0,.4); padding:3px 10px; border-radius:3px; border:1px solid rgba(255,220,140,.35); }
 #squadHUD { position:absolute; left:18px; top:214px; color:#cfe8cf; font-size:12px; line-height:1.5; text-shadow:0 1px 2px #000; background:rgba(10,14,8,.55); padding:5px 9px; border-radius:3px; border:1px solid rgba(140,200,140,.25); display:none; }

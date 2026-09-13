@@ -63,6 +63,7 @@ updateTrucks(dt); // 劫道车队: 在炮弹判定前推进, 命中管线拿到�
 updateSupplyPoints(dt); // 劫道方临时补给点: 限时失效
 // 火焰蔓延/树木燃烧倒伏/倒伏动画 (04b-fire)
 updateFires(dt);
+updateTreeBursts(dt); // 许特根树爆: 环境炮击林冠空爆 (04b-fire, woodline 专属)
 updateFallingTrees(dt);
 updateBurningTrees(dt);
 updatePlaneWrecks(dt);

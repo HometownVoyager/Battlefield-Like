@@ -28,6 +28,8 @@ suppress(a){ this.suppressV=Math.min(1,this.suppressV+a); },
 leanT:0,
 damage(amt,attacker,isHead){
 if(!this.alive||matchOver||this.spectator) return; // 观战: 完全免伤
+// 连杀增益·减伤: 只吃敌方来源伤害 (摔落/严寒/激流等无主伤害与自伤不吃, 2026-09-11)
+if(this.streakBuff&&this.streakBuff.dmgCut>0&&attacker&&attacker!==this&&attacker.team!==this.team) amt*=1-this.streakBuff.dmgCut;
 this.hp-=amt;
 this.lastDmgT=nowT;
 if(this.bandaging>0){ this.bandaging=0; showScorePop('包扎被打断!'); }

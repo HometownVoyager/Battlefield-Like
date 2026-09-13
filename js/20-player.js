@@ -141,7 +141,7 @@ return;
 }
 for(const mg of MG42S){
 if(!empReady(mg)) continue;
-if(Math.hypot(mg.x-player.pos.x,mg.z-player.pos.z)<2.6){
+if(empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)){
 mg.user=player;
 player.useCast={kind:'mg',g:mg,t:0,dur:EM_CAST_DUR};
 AudioSys.click(700,0.25,0.05);
@@ -151,7 +151,7 @@ return;
 }
 for(const g of ATGUNS){
 if(!empReady(g)) continue;
-if(Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<3){
+if(empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 g.user=player;
 player.useCast={kind:'at',g,t:0,dur:EM_CAST_DUR};
 AudioSys.click(700,0.25,0.05);
@@ -161,7 +161,7 @@ return;
 }
 for(const g of AAGUNS){
 if(!empReady(g)) continue;
-if(Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<3){
+if(empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 g.user=player;
 player.useCast={kind:'aa',g,t:0,dur:EM_CAST_DUR};
 AudioSys.click(700,0.25,0.05);
@@ -281,6 +281,7 @@ function updatePlayer(dt){
 if(!player.alive){ return; }
 const p=player;
 p.meleeCd-=dt; p.resupplyCd-=dt;
+if(p.streakBuff&&nowT>=p.streakBuff.until) p.streakBuff=null; // 连杀增益到期 (2026-09-11)
 p.bandResupCd=Math.max(0,(p.bandResupCd||0)-dt);
 p.suppressV=Math.max(0,p.suppressV-dt*0.8);
 // 固定火力点使用前摇: 移动打断, 计时满上机 (目标被夺则提示)
@@ -405,8 +406,11 @@ if(p.ads) speed*=0.55;
 if(p.bandaging>0) speed*=0.45;
 if(VM.state==='reload') speed*=0.8;
 if(nowT-(p.wireT||-9)<0.3) speed*=0.42;
+if(p.streakBuff) speed*=p.streakBuff.speedMul; // 连杀增益: 步兵移速提升 (载具不受益, 2026-09-11)
 // 深谷激流: 徒涉大龙河严重减速
 if(inRiverChannel(p.pos.x,p.pos.z)) speed*=0.38;
+// 浅水/支流 (淞沪圩田): 涉水减速, 无激流伤害
+else if(inShallowChannel(p.pos.x,p.pos.z)) speed*=0.55;
 const sy=Math.sin(p.yaw), cy=Math.cos(p.yaw);
 let mx=(-sy*fwd + cy*str), mz=(-cy*fwd - sy*str);
 const ml=Math.hypot(mx,mz);
@@ -426,7 +430,12 @@ if(!playerChuteMesh){ playerChuteMesh=mkChute(); scene.add(playerChuteMesh); }
 playerChuteMesh.position.set(p.pos.x,p.pos.y+3.8,p.pos.z);
 playerChuteMesh.rotation.set(Math.sin(nowT*0.7)*0.12,0,Math.cos(nowT*0.6)*0.08);
 } else if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
-p.pos.x+=p.vel.x*dt; p.pos.y+=p.vel.y*dt; p.pos.z+=p.vel.z*dt;
+// 坡度物理 (2026-09-12): 地面态水平位移过闸 (上坡>40°减速/>65°封, 下坡不设限; 腾空/伞降不适用)
+if(p.onGround&&!p.onVehicle){
+const mv=slopeGateMove(p.pos,p.vel.x*dt,p.vel.z*dt);
+p.pos.x+=mv[0]; p.pos.z+=mv[1];
+}else{ p.pos.x+=p.vel.x*dt; p.pos.z+=p.vel.z*dt; }
+p.pos.y+=p.vel.y*dt;
 collideMove(p.pos,0.42);
 const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);
 if(p.pos.y<=gh){
@@ -601,17 +610,17 @@ elm.style.display='block'; elm.innerHTML='<b>F</b> '+(t.crewBot?'接管':'进入
 }
 }
 for(const mg of MG42S){
-if(!mg.user&&Math.hypot(mg.x-player.pos.x,mg.z-player.pos.z)<2.6){
+if(!mg.user&&empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)){
 elm.style.display='block'; elm.innerHTML='<b>F</b> 使用 '+((mg.def&&mg.def.name)||'重机枪'); return;
 }
 }
 for(const g of ATGUNS){
-if(!g.user&&Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<3){
+if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 elm.style.display='block'; elm.innerHTML='<b>F</b> 使用反坦克炮'; return;
 }
 }
 for(const g of AAGUNS){
-if(!g.user&&Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<3){
+if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 elm.style.display='block'; elm.innerHTML='<b>F</b> 使用防空炮'; return;
 }
 }

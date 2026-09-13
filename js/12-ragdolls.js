@@ -62,7 +62,7 @@ const hm=new THREE.Mesh(new THREE.SphereGeometry(hs2,8,6),helmMat);
 hm.castShadow=true; scene.add(hm);
 const hb2=new CANNON.Body({mass:1.8});
 hb2.addShape(new CANNON.Sphere(hs2*0.8));
-const hp=loc(0,p.y+1.76*base+hy2,0);
+const hp=loc(0,1.76*base+hy2,0); // 头盔=头顶正上方 hy2 (2026-09-12 修复: 原写法把 p.y 重复累加, 头盔初始悬空≈海拔高度, 与头的 P2P 约束初始误差经求解器换算成 ~14×g 的弹射速度 → 坡地/高地死亡尸体飞天)
 hb2.position.set(hp[0],hp[1],hp[2]); hb2.quaternion.setFromEuler(0,yaw,0);
 hb2.angularDamping=0.3; hb2.linearDamping=0.06;
 RAG.world.addBody(hb2);
@@ -224,10 +224,24 @@ r.t-=dt;
 for(const p of r.parts){
 const b=p.body;
 const gh=heightAt(b.position.x,b.position.z);
-if(b.position.y<gh+p.hy){
-b.position.y=gh+p.hy;
+// 坡地安全 (2026-09-12, 尸体起飞修复配套): ①阈值按坡度放宽 —— 贴坡部件的法向半厚不变,
+//   竖直可沉深度=hy/cosθ, 原平地阈值在坡上会逐帧垂直抬起贴坡部件; ②浅层接触用速度式
+//   地面支撑而非位置锚定, 部件可被约束正常拖动, 落地姿态更平稳; ③深埋 (翻滚插入坡面)
+//   才限幅抬出 —— 整步位置传送会成为约束方程的位置误差, 被 GSSolver 的 Baumgarte 项
+//   (B=-g·a, a≈14@60fps) 换算成弹射速度 (本次"起飞"bug 的放大器), 故限幅
+const rgE=0.35;
+const rgx=(heightAt(b.position.x+rgE,b.position.z)-heightAt(b.position.x-rgE,b.position.z))/(2*rgE);
+const rgz=(heightAt(b.position.x,b.position.z+rgE)-heightAt(b.position.x,b.position.z-rgE))/(2*rgE);
+const rgL=Math.sqrt(1+rgx*rgx+rgz*rgz);
+const pen=gh+p.hy*rgL-b.position.y; // 竖直下沉深度
+if(pen>0){
+if(pen>0.1){
+b.position.y+=Math.min(pen,0.06);
 if(b.velocity.y<0) b.velocity.y*=-0.25;
-b.velocity.x*=0.85; b.velocity.z*=0.85;
+}else{
+b.velocity.y=b.velocity.y*0.85+Math.min(pen*240,45)*dt;
+}
+b.velocity.x*=0.6; b.velocity.z*=0.6;
 b.angularVelocity.x*=0.78; b.angularVelocity.y*=0.78; b.angularVelocity.z*=0.78;
 }
 ragCollide(b,0.16);

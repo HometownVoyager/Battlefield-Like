@@ -378,7 +378,9 @@ addSnowCap(rm); slabs.push(rm);
 	const top=o.y0+o.rise*(1-(q0+q1)/2/span), bot=o.y0-0.35;
 	const bp=ctx.L(o.axis==='x'?0:cc, o.axis==='x'?cc:0);
 	const bi0=BOXES.length;
-	const bm=solidBox(o.mat, o.axis==='x'?ridgeLen:q1-q0+0.08, top-bot, o.axis==='x'?q1-q0+0.08:ridgeLen, bp[0], ctx.g0+(top+bot)/2, bp[1], ctx.ry, 1.6);
+	// 不传 chain: 轴对齐=单块精确 AABB; 斜置=自动 2D 贴片铺满带宽 —— 旧 chain=1.6 强制单排链,
+	// 斜置宽坡面(带宽>1.7)两侧无碰撞, 上坡面走到带缘直接坠穿 (2026-09-12 用户实机: 厂房外坡面无碰撞)
+	const bm=solidBox(o.mat, o.axis==='x'?ridgeLen:q1-q0+0.08, top-bot, o.axis==='x'?q1-q0+0.08:ridgeLen, bp[0], ctx.g0+(top+bot)/2, bp[1], ctx.ry);
 	// 带内记录碰撞盒而非网格: killBox 以盒为单位(连同视觉移除), 存 mesh 会漏杀碰撞, 塌顶后留下隐形斜坡
 	for(let bi=bi0;bi<BOXES.length;bi++) bands.push(BOXES[bi]);
 	}
@@ -423,16 +425,29 @@ const n=Math.max(2,Math.ceil(rise/(o.maxRise||0.42)));
 const sr=rise/n;
 const tr=o.tread||Math.max(0.5,sr*1.45);
 const [dx,dz]= o.dir==='z+'?[0,1]:o.dir==='z-'?[0,-1]:o.dir==='x+'?[1,0]:[-1,0];
+const mat=o.mat||MAT.woodDark;
+// ── 2026-09-12 v4: 旧观感薄踏步 + 踢面封闭 (v2"实心柱式"废弃: 每步整根砌到 base, 高梯段成实心巨块) ──
+// 每步=整步高锯齿盒 (顶面=步面与旧版一致, 底面=前一步顶面, 侧看封闭零缝), 梯段上方净空不受影响;
+// 梯脚贴地封堵: foundation 楼面=hMax+raise 而室内地面=原地形, 坡地上楼面比梯脚地表高 0.3~1.4m
+// (淞沪丝厂梯脚悬空 ~0.6 即此根因) —— 贴地梯 (base 距梯脚地表≤1.6) 前两级与空隙≤0.7 的步级
+// 落到地表封底 (平地视觉基本不变), 其余保持开敞锯齿 (旧版观感, 梯下可作正常净空)
+const _foot=ctx.L(o.lx+dx*tr*0.5, o.lz+dz*tr*0.5);
+const _toGround=(o.base-heightAt(_foot[0],_foot[1]))<=1.6;
 for(let i=0;i<n;i++){
 const p=ctx.L(o.lx+dx*((i+0.5)*tr), o.lz+dz*((i+0.5)*tr));
 const top=o.base+sr*(i+1);
+const sawBot=Math.max(o.base, top-sr); // 步底=前一步顶面; 首步=base
+const gh=heightAt(p[0],p[1]);
+const bot=(_toGround&&(i<2||sawBot-gh<=0.7))?Math.min(sawBot,gh+0.03):sawBot; // 贴地封底; 高处悬开敞
 const bw=dx!==0?tr:o.width, bd=dx!==0?o.width:tr;
 const b0=BOXES.length;
-const m=solidBox(o.mat||MAT.woodDark,bw,0.24,bd,p[0],top-0.12,p[1],ctx.ry);
-if(o.parts) o.parts.push({m,b:BOXES.slice(b0)}); // 坍塌链收集 (2026-09-05 修"楼梯浮空": 踏步随楼坍塌)
+const m=solidBox(mat,bw,top-bot,bd,p[0],(top+bot)/2,p[1],ctx.ry);
+for(let k=b0;k<BOXES.length;k++) BOXES[k].stair=1;
+if(o.parts) o.parts.push({m,b:BOXES.slice(b0)});
 }
 const ep=ctx.L.apply(ctx, o.exit||[o.lx+dx*(n*tr+0.35), o.lz+dz*(n*tr+0.35)]);
-STAIRS.push({x:ep[0],z:ep[1],topY:o.topY,sr,width:o.width});
+const _fp=ctx.L(o.lx,o.lz), _tp=ctx.L(o.lx+dx*(n-0.5)*tr,o.lz+dz*(n-0.5)*tr);
+STAIRS.push({x:ep[0],z:ep[1],topY:o.topY,sr,width:o.width,n,fx:_fp[0],fz:_fp[1],tx:_tp[0],tz:_tp[1]});
 return {n,sr,tr,run:n*tr,parts:o.parts||null};
 }
 // ===== 建筑框架: 选址/足迹登记 (防建筑互穿/压旗杆/上道路) =====
@@ -457,6 +472,7 @@ return mx-mn;
 function spotBlockedBuild(x,z,ry,w,d){
 for(const f of CAMPAIGN.flags){ if(Math.hypot(x-f.x,z-f.z)<w*0.5+2.5) return true; }
 if(roadDist(x,z)<5) return true;
+if(metroBlocked(x,z,w,d)) return true;
 if(RIVER&&inRiverChannel(x,z)) return true;
 	if(BRIDGE&&onBridge(x,z,6)) return true;
 	const MB=MAP_SIZE/2-14; // 随地图尺寸: 320 图=146 (与旧值一致), 800 图村庄可正常落址
@@ -482,17 +498,21 @@ return null;
 }
 // 手写坐标摆建筑: 原地校验(高差宽限), 失败小偏移重试, 兜底原样登记
 // o:{ox,oz: 足迹中心局部偏移(如教堂含背面钟塔), maxDh}
+// o.strict=true: 8 次重试全败返回 null 而非兜底强放 (2026-09-09 柏林加密批次 ——
+//   兜底强放会绕过 B_FOOT 互斥, 把 37m 长街墙压在已有公寓上; 老调用方行为不变)
 function placeAt(x,z,ry,w,d,o={}){
 for(let t=0;t<8;t++){
 const px=x+(t?wr(-2.5,2.5):0), pz=z+(t?wr(-2.5,2.5):0);
 const ox=o.ox||0, oz=o.oz||0;
 const rxx=px+ox*Math.cos(ry)+oz*Math.sin(ry), rzz=pz-ox*Math.sin(ry)+oz*Math.cos(ry);
 if(terrainDelta(px,pz,ry,w,d)>(o.maxDh!==undefined?o.maxDh:1.4)) continue;
+if(metroBlocked(rxx,rzz,w,d)) continue; // 地铁站厅/隧道上方禁建 (2026-09-09)
 const rect=footRect(rxx,rzz,ry,w,d,1.0);
 if(!propFreeRect(rect)) continue; // 同 placeBuild: 手摆建筑也让开道具
 if(B_FOOT.some(f=>rectsOverlap(rect,f))) continue;
 B_FOOT.push(rect); return {x:px,z:pz,ry};
 }
+if(o.strict) return null;
 const rect=footRect(x,z,ry,w,d,1.0); B_FOOT.push(rect); return {x,z,ry};
 }
 // 瞭望塔选址(足迹=塔身+局部+z 向外伸的楼梯)
@@ -514,8 +534,26 @@ watchtower(x,z,ry);
 B_FOOT.push(footRect(x+2.8*Math.sin(ry),z+2.8*Math.cos(ry),ry,4.2,9.6,0.8));
 return false;
 }
-// 道具落点检查: 避开建筑足迹
-function freeSpot(x,z,r){ return !B_FOOT.some(f=>x>f.x0-r&&x<f.x1+r&&z>f.z0-r&&z<f.z1+r); }
+// 道具落点检查: 避开建筑足迹 + 地铁下沉区 (2026-09-09 柏林: 站厅/隧道上方禁止落位 ——
+// 该处 heightAt 取到坑底, 道具/树/草会沉入地下; 隧道顶板=街面只走人/车, 不摆物件)
+function freeSpot(x,z,r){
+if(B_FOOT.some(f=>x>f.x0-r&&x<f.x1+r&&z>f.z0-r&&z<f.z1+r)) return false;
+if(typeof METRO_RECTS!=='undefined'){
+for(const s of METRO_RECTS){
+if(x>s.x0-r&&x<s.x1+r&&z>s.z0-r&&z<s.z1+r) return false;
+}
+}
+return true;
+}
+// 地铁下沉区禁建 (2026-09-09): 站厅/隧道上方落建筑会悬空/埋进坑底 —— freeSpot 只挡道具/植被,
+// 建筑走 placeAt/placeBuild 的另一条校验链, 此处补同一份矩形表
+function metroBlocked(x,z,w,d){
+if(typeof METRO_RECTS==='undefined') return false;
+for(const s of METRO_RECTS){
+if(x>s.x0-w/2&&x<s.x1+w/2&&z>s.z0-d/2&&z<s.z1+d/2) return true;
+}
+return false;
+}
 // 建筑足迹矩形 vs 已放置道具: 任一道具圆与矩形(含道具半径外扩)相交 → 拒绝
 // (粗粒距 check 覆盖不到旋转矩形的最远角, 石墙段/弹坑会漏进房内)
 function propFreeRect(rect){

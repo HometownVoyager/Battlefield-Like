@@ -60,13 +60,14 @@ if(GAMEMODE==='convoy'&&CAMPAIGN.convoy&&player.team===CAMPAIGN.convoy.escortTea
 const pt=convoyDeployPt();
 opts.push({name:'随车队',x:pt.x,z:pt.z,id:'CV'});
 }
-// 载具出生选项
+// 载具出生选项 (重生倒计时按 tankRespawnMul 换算: 苏军厂房在手时实际回场更快)
 const vehs=[...tanks,...planes].filter(v=>v.team===player.team);
 vehs.forEach((v,i)=>{
 const id='V'+i;
 const busy=v.playerDriven;
 const ready=v.alive&&!busy;
-opts.push({name:(v.kind==='plane'?'✈ ':'▣ ')+v.name+(ready?'':(busy?' (占用)':' (重生 '+Math.ceil(v.respawnT)+'s)')),id,veh:v,disabled:!ready});
+const remain=v.alive?0:Math.ceil(v.respawnT/(v.kind==='tank'?tankRespawnMul(v.team):1));
+opts.push({name:(v.kind==='plane'?'✈ ':'▣ ')+v.name+(ready?'':(busy?' (占用)':' (重生 '+remain+'s)')),id,veh:v,disabled:!ready});
 });
 if(!opts.some(o=>!o.disabled&&(o.id===selectedSpawn))) selectedSpawn=-1;
 opts.forEach(o=>{
@@ -124,7 +125,7 @@ c.moveTo(a0,b0); c.lineTo(a1,b1); c.lineTo(a2,b2); c.lineTo(a3,b3);
 c.closePath(); c.fill();
 }
 }
-// 河道与大桥
+// 河道与大桥 (主河 + 淞沪支流 + 多桥)
 if(RIVER){
 c.strokeStyle='rgba(70,110,150,.85)'; c.lineWidth=9;
 c.beginPath();
@@ -133,12 +134,97 @@ const [px,py]=toM(pt[0],pt[1]);
 i===0?c.moveTo(px,py):c.lineTo(px,py);
 });
 c.stroke();
+// 徒涉滩 (胡康 ford, 2026-09-12 巨桥改版): 虚线圈=可涉渡口
+if(RIVER.ford){
+const F=RIVER.ford, [fx,fy]=toM(F.x,F.z);
+c.strokeStyle='rgba(205,230,240,.95)'; c.lineWidth=2.5;
+c.setLineDash([6,4]);
+c.beginPath(); c.arc(fx,fy,F.r/MH*(S/2)*0.8,0,TAU); c.stroke();
+c.setLineDash([]);
 }
-if(BRIDGE){
-const bx=Math.sin(BRIDGE.yaw)*(BRIDGE.len/2), bz=Math.cos(BRIDGE.yaw)*(BRIDGE.len/2);
-const [ax,ay]=toM(BRIDGE.x-bx,BRIDGE.z-bz), [bx2,by2]=toM(BRIDGE.x+bx,BRIDGE.z+bz);
+}
+if(typeof DELTA_CHANS!=='undefined'&&DELTA_CHANS.length){
+c.strokeStyle='rgba(70,110,150,.55)'; c.lineWidth=5;
+for(const ch of DELTA_CHANS){
+c.beginPath();
+ch.forEach((pt,i)=>{
+const [px,py]=toM(pt[0],pt[1]);
+i===0?c.moveTo(px,py):c.lineTo(px,py);
+});
+c.stroke();
+}
+}
+// 鱼塘/藕塘 + 丝厂地标 (淞沪)
+if(typeof DELTA!=='undefined'&&DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+const [px,py]=toM(pd.x,pd.z);
+c.beginPath(); c.arc(px,py,pd.r*0.7,0,TAU);
+c.fillStyle=pd.t==='lotus'?'rgba(70,120,60,.5)':'rgba(70,110,150,.5)';
+c.fill();
+}
+}
+if(typeof DELTA!=='undefined'&&DELTA&&DELTA.landmark){
+const L=DELTA.landmark;
+const [px,py]=toM(L.x,L.z);
+c.fillStyle='rgba(160,100,70,.9)';
+c.fillRect(px-7,py-7,14,14);
+c.fillStyle='#fff'; c.font='bold 10px sans-serif'; c.textAlign='center';
+c.fillText('丝厂',px,py+3);
+}
+if(typeof BRIDGES!=='undefined'&&BRIDGES.length){
 c.strokeStyle='#d8c890'; c.lineWidth=7;
+for(const B of BRIDGES){
+const bx=Math.sin(B.yaw)*(B.len/2), bz=Math.cos(B.yaw)*(B.len/2);
+const [ax,ay]=toM(B.x-bx,B.z-bz), [bx2,by2]=toM(B.x+bx,B.z+bz);
 c.beginPath(); c.moveTo(ax,ay); c.lineTo(bx2,by2); c.stroke();
+}
+}
+// 百团沟壑 (语义分区, 2026-09-12 补画): 沟壑赭色带 + 坡道堑口浅色通道线 —— 部署图读出三路与分层
+if(typeof LOESS!=='undefined'&&LOESS&&LOESS.gullies){
+c.strokeStyle='rgba(158,108,58,.85)'; c.lineWidth=9;
+for(const g of LOESS.gullies){
+c.beginPath();
+g.forEach((pt,i)=>{
+const [px,py]=toM(pt[0],pt[1]);
+i===0?c.moveTo(px,py):c.lineTo(px,py);
+});
+c.stroke();
+}
+if(LOESS.ramps){
+c.strokeStyle='rgba(230,212,160,.95)'; c.lineWidth=3.5;
+for(const r of LOESS.ramps){
+const [ax,ay]=toM(r.x0,r.z0), [bx2,by2]=toM(r.x1,r.z1);
+c.beginPath(); c.moveTo(ax,ay); c.lineTo(bx2,by2); c.stroke();
+}
+}
+}
+// 雾林守线语义 (2026-09-13 许特根改版): 北谷灰蓝带 + 堑口浅色通道 + 西墙深灰双线 (缺口留白)
+if(typeof WOOD!=='undefined'&&WOOD&&WOOD.ravine){
+c.strokeStyle='rgba(96,108,104,.9)'; c.lineWidth=9;
+c.beginPath();
+WOOD.ravine.pts.forEach((pt,i)=>{
+const [px,py]=toM(pt[0],pt[1]);
+i===0?c.moveTo(px,py):c.lineTo(px,py);
+});
+c.stroke();
+c.strokeStyle='rgba(224,216,180,.95)'; c.lineWidth=3.5;
+for(const r of WOOD.ravine.ramps){
+const [ax,ay]=toM(r.x0,r.z0), [bx2,by2]=toM(r.x1,r.z1);
+c.beginPath(); c.moveTo(ax,ay); c.lineTo(bx2,by2); c.stroke();
+}
+}
+if(typeof WOOD!=='undefined'&&WOOD&&WOOD.belt){
+const B=WOOD.belt;
+c.strokeStyle='rgba(70,72,66,.92)'; c.lineWidth=5;
+for(const bx of [B.x0,B.x1]){
+c.beginPath();
+let [px,py]=toM(bx,-B.spanZ);
+c.moveTo(px,py);
+[px,py]=toM(bx,-B.gapZ); c.lineTo(px,py);
+[px,py]=toM(bx,B.gapZ); c.moveTo(px,py);
+[px,py]=toM(bx,B.spanZ); c.lineTo(px,py);
+c.stroke();
+}
 }
 if(BASES.length) [0,1].forEach(t=>{
 const [px,py]=toM(BASES[t].x,BASES[t].z);
@@ -280,10 +366,14 @@ const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).lengt
 	bot.spawn();
 	}
 	}
-	// 旗帜初始归属 (征服: 靠近各自基地的旗点归属该方; 攻防/破袭: 防守方全部据守)
+	// 旗帜初始归属 (征服: 优先读旗点显式 own 字段[斯大林格勒 14 点草图开局态势]; 无 own 时按就近归属;
+	// 攻防/破袭: 防守方全部据守)
 	el('flagIcons').innerHTML=FLAGS.map(f=>`<span id="fi${f.id}">${f.id}</span>`).join('');
 	if(GAMEMODE==='conquest'){
-	if(FLAGS.length){
+	if(FLAGS.some(f=>f.own!==undefined)){
+	// 显式归属 (2026-09-06 斯大林格勒改版): 两翼 home 点开局各归其主, 中央拉锯带中立 —— 草图开局态势
+	FLAGS.forEach(f=>{ if(f.own!==undefined){ f.owner=f.own; drawFlagTex(f); } });
+	}else if(FLAGS.length){
 	const sorted=[...FLAGS].sort((a,b)=>Math.hypot(a.x-BASES[0].x,a.z-BASES[0].z)-Math.hypot(b.x-BASES[0].x,b.z-BASES[0].z));
 	sorted[0].owner=0;
 	sorted[sorted.length-1].owner=1;
@@ -304,8 +394,8 @@ const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).lengt
 	// 防守方兵力=进攻方×1.25 (2026-09-05 用户指定下调: 防守优势改由"防御工事模板"承担阵地强度,
 	// 人数只保留小幅倾斜; 原为 ×1.75, 阵地+人海双优势过重)
 	tickets[DEF]=Math.round(tickets[ATK]*1.25);
-	// 太行山围攻 (9 旗多线上山) 延长至 22 分钟
-	matchTime=GAMEMODE==='assault'?(CAMPAIGN.id==='taihang'?22*60:18*60):16*60;
+// 攻防限时: 默认 18 分钟; 战役条目 matchMin 覆盖 (太行山围攻/柏林大地图 22 分钟)
+matchTime=GAMEMODE==='assault'?((CAMPAIGN.matchMin||18)*60):16*60;
 	} else if(GAMEMODE==='clash'){
 	// 遭遇战: 无旗点, 兵力打空者败, 15分钟限时
 	matchTime=15*60;

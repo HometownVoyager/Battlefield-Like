@@ -58,7 +58,7 @@ updateMatrix(){const e=this.matrix.elements||(this.matrix.elements=new Float32Ar
 lookAt(){return this;}
 clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry;if(this.material)c.material=this.material;c.position=new V3(this.position.x,this.position.y,this.position.z);c.rotation=new Euler();if(this.rotation.x||this.rotation.y||this.rotation.z)c.rotation.set(this.rotation.x,this.rotation.y,this.rotation.z);c.scale=new V3(this.scale.x,this.scale.y,this.scale.z);c.visible=this.visible;c.castShadow=this.castShadow;c.name=this.name;return c;}};
 class Geo{constructor(...a){this.attributes={};this.parameters={};}translate(){return this;}rotateX(){return this;}rotateY(){return this;}rotateZ(){return this;}setAttribute(n,a){this.attributes[n]=a;return this;}setIndex(){return this;}setFromPoints(){return this;}computeVertexNormals(){return this;}dispose(){}}
-class _PlaneGeo extends Geo{constructor(w=1,h=1,sg=1,sh=1){super(w,h);const gx=(sg||1)+1,gy=(sh||1)+1;this.attributes.position={count:gx*gy,getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}};}}
+class _PlaneGeo extends Geo{constructor(w=1,h=1,sg=1,sh=1){super(w,h);const gx=(sg||1)+1,gy=(sh||1)+1;this.attributes.position={count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}};}}
 class BufAttr{constructor(a,n){this.array=a;this.itemSize=n;this.count=(a&&a.length)||0;}
 set(){return this;}
 getX(i){return (this.array&&this.array[i*this.itemSize])||0;}
@@ -176,7 +176,9 @@ catch(e){ out.checks.push(name+' ✗ '+String(e&&e.stack||e).split('\\n').slice(
 // ── 1. 房屋墙段/废墟结构 (2026-09-01 倒塌重构; 2026-09-02 碎石堆定时消失): 摧毁即刻碎块化 ——
 //    碰撞死+视觉即刻移除+原地碎石堆(停留 RUBBLE_TTL 后沉入消失), 结构本身不再排队下沉任务 ──
 chk('结构:摧毁即刻倒塌→碎石堆停留后沉入消失',()=>{
-const g=DESTRUCTIBLES.find(g=>!g.dead&&!g.roofRef)||DESTRUCTIBLES.find(g=>!g.dead);
+// 2026-09-12 莫斯科城市边缘改版暴露: 厂区先于街块落位时首组=钢水包(带 onDead 爆炸/火区钩子) ——
+// 特殊死亡钩子结构会向世界额外加对象, 碎石堆(4块)计数断言只适用普通墙组 → 跳过 onDead 组
+const g=DESTRUCTIBLES.find(g=>!g.dead&&!g.roofRef&&!g.onDead)||DESTRUCTIBLES.find(g=>!g.dead&&!g.onDead)||DESTRUCTIBLES.find(g=>!g.dead);
 if(!g){ out.checks.push('(本布局无可毁结构, 跳过)'); return; }
 const visMeshes=g.meshes.filter(m=>m&&m.parent);
 assert(visMeshes.length>0,'结构组有视觉网格');
@@ -257,7 +259,7 @@ const trunkArr=TREE_IM.trunks.instanceMatrix.array;
 const leafArr=TREE_IM.leaves.instanceMatrix.array;
 treeFall(tr,1,0);
 assert(tr.fall,'树开始倒伏');
-step(updateFallingTrees,0.1,20); // 倒伏动画 (~1.3s)
+step(updateFallingTrees,0.1,30); // 倒伏动画+触地回弹 (大树最长 ~2.5s)
 assert(TREE_SINKS.some(s=>s.tr===tr),'倒伏完成登记沉入');
 step(updateTreeSinks,0.25,132); // 停留(≤22s)+下沉(3.6s)+余量 ≈ 33s
 assert(!TREE_SINKS.some(s=>s.tr===tr),'沉入任务完成');
@@ -339,6 +341,7 @@ if(!t){ out.checks.push('(本模式无坦克, 跳过)'); return; }
 const sn=Math.sin(t.yaw), cs=Math.cos(t.yaw);
 const bb=addBoxCollider(t.pos.x+sn*2.6,t.pos.y+0.5,t.pos.z+cs*2.6,1.2,1.0,1.2);
 bb.crush=true;
+bb.gh=t.pos.y; // 坡地地图: gh 独立采样会高于箱心, 导致 maxY-gh<0.7 被当低矮障碍跳过 —— 测试箱贴坦克脚底
 const meshBefore=world.children.length;
 t.vel=5;
 step(()=>t.update(0.05),0.05,8); // 0.4s 推进: 前轴圆命中 → 应碾毁而非推挤

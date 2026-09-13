@@ -166,7 +166,9 @@ if(po&&!occBlocked(po[0],po[1])) return po;
 return null;
 };
 FLAGS.forEach((f,i)=>{
-const tgt=BASES[i%2];
+// 机枪朝向: 带显式 own 的旗点(斯大林格勒 14 点)面向敌方主基地 = home 点枪口对着反攻轴线;
+// 无 own 的中性旗沿用奇偶交替旧规则 (其他战役行为零变化)
+const tgt=BASES[f.own===0?1:(f.own===1?0:(i%2))];
 const face=Math.atan2(f.x-tgt.x,f.z-tgt.z);
 const sp=mgSpot(f.x,f.z,9);
 if(sp) mg42(sp[0],sp[1],face);

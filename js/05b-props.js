@@ -162,6 +162,42 @@ fuelAdd(x,z,0.9);
 const rec={kind:'dead',x,z,g0,meshes:[t,b1],cyl,alive:true,dead:false};
 floraHashAdd(rec);
 }
+// 垂柳 (淞沪水乡): 沿河/塘软遮蔽 —— 可穿行, 不挡弹, 轮廓一眼江南
+// 空间账: 干高 2.8, 冠幅 ~3.5 下垂至 ~0.6m (站隐不全遮); 根部圆柱 r0.35
+// 2026-09-12 实机修复: 旧版冠部=3 片平面绿盒悬空像飞毯; 改为多层小叶簇+自然垂条
+function willowTree(x,z){
+if(!propFree(x,z,1.4)||!freeSpot(x,z,1.0)) return;
+propTake(x,z,1.4);
+const g0=heightAt(x,z)-0.2;
+// 主干 (微倾, 高 2.8)
+const trunk=mesh(new THREE.CylinderGeometry(0.16,0.30,2.8,7),MAT.bark,x,g0+1.4,z);
+trunk.rotation.z=wr(-0.06,0.06);
+// 主枝: 3 根斜出 (从干顶分叉)
+for(let i=0;i<3;i++){
+const a=i*TAU/3+wr(-0.3,0.3);
+const bx=x+Math.cos(a)*0.5, bz=z+Math.sin(a)*0.5;
+const m=mesh(boxGeo(0.10,1.4,0.10),MAT.bark,bx,g0+3.2,bz,a);
+m.rotation.order='YXZ'; m.rotation.z=wr(0.3,0.5);
+}
+// 冠部: 多层小叶簇 (非平面大盒, 而是 6~8 片小叶面交错)
+for(let i=0;i<7;i++){
+const a=wr(0,TAU), r=wr(0.3,1.2), h=wr(2.6,3.6);
+const px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
+const m=mesh(boxGeo(wr(0.8,1.4),0.12,wr(0.6,1.1)),MAT.leaves||MAT.wood,px,g0+h,pz,wr(0,TAU),false,false);
+m.rotation.order='YXZ'; m.rotation.x=wr(-0.3,0.3); m.rotation.z=wr(-0.2,0.2);
+}
+// 垂条: 10~14 条细长条自冠部下垂 (纯视觉, 不挡弹)
+for(let i=0;i<12;i++){
+const a=wr(0,TAU), r=wr(0.5,1.6);
+const px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
+const topY=g0+wr(2.8,3.4);
+const len=wr(1.6,2.4);
+const m=mesh(boxGeo(0.06,len,0.06),MAT.leaves||MAT.wood,px,topY-len/2,pz,0,false,false);
+m.rotation.order='YXZ';
+m.rotation.z=wr(-0.15,0.15); m.rotation.x=wr(-0.1,0.1);
+}
+CYLS.push({x,z,r:0.35,y0:g0,y1:g0+2.8});
+}
 const craterGeo=new THREE.CircleGeometry(1,20);
 const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false,map:TEX.crater}); // 2026-09-06 B8/P3-12: 焦土径向贴图取代纯色
 const runtimeCraters=[];
@@ -431,4 +467,91 @@ mesh(boxGeo(segL,0.05,0.05),MAT.metalDark,(x+prevArm.x)/2,(g0+prevArm.g)/2+5.82,
 }
 prevArm={x,g:g0};
 }
+}
+// ═══════════ 柏林街道家具 (2026-09-09 加密批次: 用户实机反馈"城内太过于空荡") ═══════════
+// 烧毁轿车残骸: 车体+车厢+四轮 —— 可碾轻掩体 (crush), 城市街道的密度骨架
+function carWreck(x,z,ry){
+if(!propFree(x,z,2.2)||!freeSpot(x,z,2.1)) return; // freeSpot: 避开建筑足迹/地铁下沉区
+propTake(x,z,2.2);
+const fit=groundFit(x,z,ry,1.9,1.0);
+const dark=new THREE.MeshLambertMaterial({color:0x3a3229,map:TEX.grime});
+const grp=new THREE.Group();
+grp.position.set(x,fit.y,z);
+grp.rotation.order='YXZ';
+grp.rotation.set(fit.pitch,ry,fit.roll);
+world.add(grp);
+const body=new THREE.Mesh(boxGeo(1.75,0.72,4.2),dark); body.position.y=0.62; grp.add(body);
+const cab=new THREE.Mesh(boxGeo(1.6,0.62,1.9),dark); cab.position.set(0,1.24,-0.25); grp.add(cab);
+for(const [wx,wz] of [[-0.82,1.35],[0.82,1.35],[-0.82,-1.35],[0.82,-1.35]]){
+const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.22,8),MAT.metalDark);
+wh.position.set(wx,0.34,wz); wh.rotation.z=HPI; grp.add(wh);
+}
+grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+const bb=addBoxCollider(x,fit.y+0.62,z, Math.abs(Math.sin(ry))>0.5?4.2:1.75, 1.24, Math.abs(Math.sin(ry))>0.5?1.75:4.2);
+bb.crush=true; // 坦克可碾 (轻掩体: 挡人挡弹, 不挡坦克)
+coverPoints.push({x:x+Math.cos(ry)*1.5,z:z-Math.sin(ry)*1.5},{x:x-Math.cos(ry)*1.5,z:z+Math.sin(ry)*1.5});
+}
+// 街灯 (柏林街灯): 铸铁杆+弯臂+灯罩 —— 细高件, 坦克可碾平 (crush); ry 决定灯臂朝向
+function lampPost(x,z,ry=0){
+if(!propFree(x,z,0.9)||!freeSpot(x,z,0.8)) return;
+propTake(x,z,0.9);
+const g0=heightAt(x,z), h=5.0;
+const cs=Math.cos(ry), sn=Math.sin(ry);
+mesh(new THREE.CylinderGeometry(0.07,0.11,h,7),MAT.metalDark,x,g0+h/2,z);
+mesh(boxGeo(0.72,0.08,0.08),MAT.metalDark,x+cs*0.32,g0+h-0.05,z-sn*0.32,ry,false,true);
+mesh(boxGeo(0.34,0.3,0.34),MAT.metalDark,x+cs*0.64,g0+h-0.22,z-sn*0.64,ry,false,true);
+const bb=addBoxCollider(x,g0+h/2,z,0.26,h,0.26);
+bb.crush=true;
+}
+// 碎石堆 (街边建筑塌落的瓦砾带): 纯视觉+软掩体 —— 便宜 (6 盒), 用于成片铺街
+function debrisLine(x0,z0,x1,z1,step){
+const len=Math.hypot(x1-x0,z1-z0), n=Math.max(1,Math.round(len/step));
+for(let i=0;i<n;i++){
+const t=(i+0.5)/n, px=x0+(x1-x0)*t+wr(-1.4,1.4), pz=z0+(z1-z0)*t+wr(-1.4,1.4);
+if(!freeSpot(px,pz,1.6)) continue;
+rubblePile(px,pz,wr(1.4,2.2));
+}
+}
+// ═══════════ 地貌组道具 (2026-09-10: 百团铁路专线) ═══════════
+// 铁路线: 双轨+枕木, 沿 (x0,z0)→(x1,z1) 铺设 —— 轨面贴地不设碰撞 (0.08m 可碾过)
+function railLine(x0,z0,x1,z1){
+const len=Math.hypot(x1-x0,z1-z0)||1;
+const ux=(x1-x0)/len, uz=(z1-z0)/len;
+const ry=Math.atan2(ux,uz);
+const step=3.5;
+for(let u=0;u<len;u+=step){
+const px=x0+ux*(u+step/2), pz=z0+uz*(u+step/2);
+const g0=heightAt(px,pz);
+// 枕木 (垂直轨向)
+mesh(boxGeo(2.4,0.12,0.5),MAT.woodDark,px,g0+0.03,pz,ry,false,true);
+// 双轨
+for(const side of [-0.72,0.72]){
+const rx=px+Math.cos(ry)*side, rz=pz-Math.sin(ry)*side;
+mesh(boxGeo(0.1,0.1,step+0.1),MAT.metalDark,rx,g0+0.1,rz,ry,false,true);
+}
+}
+}
+// 平板车残骸: 硬掩体, 坦克不可碾 (无 crush) —— 破袭目标感
+function railFlatcar(x,z,ry){
+if(!propFree(x,z,3.5)||!freeSpot(x,z,3.2)) return;
+propTake(x,z,3.5);
+const fit=groundFit(x,z,ry,5.5,1.6);
+const cs=Math.cos(ry), sn=Math.sin(ry);
+// 车架
+solidBox(MAT.woodDark,2.2,0.35,5.8,x,fit.y+0.55,z,ry);
+// 平板面
+mesh(boxGeo(2.0,0.12,5.5),MAT.wood,x,fit.y+0.78,z,ry,false,true);
+// 车轮 (圆柱)
+for(const u of [-2.0,2.0]){
+for(const v of [-0.85,0.85]){
+const wx=x+sn*u+cs*v, wz=z+cs*u-sn*v;
+mesh(new THREE.CylinderGeometry(0.32,0.32,0.18,8),MAT.metalDark,wx,fit.y+0.32,wz).rotation.z=HPI;
+}
+}
+// 车端挡板
+for(const sgn of [-1,1]){
+const px=x+sn*sgn*2.7, pz=z+cs*sgn*2.7;
+mesh(boxGeo(2.1,0.7,0.12),MAT.woodDark,px,fit.y+1.1,pz,ry,false,true);
+}
+coverPoints.push({x:x+cs*1.4,z:z-sn*1.4},{x:x-cs*1.4,z:z+sn*1.4});
 }

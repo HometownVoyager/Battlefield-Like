@@ -376,13 +376,13 @@ player.yaw=this.yaw+Math.PI;
 const thr=(keys.KeyW?1:0)-(keys.KeyS?1:0);
 this.speed=clamp(this.speed+thr*13*dt,this.def.spd[0],this.def.spd[1]);
 if(mouseDown&&this.fireT<=0&&!matchOver){
-this.fireT=this.def.rof;
+this.fireT=this.def.rof*(player.streakBuff?player.streakBuff.reloadMul:1); // 连杀增益: 航炮加速 (2026-09-12)
 this.fireMGBurst(player,0.8);
 AudioSys.gunshot('smg',0,0);
 addTrauma(0.03);
 }
 if((mouse2Down||keys.KeyB)&&this.bombs>0&&this.bombCd<=0&&!matchOver){
-this.bombCd=0.8; this.bombs--;
+this.bombCd=0.8*(player.streakBuff?player.streakBuff.reloadMul:1); this.bombs--; // 连杀增益: 投弹间隔缩短 (挂弹补给 rearmT 不动, 2026-09-12)
 this.dropBomb(player);
 }
 const gh=heightAt(this.pos.x,this.pos.z);
@@ -423,9 +423,10 @@ cb.damage(999,attacker,false);
 }
 if(attacker&&attacker.team!==this.team){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+SCORE_TABLE.plane;
+// 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
+if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('击落战机',SCORE_TABLE.plane);
+else attacker.score=(attacker.score||0)+SCORE_TABLE.plane;
 addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
-if(attacker.isPlayer) registerKillScore('击落战机',SCORE_TABLE.plane);
 }
 tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);
 explosionFX(this.pos.clone());

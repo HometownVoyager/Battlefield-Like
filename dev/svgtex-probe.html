@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SVG 贴图管线探针</title>
+<style>
+body{font:14px/1.6 Consolas,monospace;background:#222;color:#ddd;margin:16px}
+.row{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+.cell{text-align:center}
+canvas{width:160px;height:160px;image-rendering:pixelated;border:1px solid #555;background:
+repeating-conic-gradient(#333 0 25%,#3a3a3a 0 50%) 0 0/20px 20px}
+b{display:block;margin-top:4px}
+#log{white-space:pre-wrap;background:#111;padding:10px;border:1px solid #444;margin-top:14px;min-height:60px}
+</style>
+</head>
+<body>
+<h3>SVG 贴图管线探针（与游戏 02-scene.js 同款 svgURI/Image/drawImage 路径）</h3>
+<div>每格应为有内容的纹理（非纯黑/非透明）。格内四块样本：草方格平铺 / 砖 / 白底布纹 / 弹坑。</div>
+<div class="row" id="grid"></div>
+<div>对照：左=直接 drawImage(SVG)；右=同款重绘后回读校验路径。</div>
+<div id="log">日志：</div>
+<script>
+'use strict';
+const log=document.getElementById('log');
+const say=m=>{log.textContent+=m};
+function svgURI(w,h,body){return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`);}
+function mottle(id,freq,rgb,s,bias,op,seed){return `<filter id="${id}" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${freq}" numOctaves="3" seed="${seed}" stitchTiles="stitch"/><feColorMatrix type="matrix" values="0 0 0 0 ${rgb[0]} 0 0 0 0 ${rgb[1]} 0 0 0 0 ${rgb[2]} ${s} ${s} ${s} 0 ${bias}"/></filter><rect width="100%" height="100%" filter="url(#${id})" opacity="${op}"/>`;}
+// 四个代表性生成体: 草(噪声色斑) / 砖(纯形状) / 布(白底拉丝) / 弹坑(径向渐变)
+const GEN={
+ 'grass feTurbulence':()=>`<rect width="128" height="128" fill="#6b7a48"/>`+mottle('g1','0.03',[0.3,0.36,0.16],0.9,-0.76,0.5,7),
+ 'brick 纯形状':()=>{let b='';for(let ry=0;ry<4;ry++){const off=(ry%2)?32:0;for(let x=-64+off;x<128;x+=64){b+=`<rect x="${x+1}" y="${ry*32+1}" width="61" height="29" rx="1.5" fill="rgb(${120+ry*8},${80},${60})"/>`;}}return `<rect width="128" height="128" fill="#8a8172"/>`+b;},
+ 'cloth 白底拉丝':()=>`<rect width="128" height="128" fill="#ffffff"/>`+mottle('c1','0.05',[0.6,0.6,0.62],0.8,-0.7,0.15,3),
+ 'crater 径向渐变':()=>`<defs><radialGradient id="r1"><stop offset="0" stop-color="rgb(40,36,30)"/><stop offset="1" stop-color="rgb(150,142,124)"/></radialGradient></defs><rect width="128" height="128" fill="rgb(150,142,124)"/><circle cx="64" cy="64" r="64" fill="url(#r1)"/>`,
+};
+const grid=document.getElementById('grid');
+for(const [name,gen] of Object.entries(GEN)){
+ for(const mode of ['直接绘制','重绘+校验']){
+  const cell=document.createElement('div');cell.className='cell';
+  const c=document.createElement('canvas');c.width=128;c.height=128;
+  cell.appendChild(c);
+  const cap=document.createElement('b');cap.textContent=name+' / '+mode;cell.appendChild(cap);
+  grid.appendChild(cell);
+  const g=c.getContext('2d');
+  g.fillStyle='#888';g.fillRect(0,0,128,128); // 底灰: 若 SVG 全透明会露出灰底而非黑
+  const img=new Image();
+  img.onload=()=>{
+   try{
+    g.clearRect(0,0,128,128);
+    g.drawImage(img,0,0,128,128);
+   }catch(e){say(`[✗] ${name}/${mode} drawImage 抛异常: ${e.message}\n`);return}
+   const d=g.getImageData(0,0,128,128).data;
+   let n=0,op=0,black=0,sum=0;
+   for(let i=0;i<d.length;i+=148){n++;sum+=d[i]+d[i+1]+d[i+2];if(d[i+3]>10)op++;if(d[i+3]>200&&d[i]+d[i+1]+d[i+2]<24)black++;}
+   const avg=(sum/n/3).toFixed(0);
+   const verdict=(op===0)?'【全透明→黑贴图根因】':(black/n>0.995?'【全黑→黑贴图根因】':'【正常】');
+   say(`[i] ${name}/${mode}: 平均亮度=${avg} 不透明=${(100*op/n)|0}% 纯黑=${(100*black/n)|0}% ${verdict}\n`);
+  };
+  img.onerror=()=>say(`[✗] ${name}/${mode} SVG 加载失败(onerror)\n`);
+  img.src=svgURI(128,128,gen());
+ }
+}
+</script>
+</body>
+</html>

@@ -33,13 +33,16 @@ propTake(x,z,2.7); // 反坦克炮整机+掩护墙占位
 CYLS.push({x,z,r:0.6,y0:g0,y1:g0+1.2});
 ATGUNS.push({x,z,y:g0+0.85,face,grp,yaw,pitch,user:null,cd:0,cdLock:0,kind:'at'});
 }
-function aaGun(x,z){
-// 同 atGun: 炮座落点互斥+外推, 无净位放弃
+// yDeck: 塔顶/平台固定高度 (2026-09-09 柏林防空塔: 屋顶平台高炮; 省略=按地形取高)
+function aaGun(x,z,yDeck){
+const onDeck=yDeck!==undefined&&yDeck!==null;
+if(!onDeck){
 const po=propFree(x,z,1.2)?[x,z]:propPushOut(x,z,1.2);
 if(!po) return;
 x=po[0]; z=po[1];
-const g0=heightAt(x,z);
-const gfit=groundFit(x,z,0,1.0,1.0);
+}
+const g0=onDeck?yDeck:heightAt(x,z);
+const gfit=onDeck?{y:g0,pitch:0,roll:0}:groundFit(x,z,0,1.0,1.0);
 const grp=new THREE.Group();
 grp.position.set(x,gfit.y+1.15,z);
 grp.rotation.order='YXZ';
@@ -72,9 +75,15 @@ const po=propPushOut(x,z,r);
 if(po&&!occBlocked(po[0],po[1])&&freeSpot(po[0],po[1],0.6)) return po;
 return null;
 }
+// 反坦克炮按相邻旗对中点摆放; 斯大林格勒 14 点改版后旗链拉长 —— 只在中带 (距图心 80m 内) 布炮,
+// 避免两翼 home 区(纵深无敌方坦克常态化)堆满反坦克炮; 其他战役保持全旗对布放 (行为零变化)
+const atMidBand=CAMPAIGN.id==='stalingrad';
 for(let i=0;i<FLAGS.length-1;i++){
 const a=FLAGS[i], b=FLAGS[i+1];
-const sp=findClearSpot((a.x+b.x)/2,(a.z+b.z)/2,10,2.7);
+const mx=(a.x+b.x)/2, mz=(a.z+b.z)/2;
+if(atMidBand&&Math.hypot(mx,mz)>80) continue;
+if(onBridge(mx,mz)!==false) continue; // 桥面不布反坦克炮 (2026-09-12 胡康巨桥: 桥面留给通行/塔楼/桥头碉堡)
+const sp=findClearSpot(mx,mz,10,2.7);
 if(sp) atGun(sp[0],sp[1],Math.atan2(b.x-a.x,b.z-a.z)+HPI*(i%2?1:-1));
 }
 if(FLAGS.length>2){ const sp=findClearSpot(FLAGS[0].x,FLAGS[0].z,14,2.7); if(sp) atGun(sp[0],sp[1],rand(0,TAU)); }
@@ -82,7 +91,12 @@ if(BASES.length){
 { const p1=findClearSpot(BASES[0].x+(BASES[0].x<0?10:-10),BASES[0].z+10,8,1.2); if(p1) aaGun(p1[0],p1[1]); }
 { const p2=findClearSpot(BASES[1].x+(BASES[1].x<0?10:-10),BASES[1].z-10,8,1.2); if(p2) aaGun(p2[0],p2[1]); }
 }
-if(FLAGS.length){ const fm=FLAGS[Math.floor(FLAGS.length/2)]; const p3=findClearSpot(fm.x,fm.z,12,1.2); if(p3) aaGun(p3[0],p3[1]); }
+// 中央旗防空炮: 旗在桥面上时跳过 (胡康巨桥 —— 塔顶 FLAK_DECKS 高炮已覆盖, 桥心不摆炮挡行车道)
+if(FLAGS.length&&onBridge(FLAGS[Math.floor(FLAGS.length/2)].x,FLAGS[Math.floor(FLAGS.length/2)].z)===false){
+const fm=FLAGS[Math.floor(FLAGS.length/2)]; const p3=findClearSpot(fm.x,fm.z,12,1.2); if(p3) aaGun(p3[0],p3[1]);
+}
+// 塔顶高炮 (2026-09-09 柏林防空塔): FLAK_DECKS 由 05a flakTower 登记平台坐标/高度 —— 平台炮位固定不偏移
+for(const d of FLAK_DECKS) aaGun(d.x,d.z,d.y);
 // 无旗点战役 (遭遇/劫道): 阵营前出点各配反坦克炮+重机枪, 面向敌方基地
 // 炮位/机枪位带垂直侧移(perp), 车队出发地等贴路前出点的工事不会被甩到路心
 // 劫道(断崖公路)除外: 伏击山谷不设任何固定火力点
@@ -145,11 +159,22 @@ return true;
 for(let i=MED_CRATES.length-1;i>=0;i--){
 if(MED_CRATES[i].owner===owner) removeMedkit(MED_CRATES[i]);
 }
-// 落点避障: 占位占用格+道具登记双查, 偏移兜底, 仍无净位则放弃 (不压弹药箱/沙袋/炮位/墙脚)
+// 落点避障: 占位占用格+道具登记+建筑足迹三查, 偏移兜底, 仍无净位则放弃 (不压弹药箱/沙袋/炮位/墙脚)
+// 足迹查豁免旗点平台标记 (footRect 中心=旗点坐标, 0.8 高平台可放箱); 2026-09-12 百团改版:
+// verify-layouts 抓到运行时医疗箱落进碉堡足迹 (=埋进墙里), 补齐这项空间避让
 let px=x,pz=z,ok=false;
 for(const [ox,oz] of [[0,0],[0.9,0.5],[-0.9,0.5],[0.5,-0.9],[-0.5,-0.9],[1.4,0],[-1.4,0],[0,1.4],[0,-1.4]]){
 if(occBlocked(x+ox,z+oz)) continue;
 if(!propFree(x+ox,z+oz,0.85)) continue;
+let footHit=false;
+for(const f of B_FOOT){
+const fcx=(f.x0+f.x1)/2, fcz=(f.z0+f.z1)/2;
+let isFlagRect=false;
+for(const fl of FLAGS){ if(Math.abs(fcx-fl.x)<0.1&&Math.abs(fcz-fl.z)<0.1){ isFlagRect=true; break; } }
+if(isFlagRect) continue;
+if(x+ox>f.x0-0.85&&x+ox<f.x1+0.85&&z+oz>f.z0-0.85&&z+oz<f.z1+0.85){ footHit=true; break; }
+}
+if(footHit) continue;
 px=x+ox; pz=z+oz; ok=true; break;
 }
 if(!ok){

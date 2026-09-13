@@ -178,6 +178,33 @@ if(b.maxY<=curY+0.55&&b.maxY>h) h=b.maxY;
 });
 return h;
 }
+// 坡度物理 (步兵, 2026-09-12 百团改版, 全战役生效; 玩家/Bot 同规则 —— 纲领第 2 条):
+// 上坡 FOOT_SLOPE_SLOW(40°)起减速"手脚并用", FOOT_SLOPE_MAX(65°)以上不可登攀 ——
+// 超限段只保留沿等高线分量 (横向恒可走, 无卡死); 下坡不设限: 走出崖缘自然腾空, 摔伤由 fallDamage 结算。
+// 仅地面态调用 (腾空/伞降/乘载具不适用); 建筑楼梯不受影响 (heightAt 不含建筑几何)。
+const _slopeOut=[0,0];
+function slopeGateMove(pos,dx,dz){
+_slopeOut[0]=dx; _slopeOut[1]=dz;
+const dist=Math.hypot(dx,dz);
+if(dist<1e-6) return _slopeOut;
+const dh=heightAt(pos.x+dx,pos.z+dz)-heightAt(pos.x,pos.z);
+if(dh<=0) return _slopeOut; // 下坡/平地不设限
+const sl=dh/dist, kMax=Math.tan(FOOT_SLOPE_MAX*DEG), kSlow=Math.tan(FOOT_SLOPE_SLOW*DEG);
+if(sl<=kSlow) return _slopeOut;
+if(sl>kMax){
+const gx=heightAt(pos.x+1.2,pos.z)-heightAt(pos.x-1.2,pos.z);
+const gz=heightAt(pos.x,pos.z+1.2)-heightAt(pos.x,pos.z-1.2);
+const gl=Math.hypot(gx,gz);
+if(gl>1e-4){
+const cx=-gz/gl, cz=gx/gl, t=dx*cx+dz*cz;
+_slopeOut[0]=cx*t*0.8; _slopeOut[1]=cz*t*0.8;
+}else{ _slopeOut[0]=0; _slopeOut[1]=0; }
+return _slopeOut;
+}
+const f=1-(sl-kSlow)/(kMax-kSlow)*0.72; // 40°→65° 线性减速至 28%
+_slopeOut[0]=dx*f; _slopeOut[1]=dz*f;
+return _slopeOut;
+}
 // 严寒庇护判定 (2026-09-05 城市组·斯大林格勒 cold:true): 头顶竖直射线 12m 内有静态遮蔽
 // (屋顶/楼板/亭顶/车厢顶) 即算室内 —— 玩家与 Bot 同判定 (raycastWorld 竖直向只测所在格, 开销可忽略)
 const _coldO=V3(), _coldD=V3(0,1,0);

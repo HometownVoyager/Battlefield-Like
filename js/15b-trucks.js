@@ -164,9 +164,10 @@ onTick:(dtk,k)=>{ if(k<0.9&&Math.random()<dtk*2.2) spawnP(PT.dark,this.pos.x+ran
 onDone:()=>{ world.remove(this.grp); this.sunk=true; }});
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
-attacker.score=(attacker.score||0)+SCORE_TABLE.truck;
+// 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
+if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁运输车',SCORE_TABLE.truck);
+else attacker.score=(attacker.score||0)+SCORE_TABLE.truck;
 addKillfeed(attacker,this,false);
-if(attacker.isPlayer) registerKillScore('摧毁运输车',SCORE_TABLE.truck);
 }
 addKillMsg(`运输车被摧毁! 剩余 ${CONVOY_STATE?CONVOY_STATE.left:0} 辆`,attacker?attacker.team:player.team);
 }

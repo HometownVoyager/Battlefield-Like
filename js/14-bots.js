@@ -97,10 +97,18 @@ this.coverCd=0; this.slideCd=0; this.lastCover=null;
 this.fireFleeT=0; this.fireScanT=rand(0,0.22);
 this.onVehicle=null; this.targetVeh=null; this.chuting=false; this.emCast=null;
 this.bandageT=0;
-this.mesh.root.visible=true;
-this.mesh.root.rotation.set(0,0,0);
-this.mesh.pelvis.position.y=0.94;
-this.pickObjective();
+	this.mesh.root.visible=true;
+	this.mesh.root.rotation.set(0,0,0);
+	this.mesh.pelvis.position.y=0.94;
+	// 全局机制 (2026-09-06 用户指定): Bot 部署/重生时若有同队闲置坦克 → 直接部署为车组。
+	// 与玩家部署界面"选载具出生"同一语义 (不限距离, 取最近一辆); 小队成员除外 (随玩家步行);
+	// 战机不在此列 (pilotOf 专属流程), 卡车为劫道模式纯 AI 运输队 (无乘员位) 也不适用。
+	// 厂房坦克产能依赖此条: 苏军战损坦克在厂区重生后, 下一名额度内重生的 Bot 会直接上车开赴前线。
+	if(!this.inSquad){
+	const dv=pickIdleDeployVehicle(this);
+	if(dv) this.spawnInVehicle(dv);
+	}
+	this.pickObjective();
 }
 spawnInVehicle(v){
 this.hp=100; this.alive=true; this.crouch=false; this.prone=false;
@@ -115,8 +123,8 @@ this.respawnT=0;
 this.mesh.root.visible=false;
 this.mesh.root.rotation.set(0,0,0);
 this.mesh.pelvis.position.y=0.94;
-this.onVehicle=v; v.crewBot=this;
-this.pos.copy(v.pos);
+	this.onVehicle=v; v.crewBot=this; v.claimBot=null;
+	this.pos.copy(v.pos);
 }
 enterVehicle(v){
 if(v.crewBot||v.playerDriven) return;
@@ -424,7 +432,7 @@ return;
 if(dTank<130){
 for(const g of ATGUNS){
 if(!empReady(g)) continue; // 占用中/上炮冷却中(下炮后EMP_REARM_T秒)
-if(Math.hypot(g.x-this.pos.x,g.z-this.pos.z)<16){
+if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,16)){
 // 解除朝向限制: 炮塔可360°回旋, 就近即可上炮; 使用前摇与玩家同规 (0.9s原地操作); 前摇期间即占位
 g.user=this;
 this.emCast={kind:'at',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null;
@@ -449,7 +457,7 @@ const ePlane=enemyPlaneAlive(this.team);
 if(ePlane&&!engaged&&!this.inSquad&&Math.random()<0.4){
 for(const g of AAGUNS){
 if(!empReady(g)) continue;
-if(Math.hypot(g.x-this.pos.x,g.z-this.pos.z)<15){
+if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,15)){
 g.user=this;
 this.emCast={kind:'aa',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
 return;
@@ -631,7 +639,7 @@ return;
 if(!this.mgUse&&Math.random()<0.25){
 for(const mg of MG42S){
 if(!empReady(mg)) continue;
-if(Math.hypot(mg.x-this.pos.x,mg.z-this.pos.z)<14){
+if(empInReach(mg,this.pos.x,this.pos.y,this.pos.z,14)){
 mg.user=this;
 this.emCast={kind:'mg',g:mg,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
 return;
@@ -641,7 +649,7 @@ return;
 if(!this.defendPt||Math.random()<0.3){
 let best=null,bd=1e9;
 for(const cp of coverPoints){
-if(fireThreat(cp.x,cp.z,2.8)) continue; // 驻守点避开火线 (2026-09-02 火情规避)
+if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 驻守点避开火线/树爆弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
 const d=Math.hypot(cp.x-f.x,cp.z-f.z);
 // 掩体限制在旗圈以内: 守方站在圈内才能真正阻断敌方占领
 if(d<f.r*0.85){
@@ -692,7 +700,7 @@ const cands=[];
 for(const cp of coverPoints){
 const d=Math.hypot(cp.x-this.pos.x,cp.z-this.pos.z);
 if(d<2.2||d>26) continue;
-if(fireThreat(cp.x,cp.z,2.8)) continue; // 火线上的掩体不进 (2026-09-02 火情规避)
+if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 火线/弹着圈上的掩体不进 (2026-09-02 火情规避 / 2026-09-13 树爆)
 cands.push([d,cp]);
 }
 if(!cands.length) return null;
@@ -720,7 +728,7 @@ for(const cp of coverPoints){
 const d=Math.hypot(cp.x-this.pos.x,cp.z-this.pos.z);
 if(d<6||d>22) continue;
 if(Math.hypot(tx-cp.x,tz-cp.z)>dMe-4) continue;
-if(fireThreat(cp.x,cp.z,2.8)) continue; // 跃进落点不选火线 (2026-09-02 火情规避)
+if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 跃进落点不选火线/弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
 cands.push([d,cp]);
 }
 if(!cands.length) return null;
@@ -853,7 +861,7 @@ this.fireFleeT-=dt;
 this.fireScanT-=dt;
 if(this.fireScanT<=0){
 this.fireScanT=0.22;
-const ft=fireThreat(this.pos.x,this.pos.z,2.0);
+const ft=fireThreat(this.pos.x,this.pos.z,2.0)||tbThreat(this.pos.x,this.pos.z,2.0); // 树爆弹着圈 (2026-09-13 许特根改版, 与火情同一逃生路径)
 if(ft){
 this.fireFleeT=0.75;
 // 逃生航向: 背离最近火心, 逐级侧偏选无火可立的落点 (全堵则直背火冲, moveDir 内还有二次避障)
@@ -1413,10 +1421,13 @@ if(!found) yaw+=Math.PI*(Math.random()<0.5?0.5:-0.5);
 	const rd=riverDirAt(this.pos.x,this.pos.z);
 	if(rd){ this.pos.x+=rd[0]*1.5*dt; this.pos.z+=rd[1]*1.5*dt; }
 	}
-	this.vel.x=Math.sin(yaw)*speed*cr*wf*(riv?0.4:1);
-	this.vel.z=Math.cos(yaw)*speed*cr*wf*(riv?0.4:1);
-this.pos.x+=this.vel.x*dt;
-this.pos.z+=this.vel.z*dt;
+	// 浅水/支流 (淞沪圩田): 涉水减速, 无激流伤害
+	const shal=!riv&&inShallowChannel(this.pos.x,this.pos.z);
+this.vel.x=Math.sin(yaw)*speed*cr*wf*(riv?0.4:(shal?0.55:1));
+this.vel.z=Math.cos(yaw)*speed*cr*wf*(riv?0.4:(shal?0.55:1));
+// 坡度物理 (2026-09-12): 与玩家同规则 —— 上坡>40°减速/>65°封(沿等高线滑), 下坡不设限
+const mvS=slopeGateMove(this.pos,this.vel.x*dt,this.vel.z*dt);
+this.pos.x+=mvS[0]; this.pos.z+=mvS[1];
 collideMove(this.pos,0.4);
 const gh=standHeight(this.pos.x,this.pos.z,this.pos.y+0.6);
 this.pos.y=dampF(this.pos.y,gh,20,dt);
@@ -1626,3 +1637,21 @@ if(n>1){ pos.needsUpdate=true; b.dbgLine.geometry.setDrawRange(0,n); b.dbgLine.v
 else b.dbgLine.visible=false;
 },
 };
+
+// ===== 部署上车: 闲置坦克扫描 (2026-09-06 用户指定全局机制) =====
+// Bot 部署/重生时若同队存在闲置坦克 → 直接部署为车组 (spawnInVehicle)。
+// 闲置判定与 06/14 的既有"就近认领"同口径: 活着/同队/无乘员/非玩家驾驶/
+// 不在禁入冷却(noEnterT)/血量≥40%/无他人 8s 内的有效认领(claimBot)。
+// 最近优先、不限距离 —— 与玩家部署界面"选载具出生"同语义; 厂房产能重生车由此快速获得车组。
+function pickIdleDeployVehicle(bot){
+let best=null,bd=1e9;
+for(const v of tanks){
+if(!v.alive||v.team!==bot.team||v.crewBot||v.playerDriven) continue;
+if((v.noEnterT||0)>nowT) continue;
+if(v.hp<v.maxHp*0.4) continue;
+if(v.claimBot&&v.claimBot.alive&&v.claimBot!==bot&&v.claimBot.targetVeh===v&&nowT-(v.claimT||0)<8) continue;
+const d=Math.hypot(v.pos.x-bot.pos.x,v.pos.z-bot.pos.z);
+if(d<bd){ bd=d; best=v; }
+}
+return best;
+}

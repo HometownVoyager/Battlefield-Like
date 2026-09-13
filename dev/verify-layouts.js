@@ -29,13 +29,14 @@ class Obj3{ constructor(){ this.position=new P3(); this.rotation=new Rot(); this
 add(m){ this.children.push(m); m.parent=this; } remove(m){ const i=this.children.indexOf(m); if(i>=0){ this.children.splice(i,1); m.parent=null; } }
 traverse(fn){ fn(this); for(const c of this.children) if(c.traverse) c.traverse(fn); } }
 class Geo{ constructor(...a){ this.parameters={width:a[0]||1,height:a[1]||1,depth:a[2]||1}; } translate(){return this;} rotateX(){return this;} rotateY(){return this;} }
+class PlaneGeo extends Geo{ constructor(w=1,h=1,sg=1,sh=1){ super(w,h); const gx=(sg||1)+1, gy=(sh||1)+1; this.attributes={position:{count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}}}; } }
 return {
 Group:class extends Obj3{}, Mesh:class extends Obj3{ constructor(g,m){ super(); this.geometry=g||new Geo(); this.material=m||{}; } },
 InstancedMesh:class extends Obj3{ constructor(g,m,n){ super(); this.geometry=g; this.material=m; this.count=n; } setMatrixAt(){} },
 Object3D:Obj3, Vector3:P3, Quaternion:Quat, CanvasTexture:class{ constructor(c){ this.image=c; } },
 Euler:class{ set(){ return this; } },
 Matrix4:class{ compose(){ return this; } },
-BoxGeometry:Geo, CylinderGeometry:Geo, PlaneGeometry:Geo, SphereGeometry:Geo, ConeGeometry:Geo, TorusGeometry:Geo, CircleGeometry:Geo,
+BoxGeometry:Geo, CylinderGeometry:Geo, PlaneGeometry:PlaneGeo, SphereGeometry:Geo, ConeGeometry:Geo, TorusGeometry:Geo, CircleGeometry:Geo,
 MeshLambertMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } },
 MeshBasicMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } },
 BufferGeometry:class{ constructor(){ this.attributes={}; } setAttribute(n,a){ this.attributes[n]=a; return this; } setIndex(){return this;} setFromPoints(){return this;} computeVertexNormals(){return this;} },
@@ -52,16 +53,82 @@ const XF_SEGS=[]; let XF_LEN=0;
 function ridgeInfo(x,z){let bd=1e9,bt=0;for(const s of XF_SEGS){const abx=s.bx-s.ax,abz=s.bz-s.az;const t=Math.max(0,Math.min(1,((x-s.ax)*abx+(z-s.az)*abz)/(abx*abx+abz*abz||1)));const px=s.ax+abx*t,pz=s.az+abz*t;const d=Math.hypot(x-px,z-pz);if(d<bd){bd=d;bt=(s.l0+s.l*t)/XF_LEN;}}return{d:bd,t:bt};}
 const xfGauss=(t,c,w)=>{const u=(t-c)/w;return Math.exp(-0.5*u*u);};
 function ridgeH(t){let h=0;for(const c of [[0.20,44,0.055],[0.50,112,0.075],[0.84,52,0.06]])h+=c[1]*xfGauss(t,c[0],c[2]);for(const c of [[0.32,27,0.05],[0.655,31,0.05]])h+=c[1]*xfGauss(t,c[0],c[2]);return h;}
+// ── 雾林守线副本 (2026-09-13 许特根改版): 北谷(卡尔小径)距离场+堑口遮罩 (与 03-terrain 同构) ──
+const WOOD=CAMPAIGN.wood||null;
+const segW=(px,pz,ax,az,bx,bz)=>{ const abx=bx-ax,abz=bz-az; const t=Math.max(0,Math.min(1,((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz||1))); return Math.hypot(px-(ax+abx*t),pz-(az+abz*t)); };
+const woodRavineDist=(x,z)=>{ if(!WOOD||!WOOD.ravine) return 1e9; let gd=1e9; const P=WOOD.ravine.pts; for(let i=0;i<P.length-1;i++){ const d=segW(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]); if(d<gd) gd=d; } return gd; };
+const woodRampMask=(x,z)=>{ if(!WOOD||!WOOD.ravine) return 0; let m=0; for(const r of (WOOD.ravine.ramps||[])){ const w2=r.w||5; const d=segW(x,z,r.x0,r.z0,r.x1,r.z1); const k=d<=w2?1:Math.max(0,Math.min(1,1-(d-w2)/5)); if(k>m) m=k; } return m; };
 function rawH(x,z){
+// 语义表 (03-terrain 副本): 淞沪/百团/莫斯科 —— 与本体 rawHeight 同构
+const DELTA=CAMPAIGN.delta||null, LOESS=CAMPAIGN.loess||null, ALPINE=CAMPAIGN.alpine||null;
+const s3=t=>t*t*(3-2*t);
+const segD=(px,pz,ax,az,bx,bz)=>{ const abx=bx-ax,abz=bz-az; const t=Math.max(0,Math.min(1,((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz||1))); return Math.hypot(px-(ax+abx*t),pz-(az+abz*t)); };
 switch(CAMPAIGN.terr){
 case 'urban': return 0.45*Math.sin(x*0.03)*Math.cos(z*0.028)+0.25*Math.sin(x*0.09+1)*Math.sin(z*0.07+0.5);
-case 'delta': return 0.55*Math.sin(x*0.018)*Math.cos(z*0.02)+0.35*Math.sin(x*0.06+2)*Math.sin(z*0.05+1)-0.15;
-case 'loess': return 3.8*Math.sin(x*0.018+0.5)*Math.cos(z*0.021)+2.0*(1-Math.abs(Math.sin(x*0.03+z*0.012+1)))+0.8*Math.sin(x*0.1+3)*Math.cos(z*0.09+1.2)-0.6;
+case 'delta':{
+let h=0.55*Math.sin(x*0.018)*Math.cos(z*0.02)+0.35*Math.sin(x*0.06+2)*Math.sin(z*0.05+1)-0.15;
+if(DELTA){
+if(DELTA.ridges){ for(const r of DELTA.ridges){ const d=segD(x,z,r.x0,r.z0,r.x1,r.z1); if(d<2.2) h+=1.35*s3(1-d/2.2); } }
+if(DELTA.paddy){ for(const p of DELTA.paddy){ const mx=(x-p.x0)*(x-p.x1), mz=(z-p.z0)*(z-p.z1); if(mx<=0&&mz<=0){ const dE=Math.min(x-p.x0,p.x1-x,z-p.z0,p.z1-z); if(dE>1.5) h-=0.65; else h-=0.65*s3(dE/1.5); } } }
+if(DELTA.ponds){ for(const pd of DELTA.ponds){ const d=Math.hypot(x-pd.x,z-pd.z); if(d<pd.r+1.2){ const k=Math.max(0,Math.min(1,1-d/(pd.r+1.2))); h-=(pd.t==='lotus'?0.55:0.75)*s3(k); } } }
+for(const ch of DELTA.channels){ for(let i=0;i<ch.length-1;i++){ const d=segD(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]); if(d<DELTA.w) h-=(DELTA.d||1.35)*s3(1-d/DELTA.w); } }
+if(DELTA.landmark){ const L=DELTA.landmark; const d=Math.hypot(x-L.x,z-L.z); if(d<14) h+=0.3*s3(1-d/14); }
+}
+return h;
+}
+case 'loess':{
+// 2026-09-12 立体化副本: 川地基底+塬面高台+黄土峁+深沟三段剖面(沟底/崩积坡/陡崖)+坡道堑口+渡台 (与 03-terrain rawHeight 同构)
+const base=1.5*Math.sin(x*0.016+0.5)*Math.cos(z*0.019)+0.8*(1-Math.abs(Math.sin(x*0.028+z*0.011+1)))+0.4*Math.sin(x*0.09+3)*Math.cos(z*0.08+1.2)+0.6;
+let h=base;
+if(LOESS){
+if(LOESS.terraces){ for(const t2 of LOESS.terraces){ const dx=Math.max(t2.x0-x,0,x-t2.x1), dz=Math.max(t2.z0-z,0,z-t2.z1); h+=(t2.h-h)*s3(Math.max(0,Math.min(1,1-Math.hypot(dx,dz)/14))); } }
+if(LOESS.maos){ for(const m2 of LOESS.maos){ const d=Math.hypot(x-m2.x,z-m2.z); if(d<m2.r){ const k=1-d/m2.r, mh=base+m2.h*k*(2-k); if(mh>h) h=mh; } } }
+const W=LOESS.w||14, D=LOESS.d||14, GB=LOESS.bottom||3, TE=LOESS.talus||12;
+let gd=1e9;
+for(const g of LOESS.gullies){ for(let i=0;i<g.length-1;i++){ const d=segD(x,z,g[i][0],g[i][1],g[i+1][0],g[i+1][1]); if(d<gd) gd=d; } }
+if(gd<W){
+let dep;
+if(gd<GB) dep=D;
+else if(gd<TE) dep=D-8*s3((gd-GB)/(TE-GB));
+else dep=(D-8)*(1-s3((gd-TE)/(W-TE)));
+if(LOESS.ramps){ let rm=0; for(const r of LOESS.ramps){ const w2=r.w||9; const d=segD(x,z,r.x0,r.z0,r.x1,r.z1); const k=d<=w2?1:Math.max(0,Math.min(1,1-(d-w2)/5)); if(k>rm) rm=k; } dep*=1-0.88*rm; }
+h-=dep;
+}
+if(LOESS.benches){ for(const b2 of LOESS.benches){ const dx=Math.max(b2.x0-x,0,x-b2.x1), dz=Math.max(b2.z0-z,0,z-b2.z1); h+=(b2.h-h)*s3(Math.max(0,Math.min(1,1-Math.hypot(dx,dz)/12))); } }
+}
+return h;
+}
 case 'jungle': return 2.3*Math.sin(x*0.014)*Math.cos(z*0.017+1)+1.25*Math.sin(x*0.05+1.2)*Math.sin(z*0.043+2)+0.5*Math.sin(x*0.12+3)*Math.cos(z*0.1);
 case 'deepjungle': return 1.9*Math.sin(x*0.016+0.3)*Math.cos(z*0.014+2)+1.0*Math.sin(x*0.045+0.7)*Math.sin(z*0.05+1.4)+0.4*Math.sin(x*0.11+1)*Math.cos(z*0.1+0.6);
-	case 'alpine':{ const r1=1-Math.abs(Math.sin(x*0.021+z*0.009)),r2=1-Math.abs(Math.sin(z*0.026-x*0.007+1.3)),r3=1-Math.abs(Math.sin((x+z)*0.014+2.6)); return r1*r1*6.5+r2*r2*4.2+r3*r3*2.5+1.3*Math.sin(x*0.05)*Math.cos(z*0.045)-2.6; }
+	case 'alpine':{
+const base=1.2*Math.sin(x*0.021)*Math.cos(z*0.024)+0.7*Math.sin(x*0.052+1.7)*Math.sin(z*0.043+0.6)+0.35*Math.sin(x*0.11+3.1)*Math.cos(z*0.09+1.2);
+if(ALPINE){
+let bd=1e9,bh=0;
+const R=ALPINE.ridges[0],RH=ALPINE.ridgeH;
+for(let i=0;i<R.length-1;i++){
+const abx=R[i+1][0]-R[i][0],abz=R[i+1][1]-R[i][1];
+const t=Math.max(0,Math.min(1,((x-R[i][0])*abx+(z-R[i][1])*abz)/(abx*abx+abz*abz||1)));
+const d=Math.hypot(x-(R[i][0]+abx*t),z-(R[i][1]+abz*t));
+if(d<bd){ bd=d; bh=RH[i]+(RH[i+1]-RH[i])*t; }
+}
+const s=s3(Math.max(0,Math.min(1,1-bd/70)));
+return base+s*s*bh;
+}
+return base;
+}
 	case 'steppe': return 0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)+0.45*Math.sin(x*0.052+1.5)*Math.sin(z*0.045+0.8)+0.18*Math.sin(x*0.14+2)*Math.cos(z*0.12+0.4);
-	case 'woods': return 1.1*Math.sin(x*0.02+0.8)*Math.cos(z*0.019+1.4)+0.55*Math.sin(x*0.06+2)*Math.sin(z*0.055+1)+0.25*Math.sin(x*0.13+1)*Math.cos(z*0.11+2.4);
+	case 'woods':{ // 2026-09-13 许特根副本: 林间缓丘+北谷(卡尔小径)三段剖面+堑口 (与 03-terrain 同构)
+	const base=0.95*Math.sin(x*0.018+0.8)*Math.cos(z*0.017+1.4)+0.5*Math.sin(x*0.05+2)*Math.sin(z*0.045+1)+0.22*Math.sin(x*0.11+1)*Math.cos(z*0.09+2.4);
+	if(!WOOD||!WOOD.ravine) return base;
+	const W2=WOOD.ravine, D2=W2.d||8.5, GB=W2.bottom||5, TE=W2.talus||12;
+	const gd=woodRavineDist(x,z);
+	if(gd>=W2.w) return base;
+	let dep;
+	if(gd<GB) dep=D2;
+	else if(gd<TE) dep=D2-5.2*s3((gd-GB)/(TE-GB));
+	else dep=(D2-5.2)*(1-s3((gd-TE)/(W2.w-TE)));
+	dep*=1-0.88*woodRampMask(x,z);
+	return base-dep*(1+0.06*Math.sin(x*0.012+2)); }
 	case 'mountain':{ // 03-terrain 副本: 谷地走廊+两侧山坡伏击带 (roadDist 相对公式)
 	const rd=roadDist(x,z);
 	const s3=t=>t*t*(3-2*t);
@@ -80,29 +147,53 @@ case 'deepjungle': return 1.9*Math.sin(x*0.016+0.3)*Math.cos(z*0.014+2)+1.0*Math
 }
 }
 const FLATS=[];
-for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang')?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
-for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang')?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
+for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
+for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
+if(WOOD&&WOOD.village){ const V=WOOD.village; FLATS.push({x:V.x,z:V.z,r:V.r,h:rawH(V.x,V.z)}); } // 许特根: 岭上村台地 (全高)
 for(const s of (CAMPAIGN.spawns||[])) FLATS.push({x:s.x,z:s.z,r:CAMPAIGN.layout==='canyon'?6:8,h:rawH(s.x,s.z)*0.55});
 if(CAMPAIGN.terr==='rolling') FLATS.push({x:0,z:0,r:34,h:rawH(0,0)*0.55});
 const TRENCHES=(CAMPAIGN.trench||[]).map(t=>({x1:t[0],z1:t[1],x2:t[2],z2:t[3]}));
-const RIVER={moscow:{pts:[[-165,-70],[-60,-34],[20,-48],[90,-92],[165,-120]],w:9,ice:true},
+const RIVER={moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true},
 burma:{pts:[[-165,62],[-70,32],[-8,62],[60,12],[120,42],[165,22]],w:8,ice:false},
-songhu:{pts:[[-165,-52],[-80,-42],[0,-58],[80,-32],[165,-42]],w:7,ice:false},
-hukawng:{pts:[[-48,-165],[-26,-95],[-4,-25],[6,45],[24,115],[44,165]],w:10,ice:false,d:5}}[CAMPAIGN.id]||null;
-const BRIDGE=CAMPAIGN.bridge||null;
-let _deck=null;
-function bridgeDeckY(){ if(_deck===null){ const B=BRIDGE; const dx=Math.sin(B.yaw),dz=Math.cos(B.yaw); const e=B.len/2+3; _deck=Math.max(heightAt(B.x-dx*e,B.z-dz*e),heightAt(B.x+dx*e,B.z+dz*e)); } return _deck; }
+songhu:{pts:[[-165,-52],[-80,-42],[0,-58],[80,-32],[165,-42]],w:7,ice:false,d:2.8},
+hukawng:{pts:[[-30,-320],[-8,-224],[-16,-120],[-4,-10],[8,100],[-10,215],[4,320]],w:26,ice:false,d:14,ford:{x:-3.3,z:172,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源)
+const DELTA=CAMPAIGN.delta||null;
+const DELTA_CHANS=(DELTA&&DELTA.channels)||[];
+const BRIDGES=CAMPAIGN.bridges||(CAMPAIGN.bridge?[CAMPAIGN.bridge]:[]);
+const BRIDGE=BRIDGES[0]||null;
+const _deckMap=new Map();
+function bridgeDeckY(B){
+const b=B||BRIDGE; if(!b) return 0;
+if(!_deckMap.has(b)){ const dx=Math.sin(b.yaw),dz=Math.cos(b.yaw); const e=b.len/2+3; _deckMap.set(b,Math.max(heightAt(b.x-dx*e,b.z-dz*e),heightAt(b.x+dx*e,b.z+dz*e))); }
+return _deckMap.get(b);
+}
+// 03-terrain 副本: 柏林地铁下沉 (2026-09-09 站厅 halls[]/隧道矩形 + 广场圆, 深度取 max)
+const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
+const METRO_FALL=0.4;
+const METRO_RECTS=[]; // 03-terrain 副本: 站厅表 + 隧道 (共读 config.metro)
+if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
+function metroDep(x,z){
+if(!METRO) return 0;
+let dep=0;
+const d0=Math.hypot(x-METRO.x,z-METRO.z);
+if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
+for(const s of METRO_RECTS){
+if(!s) continue;
+const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
+const dd=Math.hypot(dx,dz);
+if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
+}
+return dep;
+}
 function heightAt(x,z,noBridge){
 let h=rawH(x,z);
 for(const f of FLATS){ const d=Math.hypot(x-f.x,z-f.z); if(d<f.r){ const s1=1-d/f.r; const s=s1*s1*(3-2*s1); h+=(f.h-h)*s; } }
-// 03-terrain 副本: 柏林地铁下沉广场 (2026-09-05 城市组)
-const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
-if(METRO){ const d=Math.hypot(x-METRO.x,z-METRO.z); if(d<METRO.r){ const k=1-d/METRO.r; h-=METRO.d*k*k*(3-2*k); } }
+if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁站厅/通道下沉 (2026-09-09)
 // 03-terrain 副本: 诺曼底博卡日下沉土路 (田块表存在即启用)
-if((CAMPAIGN.fields||[]).length){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } }
+if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } } // !CITY 门控同 03-terrain 本体 (2026-09-06)
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
-if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k); } }
-if(!noBridge&&BRIDGE&&onBridge(x,z)){ const dy=bridgeDeckY(); if(dy>h) h=dy; }
+if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
+if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
 // 03-terrain 副本: 城市街道距离 (2026-09-05 城市组, 布局建筑避让用)
@@ -124,12 +215,31 @@ const CT=CAMPAIGN.city;
 if(!CT) return false;
 if(CT.blocks) for(const s of CT.blocks){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true; }
 if(CT.yard&&x>=CT.yard.x0&&x<=CT.yard.x1&&z>=CT.yard.z0&&z<=CT.yard.z1) return true;
+// 2026-09-09 修复: 补地铁区建成判定 (与 03-terrain 同源) —— 漏这段会让沙箱植被让位与实机不同, 布局整体错位
+if(CT.metro){ if(Math.hypot(x-CT.metro.x,z-CT.metro.z)<CT.metro.r) return true;
+for(const s2 of METRO_RECTS) if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; }
 return false;
 }
-function onBridge(x,z,m=0){ if(!BRIDGE) return false; const lx=x-BRIDGE.x,lz=z-BRIDGE.z; const ax=lx*Math.sin(BRIDGE.yaw)+lz*Math.cos(BRIDGE.yaw); const pv=lx*Math.cos(BRIDGE.yaw)-lz*Math.sin(BRIDGE.yaw); return Math.abs(ax)<BRIDGE.len/2+m&&Math.abs(pv)<BRIDGE.w/2+m; }
-function inRiverChannel(x,z){ if(!RIVER||!(RIVER.d>2)) return false; if(onBridge(x,z)) return false; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ if(seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z)<RIVER.w*0.8) return true; } return false; }
+function onBridge(x,z,m=0){
+let hit=false;
+for(const B of BRIDGES){
+const lx=x-B.x,lz=z-B.z; const ax=lx*Math.sin(B.yaw)+lz*Math.cos(B.yaw); const pv=lx*Math.cos(B.yaw)-lz*Math.sin(B.yaw);
+if(Math.abs(ax)<B.len/2+m&&Math.abs(pv)<B.w/2+m){ const dy=bridgeDeckY(B); hit=(hit===false)?dy:Math.max(hit,dy); }
+}
+return hit;
+}
+function fordAt(x,z){ if(!RIVER||!RIVER.ford) return 0; const F=RIVER.ford; const d=Math.hypot(x-F.x,z-F.z); if(d>=F.r+9) return 0; if(d<=F.r) return 1; const k2=1-(d-F.r)/9; return k2*k2*(3-2*k2); }
+function inRiverChannel(x,z){ if(!RIVER||!(RIVER.d>2)) return false; if(onBridge(x,z)!==false) return false; if(fordAt(x,z)>0.5) return false; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ if(seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z)<RIVER.w*0.8) return true; } return false; }
+function inShallowChannel(x,z){
+if(onBridge(x,z)!==false) return false;
+if(fordAt(x,z)>0.5) return true;
+if(RIVER&&!(RIVER.d>2)){ const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ if(seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z)<RIVER.w*0.75) return true; } }
+if(DELTA_CHANS.length){ for(const ch of DELTA_CHANS){ for(let i=0;i<ch.length-1;i++){ if(seg(ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1],x,z)<(DELTA.w||3.4)*0.8) return true; } } }
+if(DELTA&&DELTA.ponds){ for(const pd of DELTA.ponds){ if(Math.hypot(x-pd.x,z-pd.z)<pd.r) return true; } }
+return false;
+}
 function roadDist(x,z){ let d=CAMPAIGN.sineRoad?Math.abs(z-3*Math.sin(x*0.02)):1e9; for(const r of CAMPAIGN.roads) d=Math.min(d,seg(r[0],r[1],r[2],r[3],x,z)); return d; }
-return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,onBridge,FLATS,bridgeDeckY};
+return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,bridgeDeckY,woodRavineDist,woodRampMask};
 }
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
@@ -163,11 +273,19 @@ vm.runInContext(fs.readFileSync(path.join(root,'js/00-config.js'),'utf8'),ctx,{f
 const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
-ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge;
+ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
+ctx.fordAt=terr.fordAt; // 胡康徒涉滩强度场 (2026-09-12, 断言环带检验用)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
+// 地貌语义表 + 多桥 (2026-09-10 三图改造): 沙箱未加载 03-terrain 本体, 同构注入
+ctx.DELTA=CAMP.delta||null; ctx.DELTA_CHANS=(CAMP.delta&&CAMP.delta.channels)||[];
+ctx.LOESS=CAMP.loess||null; ctx.ALPINE=CAMP.alpine||null;
+ctx.WOOD=CAMP.wood||null; ctx.woodRavineDist=terr.woodRavineDist; ctx.woodRampMask=terr.woodRampMask; // 许特根: 北谷副本注入 (2026-09-13)
+ctx.BRIDGES=CAMP.bridges||(CAMP.bridge?[CAMP.bridge]:[]);
+ctx.BRIDGE=ctx.BRIDGES[0]||null;
 // 03-terrain 的城市语义全局 (沙箱未加载本体, 同构注入): CITY 常量供 05c/05a 使用
 ctx.CITY=CAMP.city||null;
 ctx.METRO=(CAMP.city&&CAMP.city.metro)||null;
+ctx.METRO_RECTS=(()=>{ const M2=CAMP.city&&CAMP.city.metro, a=[]; if(M2){ for(const h of (M2.halls||[])) a.push(h); if(M2.tunnel) a.push(M2.tunnel); } return a; })(); // 2026-09-09 修复: 沙箱漏注入 → freeSpot 地铁让位在沙箱里失效
 // 03-terrain 的农田系统全局 (沙箱未加载本体, 同公式注入): 田块表+查田块
 ctx.RURAL_FIELDS=CAMP.fields||[];
 ctx.fieldAt=(x,z)=>{ for(const f of ctx.RURAL_FIELDS){ if(x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1) return f; } return null; };
@@ -369,7 +487,201 @@ const hc=ctx.heightAt(M.x,M.z), he=ctx.heightAt(M.x,M.z+M.r+3);
 if(hc>he-0.5) errs.push(`柏林: 地铁下沉不足 (中心 ${hc.toFixed(2)} vs 外缘 ${he.toFixed(2)})`);
 }
 if(types.filter(t=>t==='block').length<4) errs.push(`柏林: 沿街多层公寓不足 (${types.filter(t=>t==='block').length} < 4)`);
+// ── 2026-09-09 柏林点位改版断言 (用户实机反馈"点位一条线 + 地图太小 + 没有地标") ──
+if(!types.includes('metroStation')) errs.push('柏林: 缺少地铁站厅 (BUILD_REG type=metroStation)');
+if(!types.includes('reichstag')) errs.push('柏林: 缺少国会大厦地标 (BUILD_REG type=reichstag)');
+if(!types.includes('flaktower')) errs.push('柏林: 缺少防空塔地标 (BUILD_REG type=flaktower)');
+const zs=flags.map(f=>f.z), xs=flags.map(f=>f.x);
+const zSpan=Math.max(...zs)-Math.min(...zs), xSpan=Math.max(...xs)-Math.min(...xs);
+if(zSpan<300) errs.push(`柏林: 旗点南北跨度 ${zSpan.toFixed(0)}<300 —— 又回到"一条线"`);
+if(xSpan<280) errs.push(`柏林: 旗点东西跨度 ${xSpan.toFixed(0)}<280`);
+let minFD=1e9;
+for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFD=Math.min(minFD,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
+if(minFD<100) errs.push(`柏林: 最近两旗间距 ${minFD.toFixed(0)}<100 (点位过密)`);
+if(M&&M.halls){
+// 两站一区间 (2026-09-09 用户定案): 每站下沉≥2.0 + 相邻站间距≥60 (中间有空间) +
+// 隧道全程下沉 + 顶板存在 (主街段/中段 —— 坦克/步兵照常过街, 全程不塌陷)
+const HS=M.halls, T=M.tunnel;
+if(HS.length<2) errs.push(`柏林: 地铁站 ${HS.length}<2 —— 用户要求"起码两个地铁站"`);
+for(let i=0;i<HS.length;i++){
+const A=HS[i], hcx=(A.x0+A.x1)/2, hcz=(A.z0+A.z1)/2;
+const cIn=ctx.heightAt(hcx,hcz), cOut=ctx.heightAt(A.x0-4,hcz);
+if(cOut-cIn<2.0) errs.push(`柏林: 站厅${i+1}下沉不足 (庭内 ${cIn.toFixed(2)} vs 庭外 ${cOut.toFixed(2)})`);
+if(i){ const B=HS[i-1], gap=Math.hypot(hcx-(B.x0+B.x1)/2,hcz-(B.z0+B.z1)/2); if(gap<60) errs.push(`柏林: 相邻地铁站间距 ${gap.toFixed(0)}<60 (两站挤在一起)`); }
 }
+if(T){
+const tunX=(T.x0+T.x1)/2;
+const boxes=vm.runInContext('BOXES',ctx);
+// 洞口必须真的通 (2026-09-09 自检发现: 旧洞口判定按"与站厅等宽"写, 6m 隧道对 26m 站厅判不出洞 → 两站被墙封死)
+for(const A of HS){
+const wallZ=Math.abs(T.z0-A.z1)<0.01?A.z1:(Math.abs(T.z1-A.z0)<0.01?A.z0:null);
+if(wallZ===null) continue;
+const gy=ctx.heightAt(tunX,wallZ);
+const jam=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.minY<gy+1.6&&b.maxY>gy+0.2);
+if(jam) errs.push(`柏林: 站厅(z ${A.z0}..${A.z1}) 隧道洞口被封死 @(${tunX.toFixed(0)},${wallZ.toFixed(0)})`);
+}
+const gNat=z=>ctx.heightAt(T.x0-8,z); // 街面自然地面基准 (x0-8 在所有地铁矩形外)
+for(const z of [T.z0+3,(T.z0+T.z1)/2,T.z1-3]){ // 隧道全程下沉
+const tIn=ctx.heightAt(tunX,z), tOut=gNat(z);
+if(tOut-tIn<2.0) errs.push(`柏林: 隧道下沉不足 @z=${z.toFixed(0)} (${tIn.toFixed(2)} vs ${tOut.toFixed(2)})`);
+}
+for(const z of [0,(T.z0+T.z1)/2]){ // 顶板 (主街段 + 中段): 顶面≈自然地面+0.15
+const gref=gNat(z)+0.15;
+const roofOK=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY>gref-0.9&&b.maxY<gref+0.9);
+if(!roofOK) errs.push(`柏林: 隧道顶板缺失 @z=${z.toFixed(0)} (街面塌陷/无法通行)`);
+}
+}
+}
+// 防空塔顶高炮平台登记 (05a flakTower → 17-emplacements aaGun yDeck)
+const fd=vm.runInContext('FLAK_DECKS',ctx);
+if(!fd.length) errs.push('柏林: 防空塔顶平台未登记 (FLAK_DECKS 空)');
+else if(fd[0].y-ctx.heightAt(fd[0].x,fd[0].z)<8) errs.push(`柏林: 防空塔顶平台高度异常 (${fd[0].y.toFixed(2)})`);
+// ── 2026-09-09 加密批次断言 (用户实机反馈"柏林城内太过于空荡") ──
+const nFac=types.filter(t=>t==='facade').length, nTer=types.filter(t=>t==='terrace').length;
+if(nFac+nTer<15) errs.push(`柏林: 沿街街墙不足 (facade ${nFac} + terrace ${nTer} < 15) —— 城内又空了`);
+const nCity=types.filter(t=>['facade','terrace','block','ruinedHouse','twoStory'].includes(t)).length;
+if(nCity<70) errs.push(`柏林: 城区建筑总数 ${nCity} < 70 (加密批次基线; 640 大地图不该只有 50 栋)`);
+// 国会大厦不可破坏 (2026-09-09 用户定案: 残穹壳全塌后浮空 → 整楼改永久件)
+{
+const R=reg.find(b=>b.type==='reichstag');
+if(R){
+if(!R.indestr) errs.push('柏林: 国会大厦未标记 indestr (应为不可破坏地标)');
+const DES=vm.runInContext('DESTRUCTIBLES',ctx);
+const near=DES.filter(g=>!g.dead&&Math.hypot(g.cx-R.x,g.cz-R.z)<26);
+if(near.length) errs.push(`柏林: 国会大厦不可破坏断言失败 —— 足迹内有 ${near.length} 个可毁组 (全塌后残穹壳会浮空)`);
+}
+}
+// 新建建筑不得落在地铁站厅/隧道上方 (placeAt 走 metroBlocked; 站厅本体除外)
+{
+const MR=vm.runInContext('METRO_RECTS',ctx);
+for(const r of reg){
+if(['metro','metroStation'].includes(r.type)) continue;
+for(const s of MR){
+if(r.x>s.x0&&r.x<s.x1&&r.z>s.z0&&r.z<s.z1){ errs.push(`柏林: 建筑 ${r.type}@(${r.x.toFixed(0)},${r.z.toFixed(0)}) 落在地铁下沉区上方`); break; }
+}
+}
+}
+}
+// ── 2026-09-12 莫斯科城市边缘改版断言 (用户实机反馈"地图像极其偏僻的山村+总体仍是单线夺点") ──
+if(CAMPAIGN.id==='moscow'){
+if(!types.includes('factory')) errs.push('莫斯科: 缺少厂区地标 (BUILD_REG type=factory)');
+if(types.filter(t=>t==='tramWreck').length<1) errs.push('莫斯科: 主街电车残骸缺失');
+const zs2=flags.map(f=>f.z), xs2=flags.map(f=>f.x);
+const zSpan2=Math.max(...zs2)-Math.min(...zs2), xSpan2=Math.max(...xs2)-Math.min(...xs2);
+if(zSpan2<300) errs.push(`莫斯科: 旗点南北跨度 ${zSpan2.toFixed(0)}<300 —— 又回到"一条线"`);
+if(xSpan2<380) errs.push(`莫斯科: 旗点东西跨度 ${xSpan2.toFixed(0)}<380 (城市边缘纵深不足)`);
+let minFD2=1e9;
+for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFD2=Math.min(minFD2,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
+if(minFD2<100) errs.push(`莫斯科: 最近两旗间距 ${minFD2.toFixed(0)}<100 (点位过密)`);
+const nCity2=types.filter(t=>['facade','terrace','block','ruinedHouse','twoStory'].includes(t)).length;
+if(nCity2<50) errs.push(`莫斯科: 城区建筑总数 ${nCity2} < 50 (城市边缘不该是空场撒楼)`);
+}
+}
+// ── 2026-09-12 胡康巨桥改版断言 (用户指令: "总体仍是单线夺点…大桥远不够大, 这个地图的主题就应当是巨大的大桥")
+//    (注意: 在 if(CT) 城市组包裹之外 —— 胡康无 city 语义, 放里面永远不会执行) ──
+if(CAMPAIGN.id==='hukawng'){
+// ① 巨桥规格: 双桥表, 主桥跨≥70/面宽≥12/kind=grand, 北桥 kind=stone
+const BRH=vm.runInContext('BRIDGES',ctx);
+if(BRH.length!==2) errs.push(`胡康: 桥数 ${BRH.length}≠2 (主桥+北石桥, 三路渡河少一路)`);
+const GB=BRH[0];
+if(!GB||GB.len<70||GB.w<12) errs.push(`胡康: 主桥规格不足 (len=${GB&&GB.len}, w=${GB&&GB.w}, 巨桥需≥70/≥12)`);
+if(GB&&GB.kind!=='grand') errs.push('胡康: 主桥 kind 应为 grand (grandBridge)');
+if(BRH[1]&&BRH[1].kind!=='stone') errs.push('胡康: 北桥 kind 应为 stone (stoneBridge 复用)');
+// ② 深谷净空: 主桥桥心河床低于两岸 ≥8m (抓"谷太浅/桥顺河躺")
+const hAt=ctx.heightAt, oB=ctx.onBridge;
+if(GB){
+if(oB(GB.x,GB.z)===false) errs.push('胡康: 主桥桥心不在桥面矩形内 (onBridge 失配)');
+const midBed=hAt(GB.x,GB.z,true);
+const dxx=Math.sin(GB.yaw), dzz=Math.cos(GB.yaw);
+const bank1=hAt(GB.x-dxx*(GB.len/2+3),GB.z-dzz*(GB.len/2+3),true);
+const bank2=hAt(GB.x+dxx*(GB.len/2+3),GB.z+dzz*(GB.len/2+3),true);
+const clr=Math.min(bank1,bank2)-midBed;
+if(clr<8) errs.push(`胡康: 主桥下净空不足 (床 ${midBed.toFixed(1)} vs 岸 ${Math.min(bank1,bank2).toFixed(1)}, 落差 ${clr.toFixed(1)}<8)`);
+}
+// ③ 登塔梯: ≥2 部顶面高于桥面 6m 的梯 (塔顶制高), 登顶支撑齐平 (盒顶面口径同 verify-buildings #3)
+const stH=vm.runInContext('STAIRS',ctx);
+const dyH=GB?ctx.bridgeDeckY(GB):0;
+const boxesH=vm.runInContext('BOXES',ctx);
+const twSt=stH.filter(s=>GB&&s.topY>dyH+6);
+if(twSt.length<2) errs.push(`胡康: 登塔梯不足 (${twSt.length}<2, 塔顶制高缺失)`);
+const xzH=(b,x,z)=>x>b.minX&&x<b.maxX&&z>b.minZ&&z<b.maxZ;
+for(const s of twSt){
+let sup=hAt(s.x,s.z);
+for(const b of boxesH){ if(b.dead||!xzH(b,s.x,s.z)) continue; if(b.maxY<=s.topY+0.55&&b.maxY>sup) sup=b.maxY; }
+if(Math.abs(sup-s.topY)>0.12) errs.push(`胡康: 塔梯登顶 @${s.x.toFixed(1)},${s.z.toFixed(1)} 支撑面=${sup.toFixed(2)}≠顶面=${s.topY.toFixed(2)}`);
+// 2026-09-12 实机修复回归: 梯脚不得在激流影响区 (河距口径=桥轴坐标 |u|, 旧版梯道线掉进深切带)
+if(ctx.inRiverChannel(s.fx,s.fz)) errs.push(`胡康: 塔梯梯脚 @${s.fx.toFixed(0)},${s.fz.toFixed(0)} 在激流影响区`);
+}
+// ④ 徒涉滩: 滩心=非激流+浅水, 滩外上游河心仍激流 (南线渡口存在且范围不失控)
+const RvH=vm.runInContext('RIVER',ctx);
+if(RvH&&RvH.ford){
+const F=RvH.ford;
+if(ctx.inRiverChannel(F.x,F.z)) errs.push('胡康: 徒涉滩心仍判激流 (inRiverChannel 未豁免)');
+if(!ctx.inShallowChannel(F.x,F.z)) errs.push('胡康: 徒涉滩心不判浅水 (inShallowChannel 未生效)');
+// 环带点 (d=r/2): ford 范围真实存在的灵敏检验 (只测滩心的话, r 缩到 0 中心点仍豁免, 测不出)
+const FR={x:F.x+13,z:F.z}; // 固定 13m 偏移 (设计 r 的一半): 不随 r 缩水
+if(ctx.fordAt?ctx.fordAt(FR.x,FR.z)<1:false) errs.push('胡康: 徒涉滩环带 fordAt<1 (ford 半径失效)');
+if(ctx.inRiverChannel(FR.x,FR.z)) errs.push('胡康: 徒涉滩环带仍判激流 (ford 范围不足)');
+const bedF=hAt(F.x,F.z,true);
+const bankF=Math.max(hAt(F.x-RvH.w-2,F.z,true),hAt(F.x+RvH.w+2,F.z,true)); // 岸顶取横断面两侧 max (河向取样会取到河床)
+if(bankF-bedF>3.2||bankF-bedF<0.4) errs.push(`胡康: 滩心水 dip ${(bankF-bedF).toFixed(2)} 出可涉窗 (0.4~3.2)`);
+const upF={x:F.x,z:F.z-64};
+if(!ctx.inRiverChannel(upF.x,upF.z)) errs.push('胡康: 滩外上游河心不判激流 (渡滩范围失控)');
+}
+// ⑤ 三路扇面: 旗点跨度 (告别一条线) + 桥心旗在主桥上
+const zs3=flags.map(f=>f.z), xs3=flags.map(f=>f.x);
+const zSpan3=Math.max(...zs3)-Math.min(...zs3), xSpan3=Math.max(...xs3)-Math.min(...xs3);
+if(zSpan3<300) errs.push(`胡康: 旗点南北跨度 ${zSpan3.toFixed(0)}<300 —— 又回到"一条线"`);
+if(xSpan3<260) errs.push(`胡康: 旗点东西跨度 ${xSpan3.toFixed(0)}<260 (扇面不足)`);
+if(GB&&!flags.some(f=>Math.abs(f.x-GB.x)<2&&Math.abs(f.z-GB.z)<2)) errs.push('胡康: 桥心旗「大桥」不在主桥桥心');
+}
+// ── 2026-09-13 雾林守线许特根改版断言 (用户指令: "总体仍是单线夺点, 太小同时没有任何特色, 能见度极低不错但不够")
+//    (与胡康块同级 —— woodline 无 city 语义, 放城市组包裹内永远不会执行)
+if(CAMPAIGN.id==='woodline'){
+const hW=ctx.heightAt;
+// ① 三路扇面: 旗点跨度 (旧版 5 旗一线 x 跨仅 146 —— 640 大图扇面必须读出纵深与两翼)
+const zsW=flags.map(f=>f.z), xsW=flags.map(f=>f.x);
+const zSpanW=Math.max(...zsW)-Math.min(...zsW), xSpanW=Math.max(...xsW)-Math.min(...xsW);
+if(zSpanW<280) errs.push(`雾林: 旗点南北跨度 ${zSpanW.toFixed(0)}<280 —— 又回到"一条线"`);
+if(xSpanW<320) errs.push(`雾林: 旗点东西跨度 ${xSpanW.toFixed(0)}<320 (640 图纵深不足)`);
+let minFW=1e9;
+for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFW=Math.min(minFW,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
+if(minFW<100) errs.push(`雾林: 最近两旗间距 ${minFW.toFixed(0)}<100 (点位过密)`);
+// ② 北谷(卡尔小径): 谷深真实存在 (谷底低于两岸≥6m) + 车辆堑口纵坡可过 (相邻 8m 采样高差≤1.6m)
+const WDv=vm.runInContext('WOOD',ctx);
+if(!WDv||!WDv.ravine){ errs.push('雾林: WOOD.ravine 语义表缺失 (北谷不存在)'); }
+else{
+const btm=hW(-60,164), bankL=hW(-60,164-WDv.ravine.w-6), bankR=hW(-60,164+WDv.ravine.w+6);
+if(Math.min(bankL,bankR)-btm<6) errs.push(`雾林: 北谷谷深不足 (底 ${btm.toFixed(1)} vs 岸 ${Math.min(bankL,bankR).toFixed(1)})`);
+const VR=WDv.ravine.ramps[0];
+if(!VR||VR.w<7) errs.push('雾林: 车辆堑口缺失或过窄 (坦克无法过谷)');
+else{
+let maxStep=0;
+for(let u=VR.z0;u<VR.z1;u+=8){
+const dh=Math.abs(hW(VR.x,u+8)-hW(VR.x,u));
+if(dh>maxStep) maxStep=dh;
+}
+if(maxStep>1.6) errs.push(`雾林: 车辆堑口纵坡过陡 (相邻8m高差 ${maxStep.toFixed(2)}>1.6, 坦克爬不过)`);
+}
+}
+// ③ 西墙带: 龙牙双排存在 (带内混凝土块≥100) + 永备火力点≥3 + 缺口走廊净空 (唯一装甲通道不得被堵)
+const boxesW=vm.runInContext('BOXES',ctx);
+const BW=CAMPAIGN.wood.belt;
+const teeth=boxesW.filter(b=>!b.dead&&b.minX>BW.x0-4&&b.maxX<BW.x1+4&&Math.abs((b.minZ+b.maxZ)/2)>BW.gapZ-2&&b.maxY-b.minY>0.7&&b.maxY-b.minY<1.6).length;
+if(teeth<100) errs.push(`雾林: 西墙龙牙不足 (${teeth}<100, 双排带缺失)`);
+const regW=vm.runInContext('BUILD_REG',ctx);
+const beltBunk=regW.filter(b2=>b2.type==='bunker'&&b2.x>BW.x0&&b2.x<BW.x0+30).length;
+if(beltBunk<3) errs.push(`雾林: 西墙带永备火力点不足 (${beltBunk}<3, 节节设防缺火力点)`);
+const jam=boxesW.filter(b2=>!b2.dead&&b2.maxX>146&&b2.minX<164&&b2.maxZ>-6&&b2.minZ<6&&b2.maxY-b2.minY>0.4); // 走廊内任何高度>0.4 的实体盒都算堵 (阴性验证: 单颗龙牙也必须抓到)
+if(jam.length) errs.push(`雾林: 西墙缺口装甲走廊被堵 (${jam.length} 个实体盒侵入 x146..164/z±6 —— 坦克过不去)`);
+// ④ 岭上村: 教堂地标立在村台 (纵深据点+树爆庇护所)
+if(!regW.some(b2=>b2.type==='church'&&Math.hypot(b2.x-60,b2.z+160)<42)) errs.push('雾林: 岭上村缺教堂地标 (BUILD_REG type=church @村台)');
+// ⑤ 卡尔小径坦克坟场: 谷底残骸≥2 (史实: 装甲瓶颈的残骸线)
+const kallWreck=boxesW.filter(b2=>!b2.dead&&b2.maxY-b2.minY>1.4&&b2.minZ>140&&b2.maxZ<180&&b2.minX>-90&&b2.maxX<130&&b2.maxY-b2.minY<2.6).length;
+if(kallWreck<2) errs.push(`雾林: 谷底坦克残骸不足 (${kallWreck}<2, 卡尔小径坟场缺失)`);
+// ⑥ 灌丛软遮蔽带: CROP_FIELDS≥5 (林下渗透路线的 Bot 视线遮蔽)
+const cfW=vm.runInContext('CROP_FIELDS',ctx);
+if(cfW.length<5) errs.push(`雾林: 灌丛软遮蔽带不足 (${cfW.length}<5, 林下无遮蔽语义)`);
 }
 return errs;
 }
