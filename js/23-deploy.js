@@ -9,26 +9,26 @@ el('deploy').classList.remove('hidden');
 el('blackOv').style.opacity=0;
 CLASSES.forEach((c,i)=>{
 const ws=(EXPERIMENT&&i===5)?playerClassWeapons(player.team,i):TEAM_FACTION[player.team].cls[i];
-let d2=ws.map(k=>WPN_DEFS[k].name).join(' · ');
-if(i===2){ const g=clsGear(i,player.team); d2+=' · AT雷[3]×'+g.atn+' · 燃烧弹[6]×'+(CLASSES[i].incin||0); } // 2026-09-06 B7a/P2-13: 文案由数值表拼接 (旧"×2/×1"与表值脱钩)
-if(i===4) d2+=' · 医疗箱[B] · 绷带×'+(CLASSES[i].bandages||4);
-if(i===5) d2+=EXPERIMENT?' · 燃烧弹[6]×2':' · AT雷×'+(TEAM_FACTION[player.team].atn5||3);
+let d2=ws.map(k=>t(WPN_DEFS[k].name)).join(' · ');
+if(i===2){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[3]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 2026-09-06 B7a/P2-13: 文案由数值表拼接 (旧"×2/×1"与表值脱钩)
+if(i===4) d2+=' · '+t('医疗箱[B]')+' · '+t('绷带×{0}',(CLASSES[i].bandages||4));
+if(i===5) d2+=EXPERIMENT?' · '+t('燃烧弹[6]×2'):' · '+t('AT雷×{0}',(TEAM_FACTION[player.team].atn5||3));
 el('cw'+i).textContent=d2;
 });
-el('deathInfo').innerHTML=(()=>{ 
+el('deathInfo').innerHTML=(()=>{
 if(!isDead) return '';
 const lifeT=Math.max(0,nowT-(player.lifeStartT||nowT));
 const mm2=Math.floor(lifeT/60), ss3=Math.floor(lifeT%60);
 const lk=player.lifeKills||0, ls=(player.score||0)-(player.lifeScoreStart||0);
-return (player.killerName?`你被 <b>${player.killerName}</b>${player.killerSrc?` <span style="font-size:12px;color:#cfd8c2">[${player.killerSrc}]</span>`:''} 击杀了<br>`:'')+
-`<span style="font-size:13px;color:#cdd8c8">本次存活 ${mm2}:${ss3<10?'0':''}${ss3} · 击杀 <b>${lk}</b> · 获得 <b>+${ls}</b> 分 &nbsp;|&nbsp; 本局总计 ${player.kills} 杀 / ${player.deaths} 死 / ${player.score} 分</span>`;
+return (player.killerName?t('你被 {0} 击杀了',`<b>${player.killerName}</b>${player.killerSrc?` <span style="font-size:12px;color:#cfd8c2">[${t(player.killerSrc)}]</span>`:''}`)+'<br>':'')+
+`<span style="font-size:13px;color:#cdd8c8">${t('本次存活 {0} · 击杀 {1} · 获得 +{2} 分',mm2+':'+(ss3<10?'0':'')+ss3,lk,ls)} &nbsp;|&nbsp; ${t('本局总计 {0} 杀 / {1} 死 / {2} 分',player.kills,player.deaths,player.score)}</span>`;
 })();
 el('resumeBtn').style.display=(player.alive&&player.deployed)?'inline-block':'none';
 el('deployBtn').style.display=player.alive&&player.deployed?'none':'inline-block';
 // 己方兵力归零 → 本局不可再部署 (清场阶段: 你阵亡后只能观看清场结算, 2026-09-04)
 el('deployBtn').disabled=tickets[player.team]<=0;
 if(tickets[player.team]<=0){
-el('deathInfo').innerHTML+='<br><span style="font-size:13px;color:#ff9c8a">⚠ 己方兵力已耗尽 · 本局无法再部署 · 等待清场结算</span>';
+el('deathInfo').innerHTML+='<br><span style="font-size:13px;color:#ff9c8a">'+t('⚠ 己方兵力已耗尽 · 本局无法再部署 · 等待清场结算')+'</span>';
 }
 buildSpawnList();
 drawDeployMap();
@@ -51,14 +51,14 @@ function buildSpawnList(){
 const list=el('spawnList');
 list.innerHTML='';
 const opts=[];
-if(BASES.length) opts.push({name:'主基地',x:BASES[player.team].x,z:BASES[player.team].z,id:-1});
-FLAGS.forEach((f,i)=>{ if(f.owner===player.team) opts.push({name:f.id+' 点',x:f.x,z:f.z,id:i}); });
+if(BASES.length) opts.push({name:t('主基地'),x:BASES[player.team].x,z:BASES[player.team].z,id:-1});
+FLAGS.forEach((f,i)=>{ if(f.owner===player.team) opts.push({name:t('{0} 点',f.id),x:f.x,z:f.z,id:i}); });
 // 无旗点战役 (遭遇/劫道): 阵营前出点作为部署选项
 (CAMPAIGN.spawns||[]).forEach((sp,si)=>{ if(sp.team===player.team) opts.push({name:sp.name,x:sp.x,z:sp.z,id:'P'+si}); });
 // 劫道模式: 护运方可选随车队出生 (位置在部署瞬间解算: 车队开到哪跟到哪)
 if(GAMEMODE==='convoy'&&CAMPAIGN.convoy&&player.team===CAMPAIGN.convoy.escortTeam){
 const pt=convoyDeployPt();
-opts.push({name:'随车队',x:pt.x,z:pt.z,id:'CV'});
+opts.push({name:t('随车队'),x:pt.x,z:pt.z,id:'CV'});
 }
 // 载具出生选项 (重生倒计时按 tankRespawnMul 换算: 苏军厂房在手时实际回场更快)
 const vehs=[...tanks,...planes].filter(v=>v.team===player.team);
@@ -67,7 +67,7 @@ const id='V'+i;
 const busy=v.playerDriven;
 const ready=v.alive&&!busy;
 const remain=v.alive?0:Math.ceil(v.respawnT/(v.kind==='tank'?tankRespawnMul(v.team):1));
-opts.push({name:(v.kind==='plane'?'✈ ':'▣ ')+v.name+(ready?'':(busy?' (占用)':' (重生 '+remain+'s)')),id,veh:v,disabled:!ready});
+opts.push({name:(v.kind==='plane'?'✈ ':'▣ ')+t(v.name)+(ready?'':(busy?t(' (占用)'):t(' (重生 {0}s)',remain))),id,veh:v,disabled:!ready});
 });
 if(!opts.some(o=>!o.disabled&&(o.id===selectedSpawn))) selectedSpawn=-1;
 opts.forEach(o=>{
@@ -92,7 +92,7 @@ function drawDeployMap(){
 const c=el('deployMap').getContext('2d');
 const S=300;
 c.fillStyle='#141a10'; c.fillRect(0,0,S,S);
-// 缩放随地图尺寸: 标准 320 图=±170 (与原 170 一致), 超大地图(雪峰山 800)=±410
+// 缩放随地图尺寸: 标准 320 图=±170 (与原 170 一致), 大地图 640/800=±410
 const MH=MAP_SIZE/2+10;
 const toM=(x,z)=>[S/2+x/MH*S/2, S/2+z/MH*S/2];
 c.strokeStyle='rgba(150,130,90,.5)'; c.lineWidth=4;
@@ -394,7 +394,7 @@ const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).lengt
 	// 防守方兵力=进攻方×1.25 (2026-09-05 用户指定下调: 防守优势改由"防御工事模板"承担阵地强度,
 	// 人数只保留小幅倾斜; 原为 ×1.75, 阵地+人海双优势过重)
 	tickets[DEF]=Math.round(tickets[ATK]*1.25);
-// 攻防限时: 默认 18 分钟; 战役条目 matchMin 覆盖 (太行山围攻/柏林大地图 22 分钟)
+// 攻防限时: 默认 18 分钟; 战役条目 matchMin 覆盖 (柏林大地图 22 分钟)
 matchTime=GAMEMODE==='assault'?((CAMPAIGN.matchMin||18)*60):16*60;
 	} else if(GAMEMODE==='clash'){
 	// 遭遇战: 无旗点, 兵力打空者败, 15分钟限时

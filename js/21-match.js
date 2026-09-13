@@ -23,7 +23,7 @@ const wipeT=[null,null]; // 各队倒计时剩余秒数, null=未进入 (仅归�
 function resetMatchState(){ // 对局态复位唯一入口 (2026-09-06 B7b/P2-14: 替代 22-hud startGame 的跨文件直写)
 wipeAnnounced[0]=false; wipeAnnounced[1]=false;
 wipeT[0]=null; wipeT[1]=null;
-killStreakN=0; killStreakT=-99; player.streakBuff=null; // 连杀计数/增益随新对局复位 (2026-09-11)
+killStreakN=0; killStreakT=-99; killStreakMax=0; player.streakBuff=null; // 连杀计数/增益/最大连杀随新对局复位 (2026-09-11/13)
 }
 function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
 if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
@@ -39,7 +39,7 @@ function requestEnd(forceWinner){
 if(matchOver||matchEndPending!==null) return;
 const winner=forceWinner!==undefined?forceWinner:(tickets[0]===tickets[1]?-1:(tickets[0]>tickets[1]?0:1));
 matchEndPending=winner; matchEndT=MATCH_END_DELAY;
-addKillMsg(`胜负已定 · ${winner===-1?'平局':(winner===player.team?'胜利在望':'败局在即')} · ${MATCH_END_DELAY} 秒后结算`,winner);
+addKillMsg(t('胜负已定 · {0} · {1} 秒后结算',winner===-1?t('平局'):(winner===player.team?t('胜利在望'):t('败局在即')),MATCH_END_DELAY),winner);
 }
 function updateFlags(dt){
 let owned=[0,0];
@@ -75,11 +75,11 @@ if(f.cap>=1){
 f.cap=0;
 f.owner=attacker; f.capTeam=-1;
 drawFlagTex(f);
-addKillMsg(`${TEAM_NAME[attacker]} 占领了 ${f.id} 点`,attacker);
+addKillMsg(t('{0} 占领了 {1} 点',t(TEAM_NAME[attacker]),f.id),attacker);
 for(const c of combatants){
 if(c.alive&&c.team===attacker&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
 c.score=(c.score||0)+SCORE_TABLE.flag;
-if(c.isPlayer) showKillPop('占领 '+f.id+' 点',SCORE_TABLE.flag);
+if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; } // caps: 结算占领数 (2026-09-13)
 }
 }
 	// 占满全部旗点 → 敌方兵力立即归零进入清场 (2026-09-04 用户指定: 攻防/征服任一方占满都生效 —
@@ -89,10 +89,10 @@ if(c.isPlayer) showKillPop('占领 '+f.id+' 点',SCORE_TABLE.flag);
 	if(tickets[1-attacker]>0){
 	tickets[1-attacker]=0;
 	wipeAnnounced[1-attacker]=true;
-	addKillMsg(`⚠ ${TEAM_NAME[attacker]} 占领了全部旗点 · ${TEAM_NAME[1-attacker]} 兵力归零 · 消灭其场上残兵方可获胜`,attacker);
+	addKillMsg(t('⚠ {0} 占领了全部旗点 · {1} 兵力归零 · 消灭其场上残兵方可获胜',t(TEAM_NAME[attacker]),t(TEAM_NAME[1-attacker])),attacker);
 	}
 	}else if(GAMEMODE==='assault'&&attacker===ATK){
-	// 占旗返还: +40实测让攻方票数越打越多(太行山330→998), 2026-09-01 用户指定降为+10
+	// 占旗返还: +40实测让攻方票数越打越多(实测330→998), 2026-09-01 用户指定降为+10
 	tickets[ATK]=Math.min(tickets[ATK]+SCORE_TABLE.flagReturn,TICKET_CAP);
 	}
 	}
@@ -132,8 +132,8 @@ if(!matchOver){
 	// 清场判定: 兵力归零方封重生, 对方须 占满全旗(攻防/征服)+歼灭场上全部残兵 才判胜 (2026-09-05: 坦克不再计入);
 	// 双方同时归零时以场上残余为准 (先被清空者负, 同帧清空=平局); 清场期间超时照常结算
 	const z0=tickets[0]<=0, z1=tickets[1]<=0;
-	if(z0&&!wipeAnnounced[0]){ wipeAnnounced[0]=true; addKillMsg(`⚠ ${TEAM_NAME[0]} 兵力耗尽 · ${TEAM_NAME[1]} ${flagsLostOf(1)>0?'须占领全部旗点(余 '+flagsLostOf(1)+' 点)+':''}消灭其场上残兵方可获胜`,1); }
-	if(z1&&!wipeAnnounced[1]){ wipeAnnounced[1]=true; addKillMsg(`⚠ ${TEAM_NAME[1]} 兵力耗尽 · ${TEAM_NAME[0]} ${flagsLostOf(0)>0?'须占领全部旗点(余 '+flagsLostOf(0)+' 点)+':''}消灭其场上残兵方可获胜`,0); }
+	if(z0&&!wipeAnnounced[0]){ wipeAnnounced[0]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),flagsLostOf(1)>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1); }
+	if(z1&&!wipeAnnounced[1]){ wipeAnnounced[1]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),flagsLostOf(0)>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0); }
 	if(z0&&z1){
 	if(fieldCount(0)===0&&fieldCount(1)===0){ requestEnd(-1); return; }
 	}else if(z0){
@@ -147,10 +147,10 @@ if(!matchOver){
 	if(tickets[zt]<=0&&fieldCount(zt)===1&&flagsLostOf(1-zt)===0){
 	if(wipeT[zt]===null){
 	wipeT[zt]=WIPE_GRACE;
-	addKillMsg(`⚠ ${TEAM_NAME[zt]} 场上仅剩最后 1 人 · ${WIPE_GRACE} 秒清场倒计时 · 到时限未被歼灭则直接判负`,1-zt);
+	addKillMsg(t('⚠ {0} 场上仅剩最后 1 人 · {1} 秒清场倒计时 · 到时限未被歼灭则直接判负',t(TEAM_NAME[zt]),WIPE_GRACE),1-zt);
 	}
 	wipeT[zt]-=dt;
-	if(wipeT[zt]<=0){ addKillMsg(`⏳ 清场倒计时结束 · ${TEAM_NAME[zt]} 最后一人仍存活 · ${TEAM_NAME[1-zt]} 获胜`,1-zt); requestEnd(1-zt); return; }
+	if(wipeT[zt]<=0){ addKillMsg(t('⏳ 清场倒计时结束 · {0} 最后一人仍存活 · {1} 获胜',t(TEAM_NAME[zt]),t(TEAM_NAME[1-zt])),1-zt); requestEnd(1-zt); return; }
 	}else wipeT[zt]=null;
 	}
 	// 破袭模式: 检测补给库摧毁
@@ -159,7 +159,7 @@ if(!matchOver){
 	for(const d of DEPOTS){
 	if(!d.destroyed&&d.g&&d.g.dead){
 	d.destroyed=true;
-	addKillMsg('补给库 '+d.id+' 被摧毁!',ATK);
+	addKillMsg(t('补给库 {0} 被摧毁!',d.id),ATK);
 	tickets[ATK]=Math.min(tickets[ATK]+SCORE_TABLE.depot,TICKET_CAP);
 	}
 	if(!d.destroyed) left++;
@@ -201,6 +201,10 @@ if(!matchOver){
 	}
 	}
 }
+// ── 结算 SVG 图标 (2026-09-13 结算改版): 胜=金桂冠星徽 / 负=碎裂盾徽 / 平=等号盾徽 ──
+const END_SVG_WIN=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endWg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#c8963c"/></linearGradient></defs><g fill="none" stroke="url(#endWg)" stroke-width="2.6" stroke-linecap="round"><path d="M14 46 C10 34 14 20 26 13"/><path d="M50 46 C54 34 50 20 38 13"/><path d="M15 41 q-6 -1 -8 -6"/><path d="M13 33 q-6 -2 -7 -8"/><path d="M14 25 q-5 -3 -5 -9"/><path d="M18 18 q-4 -4 -3 -10"/><path d="M49 41 q6 -1 8 -6"/><path d="M51 33 q6 -2 7 -8"/><path d="M50 25 q5 -3 5 -9"/><path d="M46 18 q4 -4 3 -10"/></g><path d="M32 17 L34.7 24.28 L42.46 24.6 L36.37 29.42 L38.47 36.9 L32 32.6 L25.53 36.9 L27.63 29.42 L21.54 24.6 L29.3 24.28 Z" fill="url(#endWg)"/></svg>`;
+const END_SVG_LOSE=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endLg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d87a6a"/><stop offset="1" stop-color="#8a3428"/></linearGradient></defs><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="url(#endLg)" stroke-width="3.4" stroke-linejoin="round"/><path d="M32 11 L27 23 L34 29 L28 41 L33 54" fill="none" stroke="#38110b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const END_SVG_DRAW=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="#9fb6c9" stroke-width="3.2" stroke-linejoin="round"/><path d="M22 27 H42 M22 37 H42" stroke="#9fb6c9" stroke-width="3.2" stroke-linecap="round"/></svg>`;
 function endMatch(forceWinner){
 matchOver=true;
 // 对局结束: 环境+引擎声静音, 主循环冻结全部战斗/移动活动
@@ -211,13 +215,35 @@ setTimeout(()=>{
 document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
 const end=document.getElementById('end');
 end.classList.remove('hidden');
+document.body.classList.add('inMenu'); // 结算画面同菜单: 隐藏战斗 HUD
+// 结算改版 (2026-09-13): SVG 胜负图标 + 战绩卡 + 本图历史最高/新纪录 (sf_best_<战役id> 存档)
+const win=winner===player.team, draw=winner===-1;
+document.getElementById('endIcon').innerHTML=draw?END_SVG_DRAW:(win?END_SVG_WIN:END_SVG_LOSE);
 const title=document.getElementById('endTitle');
-if(winner===player.team){ title.textContent='胜  利'; title.className='win'; }
-else if(winner===-1){ title.textContent='平  局'; title.className='win'; }
-else { title.textContent='战  败'; title.className='lose'; }
-document.getElementById('endStats').innerHTML=
-`${TEAM_NAME[0]} 剩余兵力 <b>${Math.ceil(tickets[0])}</b>（在场 ${fieldCount(0)} 人） · ${TEAM_NAME[1]} 剩余兵力 <b>${Math.ceil(tickets[1])}</b>（在场 ${fieldCount(1)} 人）<br>`+
-`你的战绩：<b>${player.kills}</b> 击杀 / <b>${player.deaths}</b> 阵亡 · 得分 <b>${player.score}</b>`;
+title.textContent=draw?t('平  局'):(win?t('胜  利'):t('战  败'));
+title.className=draw?'draw':(win?'win':'lose');
+document.getElementById('endSub').textContent=`${t(CAMPAIGN.title)} · ${t(CAMPAIGN.modeName)} · ${t(TEAM_FACTION[player.team].short)}`;
+const sc=Math.max(0,Math.round(player.score));
+const bestKey='sf_best_'+CAMPAIGN.id;
+const prev=parseInt(localStorage.getItem(bestKey)||'0',10)||0;
+const isNew=sc>prev;
+if(isNew) localStorage.setItem(bestKey,String(sc));
+document.getElementById('endScore').textContent=sc;
+document.getElementById('endBest').textContent=t('本图最高 {0}',Math.max(sc,prev));
+document.getElementById('endNewRec').classList.toggle('hidden',!isNew);
+const kd=player.deaths>0?(player.kills/player.deaths).toFixed(2):String(player.kills);
+document.getElementById('endGrid').innerHTML=
+`<div class="statCard"><div class="v">${player.kills}</div><div class="k">${t('击杀数')}</div></div>`+
+`<div class="statCard"><div class="v">${player.deaths}</div><div class="k">${t('阵亡数')}</div></div>`+
+`<div class="statCard"><div class="v">${kd}</div><div class="k">${t('K/D 比')}</div></div>`+
+`<div class="statCard"><div class="v">${killStreakMax}</div><div class="k">${t('最大连杀')}</div></div>`+
+`<div class="statCard"><div class="v">${player.headKills||0}</div><div class="k">${t('爆头数')}</div></div>`+
+`<div class="statCard"><div class="v">${player.caps||0}</div><div class="k">${t('占领点')}</div></div>`;
+const mx=Math.max(1,tickets[0],tickets[1]);
+const bar=z=>`<div class="tRow"><div class="tName t${z}">${t(TEAM_NAME[z])}</div>`+
+`<div class="tBarWrap"><div class="tBar t${z}" style="width:${Math.max(0,Math.min(100,tickets[z]/mx*100))}%"></div></div>`+
+`<div class="tInfo">${Math.ceil(tickets[z])} ${t('票')} · ${fieldCount(z)} ${t('在场')}</div></div>`;
+document.getElementById('endTickets').innerHTML=bar(0)+bar(1);
 },900);
 }
 const el=id=>document.getElementById(id);
@@ -235,9 +261,9 @@ return '';
 function addKillfeed(attacker,victim,isHead){
 const kf=el('killfeed');
 const div=document.createElement('div');
-const an=attacker.isPlayer?'<span class="me">你</span>':`<span class="kf${attacker.team}">${attacker.name}</span>`;
-const vn=victim.isPlayer?'<span class="me">你</span>':`<span class="kf${victim.team}">${victim.name}</span>`;
-const src=killSrcLabel(attacker);
+const an=attacker.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${attacker.team}">${attacker.name}</span>`;
+const vn=victim.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${victim.team}">${victim.name}</span>`;
+const src=t(killSrcLabel(attacker));
 div.innerHTML=`${an} ${isHead?'☠':'✕'} ${vn}${src?` <span class="kfSrc">[${src}]</span>`:''}`;
 kf.prepend(div);
 while(kf.children.length>6) kf.lastChild.remove();
@@ -245,7 +271,7 @@ setTimeout(()=>{ div.style.opacity=0; setTimeout(()=>div.remove(),1000); },5200)
 }
 function addKillMsg(txt,team){
 const m=el('msgC');
-m.textContent=txt;
+m.textContent=t(txt);
 m.style.color=team===player.team?'#ffe08a':'#ff8a7a';
 m.style.opacity=1;
 clearTimeout(m._t);
@@ -253,19 +279,19 @@ m._t=setTimeout(()=>m.style.opacity=0,2400);
 }
 // 己方载具(坦克/战机)战损重生: 顶部战况栏文字播报 (2026-09-01 用户指定; addKillMsg 按阵营自动配色)
 function announceVehRespawn(v){
-addKillMsg(`我方 ${v.name} 已重生`,v.team);
+addKillMsg(t('我方 {0} 已重生',t(v.name)),v.team);
 }
 let scorePopT=null;
 function showScorePop(txt){
 const s=el('scorePop');
-s.textContent=txt; s.style.opacity=1;
+s.textContent=t(txt); s.style.opacity=1;
 clearTimeout(scorePopT);
 scorePopT=setTimeout(()=>s.style.opacity=0,1400);
 }
 // —— 玩家击杀播报: 右下角得分列表 (每次击杀/摧毁独立成行) + 中下连杀横幅 + 连杀奖励 ——
 const MK_NAMES={2:'双杀',3:'三连杀',4:'四连杀',5:'五连杀',6:'六连杀',7:'七连杀',8:'八连杀',9:'九连杀'};
 const KILL_STREAK_WIN=5; // 连杀窗口: 距上次击杀超过该秒数则重新计数
-let killStreakN=0, killStreakT=-99;
+let killStreakN=0, killStreakT=-99, killStreakMax=0;
 // 连杀奖励 (2026-09-11): 档位表在 00-config STREAK_REWARDS —— 命中 3/6/9 杀时发放/升级增益
 // (player.streakBuff, 效果接线: 移速 20-player / 换弹 19-input / 减伤 18-game), 得分按当前档位 mul 结算。
 function streakTierOf(n){ // 当前连杀数命中的最高档 (未达 3 杀返回 null)
@@ -275,7 +301,7 @@ return hit;
 }
 function grantStreakBuff(tier,lv){
 player.streakBuff={name:tier.name, lv, mul:tier.mul, speedMul:tier.speedMul, reloadMul:tier.reloadMul, dmgCut:tier.dmgCut, until:nowT+tier.dur};
-showScorePop(`连杀奖励 · ${tier.name} (得分×${tier.mul}, ${tier.dur}s)`);
+showScorePop(t('连杀奖励 · {0} (得分×{1}, {2}s)',t(tier.name),tier.mul,tier.dur));
 AudioSys.click(660,0.22,0.05);
 setTimeout(()=>AudioSys.click(990,0.3,0.06),120);
 }
@@ -283,7 +309,7 @@ function showKillPop(label,score,mul){
 const box=el('killPops');
 const d=document.createElement('div');
 d.className='kp';
-d.innerHTML=`<span class="kpLabel">${label}</span>${mul&&mul>1?`<span class="kpMul">×${mul}</span>`:''}<span class="kpScore">+${score}</span>`;
+d.innerHTML=`<span class="kpLabel">${t(label)}</span>${mul&&mul>1?`<span class="kpMul">×${mul}</span>`:''}<span class="kpScore">+${score}</span>`;
 box.appendChild(d);
 while(box.children.length>5) box.firstChild.remove();
 setTimeout(()=>{ d.classList.add('out'); setTimeout(()=>d.remove(),500); },2600);
@@ -294,12 +320,13 @@ function registerKillScore(label,base,countStreak){
 if(countStreak===false||matchOver){ showKillPop(label,base); return base; }
 if(nowT-killStreakT>KILL_STREAK_WIN) killStreakN=0;
 killStreakN++; killStreakT=nowT;
+if(killStreakN>killStreakMax) killStreakMax=killStreakN; // 结算最大连杀 (2026-09-13)
 const tier=streakTierOf(killStreakN);
 const got=Math.round(base*(tier?tier.mul:1));
 showKillPop(label,got,tier?tier.mul:1);
 if(killStreakN>=2){
 const b=el('mkBanner');
-b.textContent=(MK_NAMES[killStreakN]||killStreakN+' 连杀')+'!';
+b.textContent=t(MK_NAMES[killStreakN]||t('{0} 连杀',killStreakN))+'!';
 b.classList.toggle('hot',killStreakN>=4);
 b.classList.remove('show');
 void b.offsetWidth; // 强制重排以重播弹出动画 (同一爆炸连杀时逐杀刷新数字)
@@ -314,6 +341,7 @@ function resetKillStreak(){ killStreakN=0; player.streakBuff=null; }
 function onPlayerKill(victim,isHead){
 const got=registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 player.score+=got;
+if(isHead) player.headKills=(player.headKills||0)+1; // 爆头数: 结算卡 (2026-09-13)
 player.lifeKills=(player.lifeKills||0)+1;
 const hm=el('hitmark');
 hm.classList.add('kill');

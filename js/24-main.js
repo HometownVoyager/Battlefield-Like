@@ -246,5 +246,6 @@ addEventListener('resize',homeStick);
 }
 
 applyQuality();
+document.body.classList.add('inMenu'); // 菜单/结算期间隐藏战斗 HUD (航拍动态不叠游戏 UI)
 initMenuUI();
 loop();

@@ -90,17 +90,17 @@ if(VM.state!=='idle') return;
 const bc=pl.buildCount||0;
 const type=BUILD_MENU[pl.buildSel||0];
 const cost=BUILD_COST[type]||1;
-if(bc<cost){ showScorePop('建造点数不足 ('+bc+'/'+cost+') — 弹药箱旁按F补给可回满'); return; }
+if(bc<cost){ showScorePop(t2('建造点数不足 ({0}/{1}) — 弹药箱旁按F补给可回满',bc,cost)); return; }
 const o=pl.pos.clone(); const dir=camForward(); dir.y=0;
 if(dir.lengthSq()<0.1) return;
 dir.normalize();
 const tx=o.x+dir.x*2.4, tz=o.z+dir.z*2.4;
-if(occBlocked(tx,tz)){ showScorePop('此处无法建造'); return; }
+if(occBlocked(tx,tz)){ showScorePop(t2('此处无法建造')); return; }
 const lim=MAP_SIZE/2-4;
-if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop('超出战场边界'); return; }
+if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop(t2('超出战场边界')); return; }
 pl.pendingBuild={type,cost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
 VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmResetSndFlags();
-showScorePop('建造中: '+BUILD_NAMES[type]+' … (移动取消)');
+showScorePop(t2('建造中: {0} … (移动取消)',t2(BUILD_NAMES[type])));
 }
 function cancelBuild(pl){
 if(!pl.pendingBuild) return;
@@ -115,7 +115,7 @@ vmResetSndFlags();
 function engBuildExec(pl){
 const tk=pl.pendingBuild; pl.pendingBuild=null;
 if(!tk||!pl.alive) return;
-if(occBlocked(tk.tx,tk.tz)){ showScorePop('位置被占用, 建造取消'); return; }
+if(occBlocked(tk.tx,tk.tz)){ showScorePop(t2('位置被占用, 建造取消')); return; }
 const ci=world.children.length;
 if(tk.type==='sandbag'){ sandbagWall(tk.tx,tk.tz,4,tk.ry); }
 else if(tk.type==='wire'){ barbedWire(tk.tx,tk.tz,tk.ry,4.2,pl); }
@@ -125,7 +125,7 @@ riseNewMeshes(ci,0.85);
 pl.buildCount=(pl.buildCount||0)-tk.cost;
 const gy=heightAt(tk.tx,tk.tz);
 for(let i=0;i<7;i++) spawnP(PT.dirt,tk.tx+rand(-1.6,1.6),gy+rand(0.1,0.4),tk.tz+rand(-1.6,1.6),rand(-1,1),rand(0.5,1.6),rand(-1,1),rand(0.3,0.5),0.8,rand(0.5,0.9),0.85,2);
-if(pl.isPlayer){ showScorePop(BUILD_NAMES[tk.type]+' · 建成 (剩余 '+pl.buildCount+' 点)'); AudioSys.metalSlide(0.25,0.2,300,150); }
+if(pl.isPlayer){ showScorePop(t2('{0} · 建成 (剩余 {1} 点)',t2(BUILD_NAMES[tk.type]),pl.buildCount)); AudioSys.metalSlide(0.25,0.2,300,150); }
 markNavDirty();
 }
 // 铁丝网减速/伤害区域: 每帧检测 combatants (WIRES 专门存储)

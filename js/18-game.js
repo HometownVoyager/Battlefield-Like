@@ -143,14 +143,14 @@ const ga=this.grabAction;
 	this.bandages=this.maxBandages;
 this.resupplyCd=ga.kind==='truck'?8:6;
 AudioSys.metalSlide(0.3,0.15,500,900);
-showScorePop(ga.kind==='truck'?'运输车补给完成':(ga.kind==='supply'?'补充点补给完成':'弹药已补充'));
+showScorePop(ga.kind==='truck'?t2('运输车补给完成'):(ga.kind==='supply'?t2('补充点补给完成'):t2('弹药已补充')));
 } else if(ga.kind==='medcrate'){
 const c=ga.crate;
 this.bandages=this.maxBandages;
 c.uses--;
 this.bandResupCd=4;
 AudioSys.click(900,0.3,0.05);
-showScorePop('绷带已补充');
+showScorePop(t2('绷带已补充'));
 if(c.owner&&c.owner!==this){ c.owner.score=(c.owner.score||0)+SCORE_TABLE.medkit; }
 }
 this.grabAction=null;

@@ -577,17 +577,17 @@ updateInteractHint._sig=sig; updateInteractHint._t=nowT;
 const tip=document.getElementById('clsTip');
 	let tt='';
 	if(player.alive&&player.deployed&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA){
-	if(player.loiter) tt='<b>左键</b> 自爆 · <b>右键</b> 加速 · <b>鼠标</b> 制导 · <b>F</b> 切换视角';
-	else if(player.onMortar) tt='<b>左键</b> 发射 · <b>鼠标</b> 调弹道 · <b>F</b> 离开';
-	else if(player.cls===4) tt='<b>B</b> 放置医疗箱';
-	else if(player.cls===6) tt=player.mortarPlaced?'<b>F</b> 上炮 · <b>B</b> 靠近回收':'<b>B</b> 架设迫击炮';
+	if(player.loiter) tt=t2('<b>左键</b> 自爆 · <b>右键</b> 加速 · <b>鼠标</b> 制导 · <b>F</b> 切换视角');
+	else if(player.onMortar) tt=t2('<b>左键</b> 发射 · <b>鼠标</b> 调弹道 · <b>F</b> 离开');
+	else if(player.cls===4) tt=t2('<b>B</b> 放置医疗箱');
+	else if(player.cls===6) tt=player.mortarPlaced?t2('<b>F</b> 上炮 · <b>B</b> 靠近回收'):t2('<b>B</b> 架设迫击炮');
 	else if(isLoiterClass()) tt=player.spectator
-?'观战中 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(右键加速) · <b>左键</b> TV弹制导/手动引爆 · 触地消失 · 弹药无限'
-:'<b>左键</b> 发射巡飞弹(TV制导) · <b>6</b> 燃烧弹';
+?t2('观战中 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(右键加速) · <b>左键</b> TV弹制导/手动引爆 · 触地消失 · 弹药无限')
+:t2('<b>左键</b> 发射巡飞弹(TV制导) · <b>6</b> 燃烧弹');
 else if(player.cls===7){
 const bt2=BUILD_MENU[player.buildSel||0];
 const bn2=bt2==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt2];
-tt='<b>5</b> 工事: '+bn2+' ('+BUILD_COST[bt2]+'点) · <b>B</b> 建造 · 剩 '+(player.buildCount||0)+' 点';
+tt=t2('<b>5</b> 工事: {0} ({1}点) · <b>B</b> 建造 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0));
 }
 }
 if(tip._last!==tt){ tip._last=tt; tip.innerHTML=tt; tip.style.display=tt?'block':'none'; }
@@ -595,47 +595,47 @@ const elm=document.getElementById('interact');
 if(player.spectator){ elm.style.display='none'; return; } // 观战: 隐藏载具/阵位/补给互动提示
 if(player.useCast){ // 固定火力点使用前摇进度
 elm.style.display='block';
-elm.innerHTML='使用中… '+Math.max(0,(player.useCast.dur-player.useCast.t)).toFixed(1)+'s (移动中止)';
+elm.innerHTML=t2('使用中… {0}s (移动中止)',Math.max(0,(player.useCast.dur-player.useCast.t)).toFixed(1));
 return;
 }
-if(player.onVehicle&&player.onVehicle.kind==='plane'){ elm.style.display='block'; elm.innerHTML='<b>F</b> 跳伞 · <b>W/S</b>油门 <b>A/D</b>压坡转向 <b>鼠标</b>拉杆 <b>左键</b>机枪 <b>右键/B</b>炸弹'; return; }
-if(player.onVehicle){ elm.style.display='block'; elm.innerHTML='<b>F</b> 离开坦克 · <b>WASD</b>驾驶 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>炮手镜'; return; }
-if(player.onMG){ elm.style.display='block'; elm.innerHTML='<b>F</b> 离开机枪'; return; }
-if(player.onMortar){ elm.style.display='block'; elm.innerHTML='<b>F</b> 离开迫击炮 · <b>左键</b> 发射 · <b>鼠标</b> 调整弹道'; return; }
-if(player.onAT){ elm.style.display='block'; elm.innerHTML='<b>F</b> 离开反坦克炮'; return; }
-if(player.onAA){ elm.style.display='block'; elm.innerHTML='<b>F</b> 离开防空炮'; return; }
+if(player.onVehicle&&player.onVehicle.kind==='plane'){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 跳伞 · <b>W/S</b>油门 <b>A/D</b>压坡转向 <b>鼠标</b>拉杆 <b>左键</b>机枪 <b>右键/B</b>炸弹'); return; }
+if(player.onVehicle){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开坦克 · <b>WASD</b>驾驶 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>炮手镜'); return; }
+if(player.onMG){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开机枪'); return; }
+if(player.onMortar){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开迫击炮 · <b>左键</b> 发射 · <b>鼠标</b> 调整弹道'); return; }
+if(player.onAT){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开反坦克炮'); return; }
+if(player.onAA){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开防空炮'); return; }
 for(const t of tanks){
 if(t.alive&&t.team===player.team&&Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<4.5){
-elm.style.display='block'; elm.innerHTML='<b>F</b> '+(t.crewBot?'接管':'进入')+' '+t.name; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> {0} {1}',t2(t.crewBot?'接管':'进入'),t2(t.name)); return;
 }
 }
 for(const mg of MG42S){
 if(!mg.user&&empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 使用 '+((mg.def&&mg.def.name)||'重机枪'); return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用 {0}',t2((mg.def&&mg.def.name)||'重机枪')); return;
 }
 }
 for(const g of ATGUNS){
 if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 使用反坦克炮'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用反坦克炮'); return;
 }
 }
 for(const g of AAGUNS){
 if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 使用防空炮'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用防空炮'); return;
 }
 }
 for(const m of MORTARS){
 if(!m.alive||m.user) continue;
 if(Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8){
 elm.style.display='block';
-elm.innerHTML=(m.owner===player)?'<b>F</b> 使用迫击炮 · <b>B</b> 回收':'<b>F</b> 使用迫击炮';
+elm.innerHTML=(m.owner===player)?t2('<b>F</b> 使用迫击炮 · <b>B</b> 回收'):t2('<b>F</b> 使用迫击炮');
 return;
 }
 }
 if(player.resupplyCd<=0){
 for(const ac of AMMO_CRATES){
 if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 补充弹药'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 补充弹药'); return;
 }
 }
 // 劫道模式: 护运玩家只能贴车补给
@@ -643,14 +643,14 @@ if(GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===player.team){
 for(const t of trucks){
 if(!t.alive||t.escaped) continue;
 if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<3.6){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 从运输车补充补给'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 从运输车补充补给'); return;
 }
 }
 }
 if(player.team===0){
 for(const sp of SUPPLY_POINTS){
 if(Math.hypot(sp.x-player.pos.x,sp.z-player.pos.z)<2.8){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 从临时补给点补充补给'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 从临时补给点补充补给'); return;
 }
 }
 }
@@ -659,7 +659,7 @@ if(player.bandResupCd<=0&&player.bandages<player.maxBandages){
 for(const c of MED_CRATES){
 if(c.team!==player.team||c.uses<=0) continue;
 if(Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.6){
-elm.style.display='block'; elm.innerHTML='<b>F</b> 拿取绷带'; return;
+elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 拿取绷带'); return;
 }
 }
 }

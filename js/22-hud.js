@@ -435,62 +435,66 @@ if(rem<=0) player.streakBuff=null;
 else { sb.style.display='block'; sb.className='lv'+(player.streakBuff.lv||0);
 // 骑乘形态标注 (2026-09-12 "增益跟着人走"): 角标实时显示当前形态下实际生效的增益项
 let ctx='';
-if(player.onVehicle) ctx=player.onVehicle.kind==='plane'?' · 航炮加速':' · 主炮加速';
-else if(player.onMG) ctx=' · 枪管降温';
-else if(player.onAT||player.onAA||player.onMortar) ctx=' · 射速提升';
-sb.innerHTML=`⚔ ${player.streakBuff.name} · 得分×${player.streakBuff.mul}${ctx}<span class="sbT">${Math.ceil(rem)}s</span>`; }
+if(player.onVehicle) ctx=player.onVehicle.kind==='plane'?t(' · 航炮加速'):t(' · 主炮加速');
+else if(player.onMG) ctx=t(' · 枪管降温');
+else if(player.onAT||player.onAA||player.onMortar) ctx=t(' · 射速提升');
+sb.innerHTML=`⚔ ${t(player.streakBuff.name)} · ${t('得分')}×${player.streakBuff.mul}${ctx}<span class="sbT">${Math.ceil(rem)}s</span>`; }
 }
 if(!player.streakBuff) sb.style.display='none';
 const w=player.curW;
 if(player.onVehicle&&player.onVehicle.kind==='plane'){
 const t=player.onVehicle;
-el('wname').textContent=t.name;
-el('wmode').textContent='机体 '+Math.max(0,Math.round(t.hp/t.maxHp*100))+'%';
+el('wname').textContent=t2(t.name);
+el('wmode').textContent=t2('机体 {0}%',Math.max(0,Math.round(t.hp/t.maxHp*100)));
 el('magN').textContent=Math.round(t.speed*3.6)+'km/h';
 el('magN').style.color='#eee';
-el('resN').textContent='高度 '+Math.round(t.pos.y)+'m';
-el('nadeN').textContent='A/D 压坡转向 · 鼠标拉杆 · 炸弹 ×'+t.bombs+' [右键/B]';
+el('resN').textContent=t2('高度 {0}m',Math.round(t.pos.y));
+el('nadeN').textContent=t2('A/D 压坡转向 · 鼠标拉杆 · 炸弹 ×{0} [右键/B]',t.bombs);
 } else if(player.onVehicle){
 const t=player.onVehicle;
-el('wname').textContent=t.name;
-el('wmode').textContent='装甲 '+Math.max(0,Math.round(t.hp/t.maxHp*100))+'%';
-el('magN').textContent=t.cannonCd<=0?'就绪':t.cannonCd.toFixed(1);
+el('wname').textContent=t2(t.name);
+el('wmode').textContent=t2('装甲 {0}%',Math.max(0,Math.round(t.hp/t.maxHp*100)));
+el('magN').textContent=t.cannonCd<=0?t2('就绪'):t.cannonCd.toFixed(1);
 el('magN').style.color=t.cannonCd<=0?'#9fd89f':'#e0c080';
 el('resN').textContent='';
-el('nadeN').textContent='主炮[左键] · 机枪[右键] · 视角[F]';
+el('nadeN').textContent=t2('主炮[左键] · 机枪[右键] · 视角[F]');
 } else if(player.onAT){
-el('wname').textContent='57mm 反坦克炮';
-el('wmode').textContent='穿甲弹';
-el('magN').textContent=player.onAT.cd<=0?'就绪':player.onAT.cd.toFixed(1);
+el('wname').textContent=t2('57mm 反坦克炮');
+el('wmode').textContent=t2('穿甲弹');
+el('magN').textContent=player.onAT.cd<=0?t2('就绪'):player.onAT.cd.toFixed(1);
 el('magN').style.color=player.onAT.cd<=0?'#9fd89f':'#e0c080';
 el('resN').textContent=''; el('nadeN').textContent='';
 } else if(player.onAA){
-el('wname').textContent='防空炮';
-el('wmode').textContent='高爆弹';
+el('wname').textContent=t2('防空炮');
+el('wmode').textContent=t2('高爆弹');
 el('magN').textContent='∞';
 el('magN').style.color='#eee';
 el('resN').textContent=''; el('nadeN').textContent='';
 	} else if(player.loiter){
-	el('wname').textContent='巡飞弹 · TV制导';
-	el('wmode').textContent='导弹视角';
+	el('wname').textContent=t2('巡飞弹 · TV制导');
+	el('wmode').textContent=t2('导弹视角');
 	el('magN').textContent=Math.ceil(player.loiter.life)+'s';
 	el('magN').style.color=player.loiter.life<4?'#ff7060':'#9fe89f';
 	el('resN').textContent=Math.round(player.loiter.spd)+' m/s';
-	el('nadeN').textContent='鼠标 制导 · 左键 自爆 · 右键 加速 · F 切换视角';
+	el('nadeN').textContent=t2('鼠标 制导 · 左键 自爆 · 右键 加速 · F 切换视角');
 	} else if(w){
-	el('wname').textContent=player.onMG?'MG42 通用机枪':w.def.name;
-	el('wmode').textContent=player.onMG?'全自动':w.def.mode;
+	el('wname').textContent=player.onMG?t2('MG42 通用机枪'):t2(w.def.name);
+	el('wmode').textContent=player.onMG?t2('全自动'):w.def.mode;
 	el('magN').textContent=player.onMG?'∞':w.mag;
 	el('resN').textContent=player.onMG?'':'/ '+w.reserve;
 	el('magN').style.color=(!player.onMG&&w.mag<=Math.max(2,w.def.mag*0.25))?'#ff7060':'#eee';
-	el('nadeN').textContent='手雷 ×'+player.nadeCount+' · 绷带[H] ×'+player.bandages+(player.cls===2?' · AT雷[3] ×'+player.atNades:'')+(CLASSES[player.cls].smoke?' · 烟雾[4] ×'+player.smokeCount:'')+(player.incinCount>0?' · 燃烧[6] ×'+player.incinCount:'')+(player.cls===4?' · 医疗箱[B]':'');
+	el('nadeN').textContent=t2('手雷 ×{0}',player.nadeCount)+' · '+t2('绷带[H] ×{0}',player.bandages)
+	+(player.cls===2?' · '+t2('AT雷[3] ×{0}',player.atNades):'')
+	+(CLASSES[player.cls].smoke?' · '+t2('烟雾[4] ×{0}',player.smokeCount):'')
+	+(player.incinCount>0?' · '+t2('燃烧[6] ×{0}',player.incinCount):'')
+	+(player.cls===4?' · '+t2('医疗箱[B]'):'');
 	}
 // 载具血量条 (2026-09-01 用户新增: 驾驶坦克/飞机时按压感显示机体血量)
 if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='plane')){
 const v=player.onVehicle;
 const vhp=v.hp/v.maxHp;
 el('vehHpWrap').style.display='block';
-el('vehHpName').textContent=v.name;
+el('vehHpName').textContent=t2(v.name);
 el('vehHpBar').style.width=(Math.max(0,vhp)*100)+'%';
 el('vehHpBar').style.background=vhp>0.5?'#9fd89f':(vhp>0.25?'#e0c080':'#e07060');
 el('vehHpNum').textContent=Math.max(0,Math.ceil(v.hp))+' / '+v.maxHp;
@@ -510,21 +514,21 @@ hudSlowT=0.1;
 	const t1s=Math.ceil(tickets[1]);
 	const f0=fieldCount(0), f1=fieldCount(1);
 	let modeLine='';
-	if(GAMEMODE==='assault') modeLine=`<div style="font-size:11px;color:#ffd77a">攻防战 · 攻方占超一半且守方仅余1点→守方兵力流失 · 任意一方占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜${CAMPAIGN.id==='songhu'?' · <span style="color:#9fd4e8">浅滩涉水减速 · 深水主河须过石桥</span>':''}</div>`;
-	else if(GAMEMODE==='demolition') modeLine=`<div style="font-size:11px;color:#ffd77a">破袭战 · 剩余补给库: ${DEPOTS.filter(d=>!d.destroyed).length}/${DEPOTS.length}</div>`;
-	else if(GAMEMODE==='conquest') modeLine=`<div style="font-size:11px;color:#ffd77a">${CAMPAIGN.bridge?'拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉':'征服战 · 一方占超一半且对方仅余1点→对方兵力流失 · 占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜'}</div>`;
-	else if(GAMEMODE==='clash') modeLine=`<div style="font-size:11px;color:#ffd77a">遭遇战 · 无旗点 · 兵力打空后需清场残敌方胜</div>`;
-	else if(GAMEMODE==='convoy'){ const cs=(typeof CONVOY_STATE!=='undefined'&&CONVOY_STATE)?` · 剩余 ${CONVOY_STATE.left} 辆 · 已突围 ${CONVOY_STATE.esc}`:''; modeLine=`<div style="font-size:11px;color:#ffd77a">劫道战 · 毁车过半→劫道方胜, 突围过半→护运方胜 · 劫道方补给 ${Math.round(((CAMPAIGN.convoy&&CAMPAIGN.convoy.supplyLife)||600)/60)} 分钟后失效 · 护运方贴车补${cs}</div>`; }
+	if(GAMEMODE==='assault') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('攻防战 · 攻方占超一半且守方仅余1点→守方兵力流失 · 任意一方占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜{0}',CAMPAIGN.id==='songhu'?t(' · <span style="color:#9fd4e8">浅滩涉水减速 · 深水主河须过石桥</span>'):'')}</div>`;
+	else if(GAMEMODE==='demolition') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('破袭战 · 剩余补给库: {0}/{1}',DEPOTS.filter(d=>!d.destroyed).length,DEPOTS.length)}</div>`;
+	else if(GAMEMODE==='conquest') modeLine=`<div style="font-size:11px;color:#ffd77a">${CAMPAIGN.bridge?t('拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉'):t('征服战 · 一方占超一半且对方仅余1点→对方兵力流失 · 占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜')}</div>`;
+	else if(GAMEMODE==='clash') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('遭遇战 · 无旗点 · 兵力打空后需清场残敌方胜')}</div>`;
+	else if(GAMEMODE==='convoy'){ const cs=(typeof CONVOY_STATE!=='undefined'&&CONVOY_STATE)?t(' · 剩余 {0} 辆 · 已突围 {1}',CONVOY_STATE.left,CONVOY_STATE.esc):''; modeLine=`<div style="font-size:11px;color:#ffd77a">${t('劫道战 · 毁车过半→劫道方胜, 突围过半→护运方胜 · 劫道方补给 {0} 分钟后失效 · 护运方贴车补{1}',Math.round(((CAMPAIGN.convoy&&CAMPAIGN.convoy.supplyLife)||600)/60),cs)}</div>`; }
 	let wipeLine='';
 	for(const z of [0,1]){
 	if(tickets[z]<=0){
 	const gl=flagsLostOf(1-z);
-	wipeLine+=`<div style="font-size:11px;color:#ff9c8a">⚠ ${TEAM_NAME[z]} 兵力归零 · ${TEAM_NAME[1-z]} 需${gl>0?`占满全部旗点(余 ${gl} 点)+`:''}消灭其场上残兵(剩 ${fieldCount(z)} 人)方可获胜${wipeT[z]!==null?`<b style="color:#ffe08a"> · ⏳ 最后一人清场倒计时 ${Math.ceil(wipeT[z])} 秒</b>`:''}</div>`;
+	wipeLine+=`<div style="font-size:11px;color:#ff9c8a">${t('⚠ {0} 兵力归零 · {1} 需{2}消灭其场上残兵(剩 {3} 人)方可获胜{4}',t(TEAM_NAME[z]),t(TEAM_NAME[1-z]),gl>0?t('占满全部旗点(余 {0} 点)+',gl):'',fieldCount(z),wipeT[z]!==null?`<b style="color:#ffe08a">${t(' · ⏳ 最后一人清场倒计时 {0} 秒',Math.ceil(wipeT[z]))}</b>`:'')}</div>`;
 	}
 	}
 	const tn=' style="font-style:normal;font-size:12px;opacity:.75"';
-	el('tickets').innerHTML=`<span class="tl">${TEAM_NAME[0]} ${t0s}<span${tn}>(${f0}人)</span></span> &nbsp;·&nbsp; <span class="tr">${t1s} ${TEAM_NAME[1]}<span${tn}>(${f1}人)</span></span>`+modeLine+wipeLine+
-	(player.spectator?`<div style="font-size:11px;color:#9fe8ff">观战中 · 免伤 · 不被索敌 · 双击空格悬停/H气动飞行</div>`:'');
+	el('tickets').innerHTML=`<span class="tl">${t(TEAM_NAME[0])} ${t0s}<span${tn}>${t('({0}人)',f0)}</span></span> &nbsp;·&nbsp; <span class="tr">${t1s} ${t(TEAM_NAME[1])}<span${tn}>${t('({0}人)',f1)}</span></span>`+modeLine+wipeLine+
+	(player.spectator?`<div style="font-size:11px;color:#9fe8ff">${t('观战中 · 免伤 · 不被索敌 · 双击空格悬停/H气动飞行')}</div>`:'');
 }
 const mm=Math.floor(Math.max(0,matchTime)/60), ss2=Math.floor(Math.max(0,matchTime)%60);
 el('timeTxt').textContent=`${mm}:${ss2<10?'0':''}${ss2}`;
@@ -598,17 +602,17 @@ function initMenuUI(){
 	const showPanel=(id)=>{
 	el('mHome').classList.toggle('hidden',id!=='mHome');
 	['mPlay','mSet','mHelp'].forEach(pid=>el(pid).classList.toggle('hidden',pid!==id));
+	el('menu').classList.toggle('hasSub',id!=='mHome');
 	};
 	document.querySelectorAll('.navBtn').forEach(b=>{
 	b.onclick=()=>{ AudioSys.resume&&AudioSys.resume(); showPanel(b.dataset.p); };
 	});
 	document.querySelectorAll('.backBtn').forEach(b=>{ b.onclick=()=>showPanel('mHome'); });
-	el('helpBtn').onclick=()=>{ AudioSys.resume&&AudioSys.resume(); showPanel('mHelp'); };
-	// 实验模式开关 (操作说明旁): 巡飞弹兵替换反坦克兵
+	// 实验模式开关 (游戏设置内): 巡飞弹兵替换反坦克兵
 	{
 	const eb=el('expBtn');
 	if(eb){
-	eb.textContent='⚙ 实验模式: '+(EXPERIMENT?'开':'关');
+	eb.textContent='⚙ '+t('实验模式')+': '+t(EXPERIMENT?'开':'关');
 	eb.classList.toggle('sel',EXPERIMENT);
 	eb.onclick=()=>{
 	AudioSys.resume&&AudioSys.resume();
@@ -616,6 +620,13 @@ function initMenuUI(){
 	location.reload();
 	};
 	}
+	}
+	// 语言切换 (游戏设置内): 存档后重载生效 (静态文案 applyI18n 已在启动时应用)
+	{
+	el('langZh').classList.toggle('sel',LANG==='zh');
+	el('langEn').classList.toggle('sel',LANG==='en');
+	el('langZh').onclick=()=>{ AudioSys.resume&&AudioSys.resume(); if(LANG!=='zh'){ localStorage.setItem('sf_lang','zh'); location.reload(); } };
+	el('langEn').onclick=()=>{ AudioSys.resume&&AudioSys.resume(); if(LANG!=='en'){ localStorage.setItem('sf_lang','en'); location.reload(); } };
 	}
 // 触控按键大小
 {
@@ -634,7 +645,7 @@ const campRow=el('campRow');
 const makeCampBtn=(c,i)=>{
 const b=document.createElement('button');
 b.className='optBtn'+(i===CAMPAIGN_IDX?' sel':'');
-b.innerHTML=`<b>${c.title}</b><br><span style="font-size:10px;opacity:.8;color:#c0d8e0">${c.modeName}</span><br><span style="font-size:11px;opacity:.7">${c.sub}</span>`;
+b.innerHTML=`<b>${t2(c.title)}</b><br><span style="font-size:10px;opacity:.8;color:#c0d8e0">${t2(c.modeName)}</span><br><span style="font-size:11px;opacity:.7">${t2(c.sub)}</span>`;
 b.style.minWidth='150px';
 b.onclick=()=>{
 localStorage.setItem('sf_campaign',String(i));
@@ -653,7 +664,7 @@ outerRow.style.display='flex'; outerRow.style.flexWrap='wrap';
 outerRow.style.justifyContent='center'; outerRow.style.gap='8px';
 const folderBtn=document.createElement('button');
 folderBtn.className='optBtn'+(flagCamps.some(x=>x.i===CAMPAIGN_IDX)?' sel':'');
-folderBtn.innerHTML=`<b>📁 占旗点战役 (${flagCamps.length})</b><br><span style="font-size:10px;opacity:.8;color:#c0d8e0">攻防 · 征服 · 拉锯</span>`;
+folderBtn.innerHTML=`<b>${t2('📁 占旗点战役 ({0})',flagCamps.length)}</b><br><span style="font-size:10px;opacity:.8;color:#c0d8e0">${t2('攻防 · 征服 · 拉锯')}</span>`;
 folderBtn.style.minWidth='150px';
 folderBtn.onclick=()=>{
 const open=folderRow.style.display==='flex';
@@ -672,18 +683,21 @@ folderRow.style.justifyContent='center';
 folderRow.style.gap='8px';
 const backBtn=document.createElement('button');
 backBtn.className='optBtn';
-backBtn.textContent='‹ 返回';
+backBtn.textContent=t2('‹ 返回');
 backBtn.style.minWidth='110px';
 backBtn.onclick=()=>{ folderRow.style.display='none'; folderBtn.classList.remove('sel'); };
 folderRow.appendChild(backBtn);
 for(const x of flagCamps) folderRow.appendChild(makeCampBtn(x.c,x.i));
 campRow.appendChild(folderRow);
-if(flagCamps.some(x=>x.i===CAMPAIGN_IDX)) folderBtn.firstChild.textContent=`📁 占旗点战役 (${flagCamps.length}) · 当前${CAMPAIGN.mode==='assault'?'攻防':(CAMPAIGN.mode==='conquest'?(CAMPAIGN.bridge?'拉锯':'征服'):'')}`;
-el('menuSub').textContent=`—— ${CAMPAIGN.title} · ${CAMPAIGN.sub} ——`;
-el('teamUS').innerHTML=`${TEAM_FACTION[0].sym} ${TEAM_FACTION[0].short} · ${TEAM_FACTION[0].name}`;
-el('teamGER').innerHTML=`${TEAM_FACTION[1].sym} ${TEAM_FACTION[1].short} · ${TEAM_FACTION[1].name}`;
-document.querySelector('.t0h').textContent=TEAM_NAME[0];
-document.querySelector('.t1h').textContent=TEAM_NAME[1];
+if(flagCamps.some(x=>x.i===CAMPAIGN_IDX)){
+const modeLabel=CAMPAIGN.mode==='assault'?'攻防':(CAMPAIGN.mode==='conquest'?(CAMPAIGN.bridge?'拉锯':'征服'):'');
+folderBtn.firstChild.textContent=t2('📁 占旗点战役 ({0})',flagCamps.length)+t2(' · 当前{0}',t2(modeLabel));
+}
+el('menuSub').textContent=`—— ${t2(CAMPAIGN.title)} · ${t2(CAMPAIGN.sub)} ——`;
+el('teamUS').innerHTML=`${TEAM_FACTION[0].sym} ${t2(TEAM_FACTION[0].short)} · ${t2(TEAM_FACTION[0].name)}`;
+el('teamGER').innerHTML=`${TEAM_FACTION[1].sym} ${t2(TEAM_FACTION[1].short)} · ${t2(TEAM_FACTION[1].name)}`;
+document.querySelector('.t0h').textContent=t2(TEAM_NAME[0]);
+document.querySelector('.t1h').textContent=t2(TEAM_NAME[1]);
 // 在场人数: 标准/加强/史诗 —— 决定每队 Bot 数量 (存档 sf_size)
 document.querySelectorAll('.sizeBtn').forEach(b=>{
 b.classList.toggle('sel',+b.dataset.s===SIZE_IDX);
@@ -743,6 +757,7 @@ BOTS_PER_TEAM=SIZE_OPTS[SIZE_IDX].bots;
 	resetMatchState(); // 清场播报/倒计时复位 (2026-09-06 B7b/P2-14: 21-match 暴露的唯一入口)
 	startMatch();
 el('menu').classList.add('hidden');
+document.body.classList.remove('inMenu');
 showDeploy(true);
 }
 el('startBtn').onclick=()=>{
@@ -754,8 +769,8 @@ el('againBtn').onclick=()=>location.reload();
 	CLASSES.forEach((c,i)=>{
 	const d=document.createElement('div');
 	d.className='classCard'+(i===0?' sel':'');
-	const cname=(EXPERIMENT&&i===5)?'巡飞弹兵':c.name;
-	d.innerHTML=`<div class="cname">${cname}</div><div class="cwpn" id="cw${i}"></div><div class="cwpn">手雷 ×${c.nades}</div>`;
+	const cname=(EXPERIMENT&&i===5)?t2('巡飞弹兵'):t2(c.name);
+	d.innerHTML=`<div class="cname">${cname}</div><div class="cwpn" id="cw${i}"></div><div class="cwpn">${t2('手雷 ×{0}',c.nades)}</div>`;
 d.onclick=()=>{
 // 观战模式开关: 实验模式下巡飞弹兵"已选中"时再点一次 → 开/关观战 (2026-09-01 用户指定)
 if(EXPERIMENT&&i===5&&player.cls===5){

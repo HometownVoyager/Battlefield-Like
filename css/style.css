@@ -34,14 +34,25 @@ body.mobile #touchUI { display:block; }
 body.mobile #hint { display:none; }
 body.mobile #ctrlHelp { display:none; }
 /* ===== 主菜单 ===== */
-.menuMain { background:rgba(8,12,6,.78) !important; backdrop-filter:blur(3px); }
+.menuScreen { background:none !important; pointer-events:none; }
+/* 主菜单/结算期间: 战斗 HUD 与触控层整体隐藏 (航拍动态不叠游戏 UI, 2026-09-13 用户指示) */
+body.inMenu #ui, body.inMenu #touchUI { display:none !important; }
+#menuDock { pointer-events:auto; position:absolute; top:0; right:0; bottom:0; width:min(480px,94vw);
+display:flex; flex-direction:column; padding:44px 88px 44px 44px; overflow:auto;
+background:linear-gradient(to left, rgba(0,0,0,.88) 55%, rgba(0,0,0,.55) 80%, transparent); }
+/* 单面板纵向安全居中: auto margin 在内容高于视口时自动退化为顶对齐+可滚动 (不裁顶) */
+#menuDock > div { margin:auto 0; }
+#menu.hasSub #menuDock { width:min(780px,96vw); padding:36px 64px 36px 40px; background:linear-gradient(to left, rgba(0,0,0,.93) 62%, rgba(0,0,0,.6) 86%, transparent); }
+#mHome { text-align:center; }
+#menuDock .mSub { width:100%; background:rgba(10,12,8,.55); border:1px solid rgba(210,200,160,.22); border-radius:6px; padding:16px 20px; backdrop-filter:blur(4px); flex:none; }
 .gameLogo { text-align:center; font-size:52px; font-weight:800; letter-spacing:14px; color:#e8dcb0; text-shadow:0 2px 0 #4a3f22, 0 6px 22px rgba(0,0,0,.8); margin-top:10px; }
 .gameLogoSub { text-align:center; font-size:13px; letter-spacing:6px; color:rgba(220,210,170,.55); margin:4px 0 14px; }
 .menuNav { display:flex; flex-direction:column; align-items:center; gap:12px; margin:30px 0 26px; }
-.navBtn { width:320px; font-size:19px; letter-spacing:8px; padding:14px 0; }
+.navBtn { width:320px; max-width:100%; font-size:19px; letter-spacing:8px; padding:14px 0; }
 .mSubTitle { text-align:center; letter-spacing:8px; color:#d8c894; font-weight:600; margin-bottom:12px; }
 .backBtn { opacity:.8; }
-#mHome { text-align:center; }
+/* 语言/实验按钮选中态 */
+.langBtn.sel { background:rgba(200,175,95,.28); border-color:#d8c080; color:#ffe9b0; }
 #crosshair { position:absolute; left:50%; top:50%; width:0; height:0; --gap:8px; }
 #crosshair .chl { position:absolute; background:rgba(255,255,255,.92); box-shadow:0 0 3px rgba(0,0,0,.9); }
 #crosshair .chl.t { left:-1px; bottom:var(--gap); width:2px; height:9px; }
@@ -208,11 +219,38 @@ box-shadow: inset 0 0 0 2px rgba(140,255,170,.35); }
 #deployMap { width:100%; border:1px solid rgba(210,200,160,.3); border-radius:4px; background:#141a10; }
 #deathInfo { text-align:center; color:#e88; font-size:16px; margin-bottom:14px; min-height:22px; }
 #respawnTxt { color:#d8c894; }
-#endTitle { font-size:46px; text-align:center; letter-spacing:8px; margin-bottom:8px; }
+#endTitle { font-size:46px; text-align:center; letter-spacing:8px; margin-bottom:4px; }
 #endTitle.win { color:#ffe08a; text-shadow:0 0 30px rgba(255,210,110,.5); }
 #endTitle.lose { color:#e86a5a; }
-#endStats { text-align:center; font-size:16px; color:#bbb; line-height:2.1; margin:16px 0 26px; }
-#endStats b { color:#f0e2b0; font-size:20px; }
+#endTitle.draw { color:#a8bccb; text-shadow:0 0 26px rgba(150,180,200,.35); }
+/* ===== 结算画面 (2026-09-13 改版) ===== */
+.endPanel { width:820px; text-align:center; }
+#endHead { display:flex; align-items:center; justify-content:center; gap:22px; margin:6px 0 2px; }
+#endHeadTxt { text-align:left; }
+#endIcon svg { width:92px; height:92px; display:block; filter:drop-shadow(0 4px 14px rgba(0,0,0,.6)); }
+#endSub { text-align:center; font-size:14px; letter-spacing:3px; color:#9a9478; margin-bottom:8px; }
+#endScoreCard { display:inline-block; min-width:330px; margin:12px auto 4px; padding:12px 34px 14px;
+background:rgba(0,0,0,.38); border:1px solid rgba(210,190,130,.35); border-radius:8px; }
+#endScoreCard .scLabel { letter-spacing:5px; color:#c8b87c; font-size:13px; }
+#endScore { font-size:58px; font-weight:800; color:#ffe9a8; text-shadow:0 0 26px rgba(255,210,110,.35); line-height:1.15; }
+#endBestLine { font-size:13px; color:#a8a48c; }
+#endNewRec { display:inline-block; margin-left:12px; padding:2px 12px; border-radius:10px;
+background:linear-gradient(90deg,#c8963c,#ecc668); color:#241c08; font-weight:800; letter-spacing:2px;
+animation:recPulse 1.1s ease-in-out infinite; }
+@keyframes recPulse { 0%,100% { transform:scale(1); box-shadow:0 0 6px rgba(236,198,104,.5); } 50% { transform:scale(1.08); box-shadow:0 0 18px rgba(236,198,104,.9); } }
+#endGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:10px; margin:16px 0 10px; }
+.statCard { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:6px; padding:10px 6px 8px; }
+.statCard .v { font-size:23px; font-weight:700; color:#f0e2b0; line-height:1.2; }
+.statCard .k { font-size:11px; color:#9a9a86; letter-spacing:2px; margin-top:3px; }
+#endTickets { margin:4px auto 18px; max-width:640px; text-align:left; }
+.tRow { display:flex; align-items:center; gap:12px; margin:7px 0; }
+.tName { width:110px; font-size:13px; letter-spacing:1px; text-align:right; }
+.tName.t0 { color:#8fc1ff; } .tName.t1 { color:#ff9c8a; }
+.tBarWrap { flex:1; height:13px; background:rgba(255,255,255,.09); border-radius:7px; overflow:hidden; }
+.tBar { height:100%; border-radius:7px; transition:width .6s ease; }
+.tBar.t0 { background:linear-gradient(90deg,#4a76b8,#8fc1ff); }
+.tBar.t1 { background:linear-gradient(90deg,#b85444,#ff9c8a); }
+.tInfo { width:170px; font-size:12px; color:#a8a48c; }
 .center { text-align:center; }
 #menuVer { text-align:center; color:#555; font-size:11px; margin-top:20px; letter-spacing:2px; }
 #clsTip { position:absolute; right:26px; bottom:110px; color:#d8d2b8; font-size:12px; letter-spacing:1px; text-shadow:0 1px 3px #000; background:rgba(10,14,8,.55); padding:4px 10px; border-radius:3px; border:1px solid rgba(200,180,130,.22); display:none; }

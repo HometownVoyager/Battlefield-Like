@@ -124,14 +124,14 @@ const ok=fd.lengthSq()>0.1;
 if(ok) fd.normalize();
 placeMedkit(player,player.pos.x+(ok?fd.x*1.2:0),player.pos.z+(ok?fd.z*1.2:0));
 player.medkitT=nowT+30;
-} else showScorePop('医疗箱冷却中 ('+Math.ceil(player.medkitT-nowT)+'s)');
+} else showScorePop(t2('医疗箱冷却中 ({0}s)',Math.ceil(player.medkitT-nowT)));
 }
 }
 if(e.code==='Digit5'&&player.cls===7){
 player.buildSel=((player.buildSel||0)+1)%BUILD_MENU.length;
 const bt=BUILD_MENU[player.buildSel];
 const bn=bt==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt];
-showScorePop('建造选择: '+bn+' (消耗'+BUILD_COST[bt]+'点 · 按B放置)');
+showScorePop(t2('建造选择: {0} (消耗{1}点 · 按B放置)',t2(bn),BUILD_COST[bt]));
 }
 if(e.code==='KeyF'){
 // 巡飞弹制导中: F 切换 第一/第三 视角; 平时为互动

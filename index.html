@@ -16,7 +16,7 @@
 <div id="ammoPanel"><span id="wname">M1 加兰德</span><span id="wmode">半自动</span><div class="ammoRow"><span id="magN">8</span> <span id="resN">/ 72</span></div><div id="nadeN">手雷 ×3</div></div>
 <div id="healthPanel"><span id="hpNum">100</span><span id="hpBarWrap"><span id="hpBar" style="display:block"></span></span><div id="stamBarWrap"><div id="stamBar"></div></div></div>
 <div id="minimapWrap"><canvas id="minimap" width="190" height="190"></canvas></div>
-<div id="bigmapWrap" class="hidden"><div id="bigmapTitle">战 场 态 势 · 按 M 关闭</div><canvas id="bigmap" width="520" height="520"></canvas></div>
+<div id="bigmapWrap" class="hidden"><div id="bigmapTitle" data-i18n>战 场 态 势 · 按 M 关闭</div><canvas id="bigmap" width="520" height="520"></canvas></div>
 <div id="squadHUD"></div>
 <div id="topBar">
 <div id="tickets"><span class="tl">盟军 280</span> &nbsp;·&nbsp; <span class="tr">280 德军</span></div>
@@ -39,7 +39,7 @@
 <div id="mgPip"></div>
 <div id="heatWrap"><div id="heatFill"></div></div>
 <div id="vehHpWrap"><span id="vehHpName">坦克</span><span id="vehHpBarWrap"><span id="vehHpBar"></span></span><span id="vehHpNum">100</span></div>
-<div id="scoreboard"><h3>战 场 记 分 板</h3><div id="sbCols"><div><table><thead><tr><th class="t0h">盟军</th><th>击杀</th><th>阵亡</th><th>得分</th></tr></thead><tbody id="sbL"></tbody></table></div><div><table><thead><tr><th class="t1h">德军</th><th>击杀</th><th>阵亡</th><th>得分</th></tr></thead><tbody id="sbR"></tbody></table></div></div></div>
+<div id="scoreboard"><h3 data-i18n>战 场 记 分 板</h3><div id="sbCols"><div><table><thead><tr><th class="t0h">盟军</th><th data-i18n>击杀</th><th data-i18n>阵亡</th><th data-i18n>得分</th></tr></thead><tbody id="sbL"></tbody></table></div><div><table><thead><tr><th class="t1h">德军</th><th data-i18n>击杀</th><th data-i18n>阵亡</th><th data-i18n>得分</th></tr></thead><tbody id="sbR"></tbody></table></div></div></div>
 <div id="fps"></div>
 <div id="clsTip"></div>
 <div id="blackOv"></div>
@@ -70,126 +70,130 @@
 <div class="tbtn" id="tScore">战况</div>
 <div class="tbtn" id="tMenu">≡</div>
 </div>
-<div id="menu" class="screen">
-<button id="helpBtn" class="optBtn">? 操作说明</button>
-<button id="expBtn" class="optBtn">⚙ 实验模式: 关</button>
-<div class="panel menuMain">
+<div id="menu" class="screen menuScreen">
+<div id="menuDock">
 <div id="mHome">
 <div class="gameLogo">钢 铁 前 线</div>
-<div class="gameLogoSub">STEEL FRONT · 第二次世界大战</div>
+<div class="gameLogoSub" data-i18n>STEEL FRONT · 第二次世界大战</div>
 <div class="subtitle" id="menuSub">—— 战役 ——</div>
 <div class="menuNav">
-<button class="bigBtn navBtn" data-p="mPlay">开 始 游 戏</button>
-<button class="bigBtn navBtn" data-p="mSet">游 戏 设 置</button>
+<button class="bigBtn navBtn" data-p="mPlay" data-i18n>开 始 游 戏</button>
+<button class="bigBtn navBtn" data-p="mSet" data-i18n>游 戏 设 置</button>
+<button class="bigBtn navBtn" data-p="mHelp" data-i18n>游 戏 说 明</button>
 </div>
 <div id="menuVer">STEEL FRONT · WWII CAMPAIGNS</div>
 </div>
 <div id="mPlay" class="mSub hidden">
-<h2 class="mSubTitle">开 始 游 戏</h2>
-<div class="secLabel">战役 <span style="opacity:.6;font-weight:400">(点击卡片选择 · 按下方「进入战场」开始 · 文件夹内为占旗点战役)</span></div>
+<h2 class="mSubTitle" data-i18n>开 始 游 戏</h2>
+<div class="secLabel"><span data-i18n>战役</span> <span style="opacity:.55;font-weight:400" data-i18n>点击卡片选择战役</span></div>
 <div class="rowFlex" id="campRow" style="flex-wrap:wrap;justify-content:center"></div>
-<div class="secLabel">选择阵营</div>
+<div class="secLabel" data-i18n>选择阵营</div>
 <div class="rowFlex">
 <button class="optBtn teamBtn" id="teamUS">盟军</button>
 <button class="optBtn teamBtn" id="teamGER">德军</button>
 </div>
-<div class="secLabel">BOT 难度</div>
+<div class="secLabel" data-i18n>BOT 难度</div>
 <div class="rowFlex">
-<button class="optBtn diffBtn" data-d="0">新兵</button>
-<button class="optBtn diffBtn sel" data-d="1">老兵</button>
-<button class="optBtn diffBtn" data-d="2">精英</button>
+<button class="optBtn diffBtn" data-d="0" data-i18n>新兵</button>
+<button class="optBtn diffBtn sel" data-d="1" data-i18n>老兵</button>
+<button class="optBtn diffBtn" data-d="2" data-i18n>精英</button>
 </div>
- <div class="secLabel">在场人数</div>
+<div class="secLabel" data-i18n>在场人数</div>
 <div class="rowFlex">
-<button class="optBtn sizeBtn sel" data-s="0">标准 11v11</button>
-<button class="optBtn sizeBtn" data-s="1">加强 16v16</button>
-<button class="optBtn sizeBtn" data-s="2">史诗 22v22</button>
-<button class="optBtn sizeBtn" data-s="3">超编 30v30</button>
+<button class="optBtn sizeBtn sel" data-s="0" data-i18n>标准 11v11</button>
+<button class="optBtn sizeBtn" data-s="1" data-i18n>加强 16v16</button>
+<button class="optBtn sizeBtn" data-s="2" data-i18n>史诗 22v22</button>
+<button class="optBtn sizeBtn" data-s="3" data-i18n>超编 30v30</button>
 </div>
-<div class="secLabel">人力池倍率 <span style="opacity:.6;font-weight:400">(兵力票池 · 倍率越低一局越短)</span></div>
+<div class="secLabel" data-i18n>兵力票池</div>
 <div class="rowFlex">
 <button class="optBtn hmulBtn" data-h="0.5">×0.5</button>
 <button class="optBtn hmulBtn" data-h="1">×1</button>
 <button class="optBtn hmulBtn sel" data-h="2">×2</button>
 </div>
 <div class="center" style="margin-top:22px">
-<button class="bigBtn" id="startBtn">进 入 战 场</button>
-<button class="bigBtn backBtn">返 回</button>
+<button class="bigBtn" id="startBtn" data-i18n>进 入 战 场</button>
+<button class="bigBtn backBtn" data-i18n>返 回</button>
 </div>
 </div>
 <div id="mSet" class="mSub hidden">
-<h2 class="mSubTitle">游 戏 设 置</h2>
-<div class="secLabel">画质</div>
+<h2 class="mSubTitle" data-i18n>游 戏 设 置</h2>
+<div class="secLabel" data-i18n>画质</div>
 <div class="rowFlex">
-<button class="optBtn qualBtn" data-q="0">低画质</button>
-<button class="optBtn qualBtn sel" data-q="1">中画质</button>
-<button class="optBtn qualBtn" data-q="2">高画质·滤镜·软阴影</button>
+<button class="optBtn qualBtn" data-q="0" data-i18n>低画质</button>
+<button class="optBtn qualBtn sel" data-q="1" data-i18n>中画质</button>
+<button class="optBtn qualBtn" data-q="2" data-i18n>高画质·滤镜·软阴影</button>
 <button class="optBtn" id="ctrlModeBtn">操控: 自动</button>
 </div>
-<div class="sliderRow">鼠标灵敏度 <input type="range" id="sensRange" min="20" max="200" value="100"><span class="val" id="sensVal">1.0</span></div>
-<div class="sliderRow">音量 <input type="range" id="volRange" min="0" max="100" value="80"><span class="val" id="volVal">80</span></div>
-<div class="sliderRow">触控按键大小 <input type="range" id="tsizeRange" min="70" max="150" value="100"><span class="val" id="tsizeVal">100%</span></div>
-<div class="secLabel">键位说明</div>
-<div id="ctrlHelp">
-<div><b>WASD</b> 移动 · <b>Shift</b> 疾跑 · <b>左键</b>射击 <b>右键</b>机瞄 · <b>R</b> 装填 · <b>1/2</b> 切枪 · <b>V</b> 近战</div>
-<div><b>G</b> 手雷 · <b>3</b> AT雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带 · <b>C</b> 蹲 · <b>Z</b> 趴 · <b>X</b> 架枪 · <b>Q/E</b> 侧身 · <b>空格</b> 跳</div>
-<div><b>F</b> 互动: 载具/机枪/反坦克炮/防空炮/迫击炮/弹药医疗补给</div>
-<div><b>B</b> 兵种技能 — 医护:放医疗箱 · 迫击炮兵:架设/回收迫击炮 · 工程兵:建造工事</div>
-<div><b>5</b> 工程兵切换工事(沙袋墙/铁丝网/拒马/MG42) · 架好的迫击炮全员可 <b>F</b> 操作</div>
-<div><b>T</b> 小队进攻标记 · <b>Y</b> 小队跟随 · <b>M</b> 战场大地图 · <b>Tab</b> 记分板 · <b>Esc</b> 暂停/继续 · 坦克可直接撞毁砖墙</div>
+<div class="secLabel" data-i18n>语言 / Language</div>
+<div class="rowFlex">
+<button class="optBtn langBtn" id="langZh">中文</button>
+<button class="optBtn langBtn" id="langEn">English</button>
 </div>
-<div class="center" style="margin-top:18px"><button class="bigBtn backBtn">返 回</button></div>
+<div class="secLabel" data-i18n>实验模式</div>
+<div class="rowFlex">
+<button class="optBtn" id="expBtn">⚙ 实验模式: 关</button>
+</div>
+<div class="sliderRow"><span data-i18n>鼠标灵敏度</span> <input type="range" id="sensRange" min="20" max="200" value="100"><span class="val" id="sensVal">1.0</span></div>
+<div class="sliderRow"><span data-i18n>音量</span> <input type="range" id="volRange" min="0" max="100" value="80"><span class="val" id="volVal">80</span></div>
+<div class="sliderRow"><span data-i18n>触控按键大小</span> <input type="range" id="tsizeRange" min="70" max="150" value="100"><span class="val" id="tsizeVal">100%</span></div>
+<div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
 </div>
 <div id="mHelp" class="mSub hidden">
-<h2 class="mSubTitle">操 作 说 明</h2>
-<div class="secLabel">基础操作</div>
+<h2 class="mSubTitle" data-i18n>游 戏 说 明</h2>
+<div class="secLabel" data-i18n-html>快速上手</div>
 <div class="helpDoc">
-<div><b>WASD</b> 移动 · <b>Shift</b> 疾跑(机瞄时为屏息稳枪) · <b>空格</b> 跳跃</div>
-<div><b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填 · <b>1/2</b> 切换武器 · <b>V</b> 近战</div>
-<div><b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度) · <b>Q/E</b> 左右侧身探头</div>
-<div>蹲下/卧倒/架枪都会显著降低枪口晃动; 疾跑后停下稍等呼吸恢复再开枪更准。</div>
+<div data-i18n-html>进入战场后: 选兵种 → 选出生点 → 按 <b>部署</b> 落地。跟随小队标记进攻, 站进旗圈占领据点, 活下去比什么都重要。</div>
 </div>
-<div class="secLabel">投掷物与医疗</div>
+<div class="secLabel" data-i18n-html>基础操作</div>
 <div class="helpDoc">
-<div><b>G</b> 手雷(可按住烹饪引信) · <b>3</b> 反坦克雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带包扎(+45生命, 受击会打断)</div>
-<div>燃烧弹: 红色烈焰烟云, 同样遮蔽视线, 云内步兵持续灼烧(突击兵/巡飞弹兵携带)。</div>
-<div>医护兵按 <b>B</b> 放置医疗箱, 队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
+<div data-i18n-html><b>WASD</b> 移动 · <b>Shift</b> 疾跑(机瞄时为屏息稳枪) · <b>空格</b> 跳跃</div>
+<div data-i18n-html><b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填 · <b>1/2</b> 切换武器 · <b>V</b> 近战</div>
+<div data-i18n-html><b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度) · <b>Q/E</b> 左右侧身探头</div>
+<div data-i18n-html>蹲下/卧倒/架枪都会显著降低枪口晃动; 疾跑后停下稍等呼吸恢复再开枪更准。</div>
 </div>
-<div class="secLabel">互动 (F)</div>
+<div class="secLabel" data-i18n-html>投掷物与医疗</div>
 <div class="helpDoc">
-<div>进入/离开 <b>坦克·飞机</b>, 操作 <b>重机枪·反坦克炮·防空炮·迫击炮</b></div>
-<div>靠近<b>弹药箱</b>按 F: 补满所有武器的弹夹与备用弹药, 并补足手雷/烟雾弹/反坦克雷</div>
-<div>迫击炮兵按 <b>B</b> 架设迫击炮(再次靠近按 B 回收), 架好后全队都可按 F 上炮。</div>
+<div data-i18n-html><b>G</b> 手雷(可按住烹饪引信) · <b>3</b> 反坦克雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带包扎(+45生命, 受击会打断)</div>
+<div data-i18n-html>燃烧弹: 红色烈焰烟云, 同样遮蔽视线, 云内步兵持续灼烧(突击兵/巡飞弹兵携带)。</div>
+<div data-i18n-html>医护兵按 <b>B</b> 放置医疗箱, 队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
 </div>
-<div class="secLabel">载具与固定武器</div>
+<div class="secLabel" data-i18n-html>载具与固定武器</div>
 <div class="helpDoc">
-<div><b>坦克</b>: WASD 驾驶 · 左键主炮(圆环为落点) · 右键同轴机枪 · <b>C</b> 炮手镜 · F 下车; 车速够快可撞塌砖墙</div>
-<div><b>飞机</b>: W/S 油门 · A/D 压坡转向 · 鼠标拉杆 · 左键机枪 · 右键/B 投弹 · F 跳伞</div>
-<div>固定机枪持续射击会过热(屏幕下方热量条), 红色时需停火冷却。</div>
+<div data-i18n-html>靠近载具/重机枪/反坦克炮/防空炮/迫击炮/弹药箱按 <b>F</b> 使用。</div>
+<div data-i18n-html><b>坦克</b>: WASD 驾驶 · 左键主炮(圆环为落点) · 右键同轴机枪 · <b>C</b> 炮手镜 · F 下车; 车速够快可撞塌砖墙</div>
+<div data-i18n-html><b>飞机</b>: W/S 油门 · A/D 压坡转向 · 鼠标拉杆 · 左键机枪 · 右键/B 投弹 · F 跳伞</div>
+<div data-i18n-html>固定机枪持续射击会过热(屏幕下方热量条), 红色时需停火冷却。</div>
 </div>
-<div class="secLabel">兵种</div>
+<div class="secLabel" data-i18n-html>兵种与技能</div>
 <div class="helpDoc">
-<div>步枪兵 / 冲锋枪手 / 突击兵 / 狙击手 / 医护兵 / 反坦克兵 / 迫击炮兵 / 工程兵</div>
-<div>工程兵按 <b>5</b> 切换工事(沙袋墙/铁丝网/拒马/MG42), 按 <b>B</b> 锤击建造; 反坦克兵携带火箭筒与反坦克雷。</div>
-<div><b>实验模式</b>(主菜单"操作说明"旁开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 飞行中玩家进入弹上TV制导视角, 鼠标转向制导, <b>F</b> 切换第一/第三视角, 左键自爆, <b>右键加速冲刺</b>(松开回落巡航); 触碰目标/地面即爆炸杀伤, 并额外携带燃烧弹(按<b>6</b>)。</div>
+<div data-i18n-html>步枪兵 / 冲锋枪手 / 突击兵 / 狙击手 / 医护兵 / 反坦克兵 / 迫击炮兵 / 工程兵, 各带不同主武器与投掷物。</div>
+<div data-i18n-html>医护兵 <b>B</b> 放医疗箱 · 迫击炮兵 <b>B</b> 架设/回收迫击炮 · 工程兵 <b>B</b> 建造、<b>5</b> 切换工事(沙袋墙/铁丝网/拒马/MG42) · 架好的迫击炮全员可 <b>F</b> 操作</div>
+<div data-i18n-html><b>实验模式</b>(游戏设置中开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 弹上TV制导: <b>F</b> 切换第一/第三视角, 左键自爆, <b>右键加速冲刺</b>(松开回落巡航); 触碰目标/地面即爆, 额外携带燃烧弹(按<b>6</b>)。</div>
 </div>
-<div class="secLabel">小队与战局目标</div>
+<div class="secLabel" data-i18n-html>小队与指挥</div>
 <div class="helpDoc">
-<div><b>T</b> 标记进攻位置 · <b>Y</b> 令小队跟随 · <b>M</b> 战场大地图 · <b>Tab</b> 战场记分板</div>
-<div>占领模式: 站在旗帜圈内占领据点; 攻防/征服: 任意一方占满全部旗点→敌方兵力归零; 破袭战: 摧毁敌方全部补给库。</div>
-<div>一方兵力归零后不立即判负: 该方封重生(含坦克/飞机/你的再部署), 对方须 <b>①攻防/征服先占满全部旗点 ②消灭场上全部残兵</b> 才算获胜 (敌方坦克存活与否不影响胜负)。</div>
-<div>兵力归零方场上仅剩最后 1 人、且(攻防/征服)对方已占满全部旗点时启动 <b>30 秒清场倒计时</b>: 时间到仍未被歼灭则直接判对方胜 (防止最后一人躲藏拖局; 旗点被翻回则倒计时复位重来)。</div>
-<div>遭遇战: 无旗点, 双方从对角相向推进; 劫道战: 炸毁整支护运车队→劫道方胜, 半数卡车突围→护运方胜。</div>
-<div>击杀、占领、摧毁坦克和救治队友都会得分, 阵亡会消耗本方兵力票。</div>
-<div><b>连杀奖励</b>: 5 秒内连续击杀/摧毁可叠连杀 —— 达成 3/6/9 杀档位即获"战意"增益(移速/换弹/减伤随档提升, 持续 5~7 秒), 连杀期间每次击杀得分按 ×1.5/×2/×3 结算; 阵亡清零。</div>
-<div><b>Esc</b> 暂停(战斗/移动/天气全部冻结, 再按 Esc 或点按钮继续); 一局结束后战场活动同样全部停止。</div>
+<div data-i18n-html><b>T</b> 标记进攻位置 · <b>Y</b> 令小队跟随 · <b>M</b> 战场大地图 · <b>Tab</b> 战场记分板</div>
 </div>
-<div class="secLabel">触屏操作</div>
+<div class="secLabel" data-i18n-html>战局目标与胜负</div>
 <div class="helpDoc">
-<div>左侧虚拟摇杆移动, 右侧滑动转视角; 屏幕按钮对应开火/瞄准/跳跃/蹲/趴/换弹/手雷/绷带/互动/切枪等, 长按疾跑键锁定疾跑。</div>
-<div>触控按键大小可在 游戏设置 中调整。</div>
+<div data-i18n-html>占领模式: 站在旗帜圈内占领据点; 攻防/征服: 任意一方占满全部旗点→敌方兵力归零; 破袭战: 摧毁敌方全部补给库。</div>
+<div data-i18n-html>一方兵力归零后不立即判负: 该方封重生(含坦克/飞机/你的再部署), 对方须 <b>①攻防/征服先占满全部旗点 ②消灭场上全部残兵</b> 才算获胜 (敌方坦克存活与否不影响胜负)。</div>
+<div data-i18n-html>兵力归零方场上仅剩最后 1 人、且(攻防/征服)对方已占满全部旗点时启动 <b>30 秒清场倒计时</b>: 时间到仍未被歼灭则直接判对方胜 (防止最后一人躲藏拖局; 旗点被翻回则倒计时复位重来)。</div>
+<div data-i18n-html>遭遇战: 无旗点, 双方从对角相向推进; 劫道战: 炸毁整支护运车队→劫道方胜, 半数卡车突围→护运方胜。</div>
+<div data-i18n-html>击杀、占领、摧毁坦克和救治队友都会得分, 阵亡会消耗本方兵力票。</div>
+<div data-i18n-html><b>连杀奖励</b>: 5 秒内连续击杀/摧毁可叠连杀 —— 达成 3/6/9 杀档位即获"战意"增益(移速/换弹/减伤随档提升, 持续 5~7 秒), 连杀期间每次击杀得分按 ×1.5/×2/×3 结算; 阵亡清零。</div>
 </div>
-<div class="center" style="margin-top:18px"><button class="bigBtn backBtn">返 回</button></div>
+<div class="secLabel" data-i18n-html>暂停与结算</div>
+<div class="helpDoc">
+<div data-i18n-html><b>Esc</b> 暂停(战斗/移动/天气全部冻结, 再按 Esc 或点按钮继续); 一局结束后战场活动同样全部停止。</div>
+</div>
+<div class="secLabel" data-i18n-html>触屏操作</div>
+<div class="helpDoc">
+<div data-i18n-html>左侧虚拟摇杆移动, 右侧滑动转视角; 屏幕按钮对应开火/瞄准/跳跃/蹲/趴/换弹/手雷/绷带/互动/切枪等, 长按疾跑键锁定疾跑。</div>
+<div data-i18n-html>触控按键大小可在 游戏设置 中调整。</div>
+</div>
+<div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
 </div>
 </div>
 </div>
@@ -204,43 +208,55 @@ if(_mh&&_mp){ _mh.classList.add('hidden'); _mp.classList.remove('hidden'); }
 </script>
 <div id="deploy" class="screen hidden">
 <div class="panel">
-<h1 class="title" style="font-size:30px">部 署</h1>
+<h1 class="title" style="font-size:30px" data-i18n>部 署</h1>
 <div id="deathInfo"></div>
 <div id="deployFlex">
 <div id="deployLeft">
-<div class="secLabel">兵种</div>
+<div class="secLabel" data-i18n>兵种</div>
 <div class="rowFlex" id="classGrid"></div>
-<div class="secLabel">出生点</div>
+<div class="secLabel" data-i18n>出生点</div>
 <div id="spawnList"></div>
 </div>
 <div id="deployRight">
-<div class="secLabel">战场态势</div>
+<div class="secLabel" data-i18n>战场态势</div>
 <canvas id="deployMap" width="300" height="300"></canvas>
 </div>
 </div>
-<div class="center" style="margin-top:20px"><button class="bigBtn" id="deployBtn">部 署 <span id="respawnTxt"></span></button>
-<button class="bigBtn" id="resumeBtn" style="display:none">返 回 战 斗</button></div>
+<div class="center" style="margin-top:20px"><button class="bigBtn" id="deployBtn"><span data-i18n>部 署</span> <span id="respawnTxt"></span></button>
+<button class="bigBtn" id="resumeBtn" style="display:none" data-i18n>返 回 战 斗</button></div>
 </div>
 </div>
 <div id="end" class="screen hidden">
-<div class="panel">
+<div class="panel endPanel">
+<div id="endHead">
+<div id="endIcon"></div>
+<div id="endHeadTxt">
 <div id="endTitle">胜 利</div>
-<div id="endStats"></div>
-<div class="center"><button class="bigBtn" id="againBtn">再 来 一 局</button></div>
+<div id="endSub"></div>
+</div>
+</div>
+<div id="endScoreCard">
+<div class="scLabel" data-i18n>本局得分</div>
+<div id="endScore">0</div>
+<div id="endBestLine"><span id="endBest"></span><span id="endNewRec" class="hidden" data-i18n>新纪录!</span></div>
+</div>
+<div id="endGrid"></div>
+<div id="endTickets"></div>
+<div class="center"><button class="bigBtn" id="againBtn" data-i18n>再 来 一 局</button></div>
 </div>
 </div>
 <div id="pauseOv" class="screen hidden">
 <div class="panel" style="text-align:center">
-<div class="gameLogo" style="font-size:34px">已 暂 停</div>
-<div class="gameLogoSub">PAUSED · 战斗中按 ESC 随时暂停</div>
-<div class="subtitle">战斗、移动与战场活动均已冻结 · 按 ESC 或点击下方按钮继续</div>
-<div class="center"><button class="bigBtn" id="pauseResumeBtn">继 续 战 斗</button></div>
+<div class="gameLogo" style="font-size:34px" data-i18n>已 暂 停</div>
+<div class="subtitle" data-i18n>战斗冻结 · 按 ESC 继续</div>
+<div class="center"><button class="bigBtn" id="pauseResumeBtn" data-i18n>继 续 战 斗</button></div>
 </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 
 <script src="js/00-config.js"></script>
+<script src="js/00b-i18n.js"></script>
 <script src="js/01-audio.js"></script>
 <script src="js/02-scene.js"></script>
 <script src="js/03-terrain.js"></script>
