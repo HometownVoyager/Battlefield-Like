@@ -37,15 +37,16 @@ body.mobile #ctrlHelp { display:none; }
 .menuScreen { background:none !important; pointer-events:none; }
 /* 主菜单/结算期间: 战斗 HUD 与触控层整体隐藏 (航拍动态不叠游戏 UI, 2026-09-13 用户指示) */
 body.inMenu #ui, body.inMenu #touchUI { display:none !important; }
-#menuDock { pointer-events:auto; position:absolute; top:0; right:0; bottom:0; width:min(480px,94vw);
+#menuDock { pointer-events:auto; position:absolute; top:0; right:0; bottom:0; width:min(560px,94vw);
 display:flex; flex-direction:column; padding:44px 88px 44px 44px; overflow:auto;
 background:linear-gradient(to left, rgba(0,0,0,.88) 55%, rgba(0,0,0,.55) 80%, transparent); }
 /* 单面板纵向安全居中: auto margin 在内容高于视口时自动退化为顶对齐+可滚动 (不裁顶) */
 #menuDock > div { margin:auto 0; }
-#menu.hasSub #menuDock { width:min(780px,96vw); padding:36px 64px 36px 40px; background:linear-gradient(to left, rgba(0,0,0,.93) 62%, rgba(0,0,0,.6) 86%, transparent); }
+#menu.hasSub #menuDock { width:min(880px,96vw); padding:36px 64px 36px 40px; background:linear-gradient(to left, rgba(0,0,0,.93) 62%, rgba(0,0,0,.6) 86%, transparent); }
 #mHome { text-align:center; }
 #menuDock .mSub { width:100%; background:rgba(10,12,8,.55); border:1px solid rgba(210,200,160,.22); border-radius:6px; padding:16px 20px; backdrop-filter:blur(4px); flex:none; }
-.gameLogo { text-align:center; font-size:52px; font-weight:800; letter-spacing:14px; color:#e8dcb0; text-shadow:0 2px 0 #4a3f22, 0 6px 22px rgba(0,0,0,.8); margin-top:10px; }
+/* 主标题禁止折行: 480px 蒙版时代 "钢 铁 前 线" 会被折成两行 (2026-09-13 用户反馈) */
+.gameLogo { text-align:center; font-size:52px; font-weight:800; letter-spacing:14px; white-space:nowrap; color:#e8dcb0; text-shadow:0 2px 0 #4a3f22, 0 6px 22px rgba(0,0,0,.8); margin-top:10px; }
 .gameLogoSub { text-align:center; font-size:13px; letter-spacing:6px; color:rgba(220,210,170,.55); margin:4px 0 14px; }
 .menuNav { display:flex; flex-direction:column; align-items:center; gap:12px; margin:30px 0 26px; }
 .navBtn { width:320px; max-width:100%; font-size:19px; letter-spacing:8px; padding:14px 0; }
@@ -175,7 +176,7 @@ body.mobile #streakBuff { bottom:auto; top:158px; }
 .screen { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 30%, rgba(40,48,34,.94), rgba(8,10,6,.97)); color:#ddd; }
 .panel { width:860px; max-width:94vw; max-height:92vh; overflow:auto; padding:30px 40px; }
 h1.title { font-size:52px; letter-spacing:10px; color:#e8dcb0; text-shadow:0 2px 12px #000, 0 0 40px rgba(200,170,90,.25); font-weight:800; text-align:center; }
-.subtitle { text-align:center; color:#9a9478; letter-spacing:5px; margin:6px 0 26px; font-size:15px; }
+.subtitle { text-align:center; color:#9a9478; letter-spacing:5px; margin:6px 0 26px; font-size:15px; text-wrap:balance; }
 .secLabel { color:#b8ae88; letter-spacing:3px; font-size:13px; margin:18px 0 8px; border-bottom:1px solid rgba(200,180,130,.2); padding-bottom:4px; }
 .rowFlex { display:flex; gap:14px; flex-wrap:wrap; }
 .bigBtn { pointer-events:auto; cursor:pointer; background:linear-gradient(180deg,#5a5236,#3a3422); color:#f0e6c0; border:1px solid #8a7c50; padding:14px 42px; font-size:20px; letter-spacing:6px; border-radius:4px; transition:all .15s; font-family:inherit; }
@@ -184,6 +185,14 @@ h1.title { font-size:52px; letter-spacing:10px; color:#e8dcb0; text-shadow:0 2px
 .optBtn { pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.06); color:#ccc; border:1px solid #555; padding:9px 20px; font-size:14px; border-radius:3px; transition:all .12s; font-family:inherit; }
 .optBtn:hover { border-color:#b8a86a; color:#fff; }
 .optBtn.sel { background:rgba(200,175,95,.22); border-color:#d8c080; color:#ffe9b0; }
+/* 战役卡片标题 (含📁文件夹卡) 整词不折行: 空间不足时整卡换行而非把标题截成两截 */
+#menu .optBtn b { white-space:nowrap; }
+/* 窄屏(手机竖屏)兜底: 收缩蒙版内边距并缩小主标题, 防止 nowrap 溢出 (桌面端不受影响) */
+@media (max-width:640px){
+#menuDock { padding:28px 48px 28px 20px; }
+#menu.hasSub #menuDock { padding:24px 36px 24px 20px; }
+.gameLogo { font-size:36px; letter-spacing:8px; }
+}
 .teamBtn { flex:1; padding:16px; font-size:18px; letter-spacing:3px; }
 .classCard { pointer-events:auto; cursor:pointer; flex:1; min-width:170px; background:rgba(255,255,255,.05); border:1px solid #555; border-radius:5px; padding:13px 15px; transition:all .12s; }
 .classCard:hover { border-color:#b8a86a; }
@@ -201,7 +210,8 @@ h1.title { font-size:52px; letter-spacing:10px; color:#e8dcb0; text-shadow:0 2px
 /* 操作说明: 开始界面角落入口 + 说明面板 */
 #helpBtn { position:absolute; right:26px; bottom:22px; padding:9px 20px; font-size:14px; letter-spacing:3px; z-index:5; }
 /* 实验模式开关 (操作说明旁) */
-#expBtn { position:absolute; right:168px; bottom:22px; padding:9px 18px; font-size:14px; letter-spacing:2px; z-index:5; }
+/* 实验模式开关 (设置面板文档流内): 旧版右下角悬浮定位残留会压住"返回"按钮 (2026-09-13 用户反馈) */
+#expBtn { position:static; padding:9px 18px; font-size:14px; letter-spacing:2px; }
 #expBtn.sel { background:rgba(120,200,120,.18); border-color:#7ac87a; color:#b8ffb8; }
 /* 巡飞弹TV制导视讯遮罩: 绿色取景框 + 扫描线 + 边角标 */
 #tvOv { position:absolute; inset:0; display:none; pointer-events:none; z-index:8;
