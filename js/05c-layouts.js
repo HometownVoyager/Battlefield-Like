@@ -788,7 +788,7 @@ if(freeSpot(-40,60,2.2)) crater(-40,60,2.2);
 { if(freeSpot(-108,-108,1.5)) deadTree(-108,-108); }
 { if(freeSpot(96,180,1.5)) hedgehog(96,180); };
 { if(freeSpot(-96,-160,1.5)) hedgehog(-96,-160); };
-// 旗点通用点缀 (参照太行山口径; 置于全部建筑落位之后 —— freeSpot 避开足迹)
+// 旗点通用点缀 (置于全部建筑落位之后 —— freeSpot 避开足迹)
 F.forEach(f=>{
 { const px=f.x+wr(-8,8), pz=f.z+wr(-8,8); if(freeSpot(px,pz,2)) sandbagWall(px,pz,4,wr(0,3)); };
 { const px=f.x+wr(-9,7), pz=f.z+wr(-8,8); if(freeSpot(px,pz,1.2)) crate(px,pz,1.2,wr(0,3)); };
@@ -1426,149 +1426,6 @@ if(wr(0,1)<0.6) deadTree(x,z); else rubblePile(x,z,wr(1.4,2.2));
 }
 }
 }
-// -- 雪峰山 1945 (800 超大地图 · 山线六点征服) --
-function layoutXuefeng(){
-const F=CAMPAIGN.flags;
-// 旗点通用点缀: 沙袋半环/杂物箱/油桶 (偏移点必须自由位; 弹药箱由通用循环兜底)
-F.forEach((f,i)=>{
-{ const px=f.x+wr(-8,8), pz=f.z+wr(-8,8); if(freeSpot(px,pz,2)) sandbagWall(px,pz,4,wr(0,3)); };
-{ const px=f.x+wr(-9,7), pz=f.z+wr(-8,8); if(roadDist(px,pz)>6&&freeSpot(px,pz,1.2)) crate(px,pz,1.2,wr(0,3)); };
-{ const px=f.x+wr(-8,8), pz=f.z+wr(-9,7); if(roadDist(px,pz)>6&&freeSpot(px,pz,1)) barrel(px,pz); };
-});
-// 江口镇 (旗0 山麓稻镇): 木屋群+谷仓
-let p=placeBuild(-300,160,11,9,6); if(p) cnHouse(p.x,p.z,p.ry,9,6);
-p=placeBuild(-300,160,12,7,6); if(p) cnHouse(p.x,p.z,p.ry,7,6);
-p=placeBuild(-298,163,13,9,7); if(p) buildBarn(p.x,p.z,p.ry);
-// 青山坳 (旗1 山腰哨口): 哨屋
-p=placeBuild(-247,58,10,8,6); if(p) logCabin(p.x,p.z,p.ry);
-// 枯石垭 (旗2 垭口1): 西侧碉堡朝青山坳, 东侧机枪锁公路下坡
-p=placeBuild(-147,-2,11,8,5); if(p) bunker(p.x,p.z,Math.atan2(-247+147,58+2));
-if(freeSpot(-133,-13,1.5)) mg42(-133,-13,Math.atan2(131+133,-23+13),0);
-// 雪峰山 (旗3 主峰): 双哨屋 + 东西向机枪 (扼守峰顶两侧登山道)
-p=placeBuild(5,-21,11,8,5); if(p) logCabin(p.x,p.z,p.ry);
-p=placeBuild(9,-30,11,8,5); if(p) logCabin(p.x,p.z,p.ry);
-if(freeSpot(-16,-23,1.5)) mg42(-16,-23,Math.atan2(131+16,-23+23),0);
-if(freeSpot(25,-25,1.5)) mg42(25,-25,Math.atan2(-142-25,-7+25),1);
-// 双峰口 (旗4 垭口2): 哨屋+机枪架向主峰方向
-p=placeBuild(131,-23,10,8,5); if(p) logCabin(p.x,p.z,p.ry);
-if(freeSpot(122,-33,1.5)) mg42(122,-33,Math.atan2(-170-122,-30+33),1);
-// 东栗坡 (旗5 东麓): 木屋群
-p=placeBuild(300,-125,11,9,6); if(p) cnHouse(p.x,p.z,p.ry,9,6);
-p=placeBuild(296,-123,12,7,6); if(p) cnHouse(p.x,p.z,p.ry,7,6);
-// 山坡松杉林带: 中坡密植 (h16~82, 尝试数按画质缩放), 林线以上裸岩不落树, 避开旗圈/公路/稻田/建筑足迹
-for(let i=0,n=Math.round(1600*treeQMul());i<n;i++){
-const x=wr(-380,380), z=wr(-380,380);
-const h=heightAt(x,z);
-if(h<16||h>82) continue;
-if(roadDist(x,z)<8) continue;
-if(fieldAt(x,z)) continue;
-let near=false;
-for(const fc of F){ if(Math.hypot(x-fc.x,z-fc.z)<fc.r+4){ near=true; break; } }
-if(near) continue;
-if(!freeSpot(x,z,1.2)) continue; // 大尝试量下必须查建筑足迹, 防树穿屋
-tree(x,z,wr(1.05,1.75));
-}
-// 山脊乱石/枯树/拒马 (高海拔掩体带): 主峰与垭口两侧的山肩
-for(let i=0;i<26;i++){
-const x=wr(-260,260), z=wr(-170,120);
-if(heightAt(x,z)<48||roadDist(x,z)<8||!freeSpot(x,z,1.2)) continue;
-if(i%3===0) deadTree(x,z); else if(i%3===1) rubblePile(x,z,wr(1.2,2.0)); else hedgehog(x,z);
-}
-// 垭口拉锯弹坑
-crater(-160,-20,2.2); crater(-120,6,2.0); crater(-20,-44,2.2);
-crater(150,-36,2.1); crater(60,-6,1.9); crater(-60,48,1.8);
-}
-// -- 太行山 1943 (800 超大地图 · 三山群围攻功防) --
-// 山群三峰 (西峰E/主峰C/东峰H), 九旗散布: 每座山 2~4 条上山路线, 攻方六个前出点同时多方向围攻;
-// 守方(日军)据守全山各据点; 平原田块软遮蔽由 buildWorld 通用庄稼系统摆种
-function layoutTaihang(){
-const F=CAMPAIGN.flags;
-// 旗点通用点缀: 沙袋半环/杂物箱/油桶 (偏移点必须自由位; 弹药箱由通用循环兜底)
-F.forEach(f=>{
-{ const px=f.x+wr(-8,8), pz=f.z+wr(-8,8); if(freeSpot(px,pz,2)) sandbagWall(px,pz,4,wr(0,3)); };
-{ const px=f.x+wr(-9,7), pz=f.z+wr(-8,8); if(roadDist(px,pz)>6&&freeSpot(px,pz,1.2)) crate(px,pz,1.2,wr(0,3)); };
-{ const px=f.x+wr(-8,8), pz=f.z+wr(-9,7); if(roadDist(px,pz)>6&&freeSpot(px,pz,1)) barrel(px,pz); };
-});
-// 注: 群山路网每旗皆通, 环带选址(placeBuild)会被 roadDist<5 大面积拒绝 ——
-// 村/堡一律用手写 placeAt 锚点 (公路侧垂直方向, 旗点平台内, 兜底可强放)
-// A 南谷口 (旗0): 平原村集 —— 木屋群+谷仓+石墙 (南线起点, 攻方主突击方向)
-let p=placeAt(44,112,0.2,9,6,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,9,6);
-p=placeAt(22,98,-0.4,7,5,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,7,5);
-p=placeAt(20,135,-0.25,9.5,13.5,{maxDh:1.6}); buildBarn(p.x,p.z,p.ry);
-stoneWall(70,66,92,72);
-if(freeSpot(30,120,1.5)) hedgehog(30,120);
-// D 西峰口 (旗2): 西线山脚哨村 (锚点取平台低侧, 避免山脊削坡悬空)
-p=placeAt(-242,26,0.3,9,6,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,9,6);
-p=placeAt(-244,48,-0.35,7,5,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,7,5);
-// F 北口 (旗4): 北线山脚哨屋+碉堡朝南守山
-p=placeAt(80,-232,0.2,6,5,{maxDh:1.6}); logCabin(p.x,p.z,p.ry);
-p=placeAt(108,-232,0.35,8,5,{maxDh:1.6}); bunker(p.x,p.z,Math.atan2(30-p.x,-60-p.z));
-// G 东口 (旗6): 东线村舍
-p=placeAt(324,-104,0.2,9,6,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,9,6);
-p=placeAt(344,-111,-0.3,7,5,{maxDh:1.6}); cnHouse(p.x,p.z,p.ry,7,5);
-// B 南腰台 (旗1): 碉堡俯射南坡下口 + 双机枪封锁之字路 (锚点取南侧缓面)
-p=placeAt(68,18,0.35,8,5,{maxDh:1.6});
-bunker(p.x,p.z,Math.atan2(45-p.x,95-p.z));
-if(freeSpot(84,12,1.5)) mg42(84,12,Math.atan2(45-84,95-12),1);
-if(freeSpot(58,38,1.5)) mg42(58,38,Math.atan2(45-58,95-38),1);
-// I 西垭台 (旗8): 西/主峰间鞍部哨塔 + 机枪双向封锁两缘
-placeTower(-57,-38);
-if(freeSpot(-33,-40,1.5)) mg42(-33,-40,Math.atan2(70+33,25+40),1);
-if(freeSpot(-58,-14,1.5)) mg42(-58,-14,Math.atan2(-135+58,15+14),1);
-// E 西峰顶 (旗3): 碉堡朝西坡下口 + 机枪
-p=placeAt(-136,32,0.2,8,5,{maxDh:1.6});
-bunker(p.x,p.z,Math.atan2(-240-p.x,40-p.z));
-if(freeSpot(-124,28,1.5)) mg42(-124,28,Math.atan2(-240+124,40-28),1);
-if(freeSpot(-150,4,1.5)) mg42(-150,4,Math.atan2(-45+150,-28-4),1);
-// H 东峰顶 (旗7): 哨屋 + 机枪双向 (东线/东垭)
-p=placeAt(196,-104,-0.2,6,5,{maxDh:1.6}); logCabin(p.x,p.z,p.ry);
-if(freeSpot(212,-130,1.5)) mg42(212,-130,Math.atan2(330-212,-125+130),1);
-if(freeSpot(187,-108,1.5)) mg42(187,-108,Math.atan2(115-187,-90+108),1);
-// C 主峰要塞 (旗5): 双碉堡扼东西台缘(四路公路皆汇峰顶) + 双机枪 + 环顶沙袋 + 弹药杂物
-const fx=30, fz=-60;
-p=placeAt(fx-6,fz+5,-0.2,8,5,{maxDh:1.6}); bunker(p.x,p.z,Math.atan2(45-p.x,95-p.z));
-p=placeAt(fx-4,fz-6,0.15,8,5,{maxDh:1.6}); bunker(p.x,p.z,Math.atan2(95-p.x,-225-p.z));
-if(freeSpot(14,-74,1.5)) mg42(14,-74,Math.atan2(-45-14,-28+74),1);
-if(freeSpot(46,-72,1.5)) mg42(46,-72,Math.atan2(115-46,-90+72),1);
-for(const [wx,wz,wf] of [[fx,fz+34,0],[fx,fz-34,Math.PI],[fx-24,fz,-HPI],[fx+24,fz,HPI]]){
-if(freeSpot(wx,wz,2)) sandbagWall(wx,wz,4.5,wf);
-}
-if(freeSpot(fx+6,fz+8,1.2)) crate(fx+6,fz+8,1.2,0.5);
-if(freeSpot(fx-6,fz-10,1)) barrel(fx-6,fz-10);
-// 进攻方前出点营地: 帐篷+沙袋+杂物 (17-emplacements 会再配反坦克炮/机枪朝敌基)
-for(const sp of (CAMPAIGN.spawns||[])){
-if(freeSpot(sp.x+2,sp.z+5,2)) tent(sp.x+2,sp.z+5,0.3);
-if(freeSpot(sp.x-3,sp.z-4,2)) tent(sp.x-3,sp.z-4,-0.2);
-if(freeSpot(sp.x+6,sp.z+3,2)) sandbagWall(sp.x+6,sp.z+3,4,HPI);
-if(freeSpot(sp.x-6,sp.z-2,2)) sandbagWall(sp.x-6,sp.z-2,4,0);
-if(freeSpot(sp.x+4,sp.z-6,1.2)) crate(sp.x+4,sp.z-6,1.2,0.5);
-if(freeSpot(sp.x-4,sp.z+7,1)) barrel(sp.x-4,sp.z+7);
-}
-// 山群中坡密植林带 (h24~84, 与地表刷绿的中坡林带色对应; 85 以上裸岩不落树):
-// 避开公路/田块/旗圈/建筑足迹, 尝试数按画质缩放 —— 三峰坡面与山谷两侧连片成林
-for(let i=0,n=Math.round(4400*treeQMul());i<n;i++){
-const x=wr(-390,390), z=wr(-390,390);
-const h=heightAt(x,z);
-if(h<24||h>84) continue;
-if(roadDist(x,z)<7) continue;
-if(fieldAt(x,z)) continue;
-let near=false;
-for(const fc of F){ if(Math.hypot(x-fc.x,z-fc.z)<fc.r+5){ near=true; break; } }
-if(near) continue;
-if(!freeSpot(x,z,1.2)) continue;
-tree(x,z,wr(1.0,1.6));
-}
-// 山群坡地高海拔乱石/枯树带 (山腰掩体, 避开道路/旗圈)
-for(let i=0;i<26;i++){
-const x=wr(-250,330), z=wr(-230,90);
-if(heightAt(x,z)<28||roadDist(x,z)<8||!freeSpot(x,z,1.2)) continue;
-if(i%3===0) deadTree(x,z); else if(i%3===1) rubblePile(x,z,wr(1.2,2.0)); else hedgehog(x,z);
-}
-// 各交火面弹坑: 南线/垭口/北线/西线/东线
-crater(58,52,2.3); crater(30,20,2.0); crater(-52,-20,1.9);
-crater(105,-160,2.2); crater(120,-70,2.1); crater(-205,32,2.0);
-crater(270,-112,2.2); crater(-8,-48,1.8);
-}
 // ══════ 劫道方临时补给点 (断崖公路): 限时 (convoy.supplyLife 秒) 后全体失效 ══════
 // 补给内容=弹药+绷带+投掷物全满 (与弹药箱同标准); 仅劫道方(team0)玩家可使用
 const SUPPLY_POINTS=[];
@@ -1635,8 +1492,6 @@ for(const f of CAMPAIGN.flags) B_FOOT.push(footRect(f.x,f.z,0,5.5,5.5,0.8));
 		case 'steppe': layoutSteppe(); break;
 		case 'woods': layoutWoods(); break;
 		case 'canyon': layoutCanyon(); break;
-		case 'xuefeng': layoutXuefeng(); break;
-		case 'taihang': layoutTaihang(); break;
 		default: layoutRural(); break;
 	}
 // 大桥 (胡康=木排架; 淞沪=石拱×2): 按桥型分派
@@ -1761,7 +1616,6 @@ scene.add(disc);
 	const x=wr(-TR,TR), z=wr(-TR,TR);
 	if(roadDist(x,z)<7) continue;
 	if(inRiverChannel(x,z)) continue;
-		if(CAMPAIGN.terr==='xuefeng'&&heightAt(x,z)>84) continue; // 林线以上裸岩不落树
 	if(CITY&&cityUrban(x,z)) continue; // 城市组: 野树不落建成区 (街道+街块+厂区; 街廊保通行/保视线)
 	if(!freeSpot(x,z,1.3)) continue;
 	if(RURAL_FIELDS.length&&fieldAt(x,z)) continue; // 农田内部不落野树 (整洁田块)

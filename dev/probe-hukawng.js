@@ -266,7 +266,7 @@ if(!REG.some(r=>r.type==='bunker'&&Math.hypot(r.x-hx,r.z-hz)<14)) fail.push(`胡
 return fail;
 }
 
-const campList=[['normandy',0],['stalingrad',1],['berlin',2],['songhu',3],['baituan',4],['burma',5],['moscow',6],['hukawng',7],['steppe',8],['woodline',9],['canyon',10],['xuefeng',11],['taihang',12]];
+const campList=[['normandy',0],['stalingrad',1],['berlin',2],['songhu',3],['baituan',4],['burma',5],['moscow',6],['hukawng',7],['steppe',8],['woodline',9],['canyon',10]];
 let bad=0;
 for(const [name,idx] of campList){
 const t0=Date.now();

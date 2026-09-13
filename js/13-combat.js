@@ -362,7 +362,7 @@ if(d.mesh.userData.prop) d.mesh.userData.prop.rotation.z+=dt*(40+(d.spd-13)*2.4)
 loiterEng.update(140+d.t*6+(d.spd-13)*4,0.2);
 if(d.grace>0){
 // 出膛保护: 起步 0.8s 不做命中检测, 并强制贴地爬升 ——
-// 贴身山坡/沙袋/掩体发射 (雪峰山陡坡地形常见) 不会第一帧就击中近物自爆
+// 贴身山坡/沙袋/掩体发射 (陡坡地形常见) 不会第一帧就击中近物自爆
 d.grace-=dt;
 d.pos.x+=dir.x*step; d.pos.y+=dir.y*step; d.pos.z+=dir.z*step;
 const gh=heightAt(d.pos.x,d.pos.z);

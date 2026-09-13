@@ -46,13 +46,6 @@ Float32BufferAttribute:class{},
 }
 // ── 地形高度场复刻 (03-terrain.js 验证用拷贝; 函数结构一致) ──
 function makeTerrain(CAMPAIGN){
-// ── 雪峰山: 主山脊线峰谷参数场 (03-terrain 副本, 须在 rawH/FLATS 之前) ──
-const XF_RIDGE=[[-400,40],[-260,15],[-100,-15],[80,-30],[260,-5],[400,55]];
-const XF_SEGS=[]; let XF_LEN=0;
-{let cum=0,prev=null;for(const p of XF_RIDGE){if(prev){const l=Math.hypot(p[0]-prev[0],p[1]-prev[1]);XF_SEGS.push({ax:prev[0],az:prev[1],bx:p[0],bz:p[1],l,l0:cum});cum+=l;}prev=p;}XF_LEN=cum;}
-function ridgeInfo(x,z){let bd=1e9,bt=0;for(const s of XF_SEGS){const abx=s.bx-s.ax,abz=s.bz-s.az;const t=Math.max(0,Math.min(1,((x-s.ax)*abx+(z-s.az)*abz)/(abx*abx+abz*abz||1)));const px=s.ax+abx*t,pz=s.az+abz*t;const d=Math.hypot(x-px,z-pz);if(d<bd){bd=d;bt=(s.l0+s.l*t)/XF_LEN;}}return{d:bd,t:bt};}
-const xfGauss=(t,c,w)=>{const u=(t-c)/w;return Math.exp(-0.5*u*u);};
-function ridgeH(t){let h=0;for(const c of [[0.20,44,0.055],[0.50,112,0.075],[0.84,52,0.06]])h+=c[1]*xfGauss(t,c[0],c[2]);for(const c of [[0.32,27,0.05],[0.655,31,0.05]])h+=c[1]*xfGauss(t,c[0],c[2]);return h;}
 // ── 雾林守线副本 (2026-09-13 许特根改版): 北谷(卡尔小径)距离场+堑口遮罩 (与 03-terrain 同构) ──
 const WOOD=CAMPAIGN.wood||null;
 const segW=(px,pz,ax,az,bx,bz)=>{ const abx=bx-ax,abz=bz-az; const t=Math.max(0,Math.min(1,((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz||1))); return Math.hypot(px-(ax+abx*t),pz-(az+abz*t)); };
@@ -136,19 +129,11 @@ return base;
 	const rim=s3(Math.max(0,Math.min(1,(rd-21)/11)));
 	const rn=1+0.35*Math.sin(x*0.024+z*0.01+1)+0.2*Math.sin(x*0.055-z*0.03+0.7);
 	return 0.4*Math.sin(x*0.05)+0.2*Math.sin(x*0.12+2)+side*9*rn+rim*7*rn; }
-	case 'xuefeng':{ const ri=ridgeInfo(x,z); const dh=Math.max(0,Math.min(1,1-ri.d/230)); const s=dh*dh*(3-2*dh); const foot=3.5+2.2*Math.sin(x*0.02+0.7)*Math.cos(z*0.018+1)+1.4*Math.sin(x*0.043+2)*Math.sin(z*0.037+0.8)+2.8*Math.sin(x*0.014+1.2)*Math.cos(z*0.016+0.9)+1.7*Math.sin(x*0.031+2.4)*Math.sin(z*0.027+1.1)+0.9*Math.sin(x*0.061+0.4)*Math.cos(z*0.055+2); const sp1=Math.hypot(x+215,z-95), sp2=Math.hypot(x-245,z+85); const spur=24*Math.exp(-sp1*sp1/(2*70*70))+30*Math.exp(-sp2*sp2/(2*80*80)); return foot+s*s*ridgeH(ri.t)+spur+s*1.4*Math.sin(x*0.06+1)*Math.cos(z*0.055)+s*0.8*Math.sin(x*0.11+3)*Math.cos(z*0.09+1.2); }
-	case 'taihang':{ // 03-terrain 副本: 西南平原+双峰夹峙 (西峰72m/主峰118m, 垭口交接, 山体风化噪声)
-	const mt=(cx,cz,H,R)=>{ const d=Math.hypot(x-cx,z-cz); const dh=Math.max(0,Math.min(1,1-d/R)); return H*dh*dh*(3-2*dh); };
-	const hM=mt(-135,15,72,135)+mt(30,-60,118,185)+mt(200,-120,78,135);
-	const base=1.5+0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)+0.45*Math.sin(x*0.052+1.5)*Math.sin(z*0.045+0.8)+0.22*Math.sin(x*0.12+2)*Math.cos(z*0.1+0.4);
-	const sN=0.5*Math.sin(x*0.06+1)*Math.cos(z*0.055)+0.3*Math.sin(x*0.11+3)*Math.cos(z*0.09+1.2);
-	return base+hM+Math.min(4,1+hM*0.09)*sN; }
-	default: return 1.4*Math.sin(x*0.021)*Math.cos(z*0.024)+0.9*Math.sin(x*0.052+1.7)*Math.sin(z*0.043+0.6)+0.5*Math.sin(x*0.11+3.1)*Math.cos(z*0.09+1.2);
 }
 }
 const FLATS=[];
-for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
-for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:(CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
+for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:(CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
+for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:(CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
 if(WOOD&&WOOD.village){ const V=WOOD.village; FLATS.push({x:V.x,z:V.z,r:V.r,h:rawH(V.x,V.z)}); } // 许特根: 岭上村台地 (全高)
 for(const s of (CAMPAIGN.spawns||[])) FLATS.push({x:s.x,z:s.z,r:CAMPAIGN.layout==='canyon'?6:8,h:rawH(s.x,s.z)*0.55});
 if(CAMPAIGN.terr==='rolling') FLATS.push({x:0,z:0,r:34,h:rawH(0,0)*0.55});
@@ -398,67 +383,6 @@ for(const h of vm.runInContext('RURAL_HEDGES',ctx)){
 if(Math.hypot(h.x-f.x,h.z-f.z)<f.r+6) errs.push(`围田树篱 (${h.x.toFixed(1)},${h.z.toFixed(1)}) 侵入旗点「${f.id}」净空圈`);
 }
 }
-}
-// 9) 雪峰山: 复刻 OCC(建筑→门口→圆柱→陡坡→走廊打通, 与 03-terrain 同序) → 5m 寻路格洪水填充
-if(CAMPAIGN.id==='xuefeng'&&bases.length>=2){
-const terr2=makeTerrain(CAMPAIGN);
-const H=(x,z)=>terr2.heightAt(x,z);
-const MS=vm.runInContext('MAP_SIZE',ctx);
-const off=(MS+40)/2, N=Math.ceil(MS+40)+1;
-const occ=new Uint8Array(N*N);
-const mrect=(x0,z0,x1,z1)=>{const i0=Math.max(0,Math.floor(x0+off)),i1=Math.min(N-1,Math.ceil(x1+off));const j0=Math.max(0,Math.floor(z0+off)),j1=Math.min(N-1,Math.ceil(z1+off));for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) occ[j*N+i]=1;};
-for(const bx of vm.runInContext('BOXES',ctx)){
-if(bx.dead) continue;
-const gh=H((bx.minX+bx.maxX)/2,(bx.minZ+bx.maxZ)/2);
-if(bx.maxY<gh+0.5||bx.minY>gh+1.75) continue;
-mrect(bx.minX-0.6,bx.minZ-0.6,bx.maxX+0.6,bx.maxZ+0.6);
-}
-for(const cl of vm.runInContext('NAV_CLEARS',ctx)){
-const i0=Math.max(0,Math.floor(cl.x-cl.r+off)),i1=Math.min(N-1,Math.ceil(cl.x+cl.r+off));
-const j0=Math.max(0,Math.floor(cl.z-cl.r+off)),j1=Math.min(N-1,Math.ceil(cl.z+cl.r+off));
-for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const xx=i-off,zz=j-off;if((xx-cl.x)*(xx-cl.x)+(zz-cl.z)*(zz-cl.z)<=cl.r*cl.r) occ[j*N+i]=0;}
-}
-const mcirc=(x,z,rr)=>{const i0=Math.max(0,Math.floor(x-rr+off)),i1=Math.min(N-1,Math.ceil(x+rr+off));const j0=Math.max(0,Math.floor(z-rr+off)),j1=Math.min(N-1,Math.ceil(z+rr+off));for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const xx=i-off,zz=j-off;if((xx-x)*(xx-x)+(zz-z)*(zz-z)<=rr*rr) occ[j*N+i]=1;}};
-for(const c of vm.runInContext('CYLS',ctx)){
-if(c.r<0.28) continue;
-mcirc(c.x,c.z,c.r+0.6);
-}
-// 陡坡阻断 (8×8 厚墙) → 走廊打通 (公路/战壕/旗圈/基地圈最后清)
-const step=4, th=0.95;
-for(let j=4;j<N-4;j+=step)for(let i=4;i<N-4;i+=step){
-const x=i-off,z=j-off;
-const hx=Math.abs(H(x+step,z)-H(x-step,z))/(2*step);
-const hz=Math.abs(H(x,z+step)-H(x,z-step))/(2*step);
-if(Math.max(hx,hz)>th){
-for(let k=-2;k<=5;k++)for(let l=-2;l<=5;l++){const jj=j+l,ii=i+k;if(jj>=0&&jj<N&&ii>=0&&ii<N) occ[jj*N+ii]=1;}
-}
-}
-const clearC=(x,z,r)=>{const i0=Math.max(0,Math.floor(x-r+off)),i1=Math.min(N-1,Math.ceil(x+r+off));const j0=Math.max(0,Math.floor(z-r+off)),j1=Math.min(N-1,Math.ceil(z+r+off));for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const xx=i-off,zz=j-off;if((xx-x)*(xx-x)+(zz-z)*(zz-z)<=r*r) occ[j*N+i]=0;}};
-for(const rd of CAMPAIGN.roads){const l=Math.hypot(rd[2]-rd[0],rd[3]-rd[1])||1;for(let u=0;u<=1;u+=5/l) clearC(rd[0]+(rd[2]-rd[0])*u,rd[1]+(rd[3]-rd[1])*u,9);}
-for(const t of (CAMPAIGN.trench||[])){const l=Math.hypot(t[2]-t[0],t[3]-t[1])||1;for(let u=0;u<=1;u+=4/l) clearC(t[0]+(t[2]-t[0])*u,t[1]+(t[3]-t[1])*u,4.5);}
-for(const f of flags) clearC(f.x,f.z,f.r+8);
-for(const b of bases) clearC(b.x,b.z,26);
-const SP=5, NN=Math.floor(MS/SP)+1, NOFF=MS/2;
-const oc1=(x,z)=>{const i=Math.round(x+off),j=Math.round(z+off);if(i<0||j<0||i>=N||j>=N) return true;return occ[j*N+i]===1;};
-const ok=new Uint8Array(NN*NN);
-const sx=Math.round((bases[0].x+NOFF)/SP), sz=Math.round((bases[0].z+NOFF)/SP);
-if(oc1(bases[0].x,bases[0].z)) errs.push('雪峰山: 西基地中心落入陡坡阻断格');
-else{
-ok[sz*NN+sx]=1; const que=[[sx,sz]]; let qi=0;
-while(qi<que.length){
-const [ix,iz]=que[qi++];
-for(const dy of [-1,0,1])for(const dx of [-1,0,1]){
-if(!dx&&!dy) continue;
-const nx=ix+dx,nz=iz+dy;
-if(nx<0||nz<0||nx>=NN||nz>=NN||ok[nz*NN+nx]) continue;
-if(oc1(nx*SP-NOFF,nz*SP-NOFF)) continue;
-ok[nz*NN+nx]=1; que.push([nx,nz]);
-}
-}
-}
-const reach=(x,z)=>{const i=Math.round((x+NOFF)/SP),j=Math.round((z+NOFF)/SP);return i>=0&&j>=0&&i<NN&&j<NN&&ok[j*NN+i]===1;};
-if(!reach(bases[1].x,bases[1].z)) errs.push('雪峰山: 西基地→东基地 寻路不连通');
-for(const f of flags){ if(!reach(f.x,f.z)) errs.push(`雪峰山: 旗点「${f.id}」(${f.x},${f.z}) 从西基地不可达`); }
 }
 // 12) 城市组断言 (2026-09-05 城市组·斯大林格勒/柏林):
 //     建筑足迹不侵占街道矩形 / 多层可上楼(楼梯数) / 地标存在 / 地铁下沉量 / 电车残骸

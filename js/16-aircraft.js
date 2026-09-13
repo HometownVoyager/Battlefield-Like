@@ -63,7 +63,7 @@ onDone:()=>{ scene.remove(w.m); const j=planeWrecks.indexOf(w); if(j>=0) planeWr
 }
 }
 // 全图最高地形高度: 惰性全图采样一次并缓存 (AI 巡航层与地形规避共用)。
-// 有山战役 (雪峰山主峰 112m / 太行山 118m) 决定 AI 飞机必须飞多高才不会撞山
+// 有山战役的主峰高度决定 AI 飞机必须飞多高才不会撞山
 let TERR_MAX_H=null;
 function terrainMaxH(){
 if(TERR_MAX_H===null){
@@ -243,7 +243,7 @@ planeAI(dt){
 this.stateT-=dt;
 // ── 地形规避 (修 AI 撞山): 沿航向前方 60/130/200m 三点采样, 预测净空不足即提前拉起,
 //    同时向地形更低的一侧转向。旧版只有俯冲/缠斗状态有 14~16m 的临死反应式拉起,
-//    巡逻状态完全没有规避 —— 雪峰山(112m)/太行山(118m)巡航层 62m 直接穿山自毁。
+//    巡逻状态完全没有规避 —— 高山地图巡航层 62m 会直接穿山自毁。
 //    俯冲攻击用收窄裕度: 允许贴近山顶目标攻击, 但保证来得及拉起 ──
 const fx2=Math.sin(this.yaw), fz2=Math.cos(this.yaw);
 const gh0=heightAt(this.pos.x,this.pos.z);
@@ -297,7 +297,7 @@ if(this.pos.y<gh+14) this.pitch=Math.max(this.pitch,0.3);
 return;
 }
 if(this.state==='patrol'){
-// 巡航层: 有山战役自动抬升到"全图最高地形+42m"(雪峰山/太行山≈155~160m), 无山维持 62m;
+// 巡航层: 有山战役自动抬升到"全图最高地形+42m", 无山维持 62m;
 // 巡逻圈半径随地图缩放 (320 图 110m 不变, 800 图≈174m 覆盖全部旗区)
 const cruise=Math.max(62,terrainMaxH()+42);
 const pr=110*Math.sqrt(MAP_SIZE/320);

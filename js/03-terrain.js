@@ -3,41 +3,6 @@
 // 源: Index.original.html 第 1096-1329 行
 // ─────────────────────────────────────────────
 'use strict';
-// ── 雪峰山: 主山脊线 (西→东), 沿脊的峰谷参数场 (须在 FLATS 采样 rawHeight 之前定义) ──
-const XF_RIDGE=[[-400,40],[-260,15],[-100,-15],[80,-30],[260,-5],[400,55]];
-const XF_SEGS=[];
-let XF_LEN=0;
-{
-let cum=0, prev=null;
-for(const p of XF_RIDGE){
-if(prev){
-const l=Math.hypot(p[0]-prev[0],p[1]-prev[1]);
-XF_SEGS.push({ax:prev[0],az:prev[1],bx:p[0],bz:p[1],l,l0:cum});
-cum+=l;
-}
-prev=p;
-}
-XF_LEN=cum;
-}
-function ridgeInfo(x,z){
-let bd=1e9, bt=0;
-for(const s of XF_SEGS){
-const abx=s.bx-s.ax, abz=s.bz-s.az;
-const t=clamp(((x-s.ax)*abx+(z-s.az)*abz)/(abx*abx+abz*abz),0,1);
-const px=s.ax+abx*t, pz=s.az+abz*t;
-const d=Math.hypot(x-px,z-pz);
-if(d<bd){ bd=d; bt=(s.l0+s.l*t)/XF_LEN; }
-}
-return {d:bd, t:bt};
-}
-function xfGauss(t,c,w){ const u=(t-c)/w; return Math.exp(-0.5*u*u); }
-// 三峰两垭口: 峰1 t≈0.20(H44) 垭口1 t≈0.32(H27) 主峰 t≈0.50(H112) 垭口2 t≈0.655(H31) 峰3 t≈0.84(H52)
-function ridgeH(t){
-let h=0;
-for(const c of [[0.20,44,0.055],[0.50,112,0.075],[0.84,52,0.06]]) h+=c[1]*xfGauss(t,c[0],c[2]);
-for(const c of [[0.32,27,0.05],[0.655,31,0.05]]) h+=c[1]*xfGauss(t,c[0],c[2]);
-return h;
-}
 // 地貌语义表 (2026-09-10 三图改造): 淞沪水网 / 百团沟壑 / 莫斯科雪岭 ——
 // 与 CITY/RURAL_FIELDS 同约定: 表本体在 config 战役条目, 全链路共读, 严禁布局另写坐标
 // DELTA/DELTA_CHANS 已在 00-config 定义 (RIVER 表旁); 此处只补 LOESS/ALPINE
@@ -70,10 +35,10 @@ return m;
 // 平整区: 基地+旗点自动生成 (高度自适应当地地形, 避免高原/悬崖)
 const FLATS=[];
 {
-// 雪峰山/太行山/百团 640 大地图: 旗点平台必须取当地全高 (山顶/塬面旗点若取 0.55 会被削成盆地边缘悬崖)
-const fullH=CAMPAIGN.terr==='xuefeng'||CAMPAIGN.terr==='taihang'||CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods';
+// 百团/许特根等大起伏图: 旗点平台必须取当地全高 (山顶/塬面旗点若取 0.55 会被削成盆地边缘悬崖)
+const fullH=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods';
 const addFlat=(x,z,r,h)=>FLATS.push({x,z,r,h:h!==undefined?h:rawHeight(x,z)*0.55});
-// 超大地图: 基地平台同样取全高 —— 山后要塞(太行山日军基地)在山坡上, 0.55 系数会挖出盆地边缘悬崖
+// 大起伏图: 基地平台同样取全高 (山坡/塬面上的基地若取 0.55 系数会挖出盆地边缘悬崖)
 // 许特根 (woods): 基地/旗点取全高 (林间缓丘上 0.55 同样挖盆); 岭上村台地独立登记 (石屋群需整片平地)
 for(const b of CAMPAIGN.bases) addFlat(b.x,b.z,20,fullH?rawHeight(b.x,b.z):undefined);
 for(const f of CAMPAIGN.flags) addFlat(f.x,f.z,f.r+12,fullH?rawHeight(f.x,f.z):undefined);
@@ -339,39 +304,6 @@ const rim=sstep(clamp((rd-21)/11,0,1));
 const rn=1+0.35*Math.sin(x*0.024+z*0.01+1)+0.2*Math.sin(x*0.055-z*0.03+0.7);
 const floor=0.4*Math.sin(x*0.05)+0.2*Math.sin(x*0.12+2);
 return floor+side*9*rn+rim*7*rn;
-}
-case 'taihang':{
-// 太行山 · 800 超大地图: 山群三峰 (西峰/主峰/东峰) + 环绕平原 ——
-// 西峰(-135,15) 72m/主峰(30,-60) 118m/东峰(200,-120) 78m 各为 s3 距离场锥体,
-// 峰间交接处形成西垭(-45,-28)/东垭(115,-90) 两个高山鞍部; 平原侧低平 (±2m),
-// 山体随高度叠加风化岩噪声 (南面陡环 ~0.9 坡度, 玩家可翻, Bot 可达)
-const mt=(cx,cz,H,R)=>{
-const d=Math.hypot(x-cx,z-cz);
-const dh=clamp(1-d/R,0,1);
-return H*sstep(dh);
-};
-const hM=mt(-135,15,72,135)+mt(30,-60,118,185)+mt(200,-120,78,135);
-const base=1.5+0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)
-+0.45*Math.sin(x*0.052+1.5)*Math.sin(z*0.045+0.8)
-+0.22*Math.sin(x*0.12+2)*Math.cos(z*0.1+0.4);
-const sN=0.5*Math.sin(x*0.06+1)*Math.cos(z*0.055)+0.3*Math.sin(x*0.11+3)*Math.cos(z*0.09+1.2);
-return base+hM+Math.min(4,1+hM*0.09)*sN;
-}
-case 'xuefeng':{
-// 雪峰山 · 800 超大地图: 山脊距离场 —— 山麓为连绵丘陵(±8m 起伏), 山坡渐起承主脊,
-// 南北两条山前余脉, 沿脊参数 t 取峰谷表(三峰两垭口); 盘山公路穿两个垭口、绕主峰北腰
-const ri=ridgeInfo(x,z);
-const dh=clamp(1-ri.d/230,0,1);
-const s=sstep(dh);
-const foot=3.5+2.2*Math.sin(x*0.02+0.7)*Math.cos(z*0.018+1)
-+1.4*Math.sin(x*0.043+2)*Math.sin(z*0.037+0.8)
-+2.8*Math.sin(x*0.014+1.2)*Math.cos(z*0.016+0.9)
-+1.7*Math.sin(x*0.031+2.4)*Math.sin(z*0.027+1.1)
-+0.9*Math.sin(x*0.061+0.4)*Math.cos(z*0.055+2);
-const sp1=Math.hypot(x+215,z-95), sp2=Math.hypot(x-245,z+85);
-const spur=24*Math.exp(-sp1*sp1/(2*70*70))+30*Math.exp(-sp2*sp2/(2*80*80));
-return foot+s*s*ridgeH(ri.t)+spur
-+s*1.4*Math.sin(x*0.06+1)*Math.cos(z*0.055)+s*0.8*Math.sin(x*0.11+3)*Math.cos(z*0.09+1.2);
 }
 default:
 return 1.4*Math.sin(x*0.021)*Math.cos(z*0.024)
@@ -762,17 +694,6 @@ r=lerp(r,0.42,0.45); g=lerp(g,0.58,0.45); b=lerp(b,0.42,0.45);
 r=lerp(r,0.92,0.35); g=lerp(g,0.94,0.35); b=lerp(b,0.92,0.35);
 }
 }
-// 太行山: 山体分带 —— 低坡灌丛褐绿 / 中坡林带深绿 / 山顶裸岩灰白 (陡环风化带)
-if(CAMPAIGN.terr==='taihang'){
-const hy=pos.getY(i);
-if(hy>85){
-const k=clamp((hy-85)/26,0,1)*0.8;
-r=lerp(r,0.74,k); g=lerp(g,0.72,k); b=lerp(b,0.68,k);
-}else if(hy>26){
-const k=clamp((hy-26)/59,0,1)*0.55;
-r=lerp(r,0.55,k); g=lerp(g,1.06,k); b=lerp(b,0.52,k);
-}
-}
 // 诺曼底农田: 田块底色 (麦田金黄/玉米鲜绿/牧草亮绿/翻耕褐) + 田界土埂线
 if(RURAL_FIELDS.length){
 const fld=fieldAt(x,z);
@@ -924,9 +845,9 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	if(heightAt(x,z)>15&&roadDist(x,z)>20) d[j*N+i]=1;
 	}
 	}
-	// 雪峰山/太行山/莫斯科雪岭: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— Bot/坦克寻路阻断,
+	// 莫斯科雪岭: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— Bot/坦克寻路阻断,
 	// 随后按公路/旗圈/基地/战壕走廊强制打通 (垭口-公路-旗点平台保持可达)
-	if(CAMPAIGN.id==='xuefeng'||CAMPAIGN.id==='taihang'||CAMPAIGN.id==='moscow'){
+	if(CAMPAIGN.id==='moscow'){
 	const step=4, th=0.95;
 	for(let j=4;j<N-4;j+=step)for(let i=4;i<N-4;i+=step){
 	const x=i-off, z=j-off;
@@ -997,7 +918,7 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	}
 	// 铁路桥桥位 (巷沟上的拉锯通道; NAV_CLEARS 之外这里同步放行占用格)
 	for(const B2 of BRIDGES) clear(B2.x,B2.z,B2.len/2+6);
-	// 道路/旗点/基地走廊 (参照 xuefeng 口径)
+	// 道路/旗点/基地走廊
 	for(const r of CAMPAIGN.roads){
 	const l=Math.hypot(r[2]-r[0],r[3]-r[1])||1;
 	for(let u=0;u<=1;u+=5/l) clear(r[0]+(r[2]-r[0])*u, r[1]+(r[3]-r[1])*u, 9);

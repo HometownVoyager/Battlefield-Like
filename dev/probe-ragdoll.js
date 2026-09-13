@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 // dev/probe-ragdoll.js —— 布娃娃地形交互探针 (不进 Index.html)
-// 用法: node dev/probe-ragdoll.js [战役序号...]   (默认抽查 平原/高山/雪峰山/太行)
+// 用法: node dev/probe-ragdoll.js [战役序号...]   (默认抽查 平原/高山/黄土沟壑)
 // 依赖: dev/_cannon.js (cannon@0.6.2 官方构建拷贝, 与 index.html CDN 同版本)
 // 目的: 坡地/高地死亡尸体起飞 BUG 的复现与回归 ——
 //       ①生成即检: 头盔-头部初始约束间距应为 hy2 (~0.16m), 而非 p.y+hy2 (p.y 被双重累加);
@@ -154,7 +154,7 @@ const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -281,7 +281,7 @@ if(r.launches&&parseInt(r.launches)>0) out.bad++;
 }
 return out;
 }
-// ── 入口: 默认抽查 平原0 / 高山6 / 雪峰山 / 太行 (按 terr 名匹配) ──
+// ── 入口: 默认抽查 平原0 / 高山6 / 黄土沟壑 loess (按 terr 名匹配) ──
 const idxs=process.argv.slice(2).map(Number).filter(n=>!isNaN(n));
 let camps=[];
 if(idxs.length) camps=idxs;
@@ -290,7 +290,7 @@ const probe=boot(0);
 const total=vm.runInContext('CAMPAIGNS.length',probe);
 const all=vm.runInContext('CAMPAIGNS.map(c=>c.terr)',probe);
 camps=[];
-for(let i=0;i<total;i++) if(['rolling','alpine','xuefeng','taihang'].includes(all[i])) camps.push(i);
+for(let i=0;i<total;i++) if(['rolling','alpine','loess'].includes(all[i])) camps.push(i);
 if(!camps.length) camps=[0];
 }
 let bad=0;
