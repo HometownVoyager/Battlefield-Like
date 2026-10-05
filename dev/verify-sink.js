@@ -68,6 +68,12 @@ setX(i,v){if(this.array)this.array[i*this.itemSize]=v;}
 setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
 class _Color{constructor(c){this.c=c;}set(){return this;}}
+// ★2026-10-05 昼夜批: 夜档 02-scene 的 nightFogColor() 在 ironbottom(锁夜) 上真调 Color.lerp ⇒ 本探针私有桩补齐 (与 _bootstub 同款)
+if(!_Color.prototype.getHex){ _Color.prototype.getHex=function(){ return typeof this.c==='number'?this.c:0; }; }
+if(!_Color.prototype.lerp){
+const _h2r=h=>{ h=typeof h==='number'?h:parseInt(String(h).replace('#',''),16)||0; return [(h>>16)&255,(h>>8)&255,h&255]; };
+_Color.prototype.lerp=function(t,a){ const c0=_h2r(this.c), c1=_h2r(t&&t.c!==undefined?t.c:t); const m=c0.map((v,i)=>Math.round(v+(c1[i]-v)*a)); this.c=(m[0]<<16)|(m[1]<<8)|m[2]; return this; };
+}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
 const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
@@ -100,7 +106,9 @@ Texture:class{constructor(){this.repeat=new V3(1,1,1);this.offset=new V3(0,0,0);
 DirectionalLight:class extends Obj3{constructor(c,i){super();this.intensity=i?i:1;this.color=new _Color(c);this.target=new Obj3();this.shadow={mapSize:new V3(1,1,1),bias:0,camera:{updateProjectionMatrix(){},left:0,right:0,top:0,bottom:0,far:0,near:0}} } },
 AmbientLight:class extends Obj3{constructor(c,i){super();this.intensity=i;this.color=new Color(c);}},
 HemisphereLight:class extends Obj3{constructor(a,b,i){super();this.intensity=i;}},
-PointLight:class extends Obj3{},
+PointLight:class extends Obj3{constructor(c,i,d,dec){super();this.color=c;this.intensity=i||0;this.distance=d||0;this.decay=dec||1;this.castShadow=false;}},
+// ★2026-10-05 昼夜批: 夜档 _hlPoolEnsure 会 new THREE.SpotLight 并调 sl.target.updateMatrixWorld() (ironbottom 锁夜 ⇒ LOAD/首帧即炸)
+SpotLight:class extends Obj3{constructor(c,i,d,a,p,dec){super();this.color=c;this.intensity=i||0;this.distance=d||0;this.angle=a||0;this.penumbra=p||0;this.decay=dec||1;this.castShadow=false;this.visible=true;this.target=new Obj3();this.target.updateMatrixWorld=()=>{};}},
 Box3:class{setFromObject(){return this;}expandByObject(){return this;}},
 Clock:class{getDelta(){return 0;}},
 Matrix4:class{constructor(){this.elements=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);}compose(p){const e=this.elements;if(p&&p.x!==undefined){e[12]=p.x;e[13]=p.y;e[14]=p.z;}return this;}makeScale(x,y,z){const e=this.elements;e.fill(0);e[0]=x;e[5]=y;e[10]=z;e[15]=1;return this;}makeRotationFromEuler(){return this;}identity(){return this;}},
@@ -148,7 +156,7 @@ const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f); // 不含 24 的 loop 启动? 24 会调用 initMenuUI & setInterval? 探针只调 fn
 return ctx;
 }

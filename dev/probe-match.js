@@ -149,7 +149,7 @@ const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -189,7 +189,7 @@ return nowT-t0;
 // 对局统计探针: 无头跑完整局, 记录兵力票/旗权/扣票分解/终局方式
 // 用法: node dev/probe-match.js [战役序号|-1=旗点战役集] [次数] [最长分钟]
 // ─────────────────────────────────────────────
-const FLAG_SET=[0,1,2,3,5,6,7,8,9]; // 有点位争夺的战役 (跳过破袭/劫道; 8=woodline 2026-09-13)
+const FLAG_SET=[0,1,2,3,5,6,7,8,9,11]; // 有点位争夺的战役 (跳过破袭/劫道; 8=woodline 2026-09-13; 11=island 2026-09-18)
 function runMatch(ci,maxMin){
 const ctx=boot(ci);
 const init=vm.runInContext(`

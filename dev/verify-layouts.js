@@ -25,11 +25,11 @@ class P3{ constructor(x=0,y=0,z=0){ this.x=x;this.y=y;this.z=z; } set(x,y,z){thi
 class Quat{ constructor(){ this.x=0;this.y=0;this.z=0;this.w=1; } setFromUnitVectors(){ return this; } identity(){ return this; } setFromEuler(){ return this; } }
 class Rot{ constructor(){ this.x=0;this.y=0;this.z=0;this.order='XYZ'; } set(x,y,z){this.x=x;this.y=y;this.z=z;return this;} }
 class Scl{ constructor(){ this.x=1;this.y=1;this.z=1; } set(x,y,z){this.x=x;this.y=y;this.z=z;return this;} setScalar(s){this.x=s;this.y=s;this.z=s;return this;} }
-class Obj3{ constructor(){ this.position=new P3(); this.rotation=new Rot(); this.scale=new Scl(); this.quaternion=new Quat(); this.children=[]; this.parent=null; this.matrix={}; this.castShadow=false; this.receiveShadow=false; this.visible=true; this.renderOrder=0; this.updateMatrix=()=>{}; }
+class Obj3{ constructor(){ this.position=new P3(); this.rotation=new Rot(); this.scale=new Scl(); this.quaternion=new Quat(); this.children=[]; this.parent=null; this.matrix={}; this.castShadow=false; this.receiveShadow=false; this.visible=true; this.renderOrder=0; this.userData={}; this.updateMatrix=()=>{}; }
 add(m){ this.children.push(m); m.parent=this; } remove(m){ const i=this.children.indexOf(m); if(i>=0){ this.children.splice(i,1); m.parent=null; } }
 traverse(fn){ fn(this); for(const c of this.children) if(c.traverse) c.traverse(fn); } }
-class Geo{ constructor(...a){ this.parameters={width:a[0]||1,height:a[1]||1,depth:a[2]||1}; } translate(){return this;} rotateX(){return this;} rotateY(){return this;} }
-class PlaneGeo extends Geo{ constructor(w=1,h=1,sg=1,sh=1){ super(w,h); const gx=(sg||1)+1, gy=(sh||1)+1; this.attributes={position:{count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}}}; } }
+class Geo{ constructor(...a){ this.parameters={width:a[0]||1,height:a[1]||1,depth:a[2]||1}; } translate(){return this;} rotateX(){return this;} rotateY(){return this;} setAttribute(n,a){ this.attributes=this.attributes||{}; this.attributes[n]=a; return this; } setIndex(i){ this.index={array:(i&&i.length!==undefined)?i:[]}; return this; } computeVertexNormals(){ return this; } }
+class PlaneGeo extends Geo{ constructor(w=1,h=1,sg=1,sh=1){ super(w,h); const gx=(sg||1)+1, gy=(sh||1)+1; this.attributes={position:{count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}}}; this.index=null; } }
 return {
 Group:class extends Obj3{}, Mesh:class extends Obj3{ constructor(g,m){ super(); this.geometry=g||new Geo(); this.material=m||{}; } },
 InstancedMesh:class extends Obj3{ constructor(g,m,n){ super(); this.geometry=g; this.material=m; this.count=n; } setMatrixAt(){} },
@@ -48,9 +48,119 @@ Float32BufferAttribute:class{},
 function makeTerrain(CAMPAIGN){
 // ── 雾林守线副本 (2026-09-13 许特根改版): 北谷(卡尔小径)距离场+堑口遮罩 (与 03-terrain 同构) ──
 const WOOD=CAMPAIGN.wood||null;
+const STEPPE=CAMPAIGN.steppe||null;
 const segW=(px,pz,ax,az,bx,bz)=>{ const abx=bx-ax,abz=bz-az; const t=Math.max(0,Math.min(1,((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz||1))); return Math.hypot(px-(ax+abx*t),pz-(az+abz*t)); };
 const woodRavineDist=(x,z)=>{ if(!WOOD||!WOOD.ravine) return 1e9; let gd=1e9; const P=WOOD.ravine.pts; for(let i=0;i<P.length-1;i++){ const d=segW(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]); if(d<gd) gd=d; } return gd; };
 const woodRampMask=(x,z)=>{ if(!WOOD||!WOOD.ravine) return 0; let m=0; for(const r of (WOOD.ravine.ramps||[])){ const w2=r.w||5; const d=segW(x,z,r.x0,r.z0,r.x1,r.z1); const k=d<=w2?1:Math.max(0,Math.min(1,1-(d-w2)/5)); if(k>m) m=k; } return m; };
+// ── 环礁海域副本 (2026-09-18 塔拉瓦 / ★09-19 四面环海): 岸线距离场 + 离岸/陆上剖面 + 航道 (与 03-terrain 同构) ──
+const SEA=CAMPAIGN.sea||null;
+const s3f=t=>t*t*(3-2*t);
+function shoreZAt(x){
+if(!SEA) return 1e9;
+const P=SEA.shore;
+if(x<=P[0][0]) return P[0][1];
+for(let i=0;i<P.length-1;i++){
+if(x<=P[i+1][0]){ const t=(x-P[i][0])/((P[i+1][0]-P[i][0])||1); return P[i][1]+(P[i+1][1]-P[i][1])*t; }
+}
+return P[P.length-1][1];
+}
+function northZAt(x){
+if(!SEA||!SEA.north) return -1e9;
+const P=SEA.north;
+if(x<=P[0][0]) return P[0][1];
+for(let i=0;i<P.length-1;i++){
+if(x<=P[i+1][0]){ const t=(x-P[i][0])/((P[i+1][0]-P[i][0])||1); return P[i][1]+(P[i+1][1]-P[i][1])*t; }
+}
+return P[P.length-1][1];
+}
+function coastXAt(P,z){
+if(!P||!P.length) return 1e9;
+if(z<=P[0][0]) return P[0][1];
+for(let i=0;i<P.length-1;i++){
+if(z<=P[i+1][0]){ const t=(z-P[i][0])/((P[i+1][0]-P[i][0])||1); return P[i][1]+(P[i+1][1]-P[i][1])*t; }
+}
+return P[P.length-1][1];
+}
+// 单支岸线有符号距离: 跨度内=垂距 / 越出端点=到端点的欧氏距离 (2026-09-19 修"角落的海太浅"; 与 03-terrain 同构)
+function coastDist(P,t,v,side){
+const n=P.length;
+if(n<2||t<=P[0][0]){ const dv=v-P[0][1]; return (side*dv>=0?1:-1)*Math.hypot(t-P[0][0],dv); }
+if(t>=P[n-1][0]){ const dv=v-P[n-1][1]; return (side*dv>=0?1:-1)*Math.hypot(t-P[n-1][0],dv); }
+for(let i=0;i<n-1;i++){
+if(t<=P[i+1][0]){
+const t0=P[i][0], t1=P[i+1][0];
+const vc=P[i][1]+(P[i+1][1]-P[i][1])*((t-t0)/((t1-t0)||1));
+return side*(v-vc);
+}
+}
+return side*(v-P[n-1][1]);
+}
+function shoreDist(x,z){
+if(!SEA) return 1e9;
+const fs=coastDist(SEA.shore,x,z,1);
+const fn=SEA.north?coastDist(SEA.north,x,z,-1):-1e9;
+const dw=SEA.west?coastDist(SEA.west,z,x,-1):-1e9;
+const de=SEA.east?coastDist(SEA.east,z,x,1):-1e9;
+if(fs<=0&&fn<=0&&dw<=0&&de<=0){ let m=fs; if(fn>m)m=fn; if(dw>m)m=dw; if(de>m)m=de; return m; }
+let best=1e18;
+if(fs>0) best=fs;
+if(fn>0&&fn<best) best=fn;
+if(dw>0&&dw<best) best=dw;
+if(de>0&&de<best) best=de;
+return best;
+}
+function seaChannelMask(x,z){
+if(!SEA||!SEA.channels) return 0;
+let m=0;
+for(const c of SEA.channels){ if(c.z0!==undefined&&z<c.z0) continue; const d=Math.abs(x-c.x); const k=d<=c.w?1:Math.max(0,Math.min(1,1-(d-c.w)/6)); if(k>m) m=k; }
+return m;
+}
+function seaDepthOfD(x,z,d){
+const S=SEA;
+// 全海图 (P4 opensea): 无离岸剖面表 ⇒ 均匀海盆深 (与 03-terrain 同一支守卫; 副本必须同源)
+if(!S||!S.shelf) return (S&&S.deep)?S.deep:26;
+const A=S.shelf.d*S.shelf.rate;
+const B=A+(S.reef.d1-S.reef.d0)*S.reef.rate;
+const C=B+(S.edge.d1-S.edge.d0)*S.edge.rate;
+const D=C+(S.slope.d1-S.slope.d0)*S.slope.rate;
+let dep;
+if(d<=S.shelf.d) dep=d*S.shelf.rate;
+else if(d<=S.reef.d1) dep=A+(d-S.reef.d0)*S.reef.rate;
+else if(d<=S.edge.d1) dep=B+(d-S.edge.d0)*S.edge.rate;
+else if(d<=S.slope.d1) dep=C+(d-S.slope.d0)*S.slope.rate;
+else dep=D+(d-S.basin.d0)*S.basin.rate;
+const cm=seaChannelMask(x,z);
+if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
+return dep;
+}
+function seaDepthAt(x,z){
+if(!SEA) return 0;
+const d=shoreDist(x,z);
+return d>0?seaDepthOfD(x,z,d):0;
+}
+function seaLandH(x,z,u){
+const S=SEA;
+const hSand=S.sand.u*S.sand.rate;
+const hRidge=hSand+(S.ridge.u1-S.ridge.u0)*S.ridge.rate;
+const hBench=hRidge+(S.bench.u1-S.bench.u0)*S.bench.rate;
+let h;
+if(u<=S.sand.u) h=u*S.sand.rate;
+else if(u<=S.ridge.u1) h=hSand+(u-S.ridge.u0)*S.ridge.rate;
+else if(u<=S.bench.u1) h=hRidge+(u-S.bench.u0)*S.bench.rate;
+else{
+const H=S.hill;
+const hill=H.a*Math.sin(x*0.0125+0.7)*Math.cos(z*0.0115-0.4)+H.b*Math.sin(x*0.031-1.1)*Math.sin(z*0.028+0.6)+H.c*Math.sin(x*0.09+2.2)*Math.cos(z*0.083+1.1);
+const g=s3f(Math.max(0,Math.min(1,(u-S.bench.u1)/30)));   // 出背坡台地后渐起 (bias 保证内陆不落海平面以下)
+h=hBench+(H.bias+hill)*g+S.uplift.h*s3f(Math.max(0,Math.min(1,(u-S.uplift.u0)/S.uplift.span)));
+}
+if(S.heads) for(const hd of S.heads){ const dd=Math.hypot(x-hd.x,z-hd.z); if(dd<hd.r) h+=hd.h*s3f(1-dd/hd.r); }
+if(S.knoll){ const dd=Math.hypot(x-S.knoll.x,z-S.knoll.z); if(dd<S.knoll.r) h+=S.knoll.h*s3f(1-dd/S.knoll.r); }
+const rx=Math.max(S.runway.x0-x,0,x-S.runway.x1), rz=Math.max(S.runway.z0-z,0,z-S.runway.z1);
+const rd=Math.hypot(rx,rz);
+if(rd<20) h+=(S.runway.h-h)*s3f(Math.max(0,Math.min(1,1-rd/20)));
+return h;
+}
+function weatherAt1(x,z){ return 0; }
 function rawH(x,z){
 // 语义表 (03-terrain 副本): 淞沪/百团/莫斯科 —— 与本体 rawHeight 同构
 const DELTA=CAMPAIGN.delta||null, LOESS=CAMPAIGN.loess||null, ALPINE=CAMPAIGN.alpine||null;
@@ -129,14 +239,66 @@ return base;
 	const rim=s3(Math.max(0,Math.min(1,(rd-21)/11)));
 	const rn=1+0.35*Math.sin(x*0.024+z*0.01+1)+0.2*Math.sin(x*0.055-z*0.03+0.7);
 	return 0.4*Math.sin(x*0.05)+0.2*Math.sin(x*0.12+2)+side*9*rn+rim*7*rn; }
-}
+	case 'opensea':{ // P4 全海图副本 (与 03-terrain rawHeight 同构): 无陆地, 均匀深海盆
+	const D=(SEA&&SEA.deep)?SEA.deep:26;
+	const n=Math.sin(x*0.017)*Math.cos(z*0.013)*2.4+Math.sin((x+z)*0.009)*1.6;
+	return -(D+n);
+	}
+	case 'island':{ // 2026-09-18 塔拉瓦副本: 海床(负高度)+陆上剖面同一支岸线距离场 (与 03-terrain rawHeight 同构)
+	if(!SEA) return 0;
+	const d=shoreDist(x,z);
+	if(d>0) return -seaDepthAt(x,z);
+	return seaLandH(x,z,-d); }
+	default:
+	return 1.4*Math.sin(x*0.021)*Math.cos(z*0.024)
+	+ 0.9*Math.sin(x*0.052+1.7)*Math.sin(z*0.043+0.6)
+	+ 0.5*Math.sin(x*0.11+3.1)*Math.cos(z*0.09+1.2);
+	}
 }
 const FLATS=[];
-for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:(CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
-for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:(CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods')?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
+// 塔拉瓦环礁: 旗点/基地平台取全高 (0.55 系数会把滩头旗点削到海平面以下 —— 同 loess/woods 口径)
+const fullH2=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods'||CAMPAIGN.terr==='island';
+for(const b of CAMPAIGN.bases) FLATS.push({x:b.x,z:b.z,r:20,h:fullH2?rawH(b.x,b.z):rawH(b.x,b.z)*0.55});
+for(const f of CAMPAIGN.flags) FLATS.push({x:f.x,z:f.z,r:f.r+12,h:fullH2?rawH(f.x,f.z):rawH(f.x,f.z)*0.55});
 if(WOOD&&WOOD.village){ const V=WOOD.village; FLATS.push({x:V.x,z:V.z,r:V.r,h:rawH(V.x,V.z)}); } // 许特根: 岭上村台地 (全高)
 for(const s of (CAMPAIGN.spawns||[])) FLATS.push({x:s.x,z:s.z,r:CAMPAIGN.layout==='canyon'?6:8,h:rawH(s.x,s.z)*0.55});
+// 草原库尔斯克改版 (2026-09-13): 车站(站房/站台/水塔群)/风车/农庄需整片平地 (全高, 同岭上村口径)
+if(STEPPE&&STEPPE.station){ const T2=STEPPE.station; FLATS.push({x:T2.x,z:T2.z,r:26,h:rawH(T2.x,T2.z)}); }
+if(STEPPE&&STEPPE.village){ const V2=STEPPE.village; FLATS.push({x:V2.x,z:V2.z,r:V2.r,h:rawH(V2.x,V2.z)}); }
+if(STEPPE&&STEPPE.mill){ const M3=STEPPE.mill; FLATS.push({x:M3.x,z:M3.z,r:9,h:rawH(M3.x,M3.z)}); }
 if(CAMPAIGN.terr==='rolling') FLATS.push({x:0,z:0,r:34,h:rawH(0,0)*0.55});
+// 03-terrain 副本: 建筑地基平台 PADS (2026-09-20) —— 定向矩形硬平台, 矩形内恒等于楼面, 外接 ramp 米裙坡
+const PADS=[];
+function addPad(x,z,ry,hw,hd,ramp,h){
+const reach=Math.hypot(hw,hd)+ramp+0.001;
+PADS.push({x,z,ry,hw,hd,ramp,h,cs:Math.cos(ry),sn:Math.sin(ry),reach2:reach*reach});
+}
+function padHeight(x,z,h){
+const n=PADS.length;
+if(!n) return h;
+let plat=null, platC=1e9;
+for(let k=0;k<n;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+if(Math.abs(lx)<=p.hw&&Math.abs(lz)<=p.hd){ const c=dx*dx+dz*dz; if(c<platC){ platC=c; plat=p; } }
+}
+if(plat) return plat.h;
+for(let k=0;k<n;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+if(ax<=0&&az<=0) continue;
+const d=Math.hypot(ax>0?ax:0,az>0?az:0);
+if(d>=p.ramp) continue;
+const s1=1-d/p.ramp;
+h+=(p.h-h)*s1*s1*(3-2*s1);
+}
+return h;
+}
 const TRENCHES=(CAMPAIGN.trench||[]).map(t=>({x1:t[0],z1:t[1],x2:t[2],z2:t[3]}));
 const RIVER={moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true},
 burma:{pts:[[-165,62],[-70,32],[-8,62],[60,12],[120,42],[165,22]],w:8,ice:false},
@@ -149,6 +311,7 @@ const BRIDGE=BRIDGES[0]||null;
 const _deckMap=new Map();
 function bridgeDeckY(B){
 const b=B||BRIDGE; if(!b) return 0;
+if(b.deckY!==undefined) return b.deckY; // 栈桥 (kind='pier', 2026-09-18): 绝对桥面高, 副本同步
 if(!_deckMap.has(b)){ const dx=Math.sin(b.yaw),dz=Math.cos(b.yaw); const e=b.len/2+3; _deckMap.set(b,Math.max(heightAt(b.x-dx*e,b.z-dz*e),heightAt(b.x+dx*e,b.z+dz*e))); }
 return _deckMap.get(b);
 }
@@ -178,6 +341,7 @@ if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁站厅/通道下沉 (202
 if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } } // !CITY 门控同 03-terrain 本体 (2026-09-06)
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
+h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -224,7 +388,32 @@ if(DELTA&&DELTA.ponds){ for(const pd of DELTA.ponds){ if(Math.hypot(x-pd.x,z-pd.
 return false;
 }
 function roadDist(x,z){ let d=CAMPAIGN.sineRoad?Math.abs(z-3*Math.sin(x*0.02)):1e9; for(const r of CAMPAIGN.roads) d=Math.min(d,seg(r[0],r[1],r[2],r[3],x,z)); return d; }
-return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,bridgeDeckY,woodRavineDist,woodRampMask};
+// 03-terrain 副本: 矩形距离 (环礁跑道/规划判定用)
+function rectDist(x,z,x0,z0,x1,z1){ const dx=Math.max(x0-x,0,x-x1), dz=Math.max(z0-z,0,z-z1); return Math.hypot(dx,dz); }
+// 03-terrain 副本: 水面查询 (环礁=海平面; 河道/支流/鱼塘=05c 渲染时登记的采样表) —— 本沙箱只做布局, 采样表为空
+const WATER_SURF=[];
+const WATER_CELLS=new Map();
+function waterSurfReg(x,z,wy,hw){ WATER_SURF.push({x,z,wy,hw}); }
+// ★2026-09-26E: 05c _waterStrip 改调条带登记 (相邻采样点成段) —— 本沙箱只做布局, 水面表为空, 同义补桩
+function waterSurfRegStrip(samples,hw){ for(const s of samples) WATER_SURF.push({x:s.x,z:s.z,wy:s.wy,hw}); }
+function waterYAt(x,z){
+let wy=-1e9;
+if(SEA&&shoreDist(x,z)>0) wy=SEA.level;
+return wy;
+}
+function waterDepthAt(x,z){
+const wy=waterYAt(x,z);
+if(wy<=-1e8) return -1e9;
+return wy-heightAt(x,z,true);
+}
+function inSea(x,z){ return !!SEA&&shoreDist(x,z)>0; }
+// 03-terrain 副本: 通用水体判据 (★2026-09-26 P2-18 新增 —— 05c 的野树/草丛门会调它; 本沙箱的水面采样表为空,
+// 只有 SEA 图能命中, 与真实现一致: 其余图的水面由 05c 渲染期 waterSurfReg 登记后才存在)
+function inWaterBody(x,z){
+const wy=waterYAt(x,z);
+return wy>-1e8&&heightAt(x,z,true)<wy-0.05;
+}
+return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
 }
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
@@ -261,6 +450,14 @@ ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Mat
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
 ctx.fordAt=terr.fordAt; // 胡康徒涉滩强度场 (2026-09-12, 断言环带检验用)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
+// 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
+ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
+// 环礁语义 (2026-09-18 塔拉瓦批): SEA + 岸线距离场/水深/水面查询 同构注入 (05b/05c/04b 布局期共读)
+ctx.SEA=CAMP.sea||null;
+ctx.shoreZAt=terr.shoreZAt; ctx.northZAt=terr.northZAt; ctx.coastXAt=terr.coastXAt; ctx.shoreDist=terr.shoreDist; ctx.seaDepthAt=terr.seaDepthAt;
+ctx.seaChannelMask=terr.seaChannelMask; ctx.seaLandH=terr.seaLandH; ctx.rectDist=terr.rectDist;
+ctx.waterYAt=terr.waterYAt; ctx.waterDepthAt=terr.waterDepthAt; ctx.inSea=terr.inSea; ctx.inWaterBody=terr.inWaterBody;
+ctx.WATER_SURF=[]; ctx.WATER_CELLS=new Map(); ctx.waterSurfReg=(x,z,wy,hw)=>{ ctx.WATER_SURF.push({x,z,wy,hw}); }; ctx.waterSurfRegStrip=(samples,hw)=>{ for(const s of samples) ctx.WATER_SURF.push({x:s.x,z:s.z,wy:s.wy,hw}); };
 // 地貌语义表 + 多桥 (2026-09-10 三图改造): 沙箱未加载 03-terrain 本体, 同构注入
 ctx.DELTA=CAMP.delta||null; ctx.DELTA_CHANS=(CAMP.delta&&CAMP.delta.channels)||[];
 ctx.LOESS=CAMP.loess||null; ctx.ALPINE=CAMP.alpine||null;
@@ -375,7 +572,9 @@ else if(!d.g||d.g.hp!==720||d.g.dead) errs.push(`旗点「${f.id}」补给库异
 }
 }else if(depots.length>0) errs.push(`非破袭模式出现 ${depots.length} 处补给库`);
 // 7) 每战役至少1栋登记建筑 (断崖公路=纯自然伏击峡谷, 刻意无建筑)
-if(!reg.length&&CAMPAIGN.layout!=='canyon') errs.push('BUILD_REG 为空——布局未生成任何建筑');
+// opensea (P4 2026-09-30): 全海图**没有陆地**, 布局按设计只放海面件 (浮标/浪花) —— 建筑为空是正确态。
+//   与 canyon 同一档豁免 (那张图是无建筑遭遇战图)。'canyon' 之外的图仍必须出建筑。
+if(!reg.length&&CAMPAIGN.layout!=='canyon'&&CAMPAIGN.terr!=='opensea') errs.push('BUILD_REG 为空——布局未生成任何建筑');
 // 8) 诺曼底围田树篱: 不得侵入旗点净空圈 (布局期已按 r+7 避让, 此处兜底)
 if(vm.runInContext('RURAL_HEDGES',ctx).length){
 for(const f of flags){
@@ -607,6 +806,312 @@ if(kallWreck<2) errs.push(`雾林: 谷底坦克残骸不足 (${kallWreck}<2, 卡
 const cfW=vm.runInContext('CROP_FIELDS',ctx);
 if(cfW.length<5) errs.push(`雾林: 灌丛软遮蔽带不足 (${cfW.length}<5, 林下无遮蔽语义)`);
 }
+// ── 2026-09-13 草原遭遇库尔斯克改版断言 (用户四项裁定: 无旗+可争夺强点 / 车站铁路+风车+坟场村社 / 全套纵深防线+雷区+麦田火 / 节制版炮火犁地)
+if(CAMPAIGN.id==='steppe'){
+const hS=ctx.heightAt;
+// ① 三路扇面: 强点南北跨度≥280 / 东西跨度≥320 (终结旧版"一条对角线"), 最近两强点间距≥90
+const spS=CAMPAIGN.spawns||[];
+const xsS=spS.map(s=>s.x), zsS=spS.map(s=>s.z);
+if(Math.max(...zsS)-Math.min(...zsS)<280) errs.push(`草原: 强点南北跨度 ${(Math.max(...zsS)-Math.min(...zsS)).toFixed(0)}<280 —— 又回到"一条线"`);
+if(Math.max(...xsS)-Math.min(...xsS)<320) errs.push(`草原: 强点东西跨度 ${(Math.max(...xsS)-Math.min(...xsS)).toFixed(0)}<320 (640 图纵深不足)`);
+let minFS=1e9;
+for(let i=0;i<spS.length;i++)for(let j=i+1;j<spS.length;j++) minFS=Math.min(minFS,Math.hypot(spS[i].x-spS[j].x,spS[i].z-spS[j].z));
+if(minFS<90) errs.push(`草原: 最近两强点间距 ${minFS.toFixed(0)}<90 (点位过密)`);
+if(spS.length!==7) errs.push(`草原: 强点数 ${spS.length}≠7 (苏3/德3/车站中立)`);
+if(CAMPAIGN.matchMin!==22) errs.push('草原: matchMin≠22 (640 大图对局时长未覆盖 15 分钟默认)');
+// ② 东带防线: 龙牙双排存在 (≥120) + 三缺口装甲走廊净空 (走廊内任何高度>0.4 实体盒都算堵)
+const boxesS=vm.runInContext('BOXES',ctx);
+const BS=CAMPAIGN.steppe.belt;
+const teethS=boxesS.filter(b=>!b.dead&&b.minX>BS.x0-4&&b.maxX<BS.x1+8&&b.maxY-b.minY>0.7&&b.maxY-b.minY<1.6).length;
+if(teethS<120) errs.push(`草原: 防线龙牙不足 (${teethS}<120, 双排带缺失)`);
+for(const g of BS.gaps){
+// 走廊净空测可通行中段 (内缩 7m): 两翼战壕/机枪贴走廊边缘是设计意图 (步兵侧射位), 不算堵
+const jamS=boxesS.filter(b2=>!b2.dead&&!b2.crush&&b2.maxX>BS.x0-4&&b2.minX<BS.x1+8&&b2.maxZ>g[0]+7&&b2.minZ<g[1]-7&&b2.maxY-b2.minY>0.4); // 只抓不可碾实体 (沙袋/箱桶可碾不算堵)
+if(jamS.length){ for(const jb of jamS.slice(0,4)) console.log(`JAM z${g[0]}: c=(${((jb.minX+jb.maxX)/2).toFixed(1)},${((jb.minY+jb.maxY)/2).toFixed(1)},${((jb.minZ+jb.maxZ)/2).toFixed(1)}) size=${(jb.maxX-jb.minX).toFixed(1)}x${(jb.maxY-jb.minY).toFixed(1)}x${(jb.maxZ-jb.minZ).toFixed(1)}`); errs.push(`草原: 装甲走廊 z${g[0]}..${g[1]} 被堵 (${jamS.length} 个实体盒) —— 坦克过不去`); }
+}
+// ③ 雷区: ≥40 枚 + 不压公路 (roadDist≥5) + 不进缺口走廊
+const MINESv=vm.runInContext('MINES',ctx);
+if(MINESv.length<40) errs.push(`草原: 反坦克雷不足 (${MINESv.length}<40, 雷区带缺失)`);
+const rdS=vm.runInContext('roadDist',ctx);
+for(const m of MINESv){ if(rdS(m.x,m.z)<5){ errs.push(`草原: 地雷压公路 @(${m.x.toFixed(0)},${m.z.toFixed(0)}) —— Bot 主通道踩雷`); break; } }
+for(const m of MINESv){ if(BS.gaps.some(g=>m.z>g[0]&&m.z<g[1])){ errs.push(`草原: 地雷堵缺口走廊 @(${m.x.toFixed(0)},${m.z.toFixed(0)})`); break; } }
+// ④ 车站: 站房(terrace)+货栈(depot) 立于站区 + 水塔四腿 (CYLS)
+const regS=vm.runInContext('BUILD_REG',ctx);
+const stX=CAMPAIGN.steppe.station.x, stZ=CAMPAIGN.steppe.station.z;
+if(!regS.some(r=>r.type==='terrace'&&Math.hypot(r.x-stX,r.z-stZ)<30)) errs.push('草原: 车站缺站房 (BUILD_REG type=terrace @站区)');
+const flatS=boxesS.filter(b=>!b.dead&&b.maxY-b.minY>0.3&&b.maxY-b.minY<0.6&&Math.abs(b.minX-(stX-17))<3.5&&(b.minZ-stZ>-60)&&(b.maxZ-stZ)<60).length;
+if(flatS<3) errs.push(`草原: 调车场平板车不足 (${flatS}<3, 侧线缺失)`);
+const cylsS=vm.runInContext('CYLS',ctx);
+const wtLegs=cylsS.filter(c2=>Math.abs(c2.x-(stX+9))<6&&Math.abs(c2.z-(stZ+14))<6&&c2.y1-c2.y0>5).length;
+if(wtLegs<4) errs.push(`草原: 水塔腿柱不足 (${wtLegs}<4)`);
+// ⑤ 强点工事: 每个强点圈内沙袋/箱桶 props≥3 (可争夺强点必须有掩护)
+const propsS=vm.runInContext('PROPS',ctx);
+for(const s of spS){
+const n3=propsS.filter(pp=>Math.hypot(pp.x-s.x,pp.z-s.z)<s.r).length
++regS.filter(r2=>Math.hypot(r2.x-s.x,r2.z-s.z)<s.r).length; // 村社等强点的掩护含建筑 (农庄=木屋/谷仓)
+if(n3<3){ errs.push(`草原: 强点「${s.name}」圈内掩护不足 (props+建筑 ${n3}<3)`); break; }
+}
+// ⑥ 麦田带: CROP_FIELDS≥6 (七月金黄麦田, 可燃软遮蔽) ⑦ 装甲坟场: 残骸盒≥4
+const cfS=vm.runInContext('CROP_FIELDS',ctx);
+if(cfS.length<6) errs.push(`草原: 麦田带不足 (${cfS.length}<6)`);
+const wreckS=boxesS.filter(b=>!b.dead&&b.maxY-b.minY>1.4&&b.minX>60&&b.maxX<180&&b.minZ>-185&&b.maxZ<-100).length;
+if(wreckS<4) errs.push(`草原: 装甲坟场残骸不足 (${wreckS}<4)`);
+}
+// ── 2026-09-18 塔拉瓦环礁断言 (海滩+海 / 三路扇面 / 载具预留空间逻辑账) ──
+if(CAMPAIGN.id==='island'){
+const hI=ctx.heightAt;
+const sZI=ctx.shoreZAt, sdI=ctx.seaDepthAt;
+const SV=CAMPAIGN.sea;
+if(!SV){ errs.push('环礁: CAMPAIGN.sea 语义表缺失'); }
+else{
+// ① 三路扇面: 旗点跨度/最近旗距/数量 (与柏林·胡康同口径)
+const xsI=flags.map(f=>f.x), zsI=flags.map(f=>f.z);
+const xSpanI=Math.max(...xsI)-Math.min(...xsI), zSpanI=Math.max(...zsI)-Math.min(...zsI);
+if(xSpanI<340) errs.push(`环礁: 旗点东西跨度 ${xSpanI.toFixed(0)}<340 (两岬角制高没拉开 —— 四面环海后岛宽≈424m)`);
+if(zSpanI<190) errs.push(`环礁: 旗点南北跨度 ${zSpanI.toFixed(0)}<190 (滩头到纵深不够)`);
+let minFI=1e9;
+for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFI=Math.min(minFI,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
+if(minFI<90) errs.push(`环礁: 最近两旗间距 ${minFI.toFixed(0)}<90`);
+if(flags.length!==7) errs.push(`环礁: 旗点数 ${flags.length}≠7 (三路扇面)`);
+// 缩岛 (四面环海) 后纵深 240m: 对局时长同步下调到 20 分钟 (原 22 分钟是 390m 纵深的 640 图)
+if(CAMPAIGN.matchMin!==20) errs.push('环礁: matchMin≠20');
+// ② 攻方开局两翼: assault 自动就近拆分 → 最近的 2 旗必须是东西滩头 (扇面出发阵地, 不是中线单点)
+{
+const atkB=CAMPAIGN.bases[CAMPAIGN.atk||0];
+const sorted=[...flags].sort((a,b)=>Math.hypot(a.x-atkB.x,a.z-atkB.z)-Math.hypot(b.x-atkB.x,b.z-atkB.z));
+const ids=sorted.slice(0,2).map(f=>f.id).sort().join(',');
+if(ids!=='东滩头,西滩头') errs.push(`环礁: 攻方开局两旗=${ids} (期望"东滩头,西滩头" —— 否则开局不是两翼扇面)`);
+}
+// ③ 滩头剖面: 岸线=0 等高线 / 冲滩 1:18 / 礁盘平台 1.15~1.35 (涉水可站立) / 礁缘陡坎 / 深海盆地
+// (取样 x=-30: 避开两条登陆航道 (x=-64/70±19) 与基地/旗点平整圈, 读到的是原生剖面)
+{
+const x0=-30, z0=sZI(x0);
+const hLand=hI(x0,z0-2), hSea=hI(x0,z0+2);     // 岸线两侧: 陆侧微正, 海侧微负
+if(Math.abs(hLand)>0.35||Math.abs(hSea)>0.35) errs.push(`环礁: 岸线不在 0 等高线 (陆侧 ${hLand.toFixed(2)} / 海侧 ${hSea.toFixed(2)})`);
+const d22=sdI(x0,z0+22), d30=sdI(x0,z0+30), d43=sdI(x0,z0+43), d120=sdI(x0,z0+120);
+if(Math.abs(d22-1.22)>0.2) errs.push(`环礁: 冲滩带 22m 处水深 ${d22.toFixed(2)} (期望≈1.22, 1:18 缓坡供日后冲滩)`);
+if(d30<1.05||d30>1.35) errs.push(`环礁: 礁盘平台水深 ${d30.toFixed(2)} 不在 1.05~1.35 (涉水带: 站得住又读得出礁盘)`);
+if(d43<3.0) errs.push(`环礁: 礁缘陡坎不足 (43m 处水深 ${d43.toFixed(2)}<3.0, 登陆艇不会搁浅)`);
+if(d120<8.0) errs.push(`环礁: 深海盆地过浅 (120m 处 ${d120.toFixed(2)}<8.0, 潜泳空间不足)`);
+// 陆上剖面: 干沙滩→沙丘脊(+2.3)→背坡台地
+const u14=hI(x0,z0-14), u22=hI(x0,z0-22), u34=hI(x0,z0-34);
+if(Math.abs(u14-0.78)>0.25) errs.push(`环礁: 干沙滩 14m 处高程 ${u14.toFixed(2)} (期望≈0.78)`);
+if(u22-u14<1.2) errs.push(`环礁: 沙丘脊不明显 (脊 ${u22.toFixed(2)} - 滩 ${u14.toFixed(2)} < 1.2 —— 读不出第一道防线)`);
+if(u34<u22) errs.push(`环礁: 沙丘脊到背坡台地反而下降 (${u22.toFixed(2)}→${u34.toFixed(2)})`);
+}
+// ④ 登陆航道: 走廊内切深到 ≥2.2m, 走廊外 (偏 25m) 仍是礁盘浅水 —— 日后登陆艇的唯一深水通路
+// (★09-19 航道带 z0 海域限定: 只在南湾侧生效, 北湾不得被同一条 x 竖带再切一道 —— 下面显式验北侧)
+for(const ch of SV.channels){
+const zc=sZI(ch.x);
+const inCh=sdI(ch.x,zc+30), outCh=sdI(ch.x+ch.w+20,zc+30);
+if(inCh<2.2) errs.push(`环礁: 航道 x=${ch.x} 未切深 (30m 处水深 ${inCh.toFixed(2)}<2.2)`);
+if(outCh>1.6) errs.push(`环礁: 航道 x=${ch.x} 外侧礁盘过深 (${outCh.toFixed(2)}>1.6 —— 礁盘平台被普遍挖深, 涉水带没了)`);
+if(ch.z0!==undefined){
+const zn=ctx.northZAt(ch.x);
+const inN=sdI(ch.x,zn-30);
+if(inN>1.6) errs.push(`环礁: 航道 x=${ch.x} 的切深串到北湾 (北侧 30m 处水深 ${inN.toFixed(2)}>1.6 —— 航道必须限定海域)`);
+}
+}
+// ⑤ 长栈桥 (载具预留空间逻辑账): 桥面绝对值 2.45 / 桥下净空 ≥2.0 (潜泳可穿) / 桥根踏步顶面=桥面 / NAV 贯通
+{
+const B=CAMPAIGN.bridges.find(b=>b.kind==='pier');
+if(!B) errs.push('环礁: 缺长栈桥 (bridges kind=pier)');
+else{
+const dy=ctx.bridgeDeckY(B);
+if(Math.abs(dy-2.45)>0.05) errs.push(`环礁: 栈桥 deckY=${dy} (期望 2.45)`);
+const onDeck=hI(B.x,B.z);
+if(Math.abs(onDeck-2.45)>0.05) errs.push(`环礁: heightAt 未把栈桥面当可行走面 (${onDeck.toFixed(2)} ≠ 2.45)`);
+const clear=dy-0.32-(SV.level);           // 桥面厚 0.32, 海平面 0
+if(clear<2.0) errs.push(`环礁: 栈桥下净空 ${clear.toFixed(2)}<2.0 (潜泳穿不过)`);
+const stI=vm.runInContext('STAIRS',ctx).filter(s2=>Math.hypot(s2.x-B.x,s2.z-B.z)<B.len/2+8);
+if(!stI.some(s2=>Math.abs(s2.topY-2.45)<0.06)) errs.push('环礁: 栈桥根踏步顶面与桥面不齐平 (登桥会卡步)');
+const navI=vm.runInContext('NAV_CLEARS',ctx).filter(n2=>Math.abs(n2.x-B.x)<8&&n2.z>B.z-B.len/2-4&&n2.z<B.z+B.len/2+4);
+if(navI.length<4) errs.push(`环礁: 栈桥面 NAV 通行带不足 (${navI.length}<4, Bot 上不了栈桥)`);
+}
+}
+// ⑥ 珊瑚跑道台地: 平整 (矩形内高差≤0.35) 且台面高 ≈7.6
+{
+const R=SV.runway;
+let mn=1e9,mx=-1e9;
+for(let x=R.x0+5;x<=R.x1-5;x+=6)for(let z=R.z0+5;z<=R.z1-5;z+=6){ const h=hI(x,z); if(h<mn)mn=h; if(h>mx)mx=h; }
+if(mx-mn>0.35) errs.push(`环礁: 跑道台地不平 (高差 ${(mx-mn).toFixed(2)}>0.35)`);
+if(Math.abs((mn+mx)/2-7.6)>0.6) errs.push(`环礁: 跑道台面高程 ${((mn+mx)/2).toFixed(2)} (期望≈7.6)`);
+const regR=vm.runInContext('BUILD_REG',ctx);
+const apFlag=flags.find(f=>f.id==='机场');
+const twr=regR.find(r=>r.type==='controltower');
+if(!twr) errs.push('环礁: 缺塔台 (BUILD_REG type=controltower)');
+else if(apFlag&&Math.hypot(twr.x-apFlag.x,twr.z-apFlag.z)>32) errs.push(`环礁: 塔台离机场旗 ${Math.hypot(twr.x-apFlag.x,twr.z-apFlag.z).toFixed(0)}m (>32 —— 会战枢纽的观察/防空位不落在旗圈)`);
+if(regR.filter(r=>r.type==='hangar').length<2) errs.push('环礁: 机库不足 2 座 (可毁大件)');
+}
+// ⑦ 礁盘反登陆障碍带: 潮间带~礁盘 (离岸 6~36m) 内的不可碾硬障碍 ≥20 —— 且**不堵登陆航道**
+{
+const boxesI=vm.runInContext('BOXES',ctx), cylsI=vm.runInContext('CYLS',ctx);
+const inReef=(x,z)=>{ const d=ctx.shoreDist(x,z); return d>6&&d<36; };
+let nObs=0;
+for(const b of boxesI){ if(b.dead) continue; const cx2=(b.minX+b.maxX)/2, cz2=(b.minZ+b.maxZ)/2; if(!inReef(cx2,cz2)) continue; if(b.crush) continue; if(b.maxY-b.minY<0.5) continue; nObs++; }
+for(const c of cylsI){ if(inReef(c.x,c.z)&&c.r>0.25&&c.y1-c.y0>0.6) nObs++; }
+if(nObs<20) errs.push(`环礁: 礁盘反登陆障碍不足 (${nObs}<20 —— 礁盘必须读得出"障碍带")`);
+for(const ch of SV.channels){
+const cw=ch.w-4;  // 航道净宽 (去掉边界噪声)
+let jam=0;
+for(const b of boxesI){ if(b.dead||b.crush) continue; const cx2=(b.minX+b.maxX)/2, cz2=(b.minZ+b.maxZ)/2; if(Math.abs(cx2-ch.x)<cw&&inReef(cx2,cz2)&&b.maxY-b.minY>0.4) jam++; }
+for(const c of cylsI){ if(Math.abs(c.x-ch.x)<cw&&inReef(c.x,c.z)&&c.r>0.3&&c.y1-c.y0>0.6) jam++; }
+if(jam) errs.push(`环礁: 登陆航道 x=${ch.x} 被障碍堵 (${jam} 件) —— 日后登陆艇进不来`);
+}
+}
+// ⑧ 旗点全在陆上 (不被海水淹): 每旗离岸 ≥10m 且站立面高于海平面
+for(const f of flags){
+const d=ctx.shoreDist(f.x,f.z);
+if(d>-10) errs.push(`环礁: 旗点「${f.id}」离岸 ${(-d).toFixed(0)}m (<10m —— 旗杆站水里)`);
+if(hI(f.x,f.z)<SV.level+0.4) errs.push(`环礁: 旗点「${f.id}」站立面 ${hI(f.x,f.z).toFixed(2)} 低于海平面+0.4 (会被淹)`);
+}
+// ⑨ 地标与工事: 灯塔 (含环廊登顶) / 木碉堡群 / 岸防炮位 / 日机残骸 / 沉船 / 登陆艇残骸
+{
+const regI=vm.runInContext('BUILD_REG',ctx);
+if(!regI.some(r=>r.type==='lighthouse'&&Math.hypot(r.x+180,r.z-164)<20)) errs.push('环礁: 西南岬缺灯塔地标');
+if(!regI.some(r=>r.type==='coastalpit')) errs.push('环礁: 缺岸防炮位 (coastalPit)');
+const nLB=regI.filter(r=>r.type==='logbunker').length;
+if(nLB<6) errs.push(`环礁: 椰子木掩体不足 (${nLB}<6)`);
+const nPit=regI.filter(r=>r.type==='coastalpit').length;
+if(nPit<3) errs.push(`环礁: 岸防/纵深炮位不足 (${nPit}<3)`);
+const stI=vm.runInContext('STAIRS',ctx);
+if(!stI.some(s2=>Math.hypot(s2.x+180,s2.z-164)<12&&s2.topY>9.4)) errs.push('环礁: 灯塔环廊不可登顶 (无 topY≈10 的梯道落点)');
+if(!stI.some(s2=>Math.hypot(s2.x+58,s2.z+66)<10&&s2.topY>7.0)) errs.push('环礁: 塔台顶不可登 (无 topY≈7.6 的梯道落点)');
+// 灯塔不可摧毁 (2026-09-19 用户裁定): 灯塔墙组不得进 DESTRUCTIBLES (否则会被炸塌 → 环廊观察所消失)
+{
+const dstrI=vm.runInContext('DESTRUCTIBLES',ctx);
+const lh=regI.find(r=>r.type==='lighthouse');
+let hit=null;
+for(const g of dstrI){
+if(lh&&Math.hypot(g.cx-lh.x,g.cz-lh.z)<8){ hit=g; break; }
+}
+if(hit) errs.push(`环礁: 灯塔仍可摧毁 (DESTRUCTIBLES 内有 @${hit.cx.toFixed(0)},${hit.cz.toFixed(0)} 的结构组)`);
+if(lh&&!lh.indestr) errs.push('环礁: 灯塔 BUILD_REG 未标 indestr');
+}
+const boxesI2=vm.runInContext('BOXES',ctx);
+const wreckI=boxesI2.filter(b=>!b.dead&&b.maxY-b.minY>1.4&&b.maxY-b.minY<2.2&&ctx.shoreDist((b.minX+b.maxX)/2,(b.minZ+b.maxZ)/2)>-6).length;
+if(wreckI<2) errs.push(`环礁: 滩头登陆艇残骸不足 (${wreckI}<2)`);
+const sinkI=boxesI2.filter(b=>!b.dead&&b.maxY-b.minY>1.4&&b.maxY-b.minY<2.2&&ctx.shoreDist((b.minX+b.maxX)/2,(b.minZ+b.maxZ)/2)>60).length;
+if(sinkI<2) errs.push(`环礁: 深水沉船残骸不足 (${sinkI}<2, 潜泳缺地标/掩体)`);
+}
+// ⑩ 椰林: 椰树记录 ≥200 (太平洋岛屿的识别特征; 椰树走 FLORA_HASH 可燃记录, 不入 TREE_LIVE 实例批)
+{
+const fhI=vm.runInContext('FLORA_HASH',ctx);
+let palms=0;
+for(const arr of fhI.values()) for(const rec of arr) if(rec.kind==='palm') palms++;
+if(palms<200) errs.push(`环礁: 椰树不足 (${palms}<200 —— 一眼辨识度不足)`);
+}
+// ⑪ 深水占用格: 海侧深水必须记"水障(2)" 且浅水礁盘不记 (Bot 不走海 / 涉水可通行)
+{
+const OCCv=vm.runInContext('OCC',ctx);
+if(OCCv&&OCCv.data){
+const idxOf=(x,z)=>{ const i=Math.round((x+OCCv.off)/OCCv.res), j=Math.round((z+OCCv.off)/OCCv.res); return (i<0||j<0||i>=OCCv.N||j>=OCCv.N)?-1:j*OCCv.N+i; };
+const zc=sZI(0);
+const deep=idxOf(0,zc+90), reef=idxOf(0,zc+30), beach=idxOf(0,zc-20);
+if(deep>=0&&OCCv.data[deep]!==2) errs.push(`环礁: 深水格未记水障 (值=${OCCv.data[deep]} ≠2)`);
+if(reef>=0&&OCCv.data[reef]===2) errs.push('环礁: 礁盘浅水被误记水障 (涉水通道被 Bot 寻路封死)');
+if(beach>=0&&OCCv.data[beach]===2) errs.push('环礁: 干沙滩被误记水障');
+}
+}
+// ⑬ 四面环海 (★2026-09-19 用户裁定): 陆地是居中孤岛 —— 四个正方向全是海, **图四角必须是深海盆**,
+//    且"离岸 ≤55m 内必达可通航深水"要在 72 条方位线上处处成立 (环岛通航环带绕岛一周不断)。
+//    海域 ≥60% 且可通航深水 (>2.5m) ≥40% —— 这是"给海战足够发挥空间和影响力"的可检验口径。
+{
+const dP=ctx.shoreDist, sdP=ctx.seaDepthAt;
+for(const [px,pz,nm] of [[0,300,'南'],[0,-300,'北'],[-300,0,'西'],[300,0,'东']]){
+if(dP(px,pz)<80) errs.push(`环礁: ${nm}面不是海 (${px},${pz}) 离岸 ${(-dP(px,pz)).toFixed(0)}m <80`);
+}
+for(const [px,pz] of [[-320,-320],[320,-320],[-320,320],[320,320]]){
+const dp=sdP(px,pz);
+if(dp<8) errs.push(`环礁: 图角 (${px},${pz}) 水深 ${dp.toFixed(2)}<8 (角落的海太浅 —— 距离场越出岸线端点必须换端点距离)`);
+}
+let nT=0,seaT=0,deepT=0;
+for(let x=-316;x<=316;x+=8)for(let z=-316;z<=316;z+=8){ nT++; if(dP(x,z)>0){ seaT++; if(sdP(x,z)>2.5) deepT++; } }
+const frS=seaT/nT, fdS=deepT/nT;
+if(frS<0.60) errs.push(`环礁: 海域占比 ${(frS*100).toFixed(0)}% <60% (四面环海不足)`);
+if(fdS<0.40) errs.push(`环礁: 可通航深水占比 ${(fdS*100).toFixed(0)}% <40% (水域载具没地方跑)`);
+// 环岛通航: 沿岸线各点向**本岸海侧法线**出海 40m 的整条闭合带必须处处 ≥32m 垂直离岸距离
+// (剖面 32m ⇒ 水深 >3.1m) —— 即"环岛通航环带绕岛一周不断, 舰船可绕岛机动、可择湾逼近"。
+// 度量用 shoreDist (到最近岸的垂直距离), 不用方位射线: 射线与斜岸斜交/在图角切薄水条都会虚报。
+{
+const coasts=vm.runInContext('seaCoastLines()',ctx);
+let nPt=0, bad=null;
+for(const co of coasts){
+for(const p of co.pts){
+nPt++;
+const qx=p[0]+co.ox*40, qz=p[1]+co.oz*40;
+if(Math.abs(qx)>318||Math.abs(qz)>318){ if(!bad) bad=[p,'环带出图']; continue; }
+const dq=dP(qx,qz);
+if(dq<32&&!bad) bad=[p,`离岸仅 ${dq.toFixed(1)}m (另一支岸线太近/出图)`];
+}
+}
+if(nPt<40) errs.push(`环礁: 岸线闭合环点数不足 (${nPt}<40)`);
+if(bad) errs.push(`环礁: 环岛通航环带断裂 @(${bad[0][0].toFixed(0)},${bad[0][1].toFixed(0)}) —— ${bad[1]}`);
+}
+}
+// ⑭ 陆上语义不被海水污染: 建筑/椰树/战壕一律不得落进海里
+// (shoreDist>0 = 海侧; 这里要求至少 1.5m 干陆; 战壕折线含 {rel:[岸名,a,d]} 现算形式 → 端点必须向陆)
+{
+const regW=vm.runInContext('BUILD_REG',ctx);
+for(const r2 of regW){
+const dw=ctx.shoreDist(r2.x,r2.z);
+if(dw>-1.5){ errs.push(`环礁: 建筑 ${r2.type} 落水/贴水 @(${r2.x.toFixed(0)},${r2.z.toFixed(0)}) shoreDist=${dw.toFixed(1)}m`); break; }
+}
+const fhW=vm.runInContext('FLORA_HASH',ctx);
+let wet=null;
+for(const arr of fhW.values()) for(const rec of arr) if(rec.kind==='palm'&&ctx.shoreDist(rec.x,rec.z)>-1.5){ wet=rec; break; }
+if(wet) errs.push(`环礁: 椰树落水/贴水 @(${wet.x.toFixed(0)},${wet.z.toFixed(0)}) shoreDist=${ctx.shoreDist(wet.x,wet.z).toFixed(1)}m`);
+// 战壕 (含 rel 现算): 端点与中点都必须 ≥3m 干陆 (rel 的 d 是"入陆距离", 写错符号会把壕沟开到海里)
+{
+const pull=(a,d)=>[a, ctx.shoreZAt(a)-d];
+let bad=null;
+for(const t of (CAMPAIGN.trench||[])){
+let p1,p2;
+if(t&&t.rel){
+const [c,a1,d1,a2,d2]=t.rel;
+const f=(a,d)=>c==='shore'?[a,ctx.shoreZAt(a)-d]:c==='north'?[a,ctx.northZAt(a)+d]:
+c==='west'?[ctx.coastXAt(SV.west,a)+d,a]:[ctx.coastXAt(SV.east,a)-d,a];
+p1=f(a1,d1); p2=f(a2,d2);
+}else{ p1=[t[0],t[1]]; p2=[t[2],t[3]]; }
+for(const [px,pz] of [p1,p2,[(p1[0]+p2[0])/2,(p1[1]+p2[1])/2]]){
+if(ctx.shoreDist(px,pz)>-3){ bad=[px,pz,ctx.shoreDist(px,pz)]; break; }
+}
+if(bad) break;
+}
+if(bad) errs.push(`环礁: 战壕端点/中点落在水线附近 @(${bad[0].toFixed(0)},${bad[1].toFixed(0)}) shoreDist=${bad[2].toFixed(1)}m (rel 的 d 应为"入陆距离">0)`);
+}
+}
+// ⑮ 内陆不得低于海平面 (四面环海后内陆离岸距离变小: 缓丘负半周必须被 bias 顶住, 否则出现"干洼地")
+{
+let low=null;
+for(let x=-300;x<=300;x+=10)for(let z=-300;z<=300;z+=10){
+if(ctx.shoreDist(x,z)<-25&&hI(x,z)<0.2){ low=[x,z,hI(x,z)]; break; }
+}
+if(low) errs.push(`环礁: 陆上出现低于海平面的洼地 @(${low[0]},${low[1]}) h=${low[2].toFixed(2)}`);
+}
+// ⑫ 调试输出 (ISLE_DBG=1)
+if(process.env.ISLE_DBG){
+console.log('--- ISLE DBG ---');
+{
+let nT=0,seaT=0,deepT=0;
+for(let x=-316;x<=316;x+=8)for(let z=-316;z<=316;z+=8){ nT++; const dd=ctx.shoreDist(x,z); if(dd>0){ seaT++; if(ctx.seaDepthAt(x,z)>2.5) deepT++; } }
+console.log(`  海面占比 ${(seaT/nT*100).toFixed(0)}%  可通航深水(>2.5m) ${(deepT/nT*100).toFixed(0)}%`);
+for(const f of flags) console.log(`  ${f.id} (${f.x},${f.z}) shoreDist=${ctx.shoreDist(f.x,f.z).toFixed(1)} h=${hI(f.x,f.z).toFixed(2)}`);
+for(const [px,pz] of [[0,300],[-300,0],[300,0],[0,-300],[-320,-320],[320,320],[-296,188],[296,188]]) console.log(`  探点(${px},${pz}) shoreDist=${ctx.shoreDist(px,pz).toFixed(1)} depth=${ctx.seaDepthAt(px,pz).toFixed(2)} h=${hI(px,pz).toFixed(2)}`);
+}
+const zq=sZI(-60);
+for(const u of [0,8,14,22,34,60]) console.log(`  u=${u} h=${hI(-60,zq-u).toFixed(2)}`);
+for(const d of [0,10,22,30,36,43,60,120]) console.log(`  d=${d} depth=${sdI(-60,zq+d).toFixed(2)}`);
+const R2=SV.runway;
+console.log('  runway',JSON.stringify(R2),'sample h=',hI(0,-30).toFixed(2),hI(20,-100).toFixed(2),hI(-4,44).toFixed(2));
+const stD=vm.runInContext('STAIRS',ctx);
+console.log('  STAIRS:',stD.map(s2=>`(${s2.x.toFixed(0)},${s2.z.toFixed(0)},top=${s2.topY.toFixed(1)})`).join(' '));
+const fh=vm.runInContext('FLORA_HASH',ctx);
+let nPalm=0; for(const arr of fh.values()) for(const rec of arr) if(rec.kind==='palm') nPalm++;
+console.log('  palms in FLORA_HASH =',nPalm,' TREE_LIVE=',vm.runInContext('TREE_LIVE',ctx).length);
+}
+}
+}
 return errs;
 }
 // ── 测试主体 ──
@@ -620,7 +1125,7 @@ const r1=runCampaign(i,42), r2=runCampaign(i,42), r3=runCampaign(i,7);
 const fp1=layoutFp(r1.ctx), fp2=layoutFp(r2.ctx), fp3=layoutFp(r3.ctx);
 const errs=[];
 if(fp1!==fp2) errs.push(`种子42两次布局指纹不一致 (len ${fp1.length} vs ${fp2.length})`);
-if(fp1===fp3) errs.push('种子42与种子7布局完全相同——种子未生效');
+if(fp1===fp3&&r1.CAMP.terr!=='opensea') errs.push('种子42与种子7布局完全相同——种子未生效');   // ★2026-10-04: opensea 布局全要素来自配置 (旗点/弹药箱舰体局部锚+舰编制, 无植被无建筑), 本就种子无关 —— ironbottom 换 nightsea(treeN 0) 后不再有随机摆树消耗种子, 断言对此类图收窄
 errs.push(...checkLayout(r1));
 const g=(x)=>vm.runInContext(x,r1.ctx).length;
 const meta=r1.CAMP;

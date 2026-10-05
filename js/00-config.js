@@ -10,6 +10,34 @@ const rand=(a,b)=>a+Math.random()*(b-a);
 const randi=(a,b)=>Math.floor(rand(a,b+1));
 const TAU=Math.PI*2, HPI=Math.PI/2, DEG=Math.PI/180;
 const dampF=(cur,tgt,k,dt)=>lerp(tgt,cur,Math.exp(-k*dt));
+// ── 建筑贴图密度表 (2026-09-20c, 修用户实机二报"窗户下面的部分和总体材质总是不同") ──
+// 数值口径: 一张贴图在世界空间覆盖的边长 S (米, 各向同性 —— 世界空间盒面投影, 与构件尺寸/朝向无关)。
+// 病根: BoxGeometry 六个面的 UV 恒为 0..1 "铺满整面" ⇒ 贴图密度 = 面尺寸/S, 随构件尺寸漂移。
+//   同一面砖墙上: 3.8m 整段墙板的砖≈0.31m, 1.4m 窗台段(窗下那截)的砖只有 0.11m, 0.9m 墙垛细到 0.07m
+//   —— 一眼就看得出"窗下不是同一堵墙"(用户截图正是这处)。
+// 修法: 05-world.mesh() 建网格时按 mat.uvRef=S 归一化盒面 UV (面 UV 跨度 = 世界尺寸/S),
+//   于是整段/窗台/门楣/墙垛/柱/楼板/屋盖 一律同一密度, 与构件尺寸和朝向都无关。
+// 标定: 取该材质"面积占比最大的构件"的旧观感 (S≈旧版该构件一张贴图的覆盖边长), 见 dev/verify-uvscale.js。
+//   绿篱 TEX.hedge 明确"六面各映射整图"故不登记; 玻璃/铝/车体/雪盖等无贴图材质不受影响。
+const UV_DENSITY={
+brick:1.8,      // 3.8m 墙板旧观感 (2 贴图/3.8m≈1.9) 取整
+plaster:1.8,    // 同上 (抹灰墙板)
+stone:2.0,      // 地基裙墙/石墙 3.6m 段旧观感 (2 贴图/3.6m≈1.8)
+wood:2.0,       // 桥板/木墙板 3.6m 件旧观感 (1.5 贴图/3.6m≈2.4)
+woodDark:2.0,   // 梁/柱/栏杆 (暗木纹, 尺度不敏感)
+sandbag:1.33,   // 沙袋墙 2.66m 段旧观感 (2 贴图/2.66m)
+metal:1.2, metalDark:1.2,   // 钢板/铁件 (平色+颗粒, 尺度不敏感)
+roof:3.0,       // 屋面板 7.8m 旧观感 (2 贴图/7.8m≈3.9, 折中屋面瓦尺寸≈0.35m)
+hay:1.1,        // 草垛 (麦秆长度≈0.14m 与旧版一致)
+// ★2026-09-27 补登: 帐篷帆布 (材质 tentMatA/B 在 05a 就地建 ⇒ uvRef 也在那边挂, 这里只放数)。
+//   旧版**未登记** ⇒ 128px 白噪帆布按"BoxGeometry 六面 0..1"铺: 同一顶帐篷上 2.8m 坡板与 0.5m 檐口
+//   相差 17× (dev/_uvdensity-audit.js 实测 TEX.cloth 78 件/468 面, 跨度 0.20~3.47 m/贴) ——
+//   实机观感就是"同一顶帐篷的帆布纹是两种尺度"。1.6 与 plaster/earth 同档。
+cloth:1.6,
+rubble:0.8,     // 瓦砾堆 (碎石颗粒)
+earth:1.8,      // 土坯墙/窑洞 (2026-09-25 补 MAT.earth 时同批登记: 与 plaster 同档)
+concrete:1.4,   // 浇筑混凝土 (与 05c 火力点 fpConcreteMat 的 1.4 同一把尺)
+};
 // ── 坡度物理 (2026-09-12 百团改版定案, 全战役生效, Bot/玩家一视同仁) ──
 // 坦克: 上坡 30°起渐进减速, TANK_SLOPE_MAX(70°)以上封死(沿等高线滑移); 下坡永不硬封、只走减速带 ——
 //   防卡死阀门: 凸形崖壁上对称封坡会造"最后一步能上、倒车第一步过不了"的进退不得;
@@ -17,10 +45,79 @@ const dampF=(cur,tgt,k,dt)=>lerp(tgt,cur,Math.exp(-k*dt));
 // 步兵: FOOT_SLOPE_SLOW 起减速"手脚并用", FOOT_SLOPE_MAX 以上不可登攀(下坡不封 —— 走出崖缘自然腾空,
 //       摔伤交给 fallDamage 结算)。调参只改这三个数。
 const TANK_SLOPE_MAX=70, FOOT_SLOPE_SLOW=40, FOOT_SLOPE_MAX=65;
-const SETTINGS = { team:0, diff:1, quality:1, sens:1.0, vol:0.8 };
+// ── 水体/游泳/潜水 (2026-09-18 塔拉瓦环礁批, 全战役通用; 玩家与 Bot 同规则 —— 纲领第 2 条) ──
+// 三层口径 (按"脚底到水面的高差" wl 判): wl≤0.5 湿沙浅水(×0.9) / 0.5~SWIM_DEPTH 涉水(×WADE_SPD, 可开火)
+//   / >SWIM_DEPTH 游泳(浮于水面, 不可冲刺/卧倒/开火); 潜水=游泳态按住 Shift (陆上 Shift 仍是冲刺)。
+// 憋气: 头部没入水面起消耗, OXY_MAX 秒耗尽 → 每秒 OXY_DMG 掉血(可溺死); 出水 OXY_REFILL 秒回满。
+// 潜水上限 DIVE_MAX 米(受海床限制); 潜水 >UW_HIDE_DEPTH 米对岸上视线视为被水面遮蔽(仅 UW_HIDE_RANGE 米内可见)。
+// 子弹入水 UW_BULLET_RUN 米后失能 (水面对弹道=硬遮蔽), 手雷/炮弹入水哑火。
+// 载具入水: 水深 >VEH_WATER_DEPTH ⇒ **熄火滑行衰减到 0** (15-vehicles 实测实现是 dampF(vel,0,5,dt))
+//   + 每秒 VEH_WATER_DMG 伤 (只损不沉, 用户定案)。
+// ★2026-09-26E (审计 19): 旧注释写"减速 ×VEH_WATER_SPD", 而 VEH_WATER_SPD 全库零读点、实现是阻尼到 0 ——
+//   两者不是一回事 (×0.25 会让车在水里继续以 1/4 速前进)。保留常量作历史口径但不作数: 真正的行为在
+//   15-vehicles 的阻尼式里; 注释按实现改写 (改实现=改平衡, 用户未要求)。
+// ★2026-09-26 修 (P1-8 口径归一): 本值原为 1.2, 与"人得游的深度" SWIM_DEPTH=1.35 **不一致**, 于是
+//   1.2~1.35m 那一带在寻路/OCC 眼里是**干的** (OCC 水障格按 SWIM_DEPTH 记), 车开进去却熄火掉血:
+//   塔拉瓦礁盘水深实测 1.221~1.277 ⇒ 整条 14m 宽的环岛带都落在这条"看着能过、开进去掉血"的缝里,
+//   而 15-vehicles 那句"AI 坦克由 OCC 水障格挡住不会开进海里"也只在两个门限一致时才成立。
+//   现取同一门限: 车进水熄火的水深 = 人开始游泳的水深 ⇒ OCC 水障 ⊇ 车辆熄火带 (AI 永不把车开进熄火区)。
+const SWIM_DEPTH=1.35, WADE_DEPTH=0.5, SWIM_SPD=2.0, DIVE_SPD=1.7, WADE_SPD=0.55;
+// 湿沙档速度系数 (2026-09-26E 审计 33 修复): 本行上面自 2026-09-18 就声明"wl≤0.5 湿沙浅水 ×0.9",
+// 而三层口径里的 'wet' 档**全库无人消费** (玩家只映射 wade/swim, Bot 只拿它清标志位) ⇒ 0.9 档从未存在。
+// 现在玩家与 Bot 都按 waterStateAt 的分档取它 (过膝水里不再全速跑, 冰河/湿沙带上不额外挨罚)。
+const WET_SPD=0.9;
+// 游泳浮力位 (脚底到水面的距离) —— 玩家/Bot/海战弃船落水**共用这一个值** (2026-09-26E 审计 32 修复)。
+// 旧版三处各写一套: 玩家 1.32 / Bot 0.95 / 海战乘员 1.75−NAVAL_CFG.crewDrownPad=1.2 (20a 又手抄 1.32),
+// 观感 (头露出多少) 与命中胶囊高度都跟着差 0.37m, 且 Bot 的头部判据 headDepthAt 因此永远算不出"没入"。
+const FLOAT_PAD=1.32;
+// 浅河 (RIVER.d ≤ 2 的"可涉渡"档) 的物理水深上限 (2026-09-26E 审计 26 修复):
+// 声明为浅河的图 (滇缅/莫斯科) 其语义表说"可涉渡"(inShallowChannel ×WADE_SPD、OCC 当陆地可通行),
+// 但实测心线水深 0.15~1.92m、40% 的点 >SWIM_DEPTH ⇒ 寻路当干地走进去却转成游泳 (不能开火、龟速),
+// 三者口径互相打架。取"≤ 涉水带 (SWIM_DEPTH=1.35) 留 0.2m 余量"⇒ 浅河真正可涉渡, 与声明档一致。
+// 深谷激流档 (d>2: 淞沪主河/胡康大龙河) 不受此限 —— 它们的设计就是"须过桥"。
+const SHALLOW_RIVER_MAX=1.15;
+const OXY_MAX=22, OXY_DMG=9, OXY_REFILL=4, DIVE_MAX=4.0, DIVE_DOWN=2.2, DIVE_UP=2.6;
+const UW_HIDE_DEPTH=0.8, UW_HIDE_RANGE=12, UW_BULLET_RUN=2.5;
+const VEH_WATER_DEPTH=SWIM_DEPTH, VEH_WATER_SPD=0.25, VEH_WATER_DMG=14;
+// 海面动画钟 (★2026-09-26E 审计 36): 主循环在菜单/结算/暂停期把 nowT 冻住 (24-main 的冻结分支把帧时间
+// 累进 nowOff), 而 updateSea/updateBuoys 全读 nowT ⇒ 主菜单航拍里的海面是**完全静止**的 (同一函数的注释
+// 早已指出这个坑)。这一支只由 dt 推进: 冻结期由冻结分支按真实帧时间喂 dt, 战斗期由主循环喂。
+let seaClock=0;
+// 旗点占领的**高度容差** (★2026-09-26E 审计 30): 旧值 10m 是为"圈内二楼/塔上/坡下也计入区域"定的,
+// 但它同时让**桥下水面**的游泳者能占**桥面**旗点 —— 胡康"大桥"旗 gy=−0.20 (桥面) 而水面 −7.97 ⇒
+// 泳者 y=−8.92/−9.29, |Δy|=8.7/9.1 < 10, 而守方在桥面打不到水下 (子弹入水 2.5m 即失能)。
+// 收到 6m: 二楼/塔上/坡下 (本仓单层 ~3.2m / 两层 ~6.4m, 坡下一般 ≤4m) 照旧计入, 8.7m 的"桥下占桥面"被挡。
+const FLAG_DY_TOL=6;
+// aim = 瞄准吸附档位 (2026-09-27 用户要求"轻度的自动吸附"): 0 关 / 1 轻度 (默认) / 2 标准。
+// 与 quality/sens/vol 同规: 本文件只读存档, UI 写入在 22-hud, **改档即时生效** (fire time 读, 不需 reload);
+// 强度/锥角/目标集合的单源在 13-combat 的 AIM_PROFILES (本文件只有档位这一个数)。
+const SETTINGS = { team:0, diff:1, quality:1, sens:1.0, vol:0.8, aim:1 };
+// ★2026-09-28 阶段三 P1 (用户裁定"极其短暂"): 出生保护秒数 —— 玩家 deployPlayer / Bot spawn() 落地盖章
+//   protUntil=nowT+SPAWN_PROT, 期间免伤 (两个伤害入口各一道闸), **开火立即解除** (fireBullet 单源清账,
+//   不存在无敌输出窗口)。let 而非 const: 沙箱探针可置 0 整批豁免 (B 系探针的取证口径)。
+let SPAWN_PROT=0.5;
+// ★2026-09-28 阶段三 P1 (用户实报"被 Kar98k/STG44 秒" + 排查令; 同日 k 追补收窄): 非镜枪**Bot 射手**
+//   的爆头伤害封顶 —— 满血目标被 Bot 爆头必存活 (95, 留 5 血), "一枪爆头"保留给狙击镜枪 (scoped:true)
+//   与**玩家射手** (用户实报"自己远距爆头也秒不死", 裁定保护只朝玩家单向: Bot 爆头永远秒不死玩家,
+//   玩家爆头照杀)。封顶在距离衰减与难度倍率**之后**取 min ⇒ 精英 ×1.25 也压得住; Bot 互射仍封顶。
+const HEAD_CAP=95;
 // 阵营/难度持久化: 选战役自动开局后仍沿用上次选择 (hmul 见下行)
 SETTINGS.team=clamp(parseInt(localStorage.getItem('sf_team')||'0')||0,0,1);
-SETTINGS.diff=clamp(parseInt(localStorage.getItem('sf_diff')||'1')||1,0,2);
+// ★2026-09-26 修: 难度 0 (新兵) 是**合法值**, 而旧写法 `parseInt(...)||1` 把 '0' 读成 1 ——
+// 选新兵后只要触发一次 location.reload() (选战役/切语言/切操控/实验模式) 就跳回老兵。
+// 与上面 sf_vol 那条"0 是合法音量"同一个坑: 判"没存过"用 null, 不用 `||默认`。
+{ const _d=localStorage.getItem('sf_diff'); if(_d!==null){ const n=parseInt(_d,10); if(isFinite(n)) SETTINGS.diff=clamp(n,0,2); } }
+// 画质/灵敏度/音量持久化 (2026-09-25 补): 这三项此前只写内存 —— 而选战役/切语言/切操控/实验模式开关
+// 都会 location.reload(), 于是"改完画质→选战役"直接回到默认 (灵敏度滑条还会跳回 100)。与 sf_team/sf_diff
+// 同规落在本文件, UI 侧的初值同步在 22-hud initMenuUI。
+// **存的是滑条原值** (sf_tsize 同规: 灵敏度 20..200 / 音量 0..100), 读回时 ÷100 还原 —— 0 是合法音量,
+// 故用 null 判"没存过"而不是 `||默认`; 非法值 (NaN/越界) 一律 clamp 或回落默认。
+{ const _q=parseInt(localStorage.getItem('sf_qual')||'',10); if(_q===0||_q===1||_q===2) SETTINGS.quality=_q;
+  const _ss=localStorage.getItem('sf_sens'), _vs=localStorage.getItem('sf_vol');
+  if(_ss!==null){ const n=parseInt(_ss,10); if(isFinite(n)) SETTINGS.sens=clamp(n/100,0.2,2.0); }
+  if(_vs!==null){ const n=parseInt(_vs,10); if(isFinite(n)) SETTINGS.vol=clamp(n/100,0,1); }
+  // 瞄准吸附档位 (sf_aim): 0 是合法值 (关) ⇒ 同样用 null 判"没存过", 缺省 1 (轻度)
+  const _am=localStorage.getItem('sf_aim'); if(_am!==null){ const n=parseInt(_am,10); if(n===0||n===1||n===2) SETTINGS.aim=n; } }
 const DIFF_TABLE = [
 { react:0.85, spreadMul:1.7, dmgMul:0.7, visMul:0.8, name:'新兵' },
 { react:0.5,  spreadMul:1.0, dmgMul:1.0, visMul:1.0, name:'老兵' },
@@ -28,6 +125,9 @@ const DIFF_TABLE = [
 ];
 // ===================== 战役 / 阵营 / 环境主题 =====================
 // 每个战役: 独立地形结构(terr) + 独立布局(layout) + 专属玩法(mode) + 旗点/基地/道路/战壕
+// 全海图巡逻环 (P4 2026-09-30): 中心 + 半轴 → N 边形航点。写成函数是**单源**: 四条舰的巡逻环
+//   手写 4×8 个坐标必错, 且改半径要改 32 个数。CAMPAIGNS 数组字面量里不能写 const ⇒ 定义在数组之前。
+const _capRing=(cx,cz,rx,rz,n)=>{ const o=[],N=n||8; for(let i=0;i<N;i++){ const a=i*TAU/N; o.push([cx+Math.sin(a)*rx, cz+Math.cos(a)*rz]); } return o; };
 const CAMPAIGNS=[
 { id:'normandy', title:'诺曼底 1944', sub:'乡野田园 · 树篱丛生', f:['us','ger'], theme:'green',
 terr:'rolling', layout:'rural', mode:'assault', atk:0, modeName:'攻防·盟军进攻',
@@ -40,7 +140,8 @@ tankN:[5,5], // 2026-09-02 载具数按战区统一: 西欧=5
 fields:[
 {x0:-104,z0:-94,x1:-58,z1:-46,t:'wheat'},{x0:-4,z0:-66,x1:44,z1:-26,t:'wheat'},
 {x0:-102,z0:46,x1:-50,z1:96,t:'wheat'},{x0:52,z0:48,x1:108,z1:92,t:'wheat'},
-{x0:-64,z0:-112,x1:-10,z1:-84,t:'corn'},{x0:48,z0:-72,x1:104,z1:-40,t:'corn'},
+// ★2026-09-26 修 (P2-16 田块重叠): 西北玉米地西缘 -64→-58 (原与西北麦田重叠 6×10m: 双份植株/双份软遮蔽/双份燃料)
+{x0:-58,z0:-112,x1:-10,z1:-84,t:'corn'},{x0:48,z0:-72,x1:104,z1:-40,t:'corn'},
 {x0:-40,z0:34,x1:2,z1:92,t:'corn'},{x0:6,z0:92,x1:50,z1:116,t:'corn'},
 {x0:-54,z0:-46,x1:-14,z1:-18,t:'pasture'},{x0:64,z0:-108,x1:108,z1:-80,t:'pasture'},
 {x0:-42,z0:14,x1:-16,z1:32,t:'pasture'},{x0:54,z0:16,x1:82,z1:44,t:'till'} ] },
@@ -244,8 +345,14 @@ flags:[
 bases:[{x:-268,z:-10},{x:268,z:10}], sineRoad:false,
 // 攻方前出点 (部署/Bot重生 多路并发, spawns 多路并发机制): 北营/中路前哨/南营
 // 注意: 北沟/南沟折线全宽贯穿, 前出点须避开沟壑带 (z 129..158 / -163..-134 为北/南沟壁带)
+// ★2026-09-26 修: 南进攻营 z 由 -205 提到 -120 —— 原坐标落在南沟**南侧**(沟壁带之外的那片西南塬面),
+//   而那片与主塬之间只隔着 14m 宽的南沟沟壁 (03-terrain 陡崖档 = 物理+OCC 双封), 坡道 R1~R10 无一通向它:
+//   沙箱实测该点所在连通分量仅 848 格, 与主分量 13068 格不通 (跨分量查询 18/18 全 null), 落在那里的
+//   兵对任何目标都无路可走 ⇒ 整局站桩。新坐标在主塬西南缘 (站得住 + 主分量 13069 格), 并与上面那条
+//   "前出点须避开沟壑带"的既定规则一致 (距 -134 沟壁带 14m); 营地布景 (05c layoutLoess 的帐篷/沙袋)
+//   按 sp 坐标现算, 随本条自动搬过去。
 spawns:[
-{x:-262,z:190,name:'北进攻营',team:0},{x:-232,z:0,name:'中路前哨',team:0},{x:-262,z:-205,name:'南进攻营',team:0}],
+{x:-262,z:190,name:'北进攻营',team:0},{x:-232,z:0,name:'中路前哨',team:0},{x:-262,z:-120,name:'南进攻营',team:0}],
 // 道路网: 全部避开沟壁陡崖带 —— 跨沟必经坡道(R1~R10)/铁路桥/渡台, OCC 走廊与物理坡度双一致
 roads:[
 // 西路主线: 基地→西川→R1西口→[R1跨西沟]→塬西纵线→铁路库A
@@ -456,14 +563,69 @@ bridges:[
 {x:-2.9,z:0,len:76,w:14,yaw:1.6796,kind:'grand'},   // 大龙河大桥: 跨 76m 桥面宽 14m, 垂直于河道 (yaw=HPI+河向偏角)
 {x:-12,z:-170,len:48,w:8,yaw:1.4909,kind:'stone'}] }, // 北石拱桥: 5 跨石墩老桥, 第二条车辆通道
 // 无旗点战役 (虚构背景): 遭遇战 flags=[] (纯击杀/载具摧毁扣票), 劫道 flags=[] (胜负看车队)
-{ id:'steppe', title:'草原遭遇 1943', sub:'无垠波地 · 装甲不期而遇', f:['sov','ger'], theme:'steppe',
-terr:'steppe', layout:'steppe', mode:'clash', atk:0, modeName:'遭遇战·无目标绞肉',
-flags:[], // 无旗点: 死亡/载具摧毁直接扣兵力, 打空者败
-bases:[{x:-138,z:-96},{x:138,z:96}], sineRoad:false,
-roads:[[-138,-96,-84,-58],[-84,-58,-36,-25],[-36,-25,36,25],[36,25,84,58],[84,58,138,96]],
-trench:[[-50,-30,-16,10],[16,-12,50,32]],
-spawns:[{x:-84,z:-58,name:'西南前哨',team:0},{x:-36,z:-25,name:'一线散兵坑',team:0},{x:36,z:25,name:'一线散兵坑',team:1},{x:84,z:58,name:'东北前哨',team:1}],
-tankN:[7,7], botMul:[1,1] }, // 2026-09-02 载具数按战区统一: 东欧=7
+// ── 草原遭遇 1943 · 库尔斯克改版 (2026-09-13, 用户四项裁定: 无旗+可争夺强点 / 大件=车站铁路轴+风车磨坊+
+//    坦克坟场+农庄村社 / 全套纵深防线+雷区+麦田火 / 节制版炮火犁地) ──
+// 历史原型=库尔斯克会战 (1943.7-8) 史实要素:
+//   ① 普罗霍罗夫卡 7.12 装甲大遭遇 —— 铁路枢纽镇周边的近距坦克混战 → 中带铁路轴+车站强点;
+//   ② 波尼里 "库尔斯克的斯大林格勒" —— 车站攻防逐屋争夺 → 站房(可毁)/水塔/站台/调车场平板车;
+//   ③ 苏军大纵深防御 —— 雷区+反坦克壕+龙牙+战壕支撑点, 故意留"装甲走廊"引坦克进交叉火力
+//      → 东带防线 (雷区带→反坦克壕→龙牙双排→缺口), 3 个装甲走廊缺口=北坟场/公路/南缺口;
+//   ④ 七月金黄麦田 (可燃可藏人) + khutor 农庄村社 + 风车磨坊 (纲领§十点名的草原大件候选)。
+// 玩法: 遭遇战 (clash) 保留无旗身份, spawns 升级为 7 个"强点" (可争夺, 占领获得该点出生权, 不涉兵力票):
+//   苏军 3 (风车磨坊/北原哨/麦田农庄) + 德军 3 (东岗/装甲坟场/南缺口) + 车站中立 (双方抢);
+//   三路路网 (北坟场线/公路车站线/南麦田线) 终结旧版"一条对角线"。
+{ id:'steppe', title:'草原遭遇 1943', sub:'库尔斯克 · 钢麦绞杀', f:['sov','ger'], theme:'steppe',
+terr:'steppe', layout:'steppe', mode:'clash', atk:0, modeName:'遭遇战·强点绞杀',
+mapSize:640, matchMin:22, botMul:[1.25,1.25],
+flags:[], // 无旗点: 死亡/载具摧毁直接扣兵力, 打空者败; 强点占领只给出生权不给票
+bases:[{x:-285,z:0},{x:285,z:0}], sineRoad:false,
+// 三路公路网 (小地图/部署图与强点一致): 中线穿车站道口+防线公路缺口 / 北线穿坟场缺口 / 南线穿南缺口
+roads:[
+[-285,0,-160,-6],[-160,-6,-15,0],[-15,0,102,4],[102,4,180,-6],[180,-6,285,0],              // 中线 (过车站道口→防线公路缺口)
+[-285,0,-235,-85],[-235,-85,-122,-140],[-122,-140,0,-152],[0,-152,102,-140],[102,-140,235,-85],[235,-85,285,0], // 北线 (过装甲坟场缺口)
+[-285,0,-235,90],[-235,90,-108,152],[-108,152,0,158],[0,158,102,155],[102,155,235,90],[235,90,285,0] ],         // 南线 (过麦田农庄→南缺口)
+// 强点 (可争夺出生点, team=-1=中立开局): r=占领半径; 占领规则与旗同款 (圈内无敌方单位计时)
+spawns:[
+{x:-158,z:-16,name:'风车磨坊',team:0,r:12},   // 西线制高 (风车塔+草垛环)
+{x:-122,z:-140,name:'北原哨',team:0,r:11},    // 北线苏军前哨 (哨塔+散兵壕)
+{x:-108,z:152,name:'麦田农庄',team:0,r:12},   // 南线村社 (khutor: 木屋+院墙+麦田环)
+{x:-15,z:2,name:'车站',team:-1,r:14},         // 中带枢纽 (站房/水塔/站台/调车场 —— 双方开局抢)
+{x:170,z:-8,name:'东岗',team:1,r:11},         // 德军公路东岗 (防线后第一梯队)
+{x:112,z:-140,name:'装甲坟场',team:1,r:13},   // 德军北缺口 (坟场残骸= killing ground 强点)
+{x:112,z:155,name:'南缺口',team:1,r:12}],     // 德军南缺口 (麦田间的装甲走廊)
+// 防线带战壕 (史实苏军大纵深: 东面雷区→反坦克壕(x118)→龙牙(100..112)→缺口走廊):
+// 反坦克壕 4 段纵贯 (缺口处断开) + 各缺口两翼短壕 + 车站西缘/风车/北原哨/农庄/东岗 支撑点壕
+trench:[
+[118,-250,118,-158],[118,-124,118,-24],[118,22,118,139],[118,171,118,250], // 反坦克壕 (4 缺口走廊断开)
+[96,-20,108,-20],[96,20,108,20],                                           // 公路缺口两翼
+[98,-152,110,-152],[98,-128,110,-128],                                     // 北缺口两翼
+[98,143,110,143],[98,167,110,167],                                         // 南缺口两翼
+[-28,-24,-28,-2],[-28,8,-28,26],                                           // 车站西缘 (苏军第二梯队)
+[-172,-28,-172,-6],[-134,-152,-112,-150],[-120,164,-96,166],[182,-20,182,4] ], // 风车/北原哨/农庄/东岗
+tankN:[7,7],
+// 语义表 STEPPE (03-terrain/05c/04b/22/23 全链路共读, 严禁另写坐标):
+//   rail=铁路纵线 x (普罗霍罗夫卡轴) / station=车站布局锚点 / mill=风车 / village=农庄村社
+//   belt=防线带: 龙牙双排 x0..x1, gaps=装甲走廊 z 区间 (北坟场/公路/南缺口), spanZ=带端
+//   mines=雷区带: x0..x1 散布带 (东面=德军接近侧), zRuns=雷带区间 (缺口走廊断开, Bot 主通道无雷)
+//   wrecks=装甲坟场残骸 (缺口两侧 killing ground) / shelling=炮火犁地节制参数 (04b 读)
+steppe:{
+rail:{x:-15,gapZ:38},                       // 铁路纵线 (车站段 z±38 留站线空间, 道口在 z=0)
+station:{x:-15,z:0},                        // 车站: 站房(东)/站台(西)/水塔/货栈/调车场侧线
+mill:{x:-168,z:-8},                         // 风车磨坊 (西线制高地标, 可登顶)
+village:{x:-108,z:152,r:26},                // 麦田农庄 khutor
+belt:{x0:100,x1:112,spanZ:255,gaps:[[-152,-128],[-18,18],[143,167]]},
+mines:{x0:132,x1:150,zRuns:[[-250,-158],[-124,-24],[22,139],[171,250]],dens:0.42},
+wrecks:[[130,-150,0.3],[142,-128,-0.8],[152,-146,1.2],[138,-164,2.2],[163,-136,0.7],[88,-152,1.8],[76,-128,-0.4]],
+shelling:{minGap:45,maxGap:75,prep:2.8,shells:[2,3],spread:20,r:10,h:0.3,dmg:80,tankDmg:26,gap:1.5,deep:0.8} },
+// 七月金黄麦田带 (RURAL_FIELDS 全套复用: 金麦贴图/软遮蔽/可燃/色带/小地图/植被让位) + 1 块玉米地
+fields:[
+{x0:-196,z0:118,x1:-128,z1:170,t:'wheat'},
+{x0:-86,z0:124,x1:-30,z1:172,t:'wheat'},
+{x0:-16,z0:186,x1:52,z1:238,t:'wheat'},
+{x0:52,z0:190,x1:96,z1:240,t:'corn'},  // ★2026-09-26 修 (P2-16): 西缘 40→52 —— 与麦田带 (x -16..52) 原重叠 12×48m (双份植株/双份软遮蔽/双份燃料)
+{x0:132,z0:186,x1:200,z1:238,t:'wheat'},
+{x0:140,z0:120,x1:205,z1:172,t:'wheat'},
+{x0:-160,z0:-236,x1:-80,z1:-184,t:'wheat'} ] },
 // 雾林守线 (2026-09-13 许特根改版): 历史原型=许特根森林战役 (1944.9-12, 亚琛以南 "雾林绞肉机") ——
 // 美军攻入浓雾密林, 德军依托西墙工事带节节设防。640 大图 + 7 旗三路扇面 (告别旧版 5 旗一线):
 // 北线 雾谷哨→卡尔小径(谷底堑口) / 中线 防火道西口→十字防火道→西墙缺口 / 南线 岭上村→坝路枢纽(纵深)
@@ -520,6 +682,242 @@ tankN:[0,2], botMul:[1.35,0.75],
 // 劫道车队: trucks=数量, hp=单车血量, spd=行驶速度m/s, gap=列车间距m, escapeN=突围N辆判护运胜, escortTeam=护运方
 // supplyLife=劫道方临时补给点存活秒数 (耗尽后全部失效), 补给=弹药+绷带+投掷物全满
 convoy:{trucks:5,hp:320,spd:1.8,gap:20,escapeN:3,escortTeam:1,supplyLife:600} },
+{ id:'island', title:'塔拉瓦环礁 1943', sub:'珊瑚滩头 · 环礁登陆', f:['us','jp'], theme:'pacific',
+terr:'island', layout:'island', mode:'assault', atk:0, modeName:'攻防·美军登陆', mapSize:640, matchMin:20,
+// 2026-09-18 太平洋岛屿登陆批 (用户定案): 美军(team0)自海上登陆, 日军(team1)据岛坚守 ——
+// ★ 2026-09-19 四面环海改版 (用户裁定: "把岛屿稍微缩小一下, 搞成四面环海, 四面的海改成'给海战足够
+//   发挥空间和影响力'的格局的地形、大小等"): 陆地缩成**居中孤岛 (四湾四岬)** —— 南登陆湾 / 西湾 /
+//   东湾 / 北湾 四个海湾各是一个可登陆滩头, 四条岸线首尾相接 ⇒ 四面皆海、无一处陆地接图缘;
+//   海面 ~66% / 可通航深水 ~40%, **环岛通航环带**绕岛一周不断 ⇒ 舰船可绕岛机动、可择湾上陆。
+// 7 旗三路扇面 (旗序 = 反坦克炮位配对序, 见 17-emplacements; 相邻旗对中点即炮位):
+//   南登陆湾 (美军主基) → 两翼滩头 → 中障壁 → 椰林营区 → 灯塔岬 / 中线 → 机场 / 右线 → 炮台岬;
+//   日军主基在北湾内岸 (纵深营地), 背后即北湾洋面 (四面临海 = 守方必须四面设防)。
+flags:[
+{id:'西滩头',x:-92,z:166,r:13},{id:'东滩头',x:92,z:166,r:13},   // 攻方开局两翼出发阵地 (距攻基 92.3m, 最近的守方旗 138m)
+{id:'中障壁',x:0,z:20,r:14},                                    // 中路: 珊瑚石障壁 (岛腰, 卡住南北通道)
+{id:'椰林营区',x:-132,z:-8,r:13},                                // 左路: 西湾内岸椰林纵深 (日军兵营/仓库)
+{id:'西南岬灯塔',x:-182,z:176,r:12},                             // 左翼制高: 西南岬灯塔 (环廊 10m 观察所, 不可摧毁)
+{id:'机场',x:-50,z:-72,r:15},                                   // 中线会战枢纽: 珊瑚跑道 (塔台/机库/日机残骸)
+{id:'东南岬炮台',x:182,z:176,r:12}],                             // 右翼制高: 东南岬岸防炮台 (面海炮位/探照灯)
+bases:[{x:0,z:158},{x:0,z:-152}], sineRoad:false,   // bases[0]=美军南登陆湾滩头 / bases[1]=日军北湾内岸纵深营地
+// 路网: 中路(滩头→中障壁→机场→日军营地) + 西线(滩头→灯塔岬→椰林→北岸) + 东线(滩头→炮台岬→机场) + 后方横通
+roads:[
+[0,158,0,120],[0,120,-4,70],[-4,70,0,20],[0,20,0,-30],[0,-30,-8,-72],[-8,-72,0,-110],[0,-110,-6,-152],
+[2,160,20,168],  // 滩头公路 → 长栈桥根 (栈桥本体见 bridges.kind='pier')
+[-92,166,-136,180],[-136,180,-178,178],[-178,178,-164,130],[-164,130,-152,64],[-152,64,-142,14],[-142,14,-132,-8],
+[-132,-8,-146,-60],[-146,-60,-140,-112],[-140,-112,-96,-142],[-96,-142,-42,-152],
+[92,166,136,182],[136,182,178,178],[178,178,164,130],[164,130,152,64],[152,64,128,14],[128,14,88,-30],
+[88,-30,46,-58],[46,-58,-8,-72],[0,-110,46,-114],[46,-114,46,-58]],
+// 战壕: 两种写法混用 —— ① `{rel:[岸名, a1, d1, a2, d2]}`: 岸名取 'shore'|'north'|'west'|'east',
+//   a=沿岸坐标(x 或 z), d=**入陆距离**(m>0 向陆) ⇒ 折线现算自 CAMPAIGN.sea 岸线 (岸线只写一次, 纲领 §4.3);
+//   ② 岛内绝对折线(如中障壁两翼) 仍用 [x1,z1,x2,z2]。
+trench:[
+{rel:['shore',-186,22,-146,26]},{rel:['shore',-146,26,-108,29]},   // 西翼滩头脊线 (岬角下方沙丘脊 = 第一道防线)
+{rel:['shore',108,29,146,26]},{rel:['shore',146,26,186,22]},       // 东翼滩头脊线
+{rel:['shore',-58,28,58,28]},                                      // 南湾内侧反登陆壕 (入陆 28m, 卡登陆湾两肩)
+[-68,38,-16,44],[16,44,68,38],                                     // 中障壁两翼反登陆壕 (岛腰绝对折线)
+{rel:['west',-74,24,-16,27]},{rel:['west',38,26,100,22]},          // 西湾内岸警戒壕 (面西)
+{rel:['east',-74,24,-16,27]},{rel:['east',38,26,100,22]},          // 东湾内岸警戒壕 (面东)
+{rel:['north',-76,22,-26,26]},{rel:['north',28,26,78,22]}],        // 北湾内岸警戒壕 (守方后方)
+// ── 编制 (2026-09-20N 海战批, 用户裁定): 坦克 6,6 → **2,2**; 飞机新增 airN=1 (全图 1 架, 美军);
+//   新增 navalN=[两栖车, 艇] per team = [2,3] —— "主力应当是船和岸上的战斗交互"的数值落点。
+//   改造前每队 6 坦克 + 2 飞机 = 12 台陆/空载具; 改造后每队 2 坦克 + 2 两栖车 + 3 艇 + 半架飞机
+//   = 7 台地/海载具 + 全图 1 机 —— 数量降了, 但重心从陆装转到海战。 */
+tankN:[2,2], airN:1, navalN:[2,3], botMul:[1.25,1.25],
+// ── 环礁语义分区表 (2026-09-18 / 09-18b 三面环海 / ★09-19 四面环海): 03-terrain 剖面/色带/OCC +
+// 05c 布局/海面网格 + 22/23 HUD + 22a 沙盘 + 12 水体判定 共读 ──
+// 严禁两处各写一套坐标 (纲领 §4.3)。海平面 y=0。
+// **四面环海** (用户 2026-09-19 裁定): 南登陆洋面(礁盘+两条切深航道) / 西湾 / 东湾 / 北湾,
+// 四条岸线首尾相接成闭合环 —— 陆地是**居中的孤岛**, 不再有任何一处陆地接图缘;
+// 四湾 = 四处可登陆滩头, 四岬 = 四处防御制高点 ⇒ 攻方不必挤在南面, 守方必须四面设防。
+// 岸线四支 (同一支有符号距离场): 南岸 x→z 折线 (海侧 z>值) / 北岸 x→z 折线 (海侧 z<值) /
+// 西岸 z→x 折线 (海侧 x<值) / 东岸 z→x 折线 (海侧 x>值)。四支端点严格同位成环:
+//   shore[0]=west[末]=(-200,186)   shore[末]=east[末]=(200,186)
+//   north[0]=west[0]=(-172,-186)   north[末]=east[0]=(172,-186)
+sea:{
+level:0,
+// 南岸 (登陆正面): 中央内凹**南登陆湾**(湾头 z=172, 美军上陆点) + 两翼岬角 (±167,212)
+shore:[[-212,197],[-193,208],[-167,212],[-136,204],[-98,189],[-53,176],[0,172],[53,176],[98,189],[136,204],[167,212],[193,208],[212,197]],
+// 北岸 (守方后方洋面): 中央内凹**北湾**(湾头 z=-176) + 两翼岬角 (±134,-210)
+north:[[-182,-197],[-159,-205],[-134,-210],[-102,-201],[-64,-188],[-21,-178],[0,-176],[21,-178],[64,-188],[102,-201],[134,-210],[159,-205],[182,-197]],
+// 西岸/东岸: 折线按 **[z,x]** 存 (z 单调递增) —— 与 03-terrain `coastXAt(P,z)` 的取用契约一致;
+// HUD/沙盘要 [x,z] 时经 00-config `seaCoastLines()` 转置, 不要在别处再写一遍。
+// 西湾湾头 x=-157 (z≈9), 北端岬 x=-198 (z≈-160), 南端岬 x=-212 (z=197) —— 四湾四岬各差 90°。
+west:[[-197,-182],[-180,-191],[-159,-198],[-131,-192],[-101,-180],[-65,-167],[-27,-159],[9,-157],[47,-161],[85,-170],[121,-180],[153,-191],[178,-199],[195,-206],[197,-212]],
+east:[[-197,182],[-180,191],[-159,198],[-131,192],[-101,180],[-65,167],[-27,159],[9,157],[47,161],[85,170],[121,180],[153,191],[178,199],[195,206],[197,212]],
+// 离岸剖面 (d = 到岸线距离, 数字账=坡度) —— 四面同剖面 (任一湾都可冲滩/涉水):
+//   冲滩带 0→22m  1:18 (3.2°)  ── 登陆艇/两栖车可自行冲滩上岸
+//   礁盘   22→36m 1:250 平台 (水深 1.22~1.28m = 涉水, 可站立据枪; 史实"最后 500m 涉水上岸"的玩法位)
+//   礁缘   36→43m 1:3.3 陡坎   ── 登陆艇在此搁浅, 艇上人员改涉水/游泳 (史实塔拉瓦礁盘)
+//   外坡   43→80m 1:10.5 → 海盆 1:20 (图角最深处 ≈13m, 可自由潜泳/日后可潜航)
+shelf:{d:22,rate:0.0555}, reef:{d0:22,d1:36,rate:0.004}, edge:{d0:36,d1:43,rate:0.30},
+slope:{d0:43,d1:80,rate:0.095}, basin:{d0:80,rate:0.05},
+// 海战格局三件套 (2026-09-19 用户裁定"给海战足够发挥空间和影响力"):
+//   ① navRing = **环岛通航环带** d=43..200 (水深 3.4→13m): 绕岛一周不断, 舰船可绕岛机动/择湾上陆;
+//      沙箱断言: 72 条方位线上"离岸 ≤55m 内必达 >3.4m 深水" + 可通航深水占比 ≥35%。
+//   ② channels = 南湾两条**切深航道** (礁盘/礁缘切到 2.45m); z0=该航道所属海域的起点 (四面环海后
+//      必须限定海域, 否则同一条竖带会在北湾再切一道 —— z<z0 一侧恒为陆上或另一片海)。
+//   ③ lanes = 四湾进近航道 (纯语义/浮标标注, 为日后登陆艇/两栖车择湾上陆预留)。
+navRing:{d0:43,d1:200},
+channels:[{x:-64,w:13,z0:150},{x:70,w:13,z0:146}],
+lanes:[{bay:'south',x:0,z:200},{bay:'west',x:-210,z:0},{bay:'east',x:210,z:0},{bay:'north',x:0,z:-206}],
+// ── 海上集结点 (2026-09-20N 海战批, 用户裁定"海上集结点重生"): 每方在本方海湾外海集结 ──
+// [0]=美军(南登陆湾外海) / [1]=日军(北湾外海); face = 出航朝向(朝向本方海湾/驶向陆地的方向)。
+// 重生位 = muster[team] + 队内序号横向错位 22m (由 23-deploy 现算, 不写死坐标);
+// 取点口径: 必须落在 sea.navRing (d=43..200 → 水深 >3.4m) 内, 否则重生即搁浅。
+muster:[{x:0,z:250,face:Math.PI},{x:0,z:-250,face:0}],
+// ── 反舰炮位 (2026-09-20N 海战批, 用户裁定"日军专属 4 门, 四岬各一" + "另建独立反舰炮位") ──
+// 【单源纪律】这里只登记**岬角锚点**, 不是最终炮位坐标 —— 15f-battery 按
+//   "沿岸线法线向陆偏移 inshore 米 + findClearSpot 落位" 现算最终位, 最终朝向 = 该处岸线的向海法线。
+//   锚点取四支岸线端点即岬角 (与 seaCoastRing 的闭合契约同源), 严禁在 15f/17/05c 里另写岬角坐标。
+// key 只作台账标识与外场调试用, 布局按 anchor 归属最近岬角。
+batteries:[
+  {key:'SW', anchor:[-212,197], inshore:16, name:'西南岬反舰炮台'},
+  {key:'SE', anchor:[ 212,197], inshore:16, name:'东南岬反舰炮台'},
+  {key:'NW', anchor:[-182,-197],inshore:16, name:'西北岬反舰炮台'},
+  {key:'NE', anchor:[ 182,-197],inshore:16, name:'东北岬反舰炮台'}],
+// 泊位 (日后登陆艇/两栖车靠泊; 长栈桥两侧, d≈40m ⇒ 水深 ≈3.1m 可停 1.5m 吃水艇)
+berths:[{x:15,z:214},{x:29,z:214}],
+// 陆上剖面 (u = 入陆距离):
+//   干沙滩 0→14m 1:18 → 沙丘脊 14→22m 1:5.3 (+2.29m, 第一道防线/障壁) → 背坡台地 22→34m → 内陆缓丘+珊瑚岭
+sand:{u:14,rate:0.0555}, ridge:{u0:14,u1:22,rate:0.19}, bench:{u0:22,u1:34,rate:0.02},
+// 内陆缓丘起伏 (u>34 起叠加, bias=基准抬高: 四面环海后内陆离岸距离变小, 没有 bias 时
+// 缓丘负半周会把椰林营区一带压到海平面以下 —— "陆上出现低于海平面的干洼地") + 内陆整体抬升 (u 40→210m 抬 7m)
+hill:{a:2.6,b:1.3,c:0.5,bias:3.4}, uplift:{u0:40,span:170,h:7},
+// 机场跑道台地 (珊瑚跑道, 平整到 h; 20m 过渡): 中线会战枢纽 (跑道 x±30, 塔台在旗圈内西侧, 机库在跑道东侧)
+runway:{x0:-30,z0:-128,x1:30,z1:-16,h:7.6},
+// 岬角岩台 (灯塔岬/炮台岬, 圆顶抬升; 圆心取岬角陆上部分, 海侧部分不参与 = 天然断崖) 与纵深珊瑚岭 (日军指挥所高地)
+heads:[{x:-186,z:172,r:56,h:13.5},{x:186,z:172,r:56,h:10.5}],
+knoll:{x:86,z:-140,r:64,h:7.0},
+},
+// ── 中立可占领强点 (2026-09-21 WS3 用户第 3 条: "中间部分应当还有一个不可摧毁工事") ──
+// 中障壁混凝土工事 (05a strongpoint / 05c island 分支 E2 段) —— 本条目是**该工事唯一坐标出处**
+// (纲领 §4.3 单源: 05c 的落位与 21-match 的占领圈都读这一条, 别处不许再写第二套坐标)。
+// 落位依据: 中障壁旗 (0,20,r14) 东肩 16.0m 处 —— 强点圈 r=12 取值依据: 旗圈 14 的同量级 (steppe 强点
+//   取 11~14), 且 16.0 < 14+12 ⇒ 两圈重叠: 在中障壁旗圈里据守/进攻的单位同时也在强点圈内,
+//   强点随中路拉锯自然易手, 不会沦为"没人去的孤儿点"; 圈心即工事中心 ⇒ 占领圈天然套住工事本体
+//   (占点单位就是据守工事的人, updateSpots 的高度容差 10m 还允许屋顶观测台的射手参与占领)。
+// team:-1 = 开局中立 (攻防图上的可争夺强点); name 进播报"占领了强点「中障壁碉堡」"。
+// 占领之后 = 该点成为占领方的**出生权** (spawnPtsOf → 22-hud/23-deploy 部署选项 + 14-bots/15-vehicles
+//   推进目标 + 17-emplacements 出发区) —— 这是全库强点既有的统一语义 (steppe「车站」同款, 见 spawnPtsOf 注释),
+//   本图沿用同一支而不是给它开特例: 中路拉锯打下中障壁的部队能从工事圈再进场, 攻方不必每次从滩头重跑。
+//   (未占领时 own=-1 ⇒ 双方都不是出生点, spawnPtsOf 不会把它算进去。)
+spawns:[{x:16,z:19,name:'中障壁碉堡',team:-1,r:12}],
+// 长栈桥 (x=22, 自 u=7.6m 干沙处伸入礁盘 46m): 走 bridges 管线 (heightAt 取 deckY → 可站可走/Bot 可通行/建筑避让),
+// 桥面 2.45m 高 = 制高点, 桥下净空 2.13m = 可潜泳穿过 (水下层通道), 两侧 = 未来泊位 (见 sea.berths, 水深 ≈2.7~3.1m)
+bridges:[{x:22,z:189,len:46,w:6,yaw:0,kind:'pier',deckY:2.45}] },
+// ══════════════════════════════════════════════════════════════════════════════
+// 全海图 (2026-09-30 阶段五 P4 · 用户裁定④「全海图 · 舰上旗点」)
+// ══════════════════════════════════════════════════════════════════════════════
+// 共同口径:
+//   terr:'opensea'  = 无陆地 (四条岸线放在可玩区之外 ±820 ⇒ shoreDist 恒正 ⇒ 全图是海);
+//   layout:'opensea' = 布局函数只放浮标/浪花等海面件 (见 05c), 不建任何陆上建筑与植被;
+//   flags 全部带 `ship:<索引>` = **甲板旗点** (船在哪旗在哪, 由 15h capitalFlagTick 每帧跟随);
+//   capital[] = 大舰编制 (声明序 = 索引): key 取 CAPITAL_SPEC, route 是巡逻环 (八边形, 由 capPatrolRing 生成),
+//     base:true = 本队基地锚 (飞机出生/机器人推进目标/部署主基地选项都跟着它走 —— 全海图没有陆上基地)。
+//   tankN:[0,0] = 无坦克 (海上没有坦克的落脚地); airN:[n,n] = **双方**舰载机数 (airN 写成数组是 P4 起的新形态,
+//     标量仍旧口径 = 只有攻方有飞机 —— 既有 13 张图一行不改)。
+//   sea.muster = 小艇集结点; sea.navRing 放宽到全图 (无岸线可依, 环礁那套"离岸 43~200m"没有意义)。
+//   sea.batteries 缺省 = 无反舰炮台 (没有海岸可以架炮)。
+{ id:'coral', title:'珊瑚海海战 1942', sub:'双航母编队 · 舰上夺点', f:['us','jp'], theme:'pacific',
+terr:'opensea', layout:'opensea', mode:'conquest', modeName:'征服·舰队决战', mapSize:760, matchMin:20,
+// 旗点全在甲板上: 每队一条战列舰 (1 旗: 舰桥) + 一条航母 (2 旗: 飞行甲板/升降机) —— 抢对方航母要真的登舰。
+// 坐标 = 各舰 t=0 位姿下的世界坐标 (capitalFlagBind 开局换算成舰体局部坐标, 此后跟着舰走)。
+// ★2026-10-02 实机"旗帜卡在甲板以上的结构里": 旧 旗舰舰桥 (±220,∓70) 换算到舰体局部是 (0,+10) ——
+//   正落在 15g 的舰桥塔足迹里 (甲板室 lx±5.8 / 塔基层 ±6.0 / 命中盒 ±6.19, z 带覆盖 +10), 旗杆整根
+//   插穿甲板室顶进塔身, 旗面在塔内挥舞。新坐标 = 舰体局部 (lx,lz)=(+8.3,+14) —— 右舷舷侧走道:
+//   杆身距塔基层墙面 2.3m / 距命中盒 2.1m / 距舷缘 0.7m; 旗面 (杆高 6.25m, 长 2.4m) 挥向内侧时距
+//   pagoda 外挑层 (±5.88) 仍有 0.02m, 距美式二层 (±5.16) 0.74m; z=+14 避开舰桥翼台 (z≤+4.1) 与
+//   前主炮塔 (z≥+29.8); 主炮炮管扫掠圈 (塔心 ±12m) 不覆盖 lx=8.3。换算: yaw=±π/2 ⇒ x=基准±lz, z=∓lx。
+//   ★2026-10-02b 实机"弹药箱在船外悬浮着": 甲板旗的弹药箱旧版在旗点 ±4 随机散 (05c) —— 上批旗挪到
+//   舷侧走道后, 随机散到 lx>甲板半宽 的箱子直接悬出舷外。crateL = 弹药箱的**舰体局部锚** [lx,lz]:
+//   05c 载入期按本表 t=0 位姿换算落位 (capShipLocalXY), 命中即强放、不走随机 —— 锚位判据 (逐条对 15g):
+//   右舷走道 lx 7.9 = 内缘 7.35 距舰塔命中盒 (±6.19/±6.37) ≥0.98 (人过得去), 外缘 8.45 在护栏夹持线
+//   (8.58/8.88) 内; lz 21 避开 #2 高炮塔炮座盒 (z≥29.8) / 甲板室端墙 (z≤24.0) / 甲板室顶副炮 (4.8,22)
+//   的接管圈 (距 3.9 > 补弹半径 2.6, 不与"上炮"抢 F); cv 侧 (−3.5,40)/(−4.5,−50) 避开舰岛 (lx≥8.0)、
+//   弹射器槽 (lx ±5.88±0.75) 与中线跑道; 升降机箱接受与拦阻区停机件相邻 (旗本来就在拦阻区内)。
+flags:[
+{id:'旗舰舰桥',x:-216,z:-78.3,r:11,own:0,ship:0,crateL:[7.9,21]},
+{id:'飞行甲板',x:-210,z:220,r:12,own:0,ship:1,crateL:[-3.5,40]},
+{id:'升降机',x:-300,z:220,r:11,own:0,ship:1,crateL:[-4.5,-50]},
+{id:'旗舰舰桥',x:216,z:78.3,r:11,own:1,ship:2,crateL:[7.9,21]},
+{id:'飞行甲板',x:210,z:-220,r:12,own:1,ship:3,crateL:[-3.5,40]},
+{id:'升降机',x:300,z:-220,r:11,own:1,ship:3,crateL:[-4.5,-50]},
+],
+bases:[{x:-230,z:-70},{x:230,z:70}],
+//   基地箱 (★2026-10-02b): baseCrateL = 基地弹药箱的舰体局部锚 —— 旧 BASES±(3,±3) 换算舰局部是
+//   (±3,3), 埋在甲板室墙面里 (|lx|=3 < 甲板室半宽 5.8, 上批顺手发现之一)。(−7.9,0) = 左舷走道中段 (距舰心 7.9m ≤ layouts 基地箱 10m 判据),
+//   判据同 crateL, 与右舷旗点箱分居两舷。
+capital:[
+{key:'bb_us', team:0, x:-230, z:-70,  yaw:Math.PI/2,  route:_capRing(-230,-30,64,116), base:true, baseCrateL:[-7.9,0]},
+{key:'cv_us', team:0, x:-250, z:220,  yaw:Math.PI/2,  route:_capRing(-250,220,52,74)},
+{key:'bb_jp', team:1, x:230,  z:70,   yaw:-Math.PI/2, route:_capRing(230,30,64,116), base:true, baseCrateL:[-7.9,0]},
+{key:'cv_jp', team:1, x:250,  z:-220, yaw:-Math.PI/2, route:_capRing(250,-220,52,74)},
+],
+sineRoad:false, roads:[], trench:[],
+// 编制 (2026-10-01b 用户裁定"两栖坦克在纯海战中意义不明 / 飞机太少 / 小船也有点太多"):
+//   navalN [2,4]→[0,2] —— 两栖车 (lvt/kami) 退场 (全海图没有滩头可抢, 它们只在海里兜圈);
+//   小艇 4→2 (PT 艇是雷击/摆渡工具, 不是主力); airN [2,2]→[4,4] —— 舰载机是这张图的主角:
+//   每队 4 架 (机型表 0/1 号位交替 = 半数是挂 3 弹的 P-47/FW-190 级攻击机), 航母才有"影响力"。
+tankN:[0,0], airN:[4,4], navalN:[0,2], botMul:[1.2,1.2],
+sea:{ level:0, deep:26,
+// 四条岸线放在可玩区之外 (±820): shoreDist 在 ±380 内恒为 400m 级正值 = 全图海面。
+// 东/西岸的折线是 [z,x] 序 (见 03-terrain coastXAt), 别写反。
+shore:[[-820,-800],[820,-800]], north:[[-820,800],[820,800]],
+west:[[-820,800],[820,800]], east:[[-820,-800],[820,-800]],
+navRing:{d0:0,d1:4000},
+// 跑道占位 (坐标全在可玩区外): SEA.runway 被 04b-fire/05c/22-hud 五处无守卫直读, 缺键即载入期崩。
+//   本图没有跑道 —— 给它一个"在很远很远的地方"的空矩形, 所有 rectDist 判据恒为"远", 不排除任何点。
+runway:{x0:-9000,z0:-9000,x1:-9000,z1:-9000,h:0},
+channels:[], lanes:[], berths:[], batteries:[],   // 全海图没有航道/进近线/泊位/岸炮 —— 但键必须在: 22-hud/05c/15f 六处直读它们
+muster:[{x:-170,z:-10,face:Math.PI/2},{x:170,z:10,face:-Math.PI/2}],
+},
+spawns:[] },
+{ id:'ironbottom', title:'铁底湾夜战 1942', sub:'单舰对决 · 狭窄水道', f:['us','jp'], theme:'nightsea',
+terr:'opensea', layout:'opensea', mode:'conquest', modeName:'征服·单舰对决', mapSize:640, matchMin:16,
+// 单舰对决: 每队一条战列舰 (3 旗全在它甲板上) —— 夺点 = 登上对方旗舰并守住, 没有第二条船可以退。
+// ★2026-10-01 修 (甲板旗点授权纠正): 旧坐标 (±146/140/190, ∓30) 换算到舰体局部是 |lx|≈30 的**舷外 21m 悬空**
+//   (甲板半宽 9.0) —— 与本行"3 旗全在它甲板上"的意图直接矛盾, 而 11m 占领圈内的水面根本站不上人
+//   ⇒ 这张图的夺点目标形同虚设 (实机看到的"旗子漂在船外面"就是它, 珊瑚海同批但那条写对了)。
+//   新坐标 = 舰体局部 (lx, lz) = [星舷侧移, 艏艉向], 与珊瑚海同一套写法 (yaw=±π/2 时 x = 基准 ± lz, z = ∓ lx)。
+//   三个点由 15g 甲板判据 + 自由区洪水填充选位, 都落在**走得到**的宽甲板上:
+//     前主炮 (0,+27) 舰艏侧宽甲板带 / 舰桥 (7.2,+2) 右舷走道贴舰桥 / 后主炮 (0,-56) 舰艉宽甲板。
+//   (艏部甲板与两座前主炮之间那条横带被炮座盒封死 = 走不进去, 所以旗点一律不往艏尖放。)
+//   ★2026-10-02 实机"旗帜卡在甲板以上的结构里": 舰桥点旧局部 (7.2,+2) 距塔基层墙面只有 1.2m
+//     (塔基层 ±6.0 / pagoda 外挑 ±5.88), 旗面 (杆高 6.25m, 长 2.4m, 挂边在杆上) 挥向内侧时
+//     深入舰桥塔墙面 1m+ —— 舰一转向就"旗面插进舰岛"。与珊瑚海同批改到 (lx,lz)=(+8.3,+14):
+//     杆身距墙面 2.3m, 旗面内侧端 5.9m 距 pagoda 外挑 5.88 相切, 挥向外侧全空。换算同上式。
+//   ★2026-10-02b 附带发现修复: 前主炮旗 (0,+27) 距 #2 高炮塔心 (0,36) 仅 9m —— 该塔炮轴高 (甲板+6.0)
+//   正落在旗面带 (甲板+5.5~7.0) 内, 塔一转向旗面就被炮管周期性扫穿。#1/#3 塔炮轴只有甲板+3.0, 平射
+//   够不着旗面 ⇒ 全舰只有 #2 是约束。处置 = **低旗** (poleH 4.5, 05c 按 f.poleH 建杆/挂旗): 旗面带降到
+//   甲板+3.0~4.5, 距炮管下缘 (轴 6.0 − 管半径 0.74 = 5.26) 净空 0.76m, 满俯仰 (−0.06 rad, 仅玩家手动)
+//   仍余 0.2m —— 旗点原位不动 (占领圈/旗名/i18n 词典零扰动)。crateL 判据同珊瑚海 (前主炮箱 lz 24:
+//   避开甲板室端墙 z≤24.0 的 lx 带与炮座盒 z≥29.8; 后主炮箱 lz −52 贴舷侧走道, 内缘距 #3 炮座盒 ≥1.19)。
+flags:[
+{id:'前主炮',x:-138,z:0,r:11,own:0,ship:0,crateL:[7.9,24],poleH:4.5},
+{id:'舰桥',x:-151,z:-8.3,r:11,own:0,ship:0,crateL:[7.9,21]},
+{id:'后主炮',x:-221,z:0,r:11,own:0,ship:0,crateL:[7.9,-52]},
+{id:'前主炮',x:138,z:0,r:11,own:1,ship:1,crateL:[7.9,24],poleH:4.5},
+{id:'舰桥',x:151,z:8.3,r:11,own:1,ship:1,crateL:[7.9,21]},
+{id:'后主炮',x:221,z:0,r:11,own:1,ship:1,crateL:[7.9,-52]},
+],
+bases:[{x:-165,z:0},{x:165,z:0}],
+capital:[
+{key:'bb_us', team:0, x:-165, z:0, yaw:Math.PI/2,  route:_capRing(-165,0,58,86), base:true, baseCrateL:[-7.9,0]},
+{key:'bb_jp', team:1, x:165,  z:0, yaw:-Math.PI/2, route:_capRing(165,0,58,86), base:true, baseCrateL:[-7.9,0]},
+],
+sineRoad:false, roads:[], trench:[],
+// 编制 (2026-10-01b 用户裁定"小船也有点太多"): 单舰对决 4→2 (两艇是雷击/登舰摆渡, 不是主力群)。
+tankN:[0,0], airN:[3,3], navalN:[0,2], botMul:[1.2,1.2],
+sea:{ level:0, deep:22,
+shore:[[-820,-800],[820,-800]], north:[[-820,800],[820,800]],
+west:[[-820,800],[820,800]], east:[[-820,-800],[820,-800]],
+navRing:{d0:0,d1:4000},
+runway:{x0:-9000,z0:-9000,x1:-9000,z1:-9000,h:0},
+channels:[], lanes:[], berths:[], batteries:[],
+muster:[{x:-120,z:-10,face:Math.PI/2},{x:120,z:10,face:-Math.PI/2}],
+},
+spawns:[] },
 ];
 let CAMPAIGN_IDX=clamp(parseInt(localStorage.getItem('sf_campaign')||'0')||0,0,CAMPAIGNS.length-1);
 const CAMPAIGN=CAMPAIGNS[CAMPAIGN_IDX];
@@ -527,8 +925,67 @@ const CAMPAIGN=CAMPAIGNS[CAMPAIGN_IDX];
 let GAMEMODE=CAMPAIGN.mode;
 const ATK=CAMPAIGN.atk||0, DEF=1-ATK;
 const DEPOTS=[];
-// 战役天气: 雨/雪/阴天/雷暴
-const WEATHER={normandy:'overcast',stalingrad:'snow',berlin:'overcast',songhu:'rain',baituan:'clear',burma:'storm',moscow:'snow',hukawng:'rain',steppe:'clear',woodline:'overcast',canyon:'overcast',xuefeng:'overcast'}[CAMPAIGN.id]||'clear';
+// ── 天气系统 (2026-10-05 设计定稿, 见仓库根《天气系统设计纲要.md》; 开工批) ─────────
+// 架构: 每图从"单一固定天气"开放为 跟随地图+四档 (sf_weather, boot 一次性解析, 与昼夜同款 reload 切档):
+//   sf_weather(map|clear|overcast|rain|storm) × 图族(雪图=WX_IDENTITY==='snow') → WEATHER_EFF(7值) → WX_CFG=WEATHER_CFG[…]
+// 红线 R1 (零回归): sf_weather 缺省=跟随地图 ⇒ 全图视觉与改前逐位 —— 四档视觉系数全为既有校准值,
+//   雪图身份 'snow' 精确落入 snowMid (sun 全亮/雾×0.85/雪620 粒, 值逐位保留)。
+//   **明示例外 (2026-10-05 当日多轮口追, 均用户点名)**: ①火势基线总削 FIRE_SPREAD_NERF (04b-fire 头注);
+//   ②雨族雾距/雾起重定 (校准值 0.78 是"雨而不糊"老档, 用户裁定暴雨必须雾死): 终版
+//   小雨 far 0.4 / 暴雨 0.25 / 暴风雪 0.23, 且新增**雾起 fogNearMul** (渐变口径, 用户实报
+//   "雾不够渐变"=40m 内零雾、远处一面墙; near 提前让雾从近处开始线性爬坡):
+//   小雨 near 0.5(20m) / 暴雨·暴风雪 0.35(14m) / 细雪 0.8;
+//   ③**重档粒子密度** (用户实机裁定"暴雨/暴雪粒子远远不够密集"): 暴雨 720→2800 / 暴风雪 900→3600
+//   (约 4 倍; 小雨/细雪/中雪维持校准值, 档位对比反而更鲜明)。除此之外 R1 无豁免。
+// 红线 R3 (相乘顺序钉死): 白天基线 × NIGHT_CFG × WEATHER_CFG, 消费点不得交换/合并
+//   (ironbottom 的 overcast×夜 双乘就是校准样本)。晴天档全系数=1, 乘 1 不许出现舍入漂移。
+// 红线 R7 (单源纪律): 消费点一律读 WX_CFG 字段, 禁止新增 `WEATHER==='…'` 式字符串比较;
+//   新天气效果一律加 WEATHER_CFG 新字段 (本表注释即字段字典)。
+const WX_IDENTITY={normandy:'overcast',stalingrad:'snow',berlin:'overcast',songhu:'rain',baituan:'clear',burma:'storm',moscow:'snow',hukawng:'rain',steppe:'clear',woodline:'overcast',canyon:'overcast',xuefeng:'overcast',island:'clear',coral:'clear',ironbottom:'overcast'};
+const WX_SNOW_MAP=WX_IDENTITY[CAMPAIGN.id]==='snow';   // 雪族判据 (设计 §3, 自洽无需新数据): 斯大林格勒/莫斯科
+const WEATHER_EFF=(()=>{   // 解析规则表 (设计 §3): 跟随地图=身份档原值(雪图→snowMid); 四档按映射行
+const _s=localStorage.getItem('sf_weather')||'map';
+if(_s==='clear')   return 'clear';                                   // 雪图=雪停 (地面雪材质归 THEME, 天气层只管天)
+if(_s==='overcast')return WX_SNOW_MAP?'snowLight':'overcast';        // 雪图=阴天细雪
+if(_s==='rain')    return WX_SNOW_MAP?'snowMid':'rain';              // 雪图=中雪 (=原 snow 校准值)
+if(_s==='storm')   return WX_SNOW_MAP?'snowBlizzard':'storm';        // 雪图=暴风雪 (无闪电, R4)
+return WX_SNOW_MAP?'snowMid':(WX_IDENTITY[CAMPAIGN.id]||'clear');    // 跟随地图 (缺省)
+})();
+// 七档系数总表 (设计 §4): 视觉沿用校准值, 感知层为纯新增乘子 (白天晴朗全 1 = 现状逐位)。
+//   precip: 'none'|'rain'|'snow' (粒子种类); precipN 粒数; precipFall 落速 (雨 m/s, 雪 m/s);
+//   lightning: 闪电链开关 —— 只给 storm (R4: 暴风雪恒 false, 雪族任何档不得触发 lightningT/stormFlash);
+//   audioLevel: 环境雨声/风声增益; wind: true=走风声分支 (暴风雪, 一期复用噪声源变调+低音量);
+//   viewDMul/aimMul/hearGunMul/rangeMul: 与 NIGHT_CFG 同名系数相乘的独立天气乘子 (R6);
+//   fallEMul: 13-combat 衰减链 fallE 收距乘子 (R5: 只收 fallE, fallS/fallF/封顶不碰);
+//   fireMul: 04b-fire 火焰蔓延积热率乘子 (2026-10-05 追加裁定: 雨雪压火势; 晴朗/多云 ×1 不压;
+//     消费点唯一 = 04b-fire 的 8 邻格积热率 —— 阈值/冷却/燃料消耗不动, 压积热即压蔓延);
+//   fogNearMul: 白天雾起 40m × (渐变口径, 2026-10-05 口追新增; 02-scene dryFogNear 消费,
+//     与夜档 NIGHT_CFG.fogNearMul 相乘; 晴/阴/中雪 ×1 = 原值 40m 逐位);
+//   mapNearR/mapFireT: 暴雨档小地图雨规 (0=无); 与夜规合成见下方 WX_MM_*。
+//   sunVis/moonVis/starVis: 昼太阳盘/夜月盘(含月斑)/星空 不透明度乘子 (2026-10-05 口追⑥: 天体接入
+//     天气层; 02-scene 建盘时消费, 0=整体隐藏; 晴档全 1 逐位);
+//   skyGrey: 天穹渐变向"灰"的混合率 (2026-10-05 口追⑥; 02-scene _skyGreyMix 消费, 0=原色; 云朵画布同率灰化);
+//   skyLum: 灰目标亮度因子 (2026-10-05 口追⑧: 目标灰亮度=基色亮度×skyLum, <1 即"去饱和并压暗",
+//     暴雨 0.55 出暗天, 暴风雪 0.9 保白毛风亮灰; 云朵 _puff 同率压暗);
+//   fogDim: 雾色亮度乘子 (2026-10-05 口追⑧: fogFar 压低后视野大半是雾色, 不压雾色=拿亮灰漆满世界;
+//     02-scene scene.fog 建雾时单点消费; 水下雾 22-hud 快照当前色自动继承; 昼夜两档同乘);
+//   expoMul: 天气曝光乘子 (2026-10-05 口追⑨: toneMappingExposure 在 昼1.05/夜NIGHT_CFG.exposure 之上
+//     再乘, 全画面统一压暗 —— storm 0.7 ⇒ 暴雨昼总亮度≈晴天的 35%; ACES 保高光, 枪焰/闪电不受累;
+//     晴档 ×1 逐位);
+//   cloudN/cloudOpMul: 云 Sprite 数量 / 不透明度乘子 (2026-10-05 口追⑦: 非晴档云层加密, 暴雨/暴雪
+//     特别密; 晴档 9×1 = 现状逐位; 非晴档同时放宽云带幅面并压低高度, 见 02-scene 云块);
+//   sunMul/hemiMul 2026-10-05 口追⑧ 重调: 原 阴/暴 hemiMul 1.15 反而提亮环境光, 与"暴雨白天发暗"
+//   相悖 —— 全非晴档压暗 (阴 0.5/0.9, 雨 0.55/0.85, 暴 0.42/0.72, 细雪 0.55/0.95, 中雪 0.85/0.9, 暴雪 0.45/0.8)。
+const WEATHER_CFG={
+clear:        {sunMul:1,   hemiMul:1,   fogFarMul:1,   fogNearMul:1,  precip:'none',precipN:0,  precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:1,   aimMul:1,   hearGunMul:1,   rangeMul:1,   fallEMul:1,  fireMul:1,  mapNearR:0, mapFireT:0,sunVis:1,  moonVis:1,  starVis:1,  skyGrey:0,   skyLum:1,   fogDim:1,  expoMul:1,  cloudN:9, cloudOpMul:1},
+overcast:     {sunMul:0.5, hemiMul:0.9, fogFarMul:1,   fogNearMul:1,  precip:'none',precipN:0,  precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:1,  mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.25,starVis:0.15,skyGrey:0.55,skyLum:1,   fogDim:0.85,expoMul:0.9, cloudN:20,cloudOpMul:1.15},
+rain:         {sunMul:0.55,hemiMul:0.85,fogFarMul:0.4, fogNearMul:0.5,precip:'rain',precipN:460,precipFall:27, lightning:false,audioLevel:0.055,wind:false,viewDMul:0.75,aimMul:0.8, hearGunMul:0.8, rangeMul:0.8, fallEMul:0.75,fireMul:0.6,mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.1,starVis:0,  skyGrey:0.7,  skyLum:0.85,fogDim:0.7, expoMul:0.8, cloudN:30,cloudOpMul:1.25},
+storm:        {sunMul:0.42,hemiMul:0.72,fogFarMul:0.25,fogNearMul:0.35,precip:'rain',precipN:2800,precipFall:36, lightning:true, audioLevel:0.08, wind:false,viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.55,fogDim:0.55,expoMul:0.7, cloudN:42,cloudOpMul:1.4},
+snowLight:    {sunMul:0.55,hemiMul:0.95,fogFarMul:0.9, fogNearMul:0.8,precip:'snow',precipN:370,precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:0.75,mapNearR:0, mapFireT:0,sunVis:0.5,moonVis:0.5,starVis:0.5,skyGrey:0.3,  skyLum:1.05,fogDim:0.9, expoMul:0.95,cloudN:16,cloudOpMul:1.05},
+snowMid:      {sunMul:0.85,hemiMul:0.9, fogFarMul:0.85,fogNearMul:1,  precip:'snow',precipN:620,precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.85,aimMul:0.9, hearGunMul:0.9, rangeMul:0.85,fallEMul:0.85,fireMul:0.6,mapNearR:0, mapFireT:0,sunVis:0.3,moonVis:0.25,starVis:0.2,skyGrey:0.45,skyLum:1,   fogDim:0.9, expoMul:0.9, cloudN:24,cloudOpMul:1.15},
+snowBlizzard: {sunMul:0.45,hemiMul:0.8, fogFarMul:0.23,fogNearMul:0.35,precip:'snow',precipN:3600,precipFall:5.5,lightning:false,audioLevel:0.05,wind:true, viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.9, fogDim:0.75,expoMul:0.72,cloudN:42,cloudOpMul:1.4},
+};
+const WX_CFG=WEATHER_CFG[WEATHER_EFF];
 // 河流 (进入地形生成); d=下切深度, d>2 视为深谷激流(占用格阻挡寻路+徒涉伤害)
 const RIVER={
 moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true}, // 2026-09-12 城市边缘改版: 冰冻河沿图幅南缘 (厂区南侧河滨带)
@@ -550,6 +1007,92 @@ const BRIDGES=CAMPAIGN.bridges||(CAMPAIGN.bridge?[CAMPAIGN.bridge]:[]);
 const BRIDGE=BRIDGES[0]||null;
 // 雾林守线语义表 (2026-09-13 许特根改版): 北谷/西墙带/岭上村/灌丛带 —— 03-terrain/05c/22/23 全链路共读
 const WOOD=CAMPAIGN.wood||null;
+// 草原遭遇语义表 (2026-09-13 库尔斯克改版): 铁路/车站/风车/村社/防线带/雷区/炮火犁地 —— 04b/05c/22/23 共读
+const STEPPE=CAMPAIGN.steppe||null;
+// 环礁语义表 (2026-09-18 塔拉瓦): 海平面/岸线折线/离岸与陆上剖面/航道/泊位/跑道台地/岬角 ——
+// 03-terrain 剖面与色带、05c 布局、海面渲染、HUD、水体判定 (水深层/隐蔽/子弹入水) 全链路共读一份
+const SEA=CAMPAIGN.sea||null;
+// 海岸线四支 (2026-09-19 四面环海): 供 HUD 小地图/大地图/部署图、主菜单沙盘、海面碎波带共读同一份坐标 ——
+// 每项 {key, pts:[[x,z],…], ox, oz}: pts 为岸线点列, 海侧偏移 d 米 = 点 + (ox,oz)*d (d>0 出海)。
+// 单源纪律: 这里只做"表→折线→带"的几何展开, 海岸坐标一律来自 CAMPAIGN.sea (严禁另写)。
+function seaCoastLines(){
+if(!SEA) return [];
+const out=[];
+if(SEA.shore) out.push({key:'south', pts:SEA.shore.map(p=>[p[0],p[1]]), ox:0, oz:1});
+if(SEA.north) out.push({key:'north', pts:SEA.north.map(p=>[p[0],p[1]]), ox:0, oz:-1});
+if(SEA.west)  out.push({key:'west',  pts:SEA.west.map(p=>[p[1],p[0]]),  ox:-1, oz:0});
+if(SEA.east)  out.push({key:'east',  pts:SEA.east.map(p=>[p[1],p[0]]),  ox:1, oz:0});
+return out;
+}
+// 一条海岸带 (海侧 d0..d1) 的多边形点列 (去程沿 d0, 回程沿 d1, 首尾自然闭合)
+function seaBandRing(coast,d0,d1){
+const P=coast.pts, n=P.length, pts=[];
+for(let i=0;i<n;i++) pts.push([P[i][0]+coast.ox*d0, P[i][1]+coast.oz*d0]);
+for(let i=n-1;i>=0;i--) pts.push([P[i][0]+coast.ox*d1, P[i][1]+coast.oz*d1]);
+return pts;
+}
+// 海岸线闭合成环 (★2026-09-20 修用户实机"海岛地图四个角地域没有地图"):
+// 四支岸线首尾相接 = 岛屿闭合轮廓。HUD 四图据此做"整幅先铺深海、环内留陆地"的偶奇填充 ——
+// 旧法只按各支法向铺色带, **折线端点之外(即图幅四角)没有任何色带覆盖**, 大地图四角直接露背景色。
+// 链接按端点就近匹配(容差 3m, 与表里"四支端点严格同位"的契约一致), 不依赖书写顺序;
+// 返回 [[x,z],…] 闭合环 (不重复首点); 万一表被改坏接不成环 → 返回 null, 调用方回退旧画法。
+function seaCoastRing(){
+if(!SEA||typeof seaCoastLines!=='function') return null;
+const cs=seaCoastLines();
+if(cs.length<3) return null;
+const near=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1])<3;
+const used=new Array(cs.length).fill(false);
+const ring=cs[0].pts.slice();
+used[0]=true;
+for(let guard=0;guard<cs.length+1;guard++){
+const tail=ring[ring.length-1];
+let found=false;
+for(let i=0;i<cs.length;i++){
+if(used[i]) continue;
+const P=cs[i].pts;
+if(near(tail,P[0])){ for(let k=1;k<P.length;k++) ring.push(P[k]); used[i]=true; found=true; break; }
+if(near(tail,P[P.length-1])){ for(let k=P.length-2;k>=0;k--) ring.push(P[k]); used[i]=true; found=true; break; }
+}
+if(!found) break;
+}
+if(used.some(u=>!u)) return null;
+return ring;
+}
+// 岸线相对定位: 岸名 ('shore'|'north'|'west'|'east') + 沿岸坐标 a + **有符号偏移** off
+// (off>0 = 向海, off<0 = 向陆) → 世界坐标 [x,z]。
+// 单源纪律: 战壕表 (config.trench 的 {rel:[…]}) / 布局 (05c 的 S/N/W/E 四支助手) / 地形剖面
+// 全部经这一支展开 —— 海岸坐标只写在 CAMPAIGN.sea 一处 (纲领 §4.3)。
+// 沿岸坐标口径: 南/北岸 a=x; 西/东岸 a=z (由岸线的 ox/oz 自动判定, 与 03-terrain 的 shoreZAt/coastXAt 一致)。
+// 注: 本函数在 00-config 载入期即可用 (岸线点列是纯数据, 不依赖 03-terrain)。
+function seaShorePt(coast,a,off){
+if(!SEA||typeof seaCoastLines!=='function') return [a,0];
+const co=seaCoastLines().find(c=>c.key===coast);
+if(!co) return [a,0];
+const alongZ=co.ox!==0;                 // 西/东岸: 岸线沿 z 展开 ⇒ a=z
+const P=co.pts;
+let bx=null, bz=null;
+for(let i=0;i<P.length-1;i++){
+const t0=alongZ?P[i][1]:P[i][0], t1=alongZ?P[i+1][1]:P[i+1][0];
+const lo=Math.min(t0,t1), hi=Math.max(t0,t1);
+if(a<lo||a>hi) continue;
+const k=(t1-t0)?(a-t0)/(t1-t0):0;
+bx=P[i][0]+(P[i+1][0]-P[i][0])*k; bz=P[i][1]+(P[i+1][1]-P[i][1])*k;
+break;
+}
+if(bx===null){ const e=(alongZ?(a<P[0][1]):(a<P[0][0]))?P[0]:P[P.length-1]; bx=e[0]; bz=e[1]; }
+return [bx+co.ox*off, bz+co.oz*off];
+}
+// 战壕表展开: 数组 [x1,z1,x2,z2] 原样; 对象 {rel:['shore'|'north'|'west'|'east', a1,d1, a2,d2]}
+// 的 d 为**入陆距离**(m>0 向陆) → 展开成 [x1,z1,x2,z2]。地形 (03-terrain TRENCHES) / 沙盘 (22a _maTrench)
+// 共读这一支 —— 严禁各自再写一遍岸线算术。
+function trenchLine(t){
+if(t&&t.rel){
+const r=t.rel;
+const p1=seaShorePt(r[0],r[1],-r[2]), p2=seaShorePt(r[0],r[3],-r[4]);
+return [p1[0],p1[1],p2[0],p2[1]];
+}
+return (t&&t.length>=4)?[t[0],t[1],t[2],t[3]]:null;
+}
 // 在场人数规模 (与人力池分离): 标准/加强/史诗 —— 决定每队 Bot 数量
 const SIZE_OPTS=[{n:'标准',bots:11},{n:'加强',bots:16},{n:'史诗',bots:22},{n:'超编',bots:30}];
 let SIZE_IDX=clamp(parseInt(localStorage.getItem('sf_size')||'0')||0,0,3);
@@ -591,66 +1134,698 @@ xuefeng:{ sky:['#6e8aa0','#94aab0','#bcc8ac','#c9d0b2','#b8c2a2'], fog:0xaebc9e,
 ground:0xffffff, grassC:0xd2e0b0, leaf:0x3f6a35, roof:0x7a7264, dead:0.25, ruinAdd:0, rubbleN:5, snow:false, birds:true, treeN:3000, treeQ:1, grassMul:1.2 },
 taihang:{ sky:['#7d95a8','#a8b8bc','#d6cfae','#e0d6a8','#d2c69e'], fog:0xc8c2a4, hemi:[0xd8d8c4,0x5c5a44,0.78], sun:0xffe8bc, sunI:1.85,
 ground:0xf2ecd8, grassC:0xdce0b2, leaf:0x5f7a46, roof:0x8a7a5e, dead:0.15, ruinAdd:0, rubbleN:5, snow:false, birds:true, treeN:1800, treeQ:1, grassMul:1.0 },
+// 2026-09-18 塔拉瓦环礁: 晴空碧海/白珊瑚沙/浓绿椰林 —— 海天对比强, 太阳高照 (太平洋正午的硬光);
+// treeN 只算野生乔木 (椰林由 layoutIsland 手摆, 见 05c); 无雪无枯树 (dead 0.06)
+// 2026-09-18b 用户反馈"太亮/绿色太少"复调: 日照与半球光下压 (白珊瑚沙不再过曝),
+// ground 转暖灰绿 (整幅压 8%), 绿色交给 03-terrain 顶点色带的分带 (草甸/椰林层加厚)
+pacific:{ sky:['#2f6ba8','#5f9dc6','#a6cbdc','#d6e2dc','#c2d2c0'], fog:0xbdd2d8, hemi:[0xd6e8f0,0x49563f,0.78], sun:0xfff0d0, sunI:1.78,
+ground:0xe9ecd8, grassC:0xffffff, leaf:0xffffff, roof:0xffffff, dead:0.06, ruinAdd:0, rubbleN:5, snow:false, birds:true, treeN:560, treeQ:1, grassMul:1.35,
+// treeN 2026-09-20 I5: 230→560 —— 林下加密 (K2 段) 改变了环礁的随机流, 旧基数在改造后只剩 19 棵
+// 野生乔木 (基线 46 棵); 加密本就是用户第 7 条的一部分, 一并把乔木量补回来 (实测 ~50 棵)。
+// 2026-09-20 I5 用户第 7 条 ("塔拉瓦环礁植被还是太少, 应当有不少草丛树丛"): 环礁专属植被密度 ——
+// 改造前全图只有 99 株灌木/0 丛蕨丛/408 丛落位草丛 (见 dev/verify-foliage.js --baseline), 而
+// 一半以上的草丛采样点直接落进海里被隐藏。数值全部与 04b-fire/05c 共读 (单一数据源)。
+floraDensity:{
+  bushN:340,        // 通用散布局灌木基数 (缺省 150); 环礁陆域只占全图约 1/4, 基数须上调
+  shoreGuard:22,    // 灌木禁入带: 岸线起 22m = 沙丘脊线 (ridge.u1) —— 迎海面/湿沙保持开阔火力场
+  grassN:[1000,2400,4200], // 草丛实例 (低/中/高画质), 替代通用 480/1050/1850; 落位率由 grassTries 补
+  grassTries:6,     // 草丛采样重试次数 (旧版落海/湿沙/跑道直接隐藏 → 实例被浪费)
+  groveBushArea:30, // 椰林林下: 平均每株灌木占地 m² (面积/该值 = 株数)
+  groveFernArea:620,// 椰林林下: 平均每丛蕨丛占地 m²
+  inlandClumpN:18,  // 内陆灌丛带丛数
+  inlandClumpBush:5,// 每丛株数 (3~6 之间随机)
+  runwayFringeN:14, // 跑道外围丛数 (跑道矩形外 6~18m 环带)
+  beachClumpN:9,    // 沙丘背坡丛数 (四湾各 N 丛, 落 u∈[23,40] 即脊线以北)
+},
+}, // (2026-09-20 中转修复: pacific 主题对象缺一个闭合括号 —— 文件停在语法不过的中间态, 整局加载链/全部沙箱探针都被挡住;
+   //  此处只补回缺失的一个 `},`, 未改动 I5 植被口径任何数值。I5 owner 若还有后续内容, 重新 read + 追加即可)
+// ── 2026-10-04 (海战审计 V1 夜战名实不符): "铁底湾夜战"此前直接复用 pacific 晴天白天主题, 全库又没有
+//   夜间渲染管线 —— 实机是"大白天 + 海鸥叫"的夜战。不新做灯光管线 (工程面另案), 先给一张**月夜档**:
+//   深蓝黑夜幕/暗雾 + 半球光压到 0.55 + 月光 (冷色低强度) —— 读作夜战且可玩 (炮口焰/火光对比反而更强);
+//   birds:false 掐掉海上鸟叫, treeN/grassMul 归零 (纯海图无陆地植被, 也省一次散布)。
+nightsea:{ sky:['#0a1220','#16233a','#2a3a55','#455468','#5a6472'], fog:0x141c26, hemi:[0x33445c,0x0e1218,0.55], sun:0xa8c0e0, sunI:0.5,
+ground:0x3a4048, grassC:0x2c3238, leaf:0x1c2620, roof:0x2e3238, dead:0.5, ruinAdd:0, rubbleN:0, snow:false, birds:false, treeN:0, grassMul:0 },
 };
 const THEME=THEMES[CAMPAIGN.theme];
+// ── 昼夜模式 (2026-10-05 设计定稿, 见仓库根《昼夜模式设计-2026-10-05.md》; 六条裁定勿再议) ─────────
+// 架构: 夜档不是一张通用夜景, 而是叠加在**每图 THEME 之上**的"夜间修正层" —— 雪夜/丛林夜/海夜各是
+//   各的, 14 张图自动获得夜景。单源系数表 NIGHT_CFG (本处) + 全库唯一判据 NIGHT_MODE (bool)。
+//   isNight() 是它的只读别名 (探针/控制台语义等价)。
+// 红线一 (白天零回归): 每个消费点必须 NIGHT_MODE 门控, 白天分支与改前逐位相等 (乘 1 不许出现舍入漂移)。
+// 红线二 (几何一致): 夜档不改布局/摆件/植被/旗点/出生点 —— 照明弹/大灯的落点与相位**不得进入 wr/wri
+//   布局种子流** (与 SVG 贴图同纪律: 只用 Math.random 系 rand/randi)。
+// R5: ironbottom 标题即"铁底湾夜战", 锁死夜档 (菜单钮置灰, 此处强制 true, 存档键只存意图不改判定)。
+const NIGHT_CFG={
+  // —— 视觉 (初值为调参档; 校准样本 = ironbottom 的 overcast×夜 双重压暗, 先调它再推广全图) ——
+  sky:            null,   // 夜空渐变基线; null=统一用 nightsea 色板 (THEMES.nightsea.sky), THEME.skyNight 可按主题覆盖
+  fogFarMul:      0.55,   // dryFogFar × (半月偏暗: 比满月档收得更紧)
+  fogNearMul:     0.8,
+  fogMix:         0.6,    // 雾色向夜蓝 0x101a28 mix 的比例 (保留各图雾色相差异)
+  hemiMul:        0.45,   // hemi 强度 × (nightsea 满月档是 0.55, 半月更暗)
+  sunMul:         0.30,   // sun(月光)强度 ×, 色固定 moonCol 冷蓝
+  moonCol:        0xa8c0e0,
+  exposure:       0.72,   // toneMappingExposure 覆盖值 (白天 1.05 不动)
+  vmLightMul:     0.5,    // 第一人称 vmScene 灯 × (枪不能在夜里独亮)
+  flashRangeMul:  2.2,    // 枪口/爆炸 PointLight 作用半径 × (白天被环境光淹没的补偿)
+  cloudMul:       0.35,   // 云 Sprite 不透明度 ×
+  // —— 感知/玩法 (R2 实战档) ——
+  viewDMul:       0.55,   // Bot 索敌距离 × (95×visMul 之上再乘; FOV/蹲姿门随 viewD 自动收窄)
+  hearGunMul:     1.5,    // 听枪声/枪口事件半径 × (开火暴露加大)
+  aimMul:         0.65,   // aim assist 搜索距离 × (只缩距离, 锥角/K 分档不破)
+  rangeMul:       0.7,    // huntR / EMPL_AA_ENGAGE_R 等独立交火半径 × (逐处登记见消费点表)
+  // —— 小地图夜规 (R3: 开火显形 + 近距显形; 观战/死亡旁路=全显) ——
+  mapNearR:       60,     // 近距常显半径 (m)
+  mapFireT:       2.5,    // 开火后显形时长 (s) —— 复活 2026-09-06 之前的旧规则值
+};
+const NIGHT_MODE=(CAMPAIGN.id==='ironbottom')?true:(localStorage.getItem('sf_daynight')==='night');
+function isNight(){ return NIGHT_MODE; }
+// 小地图显形合成 (天气设计 §5-9, 公式钉死): 夜规(NIGHT_CFG.mapNearR/mapFireT) 与暴雨/暴风雪雨规(WX_CFG)
+//   相乘联动 —— 近显半径取两档**较小**, 开火显形取两档**较长** (夜+暴雨 ⇒ 60/2.5, 夜规全盖);
+//   两规都不在 ⇒ WX_MM_NEAR=0 = 全显旁路 (白天 2026-09-06 裁定零回归)。单源消费点: 22-hud mmEnemyVis。
+const _mmNightR=NIGHT_MODE?NIGHT_CFG.mapNearR:0, _mmWxR=WX_CFG.mapNearR||0;
+const WX_MM_NEAR=(_mmNightR>0&&_mmWxR>0)?Math.min(_mmNightR,_mmWxR):(_mmNightR||_mmWxR);
+const WX_MM_FIRE=Math.max(NIGHT_MODE?NIGHT_CFG.mapFireT:0,WX_CFG.mapFireT||0);
+// 夜档照明装备共用常量 (N2 二期: 大灯/照明弹/探照灯; 灯池预算红线 = 真光源同屏 ≤3)
+const NIGHT_GEAR={
+  headOn:true,             // 大灯总开关 (AI 状态机与 L 键共用判据)
+  headRealN:2,             // 真 SpotLight 池上限 (与爆炸/照明弹灯池分开记账, 同屏真光源总数 ≤3)
+  headRealR:75,            // 参与真灯竞选的最近距离 (m, 超出一律假光锥)
+  headExpo:1.8,            // 开灯载具被 Bot 索敌的 viewD ×
+  flarePeriod:28,          // 旗点照明弹周期 (s), 相邻旗错峰
+  flareBurn:8,             // 照明弹照亮持续 (s)
+  flareR:26,               // 照明半径 (m)
+  flareLitView:1.4,        // 照明半径内目标被索敌的 viewD ×
+  searchR:70,              // 探照灯光柱长 (m)
+  searchW:3.0,             // 照中判定半宽 (m)
+  searchView:2.0,          // 被照中者被索敌的 viewD × (且无视 FOV 门)
+};
+// 探照灯位登记表 (N2 4.3): 05a/05c 的静态探照灯基座 (塔拉瓦炮台/灯塔) 在 NIGHT_MODE 时往这里推
+// {x,z,y,az0,phase} —— 纯数据; 光柱锥 mesh 由 08-effects nightGearTick 惰性构建。相位走 Math.random, 不进种子。
+const SEARCHLIGHTS=[];
+// ── 植被密度/遮蔽口径单源 (2026-09-20 I5 塔拉瓦植被加密批) ──
+// 为什么集中在这里: 04b-fire.scatterBushes (通用散布局) 与 05c.layoutIsland (环礁林下/灌丛带加密)
+//   是**同一批密度口径**, 散在各自函数体里就是两处各写一套数 (纲领 §2: 同一件事只有一支代码)。
+// 缺省值 = 改造前行为 (bushN=150 就是旧 scatterBushes 里写死的魔数 150; shoreGuard=15 就是旧
+//   `shoreDist>-15` 阈值; grassN 就是旧的 480/1050/1850) ⇒ **其余 13 张图一个字节的行为变化都没有**,
+//   只有显式给了 THEME.floraDensity 的主题 (当前仅 pacific/塔拉瓦) 才吃到新密度。
+const FLORA_DENSITY_DEF={
+  bushN:150, shoreGuard:15, grassN:[480,1050,1850], grassTries:1,
+  groveBushArea:0, groveFernArea:0, inlandClumpN:0, inlandClumpBush:0, runwayFringeN:0, beachClumpN:0,
+};
+const FLORA_CFG=Object.assign({},FLORA_DENSITY_DEF,THEME.floraDensity||{});
+// ── 载具剪影规格 tk / pl (2026-09-20 I2 批: 按国家+车型出可辨识剪影, 用户已确认口径) ──
+// 为什么写在这里: 视觉尺寸与 hp/col/barrelL 同源 —— 改数值不用碰建模代码, 15-vehicles/16-aircraft 只按
+//   tk.shape / tk.tur.shape / pl.shape 走离散档分支。单位米; pl 的尺寸以 def.size=1 为基准 (建模再乘 def.size)。
+// tk 字段: shape 剪影档 sherman|pz4|t34|chiha|vickers ; wc 车重等级 light|med|heavy (炮塔尺寸缩放单源, 见 WC_TUR_SCALE) ;
+//   hullW/hullH/hullY 车体宽/高/中心高 ;
+//   trkSx 履带中心半距 ; whR/whN 负重轮半径/单侧数量 (this.wheels 动画按 baseY 逐轮走) ;
+//   glacis 首上装甲倾角(弧度, 负=上缘后倾, 0=垂直) ; sponson 铸造侧凸半宽(0=无) ; skirt 侧裙板片数(0=无) ;
+//   paint 涂装分档 plain|two|camo (two=炮塔走 colT, camo=再加 colA 迷彩条) ;
+//   barR 炮管半径 ; brake 炮口制退器 0/1 ; cupH 指挥塔高 ;
+//   tur{shape round|box|hex|hexLong|smallRound, w 宽, l 长, h 高, ringZ 座圈纵向位置} —— w/l/h 会再乘
+//   WC_TUR_SCALE[wc] (A#6: 轻 0.82 / 中 1.0 / 重 1.15), 表里写的是"中型基准值", 分级缩放由 tkSpec 派生
+// pl 字段: shape 剪影档 mustang|bf109|la5|zero|hawk3|hayabusa ; span 翼展 ; flen 机身长 ; fr 机身半径 ;
+//   nose inline(细长机鼻+桨毂) | radial(星型粗机头) ; tip 翼尖 square|round|clip|ellipse ;
+//   fin 垂尾高 ; canopy 座舱盖半径 ; belly 机腹散热器 0/1 ; biplane 双翼 0/1 ; pylons 挂架 0/1
 const FACTIONS={
 us:{ name:'美国陆军', short:'盟军', sym:'★', flagBg:'#3a5f9e',
 coat:0x57604a, pants:0x8a7f5e, helm:0x4a5240, skin:0xc09878, sleeve:0x4d5240, helmet:'pot', nade:'egg',
 names:['米勒','雷本','杰克逊','霍瓦特','梅利什','厄本','韦德','卡帕佐','德尔安科','麦克','唐尼','史密斯','布鲁尔','泰勒'],
-cls:[['garand','m1911'],['thompson','m1911'],['bar','m1911'],['springfield','m1911'],['m1903','m1911'],['bazooka','m1911'],['m1carb','m1911'],['m1carb','m1911']],
-tanks:[{name:'M4 谢尔曼',hp:1200,spd:8.3,rev:4.4,turn:0.9,reload:1.3,tRate:2.4,dmg:520,col:0x586e40,colT:0x404e30,heavy:false,barrelL:3.3,hullL:5.8},
-{name:'M26 潘兴',hp:1900,spd:6.5,rev:3.6,turn:0.7,reload:1.65,tRate:1.9,dmg:660,col:0x50663c,colT:0x3c5030,heavy:true,barrelL:4.1,hullL:6.4}],
-planes:[{name:'P-51 野马',hp:100,spd:[32,64],rof:0.075,mgDmg:17,bombs:1,col:0x74806a,size:1},
-{name:'P-47 雷电',hp:160,spd:[28,54],rof:0.09,mgDmg:21,bombs:3,col:0x687a62,size:1.18}] },
+// 兵种 8→5 (2026-09-28 阶段三 P1): 0步枪兵 / 1突击兵(主武器只留冲锋枪, 德军例外=STG44, 用户裁定) /
+//   2狙击手 / 3反坦克兵 / 4工程兵(建造+迫击炮)。原突击兵自动武器(bar/dp28/type96/zb26/type11)退场。
+cls:[['garand','m1911'],['thompson','m1911'],['springfield','m1911'],['bazooka','m1911'],['m1carb','m1911']],
+tanks:[{name:'M4 谢尔曼',hp:1300,spd:8.3,rev:4.4,turn:0.9,reload:1.3,tRate:2.4,dmg:560,col:0x586e40,colT:0x404e30,heavy:false,barrelL:3.3,hullL:5.8,
+ tk:{shape:'sherman',wc:'med',hullW:2.50,hullH:0.95,hullY:1.02,trkSx:1.60,whR:0.34,whN:5,glacis:-0.62,sponson:0.15,skirt:0,paint:'two',barR:0.13,brake:0,cupH:0.24,
+  tur:{shape:'round',w:2.30,l:2.30,h:0.70,ringZ:-0.10}}},
+{name:'M26 潘兴',hp:1900,spd:6.5,rev:3.6,turn:0.7,reload:1.65,tRate:1.9,dmg:660,col:0x50663c,colT:0x3c5030,heavy:true,barrelL:4.1,hullL:6.4,
+ tk:{shape:'sherman',wc:'heavy',hullW:2.72,hullH:1.02,hullY:1.06,trkSx:1.64,whR:0.36,whN:6,glacis:-0.55,sponson:0.10,skirt:0,paint:'two',barR:0.12,brake:1,cupH:0.26,
+  tur:{shape:'round',w:2.50,l:2.50,h:0.78,ringZ:-0.05}}}],
+planes:[{name:'P-51 野马',hp:100,spd:[26,51],rof:0.075,mgDmg:17,bombs:1,col:0x74806a,size:1,agil:1.05,
+ pl:{shape:'mustang',span:7.75,flen:4.30,fr:0.32,nose:'inline',tip:'clip',fin:0.86,canopy:0.30,belly:1,biplane:0,pylons:0}},
+{name:'P-47 雷电',hp:160,spd:[22,43],rof:0.09,mgDmg:21,bombs:3,col:0x687a62,size:1.18,agil:0.88,
+ pl:{shape:'mustang',span:8.30,flen:4.35,fr:0.38,nose:'radial',tip:'round',fin:0.80,canopy:0.34,belly:1,biplane:0,pylons:1}}] },
 ger:{ name:'德意志国防军', short:'德军', sym:'✠', flagBg:'#8a2020',
 coat:0x555a60, pants:0x46484e, helm:0x3e4246, skin:0xc8a080, sleeve:0x4a4d52, helmet:'stahl', nade:'stick',
 names:['施泰纳','穆勒','克格勒','汉森','冯·克劳克','贝克','施密特','里希特','沃尔夫','凯撒','布劳恩','菲舍尔','霍夫曼','克鲁格'],
-cls:[['kar98','p38'],['mp40','p38'],['stg44','p38'],['kar98zf','p38'],['kar98','p38'],['schreck','p38'],['g33','p38'],['g33','p38']],
-tanks:[{name:'四号坦克',hp:1200,spd:8.1,rev:4.4,turn:0.9,reload:1.3,tRate:2.4,dmg:520,col:0x545a50,colT:0x3e4238,heavy:false,barrelL:3.5,hullL:5.8},
-{name:'黑豹',hp:1900,spd:7.0,rev:3.6,turn:0.75,reload:1.6,tRate:2.0,dmg:660,col:0x5c5a48,colT:0x464438,heavy:true,barrelL:4.3,hullL:6.6}],
-planes:[{name:'BF-109',hp:100,spd:[32,64],rof:0.075,mgDmg:17,bombs:1,col:0x70747a,size:1},
-{name:'FW-190',hp:160,spd:[28,54],rof:0.09,mgDmg:21,bombs:3,col:0x62666a,size:1.18}] },
+cls:[['kar98','p38'],['stg44','p38'],['kar98zf','p38'],['schreck','p38'],['g33','p38']],
+tanks:[{name:'四号坦克',hp:1200,spd:8.1,rev:4.4,turn:0.9,reload:1.3,tRate:2.4,dmg:520,col:0x545a50,colT:0x3e4238,heavy:false,barrelL:3.5,hullL:5.8,
+ tk:{shape:'pz4',wc:'med',hullW:2.62,hullH:0.98,hullY:1.03,trkSx:1.63,whR:0.36,whN:5,glacis:-0.18,sponson:0,skirt:4,paint:'camo',colA:0x3a3428,barR:0.12,brake:1,cupH:0.24,
+  tur:{shape:'box',w:2.45,l:2.50,h:0.72,ringZ:-0.05}}},
+{name:'黑豹',hp:1900,spd:7.0,rev:3.6,turn:0.75,reload:1.6,tRate:2.0,dmg:660,col:0x5c5a48,colT:0x464438,heavy:true,barrelL:4.3,hullL:6.6,
+ tk:{shape:'pz4',wc:'heavy',hullW:2.86,hullH:1.05,hullY:1.10,trkSx:1.61,whR:0.38,whN:7,glacis:-0.95,sponson:0,skirt:4,paint:'camo',colA:0x463f2e,barR:0.11,brake:1,cupH:0.26,
+  tur:{shape:'box',w:2.55,l:2.90,h:0.74,ringZ:0.05}}}],
+planes:[{name:'BF-109',hp:100,spd:[26,51],rof:0.075,mgDmg:17,bombs:1,col:0x70747a,size:1,agil:1.05,
+ pl:{shape:'bf109',span:6.80,flen:4.30,fr:0.30,nose:'inline',tip:'square',fin:0.86,canopy:0.28,belly:0,biplane:0,pylons:0}},
+{name:'FW-190',hp:160,spd:[22,43],rof:0.09,mgDmg:21,bombs:3,col:0x62666a,size:1.18,agil:0.92,
+ pl:{shape:'bf109',span:7.60,flen:4.25,fr:0.38,nose:'radial',tip:'square',fin:0.80,canopy:0.32,belly:0,biplane:0,pylons:1}}] },
 sov:{ name:'苏联红军', short:'苏军', sym:'☭', flagBg:'#b03030',
 coat:0x6b6a4f, pants:0x5c5a42, helm:0x515c3e, skin:0xc8a080, sleeve:0x62614a, helmet:'ssh', nade:'stickS',
 names:['伊万诺夫','彼得罗夫','瓦西里','安德烈','谢尔盖','德米特里','尼古拉','阿列克谢','米哈伊尔','尤里','奥列格','弗拉基米尔','康斯坦丁','格里高利'],
-cls:[['mosin','tt33'],['ppsh','tt33'],['dp28','tt33'],['mosinpu','tt33'],['mosin','tt33'],['ptrd','tt33'],['m38carb','tt33'],['m38carb','tt33']],
-tanks:[{name:'T-34/76',hp:1300,spd:8.8,rev:4.7,turn:0.95,reload:1.25,tRate:2.5,dmg:520,col:0x4f5c40,colT:0x3c4832,heavy:false,barrelL:3.4,hullL:5.9},
-{name:'KV-1 重型',hp:2100,spd:5.7,rev:3.3,turn:0.65,reload:1.7,tRate:1.8,dmg:650,col:0x53604a,colT:0x404c3a,heavy:true,barrelL:3.9,hullL:6.5}],
-planes:[{name:'La-5',hp:100,spd:[32,64],rof:0.075,mgDmg:17,bombs:1,col:0x5f7062,size:1},
-{name:'IL-2 强击机',hp:180,spd:[26,50],rof:0.095,mgDmg:22,bombs:3,col:0x556052,size:1.2}] },
+cls:[['mosin','tt33'],['ppsh','tt33'],['mosinpu','tt33'],['ptrd','tt33'],['m38carb','tt33']],
+tanks:[{name:'T-34/76',hp:1300,spd:8.8,rev:4.7,turn:0.95,reload:1.25,tRate:2.5,dmg:520,col:0x4f5c40,colT:0x3c4832,heavy:false,barrelL:3.4,hullL:5.9,
+ tk:{shape:'t34',wc:'med',hullW:2.60,hullH:0.95,hullY:1.00,trkSx:1.62,whR:0.42,whN:5,glacis:-1.02,sponson:0,skirt:0,paint:'plain',barR:0.12,brake:0,cupH:0.22,
+  tur:{shape:'hex',w:2.44,l:2.44,h:0.70,ringZ:0.22}}},
+{name:'KV-1 重型',hp:2100,spd:5.7,rev:3.3,turn:0.65,reload:1.7,tRate:1.8,dmg:650,col:0x53604a,colT:0x404c3a,heavy:true,barrelL:3.9,hullL:6.5,
+ tk:{shape:'t34',wc:'heavy',hullW:2.75,hullH:1.05,hullY:1.08,trkSx:1.62,whR:0.38,whN:6,glacis:-0.45,sponson:0,skirt:0,paint:'plain',barR:0.13,brake:0,cupH:0.24,
+  tur:{shape:'hexLong',w:2.55,l:2.55,h:0.76,ringZ:0.10}}}],
+planes:[{name:'La-5',hp:100,spd:[26,51],rof:0.075,mgDmg:17,bombs:1,col:0x5f7062,size:1,agil:1,
+ pl:{shape:'la5',span:8.05,flen:4.05,fr:0.40,nose:'radial',tip:'round',fin:0.82,canopy:0.30,belly:0,biplane:0,pylons:0}},
+{name:'IL-2 强击机',hp:180,spd:[21,40],rof:0.095,mgDmg:22,bombs:3,col:0x556052,size:1.2,agil:0.82,
+ pl:{shape:'la5',span:8.20,flen:4.40,fr:0.42,nose:'radial',tip:'round',fin:0.78,canopy:0.40,belly:1,biplane:0,pylons:1}}] },
 jp:{ name:'日本帝国陆军', short:'日军', sym:'☀', flagBg:'#8a2020',
 coat:0x7a6f4a, pants:0x6e6444, helm:0x60593a, skin:0xc8a078, sleeve:0x6f6543, helmet:'jp', nade:'egg',
 names:['田中','佐藤','铃木','高桥','渡边','伊藤','山本','中村','小林','加藤','吉田','山田','佐佐木','松本'],
-cls:[['arisaka','nambu'],['type100','nambu'],['type96','nambu'],['type97s','nambu'],['arisaka','nambu'],['type97at','nambu'],['type38c','nambu'],['type38c','nambu']],
-tanks:[{name:'九七式中战车',hp:950,spd:8.6,rev:4.4,turn:0.95,reload:1.2,tRate:2.5,dmg:400,col:0x6f6a4c,colT:0x585340,heavy:false,barrelL:2.9,hullL:5.4},
-{name:'一式中战车',hp:1250,spd:8.1,rev:4.2,turn:0.85,reload:1.35,tRate:2.2,dmg:470,col:0x6a6548,colT:0x53503c,heavy:true,barrelL:3.3,hullL:5.7}],
-planes:[{name:'零式舰战',hp:90,spd:[33,66],rof:0.07,mgDmg:16,bombs:1,col:0x8a9284,size:0.96},
-{name:'一式战 隼',hp:150,spd:[29,56],rof:0.085,mgDmg:20,bombs:3,col:0x77806e,size:1.12}] },
+cls:[['arisaka','nambu'],['type100','nambu'],['type97s','nambu'],['type97at','nambu'],['type38c','nambu']],
+tanks:[{name:'九七式中战车',hp:820,spd:8.6,rev:4.4,turn:0.95,reload:1.2,tRate:2.5,dmg:330,col:0x6f6a4c,colT:0x585340,heavy:false,barrelL:2.9,hullL:5.4,
+ tk:{shape:'chiha',wc:'light',hullW:2.24,hullH:0.84,hullY:0.92,trkSx:1.43,whR:0.32,whN:5,glacis:-0.40,sponson:0,skirt:0,paint:'two',barR:0.10,brake:0,cupH:0.14,
+  tur:{shape:'smallRound',w:1.96,l:1.96,h:0.68,ringZ:0.30}}},
+{name:'一式中战车',hp:1050,spd:8.1,rev:4.2,turn:0.85,reload:1.35,tRate:2.2,dmg:420,col:0x6a6548,colT:0x53503c,heavy:true,barrelL:3.3,hullL:5.7,
+ tk:{shape:'chiha',wc:'med',hullW:2.36,hullH:0.90,hullY:0.96,trkSx:1.48,whR:0.35,whN:5,glacis:-0.42,sponson:0,skirt:0,paint:'two',barR:0.10,brake:0,cupH:0.16,
+  tur:{shape:'smallRound',w:2.10,l:2.10,h:0.70,ringZ:0.28}}}],
+planes:[{name:'零式舰战',hp:90,spd:[26,53],rof:0.07,mgDmg:16,bombs:1,col:0x8a9284,size:0.96,agil:1.15,
+ pl:{shape:'zero',span:8.15,flen:3.72,fr:0.28,nose:'inline',tip:'ellipse',fin:0.98,canopy:0.30,belly:0,biplane:0,pylons:0}},
+{name:'一式战 隼',hp:150,spd:[23,45],rof:0.085,mgDmg:20,bombs:3,col:0x77806e,size:1.12,agil:1,
+ pl:{shape:'hayabusa',span:7.50,flen:4.15,fr:0.29,nose:'inline',tip:'round',fin:0.88,canopy:0.34,belly:0,biplane:0,pylons:1}}] },
 kmt:{ name:'国民革命军', short:'国军', sym:'✷', flagBg:'#2050b0',
 coat:0x5a6a72, pants:0x52606a, helm:0x46525a, skin:0xc8a078, sleeve:0x53626b, helmet:'stahl', nade:'stick',
 names:['王大山','李长贵','张铁柱','刘志','陈国栋','杨得胜','赵铁牛','黄浦生','周卫国','吴天亮','徐虎','孙立','马汉山','胡铁军'],
-cls:[['zhongzheng','c96'],['mp18','c96'],['zb26','c96'],['zhongzhengs','c96'],['hanyang','c96'],['boys','c96'],['laotao','c96'],['laotao','c96']],
-tanks:[{name:'维克斯6吨',hp:800,spd:7.8,rev:4.2,turn:0.95,reload:1.15,tRate:2.5,dmg:330,col:0x5c6858,colT:0x475244,heavy:false,barrelL:2.7,hullL:5.2},
-{name:'T-26(援华)',hp:1000,spd:8.3,rev:4.4,turn:0.9,reload:1.25,tRate:2.4,dmg:400,col:0x556050,colT:0x424c3e,heavy:true,barrelL:3.0,hullL:5.4}],
-planes:[{name:'霍克III',hp:95,spd:[30,58],rof:0.08,mgDmg:16,bombs:1,col:0x6f7a68,size:0.98},
-{name:'伊-16(援华)',hp:140,spd:[28,54],rof:0.085,mgDmg:19,bombs:2,col:0x5f6a58,size:1.05}] },
+cls:[['zhongzheng','c96'],['mp18','c96'],['zhongzhengs','c96'],['boys','c96'],['laotao','c96']],
+tanks:[{name:'维克斯6吨',hp:800,spd:7.8,rev:4.2,turn:0.95,reload:1.15,tRate:2.5,dmg:330,col:0x5c6858,colT:0x475244,heavy:false,barrelL:2.7,hullL:5.2,
+ tk:{shape:'vickers',wc:'light',hullW:2.30,hullH:0.88,hullY:0.96,trkSx:1.54,whR:0.34,whN:4,glacis:-0.30,sponson:0,skirt:0,paint:'plain',barR:0.09,brake:0,cupH:0.18,
+  tur:{shape:'vickers',w:1.80,l:1.80,h:0.64,ringZ:0.15}}},
+{name:'T-26(援华)',hp:1000,spd:8.3,rev:4.4,turn:0.9,reload:1.25,tRate:2.4,dmg:400,col:0x556050,colT:0x424c3e,heavy:true,barrelL:3.0,hullL:5.4,
+ tk:{shape:'vickers',wc:'light',hullW:2.34,hullH:0.86,hullY:0.98,trkSx:1.56,whR:0.33,whN:5,glacis:-0.34,sponson:0,skirt:0,paint:'plain',barR:0.10,brake:0,cupH:0.18,
+  tur:{shape:'vickers',w:2.00,l:2.00,h:0.62,ringZ:0.18}}}],
+planes:[{name:'霍克III',hp:95,spd:[24,46],rof:0.08,mgDmg:16,bombs:1,col:0x6f7a68,size:0.98,agil:0.98,
+ pl:{shape:'hawk3',span:7.40,flen:3.95,fr:0.34,nose:'radial',tip:'square',fin:0.90,canopy:0.28,belly:0,biplane:1,pylons:0}},
+{name:'伊-16(援华)',hp:140,spd:[22,43],rof:0.085,mgDmg:19,bombs:2,col:0x5f6a58,size:1.05,agil:1.05,
+ pl:{shape:'hawk3',span:6.95,flen:3.85,fr:0.36,nose:'radial',tip:'round',fin:0.86,canopy:0.30,belly:1,biplane:0,pylons:1}}] },
 cpc:{ name:'八路军', short:'八路', sym:'✭', flagBg:'#b03030',
 coat:0x777d72, pants:0x6d736a, helm:0x777d72, skin:0xc8a078, sleeve:0x6f756a, helmet:'cap', nade:'stick', atn5:4,
 names:['李云龙','赵刚','王铁蛋','孙德胜','张大彪','魏和尚','段鹏','沈泉','邢志国','陈铁柱','石头','柱子','二娃','铁蛋'],
-cls:[['hanyang','c96'],['c96auto','c96'],['type11','c96'],['zhongzhengs','c96'],['hanyang','c96'],['hanyang','c96'],['laotao','c96'],['laotao','c96']],
-tanks:[{name:'九七式(缴获)',hp:950,spd:8.6,rev:4.4,turn:0.95,reload:1.2,tRate:2.5,dmg:400,col:0x6d7268,colT:0x565b52,heavy:false,barrelL:2.9,hullL:5.4},
-{name:'一式(缴获)',hp:1250,spd:8.1,rev:4.2,turn:0.85,reload:1.35,tRate:2.2,dmg:470,col:0x687062,colT:0x51584c,heavy:true,barrelL:3.3,hullL:5.7}],
-planes:[{name:'隼(缴获)',hp:150,spd:[29,56],rof:0.085,mgDmg:20,bombs:2,col:0x6f7a6a,size:1.12},
-{name:'九九式(缴获)',hp:140,spd:[27,52],rof:0.09,mgDmg:19,bombs:3,col:0x667062,size:1.15}] },
+cls:[['hanyang','c96'],['c96auto','c96'],['zhongzhengs','c96'],['hanyang','c96'],['laotao','c96']],
+tanks:[{name:'九七式(缴获)',hp:820,spd:8.6,rev:4.4,turn:0.95,reload:1.2,tRate:2.5,dmg:330,col:0x6d7268,colT:0x565b52,heavy:false,barrelL:2.9,hullL:5.4,
+ tk:{shape:'chiha',wc:'light',hullW:2.26,hullH:0.85,hullY:0.93,trkSx:1.45,whR:0.32,whN:5,glacis:-0.40,sponson:0,skirt:0,paint:'camo',colA:0x3f3a2c,barR:0.10,brake:0,cupH:0.18,
+  tur:{shape:'smallRound',w:2.00,l:2.00,h:0.66,ringZ:0.22}}},
+{name:'一式(缴获)',hp:1050,spd:8.1,rev:4.2,turn:0.85,reload:1.35,tRate:2.2,dmg:420,col:0x687062,colT:0x51584c,heavy:true,barrelL:3.3,hullL:5.7,
+ tk:{shape:'chiha',wc:'med',hullW:2.34,hullH:0.89,hullY:0.95,trkSx:1.46,whR:0.35,whN:5,glacis:-0.42,sponson:0,skirt:0,paint:'camo',colA:0x413b2d,barR:0.10,brake:0,cupH:0.18,
+  tur:{shape:'smallRound',w:2.06,l:2.06,h:0.68,ringZ:0.25}}}],
+planes:[{name:'隼(缴获)',hp:150,spd:[23,45],rof:0.085,mgDmg:20,bombs:2,col:0x6f7a6a,size:1.12,agil:1.08,
+ pl:{shape:'hayabusa',span:7.50,flen:4.10,fr:0.29,nose:'inline',tip:'round',fin:0.88,canopy:0.34,belly:0,biplane:0,pylons:0}},
+{name:'九九式(缴获)',hp:140,spd:[22,42],rof:0.09,mgDmg:19,bombs:3,col:0x667062,size:1.15,agil:0.95,
+ pl:{shape:'hayabusa',span:7.70,flen:4.05,fr:0.33,nose:'radial',tip:'round',fin:0.80,canopy:0.38,belly:1,biplane:0,pylons:1}}] },
 };
 const TEAM_FACTION=[FACTIONS[CAMPAIGN.f[0]],FACTIONS[CAMPAIGN.f[1]]];
 const TEAM_NAME=[TEAM_FACTION[0].short,TEAM_FACTION[1].short];
 const TEAM_COL=[0x8fc1ff,0xff9c8a];
+// ══════════════════════════════════════════════════════════════════════════════
+// 飞行模型单源常量 PLANE_FLIGHT (P3-7a 2026-09-30: 原 16-aircraft 内联魔法数收编 + 增强街机)
+// 用户裁定口径 = **增强街机**: 纯运动学底盘不变 (无升力/阻力/失速方程), 叠加三件 ——
+//   ① 协调转弯: 坡度(roll)产生偏航率, A/D 压坡即转弯 (IronSkyAce bankYaw 口径, 现代背景不搬其它);
+//   ② 伪升力下沉: 机背朝天分量 (cos(pitch)·cos(roll)) 越小沉得越快 —— 压大坡度/倒飞掉高度,
+//      平飞零下沉, 永不失速 (IronSkyAce 式伪升力的 BF 化改法: 去 8% 常沉项, 巡航不泊松掉高);
+//   ③ 速度耦合: 俯冲加速/爬升掉速, 临时超速回平自然衰减 (overMul/underMul 兜底)。
+// 消费方 (单一数据源纪律): 16-aircraft flightStep/update/playerFly/planeAI —— 别处不得另写同义常数。
+// 机型敏捷度 agil (FACTIONS[...].planes[i].agil) 缩放坡度上限与偏航率: 战斗机灵/攻击机钝,
+//   缺省 PLANE_FLIGHT.agil; 数值基准: 零式 1.15 最灵, IL-2 0.82 最钝。
+const PLANE_FLIGHT={
+birthSpeed:35,          // 出生/重生初速 m/s (7b-甲: 44×0.8=35.2 取整 —— 2026-09-30 用户实机裁定"速度有点快"全线 -20%)
+ceiling:110,            // 硬天花板 (y>此值强制压头; 原内联 110)
+bound:140,              // 出界回拉带 (|x/z|>MAP_SIZE/2+bound 折返; 原内联 140)
+boundSteerPl:1.2, boundSteerAI:0.6, // 出界折返转向率 rad/s (原内联 玩家 1.2 / AI 0.6)
+bankMax:1.15,           // 满舵坡度 rad≈66° —— "舵量→坡度"上限 (×agil)
+yawFromBank:1.15,       // 坡度→偏航率系数 (满坡·满 spdFac 时 rad/s; 满舵≈0.97, 对齐旧 AI 缠斗 ±1.0)
+spdFac0:0.62, spdFacK:0.006, // 转向速度因子 = spdFac0+speed×spdFacK (原 playerFly 内联式照搬)
+rollResp:3.2, pitchResp:3.6, // 滚转/俯仰阻尼响应 (原 playerFly 值照搬, AI 亦走此单源)
+pitchMin:-0.85, pitchMax:0.8, // 俯仰指令钳 rad (原 playerFly 值照搬)
+thrAccel:24,            // 玩家油门加速度基准 (经 spdResp 趋近 ⇒ 有效 ≈13 m/s², 与旧直加式等感)
+spdResp:0.55,           // 速度趋近响应 (AI 各态与速度耦合统一走它)
+sinkG:14,               // 伪升力基准下沉 m/s (平飞 ×0=不下沉, 60°坡 ≈7, 机背朝天全额)
+diveGain:21,            // 俯冲加速/爬升掉速增益 (m/s 每 sin(pitch); 7b-甲 26×0.8=20.8 取整; 满俯角≈+17, 回平后自然衰减回油门值)
+overMul:1.22, underMul:0.8, // 俯冲临时超速上限=spd1×overMul / 爬升掉速下限=spd0×underMul
+spdFloor:11,            // 绝对速度地板 m/s (永不失速停摆; 7b-甲 14×0.8=11.2 取整)
+cruiseMin:62, cruiseOver:42, // AI 巡航层 = max(cruiseMin, terrainMaxH()+cruiseOver) (原内联 62/42)
+patrolR:110,            // 巡逻圈基准半径 m (×√(MAP_SIZE/320); 原内联 110)
+patrolSpd:38,           // 巡逻速度目标 m/s (7b-甲 48×0.8=38.4 取整)
+rearmT:8,               // 挂弹补给周期 s/枚 (原内联 8)
+agil:1.0,               // 机型敏捷度缺省
+};
+// 战机 AI 强度按难度分档 (7b-甲 2026-09-30): eng 缩放缠斗进入距离 (240×eng) 与开火门限 (160×eng);
+//   rof 缩放开火间隔 (def.rof×rof)。7b-乙 (2026-09-30) 三域全参数化:
+//   空战域  eng/rof/react(咬上到开火的反应窗 s)/evd(挨打后规避概率)/evT(规避时长倍率);
+//   对地扫射域  sg (扫射开火进入距 110×sg);
+//   投弹域  bmLo/bmHi (投放带 [lo,hi]×速度×落弹时 —— 带越窄投得越准)。
+//   ★7b-丙 AI 接管飞行员固定读 [1] 老兵档 (用户裁定"老飞行员代打", 强度不随游戏难度变化)。
+const PLANE_DIFF=[
+{ eng:0.70, rof:1.50, react:1.10, evd:0.45, evT:1.25, sg:0.75, bmLo:0.35, bmHi:1.25, name:'新兵' },
+{ eng:1.00, rof:1.00, react:0.70, evd:0.70, evT:1.00, sg:1.00, bmLo:0.50, bmHi:1.08, name:'老兵' },
+{ eng:1.25, rof:0.85, react:0.45, evd:0.90, evT:0.80, sg:1.20, bmLo:0.65, bmHi:1.00, name:'精英' },
+];
+// ── 7b-丙 锁定/AI 接管单源常量 (2026-09-30, 用户裁定: 锁定=E/鼠标中键, 接管=Space, 老飞行员代打) ──
+//   PLANE_LOCK      锁定窗: cone=机头半角(度)/range 锁定距离; drop=维持松锥(度)/dropRange 松锁距离
+//                   (维持窗比锁定窗宽 10°/60m —— 目标小幅机动不掉锁, 明显脱离才掉)。
+//   PLANE_TAKEOVER  接管窗: range 接战上限(超出即交还) / losGrace 视线被遮宽限 s / cd 交还后冷却 s。
+//   PLANE_AI        统一 lead 追击时间基准 s (16-aircraft planeLeadAim 单源读, 缠斗与接管飞行员共用)。
+const PLANE_LOCK={ cone:35, drop:45, range:500, dropRange:560 };
+const PLANE_TAKEOVER={ cd:3, range:600, losGrace:1.6, minAGL:40, diveAGL:20 }; // cd 冷却 3s (2026-09-30j 用户裁定 8→3: 接管收账后老飞行员歇太久, 玩家空窗期太长); minAGL 保底高度 m (2026-09-30 实机热修: 用户报"接管到敌机坠地前一秒, 交还时自己也快坠机"—— 旧 gh+12 尾守卫余量不够改出; 本机 AGL+前方两采样点任一低于它即全能量拉起, 追击瞄准点也钳在它上方); diveAGL 俯冲档保底 m (2026-09-30k 用户报"敌机高度比较低时接管不去打": 旧单一 minAGL=40 把低空攻击整帧顶掉 —— 目标在本机下方 >4m 即按俯冲档拉起, 满杆改出动力学 pitchResp~0.5s 下沉 5~10m 仍留约一倍余量; 平飞/爬升维持 40m 老闸)
+//   2026-09-30 实机批 (用户报"Bot 飞机打着打着跑到低空去晃悠, 动作十分生硬") 增补三件 ——
+//   缠斗低空保护三参数 (16-aircraft planeAI 消费, 与 PLANE_TAKEOVER.minAGL=40 同一思路的 AI 侧):
+//   aimAGL    缠斗追击点最低离地 m —— lead 点钳在"瞄准点下方地形+此值"之上, 不许往地里瞄
+//             (旧版追着低目标一路盘旋下沉到贴地兜圈 = "低空晃悠"主因; 接管侧 minAGL+8=48 已验).
+//   breakAGL  本机离地低于它 → 缠斗整帧放弃攻击几何 (坡度减半+满杆+满油, 零开火) ——
+//             旧版只有机下 gh+14 尾守卫 (只抬俯仰继续咬), 满坡咬圈的伪升力下沉 ≈8.5m/s,
+//             改出动力学吃光余量, 与接管热修④"gh+12 不够改出"同一坑, 故取 30 留足一倍余量.
+//   joinAGL   入场门: 本机离地低于它不进缠斗 (44 = breakAGL+14 滞回, 防贴线反复进出缠斗态).
+const PLANE_AI={ leadT:280, aimAGL:36, breakAGL:30, joinAGL:44 };
+//   BOMB_GUIDE_RATE  航弹锁定制导角速度上限 rad/s (2026-09-30k: 投弹瞬间射手带锁定目标 (玩家 E/中键;
+//                    接管代打同吃 —— aiPilotTgt 即玩家锁) ⇒ 弹体在 updateNades 里以限角速度朝目标掰。
+//                    游戏性制导非导弹: 只改速度方向不改模长, 落体加速/触发引信/入水哑火全走原链;
+//                    无锁/目标中途死亡 = 诚实弹道。
+const BOMB_GUIDE_RATE=1.4;
+// ══════════════════════════════════════════════════════════════════════════════
+// 海战载具规格表 NAVAL_SPEC (2026-09-20N 海战批: 用户裁定"不要有运兵船, 只有战斗船。
+//   两栖车也一样" ⇒ 4 型全部是**战斗载具**, 不实现任何载人/卸兵/跳板放人机制)
+// 为什么写在这里: 与 tk/pl 同一条路线 —— 视觉尺寸、hp、武器、吃水全在一份表里, 建模与物理代码
+//   只按 spec.shape / spec.kind 走离散档分支, 调数值不用碰 15d/15e/15f 三个文件。
+// 读取方 (单一数据源纪律, 严禁任何一方另写一套):
+//   15d-naval.js  (载具本体/四档物理/进水沉没/武器管线)
+//   15e-navmodels.js (剪影建模工厂)
+//   15f-battery.js (反舰炮位对海索敌的目标尺寸表)
+//   22-hud.js (座驾 HUD 的武器/鱼雷读数) · 23-deploy.js (开局编制生成)
+// ── 字段说明 ──
+//   key/name/team/kind      kind: 'amph' 两栖履带 (水陆双态) | 'boat' 快艇 (纯水)
+//   hp/spd/rev/turn         血量 / 前进速度(m/s) / 倒车速度 / 转向速率(rad/s)
+//   reload/tRate/dmg        主炮装填 / 炮塔回转 / 主炮伤害
+//   col/colT/paint          涂装分档 (同 tk: plain|two|camo)
+//   hullL/hullW/hullH/hullY 车体/艇体 长/宽/高/中心高 (米, 实尺寸建模, 不做整体缩放)
+//   trkSx/whR/whN           两栖车履带中心半距 / 负重轮半径 / 单侧轮数 (boat 恒 0)
+//   tur{shape,w,l,h,ringZ}  炮塔档 (四种载具全都有: amph = 37mm 小塔 / boat = 大型回转炮塔;
+//                            shape 离散档 bigRound|smallRound|hex — 15e 按档建塔, boat 另有 360° 扫掠净空约束)
+//   sightH                  炮手观瞄镜心相对 deckY 的高度 (m; 炮艇档 —— 15e 的观瞄件与 WS2 炮手镜相机共用)
+//   barR/barrelL/brake/cupH 炮管半径/长度/炮口制退器/指挥塔高 (同 tk 口径; main.recoil = 后坐行程 m, 供 WS2 动画)
+//   ★2026-09-26 审计复核: main.recoil 目前**无读点** —— 它是给 15e 开炮后坐动画预留的数据 (不是死字段);
+//     真要接入时读 spec.main.recoil, 且玩家/Bot 两条开炮路径共用 Battery.fire —— 别在 20a/14 各写一个数。
+//   ── 四档物理 (用户选"中等档": 吃水/浮态/浪涌/搁浅 四项全有) ──
+//   draft0    静水吃水(米) —— PT 0.95 在冲滩带 d<17m 硬搁浅; 两栖车 0.40 礁盘(1.22m)畅通
+//   floodK    进水系数: flood += dmg*floodK; flood>1 → 沉没 (艇大车小, 史实: 木壳艇一发就灌)
+//   buoyRoll  转向横倾系数 (roll → -yawRate*k, 阻尼弹簧回正)
+//   buoyPitch 加速纵倾系数 (pitch → -accel*k, 起步抬头/刹车埋首)
+//   wadeDepth/wadeSpdMul/wadeTurnMul  两栖车浮航态阈值(水深 m) / 速度倍率 / 转向倍率
+//   ── 武器 ──
+//   main      {rof 射击间隔, dmg 对岸伤害, spd 弹速, name} —— ★对岸与对艇**双用** (用户第 6 条)
+//   secondary {rof,dmg,mgDmg,name,n} 机炮/机枪 (null = 该型无)
+//   mg        {rof,dmg} 同轴机枪 (两栖车用)
+//   torpedo/torpSpd/torpDmg/torpRange  鱼雷管数 / 航速(m/s) / 命中伤害(直接灌满 flood) / 有效射程
+//   ── 剪影档 (15e 读) ──
+//   shape      剪影档 lvt|kami|pt|gyorai (各走独立建模分支)
+//   float      浮力形态 box(浮箱缘上翘) | pontoon(可拆卸浮筒) | hull(滑行艇体)
+//   pontoon    可拆卸浮筒节数 (カミ = 2, 前后各一; 史实特色, 用独立颜色区分)
+//   ── 重生 ──
+//   sinkT      沉没耗时(秒, 3~6 档) / respawnT 重生冷却[min,max] / ticket 兵力票代价
+// 数值口径: 全部为初值, 由 owner 在 dev/verify-naval*.js 的量化验收中调优 —— 调参只改本表。
+// 海战炮弹速 (声明必须在 NAVAL_SPEC 之前: const 有 TDZ, 表里引用它不能反过来):
+//   2026-09-21B 用户裁定「两栖车和船的子弹弹速太慢; 陆战的也提到 180~200」⇒ 与陆战 SHELL_SPD 统一到 190。
+//   2026-09-28 用户裁定「各种炮弹的弹速乘二」⇒ 与陆战 SHELL_SPD 同步 **380** (两常量照旧取同一个数)。
+//   两个常量名都保留 (它们是冻结契约里的名字: 15f 岸炮提前量 / 20a 炮口抬高补偿 / 14-bots 提前量 / 16-aircraft
+//   高炮弹速全按这两个名字取值), 只是值取同一个数 —— 改一个数, 全链自动跟随。
+//   ★life 不随动 (2026-09-28): 本批口径就是"弹速×2、射程包线×2", 与 2026-09-21B 的"包线守恒"相反;
+//     迫击炮例外 —— 落点由 tof 高抛解精确定位, 弹速×2 = tof 减半 (13-combat/14-bots 两处除数已同步减半)。
+const SHELL_SPD_NAVAL=380;
+const NAVAL_SPEC={
+// ─── 美军: LVT(A)-1 两栖坦克 (LVT 浮箱车体 + 37mm M6 旋转炮塔; 史实炮塔位于车体前部偏左) ───
+lvt:{ key:'lvt', name:'LVT(A)-1 两栖坦克', team:0, kind:'amph',
+  hp:900, spd:6.2, rev:3.0, turn:0.85, reload:1.5, tRate:2.4, dmg:340,
+  col:0x5c6b47, colT:0x46523a, paint:'two',
+  hullL:7.95, hullW:3.25, hullH:1.95, hullY:1.30, trkSx:1.20, whR:0.42, whN:6,
+  tur:{shape:'smallRound', w:1.90, l:1.90, h:0.62, ringZ:1.35},
+  barR:0.08, barrelL:2.10, brake:0, cupH:0.10,
+  draft0:0.40, floodK:0.00055, buoyRoll:0.028, buoyPitch:0.030,
+  wadeDepth:0.55, wadeSpdMul:0.45, wadeTurnMul:0.50,
+  main:{rof:1.35, dmg:340, spd:SHELL_SPD_NAVAL, name:'37mm M6 炮'},
+  secondary:null, mg:{rof:0.09, dmg:40},
+  torpedo:0, torpSpd:0, torpDmg:0, torpRange:0,
+  shape:'lvt', float:'box', pontoon:0,
+  sinkT:4.5, respawnT:[55,70], ticket:4 },
+// ─── 日军: 特二式内火艇 カミ (可拆卸浮筒 —— 剪影最好认的一件) ───
+kami:{ key:'kami', name:'特二式内火艇 カミ', team:1, kind:'amph',
+  hp:700, spd:6.8, rev:3.2, turn:0.90, reload:1.35, tRate:2.6, dmg:300,
+  col:0x6a6a52, colT:0x54543f, paint:'two',
+  hullL:7.40, hullW:2.85, hullH:1.55, hullY:1.15, trkSx:1.05, whR:0.38, whN:5,
+  tur:{shape:'smallRound', w:1.75, l:1.75, h:0.58, ringZ:0.55},
+  barR:0.07, barrelL:1.95, brake:0, cupH:0.10,
+  draft0:0.38, floodK:0.00060, buoyRoll:0.030, buoyPitch:0.032,
+  wadeDepth:0.55, wadeSpdMul:0.45, wadeTurnMul:0.50,
+  main:{rof:1.30, dmg:300, spd:SHELL_SPD_NAVAL, name:'37mm 炮'},
+  secondary:null, mg:{rof:0.11, dmg:34},
+  torpedo:0, torpSpd:0, torpDmg:0, torpRange:0,
+  shape:'kami', float:'pontoon', pontoon:2,
+  sinkT:4.0, respawnT:[55,70], ticket:4 },
+// ─── 美军: PT 艇 (Elco 80': 木质滑行艇体 + **大型回转炮塔** 37mm + 双联 .50 + 4 具鱼雷管) ───
+pt:{ key:'pt', name:'PT 艇', team:0, kind:'boat',
+  hp:620, spd:14.5, rev:4.0, turn:0.62, reload:1.0, tRate:1.9, dmg:150,
+  col:0x4c5a5e, colT:0x3a4448, paint:'plain',
+  hullL:20.5, hullW:6.40, hullH:2.60, hullY:1.35, trkSx:0, whR:0, whN:0,
+  // 2026-09-21B 用户"舰船更短、炮塔更明显"(§5/§9 决定表): 真缩短 hullL 24.4→20.5 (−16%; 艇宽不变 ⇒ 剪影更短粗),
+  //   炮塔 2.55/2.75/0.88→3.10/3.35/1.05 (体积 +61%), 环座 ringZ 6.35→5.35 (前移一档, 落在艏甲板)。
+  //   塔一大就得抬: 15e 把塔底抬到艏甲板面之上 NM_TUR_LIFT(0.12) ⇒ 环座必须加高到 0.34 才能填满 0.13 的嵌合;
+  //   塔顶因此升到 yF+1.17, 观瞄镜心 (sightH, 相对主甲板) 同步抬到 1.25 才落在新塔顶面上 (15e 会断言镜座压顶 ≥0.08)。
+  //   ringZ 5.35 = 0.26·hullL —— 取艏甲板 (原艏炮座位), 后方留出舰桥/桅桁的 360° 扫掠净空 ≥0.10m。
+  tur:{shape:'bigRound', w:3.10, l:3.35, h:1.05, ringZ:5.35}, sightH:1.25,
+  barR:0.075, barrelL:2.30, brake:0, cupH:0,
+  draft0:0.95, floodK:0.00130, buoyRoll:0.034, buoyPitch:0.040,
+  wadeDepth:0, wadeSpdMul:0, wadeTurnMul:0,
+  main:{rof:0.85, dmg:150, spd:SHELL_SPD_NAVAL, name:'37mm 艇艏炮', recoil:0.22},
+  secondary:{rof:0.075, dmg:42, mgDmg:9, name:'双联 .50 机炮', n:2},
+  mg:null,
+  torpedo:4, torpSpd:26, torpDmg:900, torpRange:900,
+  shape:'pt', float:'hull', pontoon:0,
+  sinkT:5.5, respawnT:[55,70], ticket:5 },
+// ─── 日军: 九三式鱼雷艇 (短艇体 + **封闭回转炮塔** 25mm + 舷侧 2 具鱼雷管) ───
+gyorai:{ key:'gyorai', name:'九三式鱼雷艇', team:1, kind:'boat',
+  hp:520, spd:13.2, rev:3.8, turn:0.68, reload:1.1, tRate:2.1, dmg:120,
+  col:0x54544a, colT:0x3f3f38, paint:'plain',
+  hullL:15.5, hullW:5.20, hullH:2.20, hullY:1.15, trkSx:0, whR:0, whN:0,
+  // 2026-09-21B (§5/§9 决定表): 真缩短 hullL 18.2→15.5 (−15%); 塔 2.25/2.42/0.75→2.70/2.90/0.90 (仍保持 PT 塔的
+  //   0.85~0.90 等比档: w 0.871 / l 0.866 / h 0.857), 环座 ringZ 4.30→3.65 (前移一档)。
+  //   sightH 0.95→1.09 与 PT 同因: 塔顶升到 yF+1.02, 镜心必须跟着落在新塔顶面上 (塔顶/甲板都由 15e 派生)。
+  tur:{shape:'bigRound', w:2.70, l:2.90, h:0.90, ringZ:3.65}, sightH:1.09,
+  barR:0.062, barrelL:1.80, brake:0, cupH:0,
+  draft0:0.85, floodK:0.00145, buoyRoll:0.036, buoyPitch:0.042,
+  wadeDepth:0, wadeSpdMul:0, wadeTurnMul:0,
+  // 2026-09-21B: 弹速收回单源 (原硬写 spd:110 绕过了 SHELL_SPD_NAVAL, 提速时会漏改这一型)
+  main:{rof:0.16, dmg:34, spd:SHELL_SPD_NAVAL, name:'25mm 机炮', recoil:0.18},
+  secondary:null, mg:null,
+  torpedo:2, torpSpd:25, torpDmg:880, torpRange:820,
+  shape:'gyorai', float:'hull', pontoon:0,
+  sinkT:5.0, respawnT:[55,70], ticket:5 },
+};
+// 海战通用常量 (与用户裁定的"中等档物理"一一对应; 调参只改这里)
+const NAVAL_CFG={
+  shallowPad:0.45,   // 浅水带厚度: 水深 ∈ [draft, draft+该值) ⇒ 减速+刮擦 (龙骨擦礁)
+  shallowSpdMul:0.40,
+  shallowScrub:4,    // 浅水区每秒刮擦伤害
+  waveAmp:0.15,      // 浪涌振幅(米) —— 与 05b BUOYS 的 0.14/1.3 同源相位口径 (艇与浮标同波)
+  waveFreq:1.3,
+  waveKx:0.05, waveKz:0.03,
+  groundingRevMul:0.6,   // 搁浅后倒车推力倍率 (可脱困)
+  floodDrain:0,          // 进水是否自排 (0 = 只进不出, 史实木壳艇)
+                         // ★2026-09-26 审计复核: 无读点 —— 15d 的进水链本来就是只进不出 (flood 单调),
+                         //   此字段是行为契约的显式声明 (改 1 需同时在 15d 接入排水速率), 保留。
+  sinkTilt:0.8,          // 沉没第①段: 倾斜时长(秒)
+  crewDrownPad:1.2,      // 乘员落水后浮出的水面偏移
+};
+// 载具类别 → 每队编制数 (用户裁定: 每队 2 坦克 + 2 两栖车 + 3 艇; 只对 island 生效)
+const NAVAL_ORBAT_DEF=[2,3];   // [两栖车, 艇] per team —— 缺省 0 (其余 12 张图无海战载具)
+// ── 海面浪场单源 (2026-09-20N) ──
+// 为什么必须是一支函数: 05b 的航道浮标 BUOYS 与 15d 的水面载具都要"随浪起伏", 两处各写一条
+//   sin() 就是两套浪 —— 玩家会看到艇与浮标**不同步地上下**, 一眼假。这里定死波场, 两处共读。
+// 相位是**位置相位**(x*waveKx+z*waveKz), 不是随机相位: 只有位置相位才能让相邻两件同波次,
+//   随机相位下"艇与浮标同相"在数学上不可能成立 (2026-09-20N 冻结).
+// t 由调用方传入 (nowT 定义在 24-main, 本文件不得反向依赖它)。
+function seaWaveOffset(x,z,t){
+  return Math.sin(t*NAVAL_CFG.waveFreq + x*NAVAL_CFG.waveKx + z*NAVAL_CFG.waveKz)*NAVAL_CFG.waveAmp;
+}
 // ===== 固定火力点/载具机枪单源常量 (2026-09-06 B4: 玩家与 Bot 走同一份射击代码) =====
 const MG_BULLET_DEF={dmg:40,headMul:2.0,snd:'mg',tracer:2,vehDmg:9};      // 载具同轴机枪弹 (坦克 AI/玩家共用)
 const mgBulletDef=mdef=>({dmg:mdef.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:2.5}); // 固定重机枪弹 (座子 def 参数化; headMul 统一 1.9)
+// ===== 手雷投掷单源 (2026-09-30 批): 初速表 + 爆圈半径 =====
+// NADE_THROW: releaseNade (18-game) 与弹道预演 updateNadeArc (22-hud) 共用 —— 预演与实弹必须同一初速
+//   才"指哪落哪"。v=平飞分量 (camForward×v), up=抬手竖直补正, 叠加玩家自身速度 ×0.4; 重力 9.8 在
+//   updateNades (13-combat, 硬编码既有口径)。2026-09-30 用户裁定投掷距离 ≈31m (旧 12~15 初速 ≈15m):
+//   手雷 15→26 / 反坦克 12→21 / 烟雾 12→21 / 燃烧 13→22 (平地满弧 ≈31/25/25/26m 含弹跳滚动)。
+//   Bot 自有弹道解 (14-bots tof 解) 不读本表, 不受影响。
+const NADE_THROW={
+frag:{v:26,up:2.4},
+at:{v:21,up:2.2},
+smoke:{v:21,up:2.4},
+incin:{v:22,up:2.6}
+};
+// 普通手雷/爆炸圈缺省半径 (explodeAt, 13-combat): 用户裁定"微量增加手雷爆炸范围" 9→10。
+// 航弹主伤圈 (splashDamage 13) / 迫击炮 (7.5) / 反坦克炸药 (5.5) 各自独立, 不读本值。
+const NADE_BLAST_R=10;
+// ===== 触发引信单源 (2026-09-30 批2 用户裁定) =====
+// 用户原话: "保留计时，但在计时归零的基础上只有触地或命中合法目标才爆炸。"
+// 语义 = **双条件**: 引信秒照走 (**举雷瞄准期间也在走** —— 保留"厨雷"手感), 但**到点本身不炸** ——
+//   到点只是"武装完成"; 此后 ① 触地 (落地/落定) ② 撞到敌方士兵躯干, 任一发生即以该点为爆点立即引爆。
+//   ⇒ 普通手雷**没有空炸** (旧版 fuse<=0 直接 'blow' = 空中到点就炸, 是用户 2026-09-30 批2 报的"按空炸做的");
+//     想让它早炸就自己多举一会儿 (引信烧短) 再松手: 出手后触地即炸。
+//   ⇒ 举雷期间到点**不自爆** (没有接触 ⇒ 不满足双条件), 手里那颗雷只是"越来越即时"。
+// NADE_ARMED_BY_FUSE: 走本表的弹种 = "引信到点才武装"; **表外** (反坦克炸药/航弹/迫击炮弹) = 出手即武装
+//   (老口径, 行为零变化: 它们天生触地/触载具即炸, 列进来会把已经对的口径改成两套)。
+// 读表处: 13-combat nadeStep (真弹与预演共用的单源积分器) / throwNade (挂 armOnFuse 旗) / 22-hud updateNadeArc。
+//   普通手雷无坦克伤害圈是既有裁定 (explodeAt 分支), 故"合法目标"不含载具 —— 撞上去白炸不如让它落到地上再炸。
+const NADE_ARMED_BY_FUSE={frag:true,smoke:true,incin:true};
 const AT_CREW_DIST=0.9;   // 反坦克炮炮手站位: 炮后方距离 (旧 1.2/1.3 会嵌进后方沙袋墙 0.35m)
-const EMPL_AA_CD=0.34;    // 防空炮射速间隔: 玩家/Bot 同档 (D1=c; Bot 强度差异交 DIFF_TABLE 散布表达)
+// 反坦克炮**方向机限界** (★2026-09-26 修, P1-12): 炮口从轴心向前 2.69m, 而站台在轴心**后方** 0.9m ——
+// 只要允许 360° 回旋, 炮口横扫时必然从操作手躯干中间穿过去 (与 A9 高炮同一条: 高炮扫掠半径 1.7m, 站位退到 1.95m)。
+// 固定炮位在现实里本就有方向机限界 (反坦克炮的方向机通常 ±30°~±45°), 这里取 ±100° 留足射界:
+//   炮口距操作手最近 = 0.9×sin(80°) = 0.886m (躯干半径 0.3 + 管径 0.06 ⇒ 净空 0.53m);
+//   后方掩护墙 (1.6m 处、长 3.5m 的墙段, 两端 ±1.75m) 要炮口转到 ~130° 才够得着 ⇒ 同样在限界之外。
+// 玩家 (20a-seats) 与 Bot (14-bots) 共用这一条 —— 视觉/视角/弹道三者始终同向 (视角被钳在射界内)。
+const AT_YAW_MAX=1.745;
+// 反坦克炮**俯角下限** (2026-09-26 A6 修): 底盘轴心在 g0+0.85, 炮口制退器前缘到轴心 2.69m ⇒
+// 俯角 θ 时炮口高度 = 0.85 - 2.69*sinθ。旧钳位 -0.55rad 让炮口落到地面**以下 0.55m** (整个管头埋进土里,
+// 玩家在近处压炮看不到炮口)。下限按"炮口离地留 0.06m 余量"反解: asin((0.85-0.06)/2.69)=0.299 ⇒ -0.30。
+// 玩家 (20a-seats) 与 Bot (14-bots) 共用这一条。
+const AT_PITCH_DOWN=0.30;
+// 高射炮**操作手站位**: 炮口扫掠半径 = 1.7m (双管 1.7 长, 自轴心向前) ⇒ 旧站位 0.9m 站在扫掠圈**里面**,
+// 炮口横扫时直接从操作手躯干中间穿过去 (2026-09-26 A9)。站位退到 1.95m = 扫掠半径 + 0.25 余量。
+const AA_CREW_DIST=1.95;
+// 7d-乙 (2026-09-30 用户定稿 B 方案四联 20mm + 「射速和弹速也要有所提升」): 0.34→0.22 (4.5发/s, 四联射速观感),
+//   玩家/Bot 仍同档单源 (D1=c); Bot 对机 DPS 相对空对地平衡批前 = (0.34/0.22)×0.5 ≈ 0.77, 未回到集火秒杀强度。
+const EMPL_AA_CD=0.22;    // 防空炮射速间隔: 玩家/Bot 同档 (D1=c; Bot 强度差异交 DIFF_TABLE 散布表达)
+// 高炮弹速 (7d-乙): 旧借 SHELL_SPD (坦克炮单源) —— 四联 20mm 定稿后单独立户, 调高炮弹速不再牵动坦克炮。
+//   380→460 (−21% 飞行时间); 两处提前量算式同源换算: Bot 引导 14-bots (dist/FLAK_SPD), 玩家指示圈 20a-seats。
+const FLAK_SPD=460;
+// 高炮 Bot 强度按难度分档 (7b-甲 2026-09-30, 用户实机报"新手档也被高炮几秒打掉"—— 旧 ±25m 散布写死,
+// Plane.takeDmg 又不吃 DIFF_TABLE.dmgMul ⇒ 难度表对空中挨打几乎无效)。单源两张量:
+//   AA_DIFF (本文件, 高炮专用): jit=瞄准点随机散布 m (水平; 垂直=×0.32 同旧 8/25 比例)。
+//     旧等效=老兵档 25; 对机**伤害**倍率不在本表 —— 单点收口在 Plane.takeDmg 的 DIFF_TABLE.dmgMul
+//     (16-aircraft), 高炮/AI 机直检/航弹同吃, 免双乘。
+//   PLANE_DIFF (PLANE_FLIGHT 块尾, 战机 AI 专用): eng=接战距离倍率 (缠斗进入/开火门限 240/160 的分档缩放),
+//     rof=开火间隔倍率 (新兵打得慢)。
+//   react (7b-乙): 高炮反应窗 s —— 换目标/新目标进距后不即刻开火 (旧版无反应门, 新目标当帧就泼弹)。
+const AA_DIFF=[
+{ jit:45, react:1.30, name:'新兵' },
+{ jit:25, react:0.80, name:'老兵' },
+{ jit:14, react:0.45, name:'精英' },
+];
+// 空对地平衡批 (2026-09-30, 用户裁定: "飞机对地面步兵的枪有更高减伤 / 削减地面对空中单位的攻击欲望"):
+//   审计事实 —— 普通枪弹与飞机**无碰撞** (13-combat 子弹链只查坦克/卡车/士兵/艇, 步兵/坦克机枪物理上打不着机),
+//   地面枪械对机的唯一伤源是高炮弹; 坦克/两栖车/步兵又能 140~220m 点名伞降目标。单源两条:
+//   GROUNDGUN_VS_AIR   Bot 高炮弹对机伤害倍率 (玩家操作的高炮**不减**, 保基地防空火力; 难度倍率仍由
+//                      Plane.takeDmg 的 DIFF_TABLE.dmgMul 叠加, 不在这里双乘)。
+//   EMPL_AA_ENGAGE_R   Bot 高炮对机交战距离 (旧写死 220 ⇒ 全图高炮齐射同一架机; 收紧到 140 =
+//                      "靠近防空阵地才挨打", 高炮退为阵地防御兵器而非全图威胁)。
+//   7d 防空炮批重调火力时以这两条为基线; 多架机分炮不集火 (每门 enemyPlaneAlive 取第一架) 留给 7d 立台账后做。
+const GROUNDGUN_VS_AIR=0.50;
+const EMPL_AA_ENGAGE_R=140;
+//   AIR2AIR_BOT_MUL   Bot 航炮空对空伤害倍率 (2026-09-30k 用户裁定"Bot 飞机对空还是有点太强, 略削一下"
+//                     —— 0.8 = 空空伤害档 -20%; 玩家开的飞机与接管代打 (shooter=player)**不减**;
+//                     难度倍率仍由 Plane.takeDmg 的 DIFF_TABLE.dmgMul 内部叠加, 不在这里双乘;
+//                     Bot 高炮对机走 GROUNDGUN_VS_AIR 另一杆, 互不相干)。
+const AIR2AIR_BOT_MUL=0.80;
+// 轻武器对空 (7c, Q3 裁定 "加轻武器对空——步兵枪械/机枪工事可刮血飞机, BF1942 同款"):
+//   伤害档 [min,max] 每发命中掷一次 —— 步兵弹 / 机枪级弹 (def.vehDmg>0: 机枪工事·坦克同轴·车载机枪) 两档;
+//   Bot 射手再乘 GROUNDGUN_VS_AIR (空对地平衡批口径: 飞机对地面步兵的枪有更高减伤 —— 玩家档不减)。
+//   判定几何单源 planeHitTest (16-aircraft); 索敌**不放开** —— 步兵仍不主动点名飞机 (平衡批裁定),
+//   刮血只发生在弹道恰好穿过机体 (含被扫射者的还击弹), 攻击欲望不回潮。
+const AIRMG_SCRATCH_SOL=[1,3];
+const AIRMG_SCRATCH_MG=[2,5];
+// ══════════════════════════════════════════════════════════════════════════════
+// 大舰规格表 CAPITAL_SPEC (2026-09-30 阶段五 P4: 纯海战 + 大舰巨炮 / 航母子系统)
+// 用户裁定 (2026-09-30 阶段门四问, 登记表 §五 阶段五开工问项):
+//   ① 舰载机 = **简化起降** —— 甲板一键弹射起飞 (不做滑跑加速段) + 触舰自动拦阻钩停;
+//   ② 大舰被击毁 = **瘫痪** —— 永久"海上陆地": 外壳结构保留 / 上层焦黑 / 炮塔报废塌陷 /
+//      动力归零。★2026-10-01b 用户裁定改版: 瘫痪舰 = **无阵营的陆地** —— 地图标识变灰,
+//      甲板**不可再被占领** (旗点就地转灰/中立), **不再作为重生点**, 只剩可站立/可通行的地形价值;
+//      (旧口径"甲板照走照占/旗点继续可争"作废。)
+//      本队基地舰瘫痪 ⇒ 基地坐标回退到本队另一艘尚在巡航的大舰 (capBasePos 单源)。
+//   ③ 大舰**缓慢巡航** —— 沿固定航线低速往复; 甲板 = 移动平台 (乘员跟着走);
+//   ④ 胜利规则 = **全海图 · 舰上旗点** —— 无陆地, 旗点设在双方大舰甲板上, 登舰夺点。
+//
+// 与 NAVAL_SPEC 的关系: 同一条"表驱动"路线 (建模/物理/武器/伤害全按本表走), 但**另起一表** ——
+//   NAVAL_SPEC 的 4 型是**小艇** (kind amph|boat, 会沉、会重生、走 navalCraft 全库 ~15 处谓词),
+//   大舰是**不可沉的浮岛平台** (可走甲板 + 港口级火力 + 瘫痪态), 两者的消费者语义完全不同
+//   (navalPushCraft / navalNear / 沉没链在小艇上是"推挤+击沉", 在大舰上是"绕行 + 登舰"),
+//   混进一张表必然写出错误分支 —— 故独立成表 + 独立登记表 capitalShips。
+// 读取方 (单一数据源纪律, 严禁任何一方另写一套):
+//   15g-capmodels.js (剪影建模工厂 capBuildModel + 局部碰撞盒/命中盒单源)
+//   15h-capital.js   (本体 / 巡航 / 甲板平台 / 瘫痪链 / 武器 / 命中)
+//   05c-layouts.js   (甲板旗点杆高: CAP_DECK_Y) · 23-deploy.js (编制生成/基地) · 22-hud.js (海图符号)
+// ── 字段说明 ──
+//   cls                 'bb' 战列舰 | 'cv' 航空母舰 (决定建模分支与甲板语义)
+//   style               'tower'|'pagoda' (bb 舰桥形制) | 'us'|'jp' (cv 舰岛形制)
+//   hullL/hullW/hullH   总长 / 最大宽 / 龙骨到主甲板高 (米)
+//   draft0              静水吃水 (米) —— **局部 y=0 在龙骨**, 故 y=draft0 即水线、y=hullH 即主甲板面
+//   deckY/deckHW/deckHL 可行走甲板面的局部 y / 甲板矩形半宽 / 半长 (上层建筑与炮塔在甲板上的占位
+//                       由 15g 输出的 boxes 表达, 不是"挖洞"; 走行人由 15h 的局部空间解算绕行)
+//   spd/turn            巡航速度 (m/s) / 转向速率 (rad/s) —— 巡航 = 沿 route 往复, 端点掉头
+//   hp                  结构值: 打空 ⇒ **瘫痪** (不沉、不移除、不重生)
+//   armor               区域伤害倍率 {hull 舷侧装甲带 / deck 水平甲板 / sup 上层建筑 / tur 炮塔}
+//                       —— 命中盒在 15g 建模时逐盒打 tag, 伤害按被击中的那个盒取倍率 (分区装甲单源)
+//   main                主炮 {n 塔数, guns 每塔管数, rof 齐射间隔 s, dmg 单发, spd 弹速, disp 散布 rad,
+//                        ringZ[] 各塔中心局部 z, y[] 各塔炮轴局部 y, ringR 塔半径, gunSx 管间距半距, name}
+//                        —— 走全库共用的 shells 管线 (kind:'naval'), 与坦克炮/岸炮弹同一条命中链
+//   sec                 副炮 {n, rof, dmg, spd, name, barrels 联装数(建模读, 缺省2), turHp, mounts:[{lx,lz,y}]} —— 对海/对空双用 (fireBullet 扇面)
+//   aa                  防空 {n, rof, dmg, spd, name, barrels 联装数(建模读, 缺省2), turHp, mounts:[{lx,lz,y}]} —— 走高炮弹管线 (打飞机)
+//                       rof 是**单座**开火间隔 (秒)。口径见 00-config 尾部 CAPITAL_CFG.aaR 的注释:
+//                       全舰 AA 总射速 = 本舷参战座数 × 1/rof, 目标值 ≈ 2~3 发/秒 (机血 100)。
+//   torpedoDmg          鱼雷命中本舰的伤害 (鱼雷是唯一能有效重创大舰的轻兵器)
+//   ticket              本舰瘫痪时对方获得的兵力票 (反舰战果)
+//   col/colT/deckCol    涂装色 / 第二色 / 甲板色 (材质**每舰全新一套**, 与 15e 硬约束③同规)
+// 数值口径: 全部为初值, 由 owner 在 dev/verify-phase5-capital.js 的量化验收中调优 —— 调参只改本表。
+const CAPITAL_SPEC={
+// ─── 美军: 衣阿华级战列舰 (塔式舰桥 · 3×3 主炮 · 两前一后) ───
+bb_us:{ key:'bb_us', cls:'bb', name:'衣阿华级战列舰', team:0, style:'tower',
+  hp:24000,
+  hullL:152, hullW:21, hullH:12.6, draft0:5.6, deckY:12.6, deckHW:9.0, deckHL:72,
+  spd:4.0, turn:0.042,
+  armor:{ hull:0.40, deck:0.55, sup:1.00, tur:0.22 },
+  main:{ n:3, guns:3, rof:13, dmg:950, spd:SHELL_SPD_NAVAL, disp:0.012, name:'406mm 主炮', turHp:2400,
+         ringZ:[52,36,-48], y:[15.6,18.6,15.6], ringR:5.4, gunSx:2.8 },
+  // 副炮/防空全在**中部甲板室顶** (y = deckY+DH_H, 见 15g cpBuildSuperBB 的甲板室) 与艏楼甲板:
+  //   旧表把 lx 7.6/y 14.9 写成"悬在舷外半空"(甲板室不存在时的高度), 实机是一排飘着的炮座。
+  // turHp (2026-10-01b 用户裁定"各个分炮塔有自己的血量, 被打坏了就不能用"): 各炮位独立结构值 ——
+  //   打空 ⇒ 该炮位报废 (不再开火/不可接管/视觉残态), 溢出伤按 CAPITAL_CFG.turSpill 落进舰体。
+  //   ★2026-10-01c 再修 (用户复报"大量炮塔仍浮空"): 浮空判据不止"高度对不对", 还有"支撑足迹在不在" ——
+  //     甲板室 z 范围是 [-hullL*0.265, +hullL*0.158] = [-40.3, +24.0], 旧表 lz 25/27/−42 三处都**越出
+  //     甲板室端面**却保持甲板室顶高度 ⇒ 悬在主甲板上空 2.4m (高度审计查不出: 高度本身"对")。
+  //     全部收回甲板室足迹内 (z≤22 / ≥−36), 与副炮错开 ≥3m。
+  sec:{ n:4, rof:0.60, dmg:110, spd:FLAK_SPD, name:'127mm 副炮', turHp:320, barrels:1,
+        mounts:[{lx:4.8,lz:22,y:15.0},{lx:-4.8,lz:22,y:15.0},{lx:4.8,lz:-20,y:15.0},{lx:-4.8,lz:-36,y:15.0}] },
+  aa:{ n:6, rof:1.35, dmg:28, spd:FLAK_SPD, name:'40mm 博福斯', turHp:200, barrels:2,
+       mounts:[{lx:5.4,lz:18,y:15.0},{lx:-5.4,lz:-10,y:15.0},{lx:5.4,lz:-26,y:15.0},
+               {lx:-5.4,lz:-33,y:15.0},{lx:6.6,lz:46,y:12.6},{lx:-6.6,lz:46,y:12.6}] },
+  torpedoDmg:2200, ticket:120,
+  col:0x59616a, colT:0x6d757e, deckCol:0x4d5257 },
+// ─── 日军: 大和级战列舰 (塔式舰桥演化型 · 同 3×3 主炮) ───
+bb_jp:{ key:'bb_jp', cls:'bb', name:'大和级战列舰', team:1, style:'pagoda',
+  hp:25000,
+  hullL:152, hullW:21.6, hullH:12.9, draft0:5.8, deckY:12.9, deckHW:9.3, deckHL:72,
+  spd:3.8, turn:0.040,
+  armor:{ hull:0.38, deck:0.52, sup:1.00, tur:0.20 },
+  main:{ n:3, guns:3, rof:13.5, dmg:1000, spd:SHELL_SPD_NAVAL, disp:0.013, name:'460mm 主炮', turHp:2600,
+         ringZ:[52,36,-48], y:[15.9,18.9,15.9], ringR:5.6, gunSx:2.9 },
+  sec:{ n:4, rof:0.62, dmg:115, spd:FLAK_SPD, name:'155mm 副炮', turHp:340, barrels:3,
+        mounts:[{lx:4.9,lz:22,y:15.3},{lx:-4.9,lz:22,y:15.3},{lx:4.9,lz:-20,y:15.3},{lx:-4.9,lz:-36,y:15.3}] },
+  aa:{ n:6, rof:1.55, dmg:26, spd:FLAK_SPD, name:'25mm 三联装', turHp:210, barrels:3,
+       mounts:[{lx:5.5,lz:18,y:15.3},{lx:-5.5,lz:-10,y:15.3},{lx:5.5,lz:-26,y:15.3},
+               {lx:-5.5,lz:-33,y:15.3},{lx:6.8,lz:46,y:12.9},{lx:-6.8,lz:46,y:12.9}] },
+  torpedoDmg:2400, ticket:130,
+  col:0x565a52, colT:0x6b6f66, deckCol:0x4a4d45 },
+// ─── 美军: 埃塞克斯级航空母舰 (右舷舰岛 · 全通飞行甲板) ───
+cv_us:{ key:'cv_us', cls:'cv', name:'埃塞克斯级航母', team:0, style:'us',
+  hp:20000,
+  hullL:168, hullW:22, hullH:15.5, draft0:6.2, deckY:17.6, deckHW:14.0, deckHL:84,
+  spd:4.8, turn:0.052,
+  armor:{ hull:0.42, deck:0.60, sup:1.00, tur:0.30 },
+  main:null,
+  // 副炮/防空全在**飞行甲板舷缘** (y = 甲板面) —— 旧表 lx 14.6 落在甲板矩形 (半宽 14) 之外, 是舷外悬空的炮座。
+  // ★2026-10-04 (海战审计 F2 CV 死局): 航母 main:null, 唯一对舰火力是副炮 —— 旧版 secR 走全局 480,
+  //   而敌 BB mainR 620 / 珊瑚海编队环心距 516m ⇒ 全程被白打还不了手 (纯靶子)。规格级 secR 覆盖 580:
+  //   够得着 516m 外的敌 BB (能还手), 仍被 620 主炮压一档 (劣势保留, 不翻盘)。
+  secR:580,
+  sec:{ n:4, rof:0.60, dmg:110, spd:FLAK_SPD, name:'127mm 双联高平两用', turHp:320, barrels:2,
+        mounts:[{lx:11.0,lz:40,y:17.6},{lx:-11.0,lz:22,y:17.6},{lx:11.0,lz:-34,y:17.6},{lx:-11.0,lz:-50,y:17.6}] },
+  aa:{ n:8, rof:1.30, dmg:30, spd:FLAK_SPD, name:'40mm 四联博福斯', turHp:200, barrels:4,
+       mounts:[{lx:12.6,lz:58,y:17.6},{lx:-12.6,lz:62,y:17.6},{lx:12.6,lz:14,y:17.6},{lx:-12.6,lz:-4,y:17.6},
+               {lx:12.6,lz:-26,y:17.6},{lx:-12.6,lz:-40,y:17.6},{lx:12.6,lz:-64,y:17.6},{lx:-12.6,lz:-72,y:17.6}] },
+  torpedoDmg:2000, ticket:100,
+  col:0x5c6470, colT:0x707a86, deckCol:0x4a4e50 },
+// ─── 日军: 翔鹤级航空母舰 ───
+cv_jp:{ key:'cv_jp', cls:'cv', name:'翔鹤级航母', team:1, style:'jp',
+  hp:18500,
+  hullL:164, hullW:21.4, hullH:15.1, draft0:6.0, deckY:17.2, deckHW:13.6, deckHL:82,
+  spd:4.6, turn:0.050,
+  armor:{ hull:0.44, deck:0.62, sup:1.00, tur:0.30 },
+  main:null,
+  // 副炮/防空全在**飞行甲板舷缘** (y = 甲板面) —— 同 cv_us 的 F2 修: 规格级 secR 覆盖 (2026-10-04)。
+  secR:580,
+  sec:{ n:4, rof:0.62, dmg:105, spd:FLAK_SPD, name:'127mm 双联高平两用', turHp:300, barrels:2,
+        mounts:[{lx:10.6,lz:38,y:17.2},{lx:-10.6,lz:20,y:17.2},{lx:10.6,lz:-32,y:17.2},{lx:-10.6,lz:-48,y:17.2}] },
+  aa:{ n:8, rof:1.45, dmg:26, spd:FLAK_SPD, name:'25mm 三联装', turHp:190, barrels:3,
+       mounts:[{lx:12.2,lz:56,y:17.2},{lx:-12.2,lz:60,y:17.2},{lx:12.2,lz:12,y:17.2},{lx:-12.2,lz:-6,y:17.2},
+               {lx:12.2,lz:-24,y:17.2},{lx:-12.2,lz:-38,y:17.2},{lx:12.2,lz:-62,y:17.2},{lx:-12.2,lz:-70,y:17.2}] },
+  torpedoDmg:1900, ticket:95,
+  col:0x585c50, colT:0x6c7064, deckCol:0x474a44 },
+};
+// ── 大舰通用常量 (调参只改这里) ──
+const CAPITAL_CFG={
+  turnGap:0.55,        // 巡航端点掉头: 距端点多近开始转向 (× 船长/2)
+  accel:0.35,          // 巡航加/减速 (m/s²) —— 缓慢是刻意的: 大舰的位移感来自"整片甲板在挪"
+  listPerFlood:3.2,    // 进水换算横倾上限 (度): flood 1.0 ⇒ 横倾该值 —— 落水前唯一的姿态代价
+  spdPerFlood:0.45,    // 进水掉速比例 (flood 1.0 ⇒ 巡航速 ×(1−该值))
+  stepUp:0.55,         // 甲板登步余量 (与 04-collision standHeight 的 b.maxY<=curY+0.55 同规)
+  rideEps:0.75,        // "人在甲板上"的竖直容差 (米): |脚 − 甲板面| ≤ 该值 ⇒ 计入移动平台承载
+  railY:1.15,          // 舷侧护栏高 (米, 甲板面之上) —— 15g 的立柱/横索与 15h 的护栏约束同读这一条
+  railIn:0.42,         // 护栏**约束内缩** (米): 乘员中心被夹在甲板缘内该距离处 (与 capLocalSolve 的 R 同值)
+  deckLift:0.06,       // 甲板铺面相对放样顶缘的抬升 (米) —— 单源: 15g 的铺面几何与 00-config 的
+                       //   capDeckWorldY (载入期旗杆/弹药箱的甲板基高) 同读它, 否则两处差 6cm
+  smokeHp:0.55,        // 结构值低于该比例开始冒烟 (受损可视化门槛)
+  fireHp:0.25,         // 低于该比例起火 (火源 + 灼烧近处)
+  salvoDisp:0.5,       // 主炮齐射: 同塔各管相对塔心瞄准点的额外散布倍率 (齐射是一片落点, 不是 9 条重合弹道)
+  mainR:620,           // 主炮 AI 交战门 / 弹道解算有效距离 (米) —— 解不出弹道就不开火 (不浪费齐射)
+  secR:480,            // 副炮对海交战门 (米)
+  // ── 分炮塔血量链 (2026-10-01b 用户裁定"各个分炮塔有自己的血量, 可以上去操控, 被打坏了就不能用") ──
+  //   数值在 CAPITAL_SPEC 各武器组的 turHp 字段 (单源); 这里只放**结算规则**常量。
+  turSpill:0.35,       // 命中炮位时的**溢出伤占比**: 打炮塔的伤同时按该比例落进舰体结构 (打炮塔不至于对瘫痪舰体毫无贡献);
+                       //   炮位报废后的后续命中按 'hull' 装甲区全额结算 (废塔不再是装甲)。
+  gunR:3.4,            // 炮位接管交互半径 (米, 玩家距炮位座圈) —— 与陆上反坦克炮/防空炮的 3m 同档, 大件略放
+  gunSlew:{ main:0.30, sec:1.4, aa:2.0 },   // 玩家接管炮位的回转速率 (rad/s): 主炮是液压重炮 (慢), 副炮/防空快
+  gunPitch:{ main:[-0.06,0.40], sec:[-0.12,0.78], aa:[-0.10,1.15] }, // 玩家接管炮位的俯仰钳 (rad, 上仰为正)
+  // 防空交战门 (米) —— 2026-10-01 实机毙回"大和的防空火力太强"后收口: 弹速 FLAK_SPD=460 的原包线
+  //   780m 远超本值, 故本值就是唯一有效射程闸门。240 ⇒ 170 (穿越暴露时间减半)。
+  aaR:170,
+  // 防空**瞄准跟踪**圈 (米, 2026-10-01d): aaR 外、本值内照常转塔跟踪 —— 旧版 170 外连转都不转,
+  //   远圈炮位读作死件 (实机"航母上的小炮无法转向和开火")。只影响"转", 不影响"打"。
+  aaAimR:420,
+  // 舷角闸门 (rad): 目标相对本舰艏向的舷角超过该值之外时, **只有目标所在舷的炮位**参战。
+  //   旧版每座各自转塔追目标 ⇒ 背舷炮位也会把炮转过去开火, 全舰 6~8 座同时对空 = 30+ 发/秒,
+  //   机血 100 的舰载机进圈即碎 (实机:"大和的防空火力太强")。史实舰炮也是各打各舷,
+  //   本闸门与 aa.rof 一起把全舰 AA 收到 ≈ 本舷座数 × 1/rof ≈ 2~3 发/秒 (留出强投/脱离的窗口)。
+  aaArc:0.5,
+  boardR:14.0,         // 登舰半径 (米, 自舰体矩形表面起算) —— ★2026-10-03 9→14: capPushCraft 的 SAT 把艇
+                       //   顶在壳矩形外 10~12m 的均衡位 (贴舷饱和), 圈必须罩住均衡位, 摆渡下客/游泳登舰才够得着
+  // ── 接舷摆渡 (2026-10-03, 夺点死锁破解): 两图同队巡逻环全等且同相位 ⇒ 舰间距离恒在 boardR 外,
+  //   甲板旗对步兵 Bot 永远不可夺。摆渡 = 艇载自己的车组贴舷 (14-bots boatAI 'ferry' 相位),
+  //   15h capBotTick 在 boardR 圈内下客。这里只放节拍常量。
+  ferryCd:75,          // 摆渡间隔 (秒): 一次"接舷下客"完成后到下一轮摆渡的冷却 —— 冷却期艇照旧雷击/追击/会师
+  // ── 大海致命化 (2026-10-01c 用户设想"大海应该十分危险": 游泳迅速耗体力 → 体力尽强制下沉 → 溺亡) ──
+  //   生效域 = terr:'opensea' 的纯海战图 (coral/ironbottom); 陆战图的河流/湖泊游泳零变化。
+  seaSwimDrain:0.13,   // 游泳体力消耗 /s (满条 ~7.7s 耗尽; 冲刺陆上是 0.088/s —— 海里的泳者比冲刺更费力气)
+  seaSinkRate:1.1,     // 体力耗尽后的**强制下沉**速度 (diveD 增量 /s): 头没进水就接既有憋气/溺水链
+  seaDrownMul:3.0,     // 体力耗尽状态下的憋气消耗倍率 (溺水挣扎换气急: OXY_MAX 22s → ~7s), 海里 ~15s 内带走
+  seaBotGrace:2.5,     // Bot 落水宽限 (s): 短暂落水 (跳帮/被炸下甲板) 还来得及贴舷爬回去
+  seaBotDmg:18,        // Bot 落水宽限后的溺伤 /s (100 血 ~5.5s 耗尽) —— 海里扎堆游泳的 Bot 会迅速减员
+};
+// 甲板面世界 Y 的离线解析: 大舰不随浪起伏 (见 15h 头注释"零横纵摇"裁定), 故载入期即可算出。
+// 05c 建旗杆时 ships 尚未生成 (23-deploy 才造), 只能按战役数据算 —— 载入期的唯一出处。
+function capDeckWorldY(idx){
+const C=(CAMPAIGN.capital||[])[idx]; if(!C) return 0;
+const S=CAPITAL_SPEC[C.key]; if(!S) return 0;
+return (SEA?SEA.level:0)-S.draft0+S.deckY+CAPITAL_CFG.deckLift;
+}
+// 舰体局部 (lx,lz) → t=0 世界 (x,z): 与 15h capDeckBind 的 world→local (lx=dx·cc−dz·nn / lz=dx·nn+dz·cc)
+//   互为逆变换 (dx=lx·cc+lz·nn / dz=−lx·nn+lz·cc)。用途: 05c 的甲板弹药箱 —— 箱位走**舰体局部锚**
+//   (旗点的 crateL / 基地舰的 baseCrateL), 载入期换算成世界坐标落位; 开局再由 capDeckBind 换算回局部
+//   跟舰。锚位判据 (在甲板矩形内 / 让开上层建筑与炮座盒 / 不与炮位接管圈抢 F) 只有在局部坐标系里才
+//   写得出硬数字, 世界坐标 ±4 随机散给不出这三条保证 (实机"弹药箱在船外悬浮着")。
+function capShipLocalXY(idx,lx,lz){
+const C=(CAMPAIGN.capital||[])[idx]; if(!C) return null;
+const cc=Math.cos(C.yaw||0), nn=Math.sin(C.yaw||0);
+return {x:C.x+lx*cc+lz*nn, z:C.z-lx*nn+lz*cc};
+}
+// 战役里的大舰编制 (声明顺序 = 索引; 甲板旗点用 ship:<索引> 回指) —— 无大舰的战役返回空表
+function capSpawnList(){ return CAMPAIGN.capital||[]; }
+// 本队**基地舰**在大舰编制里的索引 (base:true; 无 → -1)。
+//   用途: 05c 的基地弹药箱 —— 全海图的 BASES 就是基地舰的 t=0 位置, 箱子该落在它的甲板上
+//   (旧版按 heightAt 落在海床并埋进舰体); 陆上战役返回 -1 ⇒ 调用方三个实参都不传, 逐位同旧。
+function capBaseShipIdx(team){
+const list=CAMPAIGN.capital||[];
+for(let i=0;i<list.length;i++) if(list[i].base&&list[i].team===team) return i;
+return -1;
+}
 // ===== 记分/票数单源 (2026-09-06 B7a/P2-9: 原散布 6 文件的结算字面量收拢) =====
 // ===== 包扎/激流/前摇单源 (2026-09-06 B7a/P2-10) =====
 const BANDAGE_HEAL=45;   // 包扎一次回血 (玩家/Bot 同参)
@@ -663,20 +1838,108 @@ const sstep=t=>t*t*(3-2*t);
 const SCORE_TABLE={kill:100,head:125,tank:300,plane:250,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};
 const TICKET_COST={tankLight:5,tankHeavy:6,plane:3};
 const TICKET_CAP=999;
+// ===== 地图可破坏物得分 (2026-09-26 破坏得分批) =====
+// 口径: 摧毁地图上的一"组"可破坏物 (05-world 的 DESTRUCTIBLES 台账 —— 砖墙/木栅/楼板/厂房设备/
+//   补给库/反舰炮位胸墙, 一组 = 一次 dBegin/dEnd 登记的结构件, 通常是一面墙或一件道具) = 给**击毁者**加分。
+//   分数按该组的**初始血量**分两档: 血量是"这一组有多厚实"的现成代理, 不为评分另建类型表
+//   (230 = 默认墙段/道具; 380 土坯墙; 520 房屋主墙/炮位胸墙; 600~950 整栋主体/补给库)。
+//     light 轻结构 (hp < bigHp) / big 重结构 (hp ≥ bigHp) / cap 单组上限 (防"一炮拆掉整栋楼"把分数叠成天价)。
+//   g.score 可逐组覆盖 (给将来"某件特殊道具值更多"留的口子, 目前全库无人写)。
+// 三条边界 (与"击杀记分"刻意分开): ①有主才有分 —— attacker=null 的连环自爆 (钢水包/雷链) 与场景二次爆炸不计;
+//   ②每组只结算一次 (g.dead 门, 与既有"摧毁一次"语义同源); ③不进连杀 —— 拆墙不算击杀, 不喂 3/6/9 档位、
+//   也不吃连杀倍率 (21-match 的 awardStructScore 不走 registerKillScore) ⇒ 拆楼不是刷连杀的手段。
+// 观战模式照常计分 (2026-09-16 记录批口径①: 观战局计分照常, 只是本局不进历史记录)。
+// "观战局"的判据 2026-09-27 收窄 = "本局在观战态下**部署过**" —— 只在兵种卡上点开又取消不算
+// (见 18-game.specUsed 字段注释 / 21-match.recCommit / 23-deploy.deployPlayer 盖章点)。
+const STRUCT_SCORE={light:20, big:60, bigHp:520, cap:120};
+// ===== 破坏机制口径单源 (2026-09-27N 破坏机制批) =====
+// 与 STRUCT_SCORE 同一纪律: 命中判据/作用半径/撞塌/坍塌碾压/血量归一的**所有数字只写在这里**, 使用点只读常量。
+// (旧版这些数字散在 damageStructures 的 `+3` / `×0.6` 与 15-vehicles 的 `>1.9` 里 —— 玩家读不出规律, 也就
+//  没人能回答"为什么这一炮没掉血 / 为什么轻推一下就塌了一整面墙"。)
+// ① 爆炸 → 结构组: 作用半径 R = 弹种 radius + pad; 伤害 = amt × (1 − d/R × falloff)。
+//   d = 爆点到**最近成员碰撞盒**的三维距离 (落在盒内 = 0)。旧版 d 是"到**组心**的平面距" ⇒ 长墙远端
+//   "打不着"、楼上楼下同判、隔山隔楼无遮挡。
+const STRUCT_HIT={pad:3, falloff:0.6, vGate:3.4};
+// ② 载具撞塌 (15-vehicles): 伤害 = k × 车速² (m/s); 需正面撞 (法向·行进 ≥ face) 且车速 ≥ minSpeed。
+//   10 m/s 正面撞 ≈ 220 伤害 (一次全速撞推倒默认墙段 230); 慢蹭 2 m/s 只剩 ~9 ⇒ 不再"轻推拆一层楼"。
+//   cd = 同一辆车的两次撞塌最小间隔 (s) —— 没有它, 一次持续接触会在每帧重复结算。
+const STRUCT_RAM={minSpeed:1.9, k:2.2, velAbsorb:0.58, face:0.35, cd:0.32};
+// ③ 坍塌碾压: 落体水平矩形内的步兵/载具吃一次"被砸"伤害 (随落体高度线性加码, 顶到 infMax)。
+const STRUCT_CRUSH={infBase:70, infPerM:9, infMax:200, vehMul:0.55, pad:0.6, vBand:4.0};
+// ④ 血量按组规模归一: 名义 hp (写在各建筑构建处) = "ref 盒标准件"的厚度, 实际血量 = 名义 × scale(n),
+//   scale(n) = clamp(base + span×√(n/ref), min, max) —— n=1 → 0.76× / 6 → 1.0× / 24 → 1.4× / 202 → 上限 2.6×。
+//   为什么: 旧版"每组一个数字", 实测每盒分摊血量在 2.6 ~ 230 之间 (88 倍) ⇒ 数值上"短墙更结实"。
+const STRUCT_HP={ref:6, base:0.6, span:0.4, min:0.75, max:2.6};
+// ⑤ 屋顶/楼板承伤 (B2: 直接轰屋顶零效果): 平顶板/坡顶碰撞带/山墙挂 ref.hp = base + perSqrtArea×√(投影面积),
+//   一场爆炸按"最近那条带"给 ref 记一次伤害 (与组"一次结算"同规), 累计 ≥ hp ⇒ 整片坍塌 (collapseRoof)。
+const STRUCT_ROOF={base:260, perSqrtArea:70, min:300, max:1500};
+// ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) =====
+// A#7 坦克三人车组: 编制人数 = 3。车毁恒结算 CREW_N 次死亡 / CREW_N 杀 / CREW_N 票 (每票 1 人)。
+//   为什么票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,
+//   一张 5~6 票的坦克票表达的是"装备损失", 与 A#7 的语义不同。TICKET_COST 仍供其他载具沿用。
+const CREW_N=3;              // 每车乘员数 (含玩家占位: 玩家上车即顶替原 AI 驾驶员, 车内恒为 3 人)
+// ★2026-09-26 审计复核: 本常量只作编制契约的显式声明 (22-hud 乘员数 / crewRoster 口径);
+//   车毁**有意**不按它乘票乘杀 (见 15-vehicles 里那条"只对真人成立, 故一律不加") —— 不是漏读。
+const CREW_TICKET_EACH=1;    // 每人 1 票
+const CREW_KILL_EACH=1;      // 每人 1 杀 (击杀者战果 = CREW_N 杀)
+// A#3 载具机枪过热: 与固定 MG42 (MG42S 各阵营 def.heatPS=0.014 / 玩家散热 0.22 / AI 散热 0.15) 同档。
+//   71 发到 1.0 (1/0.014 ≈ 71.4); 过热强制停火, 散到 unlock 才解锁 (滞回, 防"1 发 1 停"抖动)。
+const VEH_MG_HEAT={heatPS:0.014, coolPlayer:0.22, coolAI:0.15, unlock:0.35};
+// A#8 跳伞保护: 伞降中挨打显著更难 (伤害倍率)。索敌口径 2026-09-30 用户裁定加严: 步兵/坦克/两栖车
+//   **一律不索敌**伞降目标 (旧"25m 内可见"废除 —— 25m 内往往一片枪口, 就是"空中被集火秒杀"的来源);
+//   botEngageR 只剩一条消费者 —— 被伞兵**主动开火**打中时的还击门 (14-bots damage 分支)。
+const CHUTE_DEF={dmgMul:0.40, botEngageR:25, landClearT:0.10};
+// A#6 炮塔尺寸按车重等级分级 (用户: "大坦克和小坦克的头几乎一样大") —— wc 字段 → 缩放系数单源。
+//   不要复用 FACTIONS[*].tanks[i].heavy (那是"同阵营第二辆"的槽位标记: T-26/一式中战车 都写着 heavy:true)。
+const WC_TUR_SCALE={light:0.82,med:1.0,heavy:1.15};
 // ===== 连杀奖励 (2026-09-11 用户定案: 临时增益+得分加成, 3/6/9 递进) =====
 // 连杀口径沿用 21-match 的 KILL_STREAK_WIN=5 秒多杀窗口 (击杀/摧毁载具计入), 阵亡清零。
 // 仅玩家生效 (Bot 侧为计划项, 见 PLAN.md); at=档位阈值(本命第 N 次击杀), mul=得分倍率,
 // 增益三参数: speedMul 移速 / reloadMul 换弹时长 / dmgCut 减伤(仅敌方来源伤害, 摔落/严寒/激流不吃);
 // dur=增益时长秒 —— 2026-09-12 用户裁定: 30 秒太长, 改 5~7 秒随档递增;
 // 触达档位即发放/升级增益并刷新时长, 同一条命每档至多发放一次。
+// 续杯 (2026-09-16 用户定案): 5 秒窗口内每多一次击杀 → 当前档时长回满, 次数不限 (连杀不断就一直续);
+// 停火超窗口=断链则不再续 (增益自然到期), 阵亡照旧清零 —— 故"续杯"无需新增数值: 满值就是本表的 dur。
 const STREAK_REWARDS=[
  {at:3, mul:1.5, name:'战意·壹', speedMul:1.15, reloadMul:0.8, dmgCut:0,    dur:5},
  {at:6, mul:2.0, name:'战意·贰', speedMul:1.20, reloadMul:0.7, dmgCut:0.15, dur:6},
  {at:9, mul:3.0, name:'战意·叁', speedMul:1.25, reloadMul:0.6, dmgCut:0.25, dur:7},
 ];
+// ===== 结算战绩 / 历史最佳记录表 (2026-09-16 记录批单源) =====
+// 三处共读: ①结算页逐项战绩卡 (本局值 + 本图最佳 + 新纪录徽章) ②本图历史落盘 (sf_rec_<战役id>)
+// ③主菜单「战绩数据」面板的列。**加一项战绩只改这张表** —— 结算卡/记录写入/数据面板列自动跟着变。
+//   key   存档字段名 (= 21-match recMatchValues 里的同名项)
+//   label 中文原文即键 (走 t() 双语; 数据面板表头与结算卡标签共用)
+//   lower true = 越低越好 (阵亡数): 破纪录判定取更小值, 最佳文案翻转成"本图最少 N"
+//   fmt   显示格式 —— 本局值与记录值共用同一个, 保证同一项在结算卡/数据面板两处显示一致
+const REC_STATS=[
+ {key:'kills', label:'击杀数',  lower:false, fmt:v=>String(v)},
+ {key:'deaths',label:'阵亡数',  lower:true,  fmt:v=>String(v)},
+ {key:'kd',    label:'K/D 比',  lower:false, fmt:v=>(Number.isInteger(v)?String(v):v.toFixed(2))},
+ {key:'streak',label:'最大连杀',lower:false, fmt:v=>String(v)},
+ {key:'heads', label:'爆头数',  lower:false, fmt:v=>String(v)},
+ {key:'caps',  label:'占领点',  lower:false, fmt:v=>String(v)},
+ {key:'demol', label:'摧毁数',  lower:false, fmt:v=>String(v)}, // 2026-09-26 破坏得分批: 拆掉的地图可破坏物组数 (得分之外单独记一项战果)
+];
+// 记录存档键: sf_rec_<战役id> = JSON {v,plays,score,+REC_STATS 各项} —— 缺项 = 该项还没有记录
+// (0 是合法记录值: 一枪未发就阵亡也是记录, 故一律用 undefined 判定"无记录", 不用 0)。
+// 旧键 sf_best_<战役id> (2026-09-13 批次的"本图最高分") 保留只读兼容: 新键缺失时把它读成 score 记录。
+const REC_KEY_PRE='sf_rec_', REC_LEGACY_PRE='sf_best_', REC_VER=1;
 const EMPL_MG_DEF={rpm:1100,dmg:26,heatPS:0.012,name:'重机枪'}; // 机枪座 def 缺省兜底 (旧两处字面量 dmg 26/28 分叉已统一)
 // 大地图战役(如柏林 640×640)在战役条目里指定 mapSize; 其余沿用标准 320
 const MAP_SIZE=CAMPAIGN.mapSize||320;
+// ── 世界边缘 (★2026-09-26E 审计 28): 地形/水面网格都到 ±(MAP_SIZE/2+20), 而舰船被夹在 MAP_SIZE/2+6、
+// 玩家被夹在 +8 —— 三个边界互不同源。船贴到夹取极限时, 前方 14m 之外既无水面也无地形, 只有天空球下半球,
+// 而雾在 14m 处几乎不起作用 ⇒ 海战图上能直接看到"水盆断崖"。
+// 现在只留一个**几何单源** WORLD_MESH_HALF (网格实际边界), 一切活动实体的夹取都取"网格边界 − 视距余量":
+// 余量 24m 的来历 = 最小雾距档 (240m) 的 1/10, 远大于任何单帧位移 (29m/s×0.05s=1.45m) ⇒
+// 实体永远停在"看得见水"的范围里, 又不会因为夹取过紧而缩掉可玩海域。
+const WORLD_MESH_HALF=MAP_SIZE/2+20;
+const WORLD_ACTOR_LIMIT=WORLD_MESH_HALF-24;
+
+// 正弦路 (诺曼底 sineRoad:true 的乡道纵线) 波形单源 —— 03-terrain sineRoadZ 与本公式同源,
+// 22a-menuart 沙盘在 03-terrain 未加载时按同式自算 (改波形只动这两个数, 见 README §五)
+const SINE_ROAD={amp:3,freq:0.02};
 let BOTS_PER_TEAM=11;
 const START_TICKETS=330;
 // ===== 体力/摔落 (2026-09-02 用户指定) =====
@@ -714,29 +1977,71 @@ const FACTORY_FLAG_ID=CAMPAIGN.factoryFlag||null;
 const FACTORY_SPAWN=CAMPAIGN.factorySpawn||null;
 const FACTORY_SPEED_MUL=1.8;
 // ===== 无旗点战役 (遭遇战/劫道) 辅助 =====
-// 阵营前出点: 部署出生/Bot出生/坦克推进 的候选 (无旗点模式的核心战场锚点)
-function spawnPtsOf(team){ return (CAMPAIGN.spawns||[]).filter(s=>s.team===team); }
+// 强点 (2026-09-13 草原库尔斯克改版): spawns 升级为可争夺强点 —— 占领获得该点出生权 (不给票);
+// SPOTS 运行态由 21-match initSpots() 在开局时填充 ({x,z,name,r,own,cap,capTeam,gy}), resetMatchState 复位;
+// spawnPtsOf 改为"当前归属"动态取点: 部署/重生/推进目标全线跟着战线走 (开局 SPOTS 未填充时回退静态表)
+let SPOTS=[];
+function spawnPtsOf(team){
+if(SPOTS.length) return SPOTS.filter(s=>s.own===team);
+return (CAMPAIGN.spawns||[]).filter(s=>s.team===team);
+}
 // 基地坐标 (无基地战役如断崖公路: 回退本阵营主力前出点, 护运方=谷口集结地)
 function basePos(team){
-const b=BASES[team];
-if(b) return b;
+// 大舰基地 (2026-09-30 阶段五 P4): 全海图没有陆上基地 —— 战役把本队大舰标 base:true,
+//   基地坐标随舰移动 (飞机出生点/机器人推进目标/部署主基地选项全部跟着走)。无大舰的战役返回 null。
+if(typeof capBasePos==='function'){ const c=capBasePos(team); if(c) return c; }
+const b=BASES[team];if(b) return b;
 const sp=spawnPtsOf(team);
 if(sp.length) return sp[0];
 return {x:0,z:0};
 }
+// ===== 强点净空 (2026-09-26 P0-3 死袋) =====
+// 出生/强点所在 5m 导航格的**格心**离点位最多 3.5m (格心是 5m 栅格点, 点位不落在栅格上),
+// 而强点环上的工事/布景恰好落在离点位 5~10m 处 ⇒ 件数一多就把点位那格连同邻格圈成 1~5 格的死袋。
+// 沙箱实测 (dev/_steppe-pocket-probe.js): 草原遭遇 7 个强点里每次换局有 1~3 个被判死袋, 随布景随机换人;
+// 落进去的兵对任何目标 findPath 恒为 null。凡"可能落在强点环上"的布景/工事/散件都按这条净空筛选。
+function spawnKeepClear(x,z,r){
+const sd=CAMPAIGN.spawns||[];
+for(let i=0;i<sd.length;i++){ const s=sd[i]; if(Math.hypot(x-s.x,z-s.z)<r) return false; }
+return true;
+}
+// ===== 攻防开局归属 (单源; 2026-09-01 用户指定口径) =====
+// 进攻方开局持有**距其基地最近的**旗点 (≥5 旗给 2 个, 其余 1 个), 其余旗点归防守方。
+// 两个消费方必须共读这一支 —— 否则会脱钩, 且脱钩的后果是实机可见的:
+//   ① 23-deploy.applyFlagOwnership 按它写 owner (开局态势);
+//   ② 05c-layouts.defWorks (守方工事模板: 街垒/机枪位/沙袋/铁丝网) 按它跳过攻方旗圈 ——
+//      否则守方工事会被摆进开局就属于进攻方的旗圈里, 攻方在自家旗圈里被"面朝自己"的工事压制。
+//      (塔拉瓦岛图早有一份 130m 版豁免, 注释写明"攻方被一路反推下海的主因之一"; 柏林/莫斯科当时没有。)
+// list 接受 CAMPAIGN.flags (布局期) 或 FLAGS (归属期): 两者同序同坐标, 稳定性排序下取同一批。
+// ★坐标取法与 basePos 等价但**不读 BASES**: 05c 的 buildWorld() 在 `const FLAGS/BASES` **之前**调用
+//   (05c:2446 先跑世界构建, 2447+ 才建这两张表) —— 布局期读 BASES 会踩 const 的 TDZ (ReferenceError),
+//   而 basePos 恰好读 BASES。这里只用 CAMPAIGN.bases (与 BASES 同坐标) + spawnPtsOf 兜底。
+function attackerFlagPicks(list){
+if(!list||!list.length) return [];
+const b=(CAMPAIGN.bases&&CAMPAIGN.bases[ATK])||null;
+const sp=b?null:spawnPtsOf(ATK);
+const atkB=b||((sp&&sp.length)?sp[0]:{x:0,z:0});
+const sorted=[...list].sort((a,b2)=>Math.hypot(a.x-atkB.x,a.z-atkB.z)-Math.hypot(b2.x-atkB.x,b2.z-atkB.z));
+const n=Math.min(list.length>=5?2:1, Math.max(0,list.length-1));
+return sorted.slice(0,n);
+}
 // ===== 实验模式/燃烧弹 兵种装备辅助 =====
-// 玩家选择某兵种时的武器槽: 实验模式下 5号位(反坦克兵)替换为巡飞弹兵
+// 玩家选择某兵种时的武器槽: 实验模式下 3号位(反坦克兵)替换为巡飞弹兵 (2026-09-28 兵种 8→5 重映射, 原 5 号位);
+// 观战模式 (2026-09-17 观战扩展批): **副武器位(2号槽)一律换成观战连狙** —— 与所选兵种无关
+//   (观战开关挂在兵种卡上, 但开过之后可以再点别的兵种卡, 故判据只看 player.spectator)。
 function playerClassWeapons(team,cls){
-if(EXPERIMENT&&cls===5) return ['loiter',TEAM_FACTION[team].cls[5][1]];
-return TEAM_FACTION[team].cls[cls];
+let ws=(EXPERIMENT&&cls===3)?['loiter',TEAM_FACTION[team].cls[3][1]]:TEAM_FACTION[team].cls[cls];
+if(player.spectator&&ws.length>1) ws=[ws[0],'specsniper'];
+return ws;
 }
 // 玩家某兵种的投掷物配置 (Bot 不受实验模式影响, 仍用史实配置)
-// 投掷物/AT雷按 2026-08-30 约定为史实携带量 ×2
+// 投掷物/AT雷按 2026-08-30 约定为史实携带量 ×2; atn: 反坦克兵(cls3) 保留阵营特例 (atn5×2),
+//   其余兵种按 CLASSES.atn 直读 (2026-10-05: 步枪兵+2 / 突击兵保持 4, 携量进表不再这里写死)
 function clsGear(cls,team){
 const c=CLASSES[cls];
 const g={ nades:c.nades||0, smoke:c.smoke||0, incin:c.incin||0,
-atn:cls===2?4:(cls===5?(TEAM_FACTION[team].atn5||3)*2:0) };
-if(EXPERIMENT&&cls===5){ g.atn=0; g.smoke=0; g.incin=4; }
+atn:(cls===3)?(TEAM_FACTION[team].atn5||3)*2:(c.atn||0) };
+if(EXPERIMENT&&cls===3){ g.atn=0; g.smoke=0; g.incin=4; }
 return g;
 }
 function isLoiterClass(){ return EXPERIMENT&&player.cls===5; }
@@ -744,8 +2049,16 @@ function isLoiterClass(){ return EXPERIMENT&&player.cls===5; }
 // 一门炮同时只允许一个"操作者"(含前摇期间的等待者); 下炮后 EMP_REARM_T 秒内任何人不可再上,
 // 防止 Bot "下炮秒上同炮" 的连续上炮观感; 前摇占位者取消时释放但不触发上炮冷却
 const EMP_REARM_T=6;
+// ── 座位装甲豁免 (★2026-09-26E 审计 2 修复) ──────────────────────────────────────
+// 载具/舰艇的壳体对**溅射/火焰/碾压**是硬遮蔽: 乘员 (玩家或 Bot) 只由车体承伤, 不按步兵结算。
+// 旧版全库的豁免清单只认 onVehicle, 而海战座位**刻意不挂** onVehicle (20a 契约: 艇上玩家走 onNaval,
+// 见 20a-seats "海战座位不挂 onVehicle" 那段) ⇒ 艇上玩家"子弹免疫、溅射满额":
+// 一发炮弹命中所乘的艇, 舷侧溅射按步兵满额结算 (lerp(150,10,d/7), LVT 舷侧 d≈1.8m ⇒ ≈114 > 100HP 一发毙命),
+// 而坦克里的玩家/车组零伤 —— 同一层壳体对子弹是硬遮蔽、对爆炸却是透明。
+// 判定读**座位字段**而不是位置 (与 20a/15d 的座位契约同源), 不引入第二套"在不在载具里"的算术。
+function seatShielded(s){ return !!(s&&(s.onVehicle||s.onNaval)); }
 function releaseEmpl(g,rearm){ if(!g) return; g.user=null; if(rearm&&g.cdLock!==undefined) g.cdLock=nowT+EMP_REARM_T; }
-function empReady(g){ return !!g&&!g.user&&nowT>=(g.cdLock||0); }
+function empReady(g){ return !!g&&!g.dead&&!g.user&&nowT>=(g.cdLock||0); }
 // 固定火力点"够得着"判定 (2026-09-09 柏林防空塔顶高炮): 2D 距离 + 垂直高差 ≤2.6m ——
 // 防隔层上炮 (站塔底/楼板下方不能操作平台上的炮); 地面炮位 g.y 与站位高差恒 ≤1.25, 行为不变
 function empInReach(g,x,y,z,d){

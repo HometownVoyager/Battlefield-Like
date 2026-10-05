@@ -158,7 +158,7 @@ for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -678,6 +678,7 @@ const ctx=boot(3);
 const err=vm.runInContext(`${HOOK}
 (()=>{
 try{
+SPAWN_PROT=0; // 探针整批豁免 (00-config 口径): 本测试在开局帧直接调 damage(), 出生保护 0.5s 会吞掉击杀链 (2026-09-29)
 document.getElementById('startBtn').onclick();
 var a=null,v=null;
 for(const s of soldiers){ if(!s.alive) continue; if(s.team===1&&!a) a=s; if(s.team===0&&!v) v=s; }
@@ -715,6 +716,7 @@ const ctx=boot(3);
 const err=vm.runInContext(`${HOOK}
 (()=>{
 try{
+SPAWN_PROT=0; // 探针整批豁免 (00-config 口径): 同 T12 (2026-09-29)
 document.getElementById('startBtn').onclick();
 var v1=null,v2=null,v0=null,a=null;
 for(const s of soldiers){ if(!s.alive) continue; if(s.team===1&&!v1) v1=s; else if(s.team===1&&!v2) v2=s; if(s.team===0&&!v0) v0=s; else if(s.team===0&&v0&&!a) a=s; }
@@ -739,8 +741,103 @@ ok(err.sHead===125,'T14 玩家爆头击杀 → score===125 (修复前双计 225,
 ok(!err.aIsPlayer&&err.sBot===100,'T14 Bot 杀 Bot → attacker.score===100 (Bot 记分板, 实测 '+err.sBot+')');
 }
 
+// T15: 连杀增益「杀敌续杯」(2026-09-16 用户定案) —— 5 秒窗口内每多一次击杀把当前档时长"续满", 次数不限;
+// 踩档那杀走升级 (不重复续), 停火超窗口=断链不再续 (增益自然到期), 阵亡清零; 记分倍率不受续杯影响。
+// 时间线全部走 registerKillScore 唯一入口 (与真实击杀/摧毁载具同路径), nowT 手动推进以精确控窗口。
+function t15(){
+console.log('T15 连杀续杯: 窗口内回满当前档 / 断链不续 / 阵亡清零 (诺曼底)');
+const ctx=boot(0);
+const r=vm.runInContext(`(()=>{
+try{
+document.getElementById('startBtn').onclick();
+// 本探针只测规则, 不测播报 DOM: showKillPop 的 while(box.children.length>5) 在 DOM 桩下不会缩短 children
+// (firstChild 返回的占位节点不在 children 里) —— 密集击杀会死循环, 故此处把两条播报短路 (T14 已覆盖真实播报路径)。
+showKillPop=function(){}; showScorePop=function(){};
+const K=SCORE_TABLE.kill, TK=SCORE_TABLE.tank;
+const T=[];
+const snap=(tag,got)=>{ T.push({tag, n:killStreakN,
+ lv:player.streakBuff?player.streakBuff.lv:null, dur:player.streakBuff?player.streakBuff.dur:null,
+ until:player.streakBuff?+player.streakBuff.until.toFixed(3):null,
+ refills:killStreakRefills, got:got===undefined?null:got, now:+nowT.toFixed(3)}); };
+const kill=(t,base)=>{ nowT=t; const g=registerKillScore('击杀',base===undefined?K:base); return g; };
+// —— 时间线 A: 3 杀发放 → 4/5 杀续杯 → 6 杀升级 → 7/8 杀续杯 → 9 杀升级 → 10/11 杀续杯 ——
+nowT=100; player.streakBuff=null; killStreakN=0; killStreakT=-99; killStreakRefills=0;
+snap('1杀',kill(100)); snap('2杀',kill(101));                                      // 未达档: 无增益
+snap('3杀',kill(102));                                                              // 发放 战意壹 5s
+snap('4杀',kill(104)); snap('5杀',kill(105));                                        // 续杯 ×2
+snap('6杀',kill(105.5));                                                            // 升级 战意贰 6s
+snap('7杀',kill(106)); snap('8杀',kill(106.5));                                      // 续杯 ×2
+snap('9杀',kill(107));                                                              // 升级 战意叁 7s
+snap('10杀',kill(111,TK));                                                          // 关键: 9 杀之后仍续杯 (摧毁坦克同口径)
+snap('11杀',kill(111.5));
+// —— 时间线 B: 断链 (距上一杀 >5s) → 连杀重计、不续杯、增益时长不动 ——
+const bUntilBefore=player.streakBuff.until, bRefBefore=killStreakRefills;
+snap('断链后1杀',kill(120));                                                         // 120-111.5=8.5 > 5 → N 重计
+const bUntilAfter=player.streakBuff.until;
+// —— 时间线 C: 断链后再 3 连杀 → 重新发放 (同一条命可多次发放不同档) ——
+snap('重连2杀',kill(121)); snap('重连3杀',kill(122));
+// —— 时间线 D: 窗口边界 (恰好 5.0s 仍算连杀/续杯, 5.001s 不算) ——
+nowT=300; killStreakN=0; killStreakT=-99; killStreakRefills=0; player.streakBuff=null;
+kill(300); kill(301); kill(302);                       // 3 杀 → until=307
+nowT=307; const edgeGot=registerKillScore('击杀',K); snap('边界4杀(5.000s)',edgeGot);
+const edgeRef=killStreakRefills, edgeUntil=player.streakBuff.until;
+nowT=312.001; registerKillScore('击杀',K); snap('边界外1杀(5.001s)');
+const outRef=killStreakRefills, outUntil=player.streakBuff.until;
+// —— 时间线 E: 阵亡清零 ——
+const beforeReset={n:killStreakN, ref:killStreakRefills, buff:!!player.streakBuff};
+resetKillStreak();
+const afterReset={n:killStreakN, ref:killStreakRefills, buff:player.streakBuff};
+return {T, bUntilBefore, bUntilAfter, bRefBefore, edgeRef, edgeUntil, outRef, outUntil, beforeReset, afterReset,
+ maxStreak:killStreakMax, score:{
+  g3:T.find(x=>x.tag==='3杀').got, g4:T.find(x=>x.tag==='4杀').got, g6:T.find(x=>x.tag==='6杀').got,
+  g10:T.find(x=>x.tag==='10杀').got, gOut:T.find(x=>x.tag==='断链后1杀').got }};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof r==='string'&&r.indexOf('ERR:')===0){ ok(false,'T15 '+(r||'')); return; }
+const at=tag=>r.T.find(x=>x.tag===tag)||{};
+// ① 未达档无增益
+ok(at('1杀').lv===null&&at('2杀').lv===null&&at('1杀').refills===0,'T15 未达 3 杀不发增益也不续杯');
+// ② 3 杀发放 (档位/时长/起始倍率)
+ok(at('3杀').lv===0&&at('3杀').dur===5&&at('3杀').until===107,'T15 3 杀发放 战意壹 (lv0 / 5s / until=107, 实测 until='+at('3杀').until+')');
+ok(r.score.g3===150,'T15 3 杀起得分吃 ×1.5 (实测 '+r.score.g3+')');
+// ③ 窗口内击杀续杯: 时长回满 + 计数 +1, 档位不变, 倍率不变
+ok(at('4杀').until===109&&at('4杀').lv===0,'T15 第 4 杀续杯: 剩余时长回满 5s (until 107→109, 实测 '+at('4杀').until+')');
+ok(at('4杀').refills===1&&at('5杀').refills===2,'T15 每次续杯计数 +1 (4杀=1 / 5杀=2, 实测 '+at('5杀').refills+')');
+ok(r.score.g4===150,'T15 续杯不改倍率 (续杯后击杀仍 ×1.5 = '+r.score.g4+')');
+// ④ 踩档升级优先于续杯 (第 6 杀升级, 不额外记续杯)
+ok(at('6杀').lv===1&&at('6杀').dur===6&&at('6杀').until===111.5&&at('6杀').refills===2,
+ 'T15 第 6 杀升级 战意贰 (lv1/6s/until=111.5) 且不记续杯 (实测 until='+at('6杀').until+' refills='+at('6杀').refills+')');
+// ⑤ 9 杀之后的第 10 杀仍续杯 (改造前的洞: 过 9 杀只叠连杀, 增益到期即消失)
+ok(at('10杀').lv===2&&at('10杀').until===118&&at('10杀').refills===5,
+ 'T15 9 杀满档后第 10 杀仍续杯 (lv2 7s → until=118, 实测 until='+at('10杀').until+' refills='+at('10杀').refills+')');
+ok(r.score.g10===900,'T15 满档续杯期摧毁坦克吃 ×3 (300×3=900, 实测 '+r.score.g10+')');
+ok(at('11杀').until===118.5&&at('11杀').refills===6,'T15 连续续杯次数不限 (11 杀 until=118.5 / refills=6, 实测 '+at('11杀').refills+')');
+// ⑥ 断链: 连杀重计为 1、不续杯、时长不动、无倍率
+ok(at('断链后1杀').n===1&&at('断链后1杀').refills===r.bRefBefore&&r.bUntilAfter===r.bUntilBefore,
+ 'T15 停火 >5s 断链: 连杀重计为 1、不续杯 (refills='+at('断链后1杀').refills+' 保持, until 不动)');
+ok(r.score.gOut===100,'T15 断链后击杀无倍率 (基础 100, 实测 '+r.score.gOut+')');
+// ⑦ 断链后再连 3 杀 → 同一条命可重新发放 (档位从头)
+ok(at('重连3杀').lv===0&&at('重连3杀').dur===5,'T15 断链后重新 3 连杀 → 重新发放 战意壹 (lv0/5s)');
+// ⑧ 窗口边界: 恰好 5.000s 算连杀 (续杯), 5.001s 不算
+ok(at('边界4杀(5.000s)').refills===1&&at('边界4杀(5.000s)').until===312,
+ 'T15 窗口边界 5.000s 仍算连杀 → 续杯 (until=312, 实测 '+at('边界4杀(5.000s)').until+')');
+ok(at('边界4杀(5.000s)').until===312&&at('边界外1杀(5.001s)').refills===1&&r.outUntil===312,
+ 'T15 5.001s 不算连杀 → 不续杯 (until 停在 312, 实测 '+r.outUntil+')');
+// ⑨ 阵亡清零: 连杀/增益/续杯数一起清
+ok(r.beforeReset.buff&&r.afterReset.n===0&&r.afterReset.ref===0&&r.afterReset.buff===null,
+ 'T15 阵亡 resetKillStreak 清空连杀计数/增益/续杯数');
+ok(r.maxStreak>=11,'T15 最大连杀统计不受续杯影响 (实测 '+r.maxStreak+')');
+// ⑩ HUD/样式接线 (2026-09-16 续杯脉冲): 源码级回归 —— 改显示层忘了接这根线会被抓到
+const hud=fs.readFileSync(path.join(root,'js/22-hud.js'),'utf8');
+const css=fs.readFileSync(path.join(root,'css/style.css'),'utf8');
+const match=fs.readFileSync(path.join(root,'js/21-match.js'),'utf8');
+ok(/b\.refillT=nowT/.test(match),'T15 21-match 续杯写入 buff.refillT (供 HUD 触发脉冲)');
+ok(/streakBuff\.refillT/.test(hud)&&/'\s*refill'/.test(hud),'T15 22-hud 读 refillT 并在 0.45s 窗口内挂 .refill 类');
+ok(/#streakBuff\.refill\s*\{/.test(css)&&/@keyframes sbRefill/.test(css),'T15 CSS 提供 #streakBuff.refill + @keyframes sbRefill 脉冲');
+}
+
 // ── 入口 ──
 console.log('== 清场胜利规则沙箱 ==');
-t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14();
+t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15();
 console.log(`== 结果: ${PASS.length} 通过 / ${FAILS} 失败 ==`);
 process.exit(FAILS?1:0);

@@ -4,14 +4,63 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>钢铁前线 · 战役合集</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=20261005b">
+<script>
+// 首屏引导 (必须在 <body> 内容之前执行):
+// ① 语言: EN 存档时给 <html> 加 lang-en, 配合 CSS 把中文原文先藏起来等 applyI18n() 盖章, 消除"先中文后英文";
+// ② 选战役后重载 (sf_openplay): 直接在 <body> 里写明停靠面板, 主菜单 #mHome 不参与首帧布局;
+// ③ 样式表兜底 (2026-09-15 用户实机教训): file:// 直开时浏览器对"未变动的 URL"走启发式缓存 ——
+//    Ctrl+F5 会刷新 HTML 却可能仍在用缓存里的旧 css/style.css, 表现就是"改了样式却看不出效果"
+//    (菜单期 HUD 不隐藏即是)。这里在 DOMContentLoaded 后实测新样式是否生效 (#menuArt 的计算 display
+//    在新版是 flex、旧版是 block), 没生效就换一个 URL 把样式表重新载入一次。
+//    ④ 本文件所有 css/js 引用统一带 ?v=<版本>; 改样式或脚本后把下面的版本号与引用一起 +1。
+window.__sfStyleVer='20261005a';
+// ⑤ boot 异常屏上可见 (2026-09-30 Ctrl+F5 事故教训): three/cannon 曾走 CDN, 硬刷新时 CDN 拉不到 ⇒
+//    脚本链首用 THREE 处即抛 ⇒ 页面只剩页尾 bootFail 兜底摘 inMenu (HUD 全裸+黑屏), 报错只在控制台。
+//    这里把全局错误尽早记进 __sfErrs, 页尾 bootFail 分支负责把它们写到 #bootErr 浮层上 ——
+//    以后再出 bootFail, 屏上直接可读错误行 (file:// 不挂 DevTools 也能抄给我)。
+window.__sfErrs=window.__sfErrs||[];
+// 第三参 true = 捕获阶段: <script>/资源加载失败 (404/读盘失败) 的 error 事件**不冒泡**, 只在捕获期到达 ——
+// 而那正是本钩子最该接住的场景 (lib 库文件缺失/损坏)。资源错的 e.message 为空, 取 target 的 src/href。
+window.addEventListener('error',function(e){
+var m=(e&&e.message)?e.message:(e&&e.target&&(e.target.src||e.target.href))?'资源加载失败: '+String(e.target.src||e.target.href).split('/').pop():'脚本异常';
+window.__sfErrs.push(m+(e&&e.filename?' @ '+String(e.filename).split('/').pop()+':'+e.lineno:''));
+},true);
+window.addEventListener('unhandledrejection',function(e){
+window.__sfErrs.push('Promise: '+((e.reason&&(e.reason.stack||e.reason.message))||e.reason||'rejection'));
+});
+try{
+if(localStorage.getItem('sf_lang')==='en') document.documentElement.classList.add('lang-en');
+if(localStorage.getItem('sf_openplay')==='1') document.documentElement.classList.add('boot-play');
+document.addEventListener('DOMContentLoaded',function(){
+setTimeout(function(){
+var probe=document.getElementById('menuArt');
+var pd=probe?getComputedStyle(probe).display:'';
+// ★ 2026-09-25 修: 只在"能判定"时报警 —— #menuArt 在 body.mobile 与 @media(max-width:620px)
+//   下**按设计**是 display:none, 旧条件 (!='flex' ⇒ 报警) 在触屏/窄窗每次加载都误报并重复拉一次样式表。
+//   真判据 = 新样式生效时是 flex、缓存里那份是 block; none 说明这条探针本轮无效, 直接跳过。
+if(probe&&pd!=='flex'&&pd!=='none'){
+var link=document.querySelector('link[href^="css/style.css"]');
+if(link){
+var fresh=link.cloneNode();
+fresh.href='css/style.css?fresh='+Date.now();
+link.parentNode.appendChild(fresh);
+console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fresh.href);
+}
+}
+},600);
+},{once:true});
+}catch(e){}
+</script>
 </head>
-<body>
+<body class="inMenu">
 <div id="ui">
 <div id="crosshair"><span class="chl t"></span><span class="chl b"></span><span class="chl l"></span><span class="chl r"></span><span class="chdot"></span></div>
-<div id="hitmark"><span></span><span></span><span></span><span></span></div>
+<div id="hitmark"><span></span><span></span><span></span><span></span><b class="hmF"></b></div>
+<div id="nadeArc"><svg id="naSvg" xmlns="http://www.w3.org/2000/svg"><path id="naBlast" d=""></path><path id="naSpot" d=""></path><circle id="naDot" r="2.6"></circle><circle id="naAir" r="12"></circle></svg></div>
 <div id="dmgOv"></div><div id="supOv"></div><div id="lowOv"></div><div id="vig"></div>
 <div id="scopeOv"></div>
+<div id="uwOv"></div>
 <div id="dirHits"></div>
 <div id="ammoPanel"><span id="wname">M1 加兰德</span><span id="wmode">半自动</span><div class="ammoRow"><span id="magN">8</span> <span id="resN">/ 72</span></div><div id="nadeN">手雷 ×3</div></div>
 <div id="healthPanel"><span id="hpNum">100</span><span id="hpBarWrap"><span id="hpBar" style="display:block"></span></span><div id="stamBarWrap"><div id="stamBar"></div></div></div>
@@ -23,6 +72,7 @@
 <div id="flagIcons"><span id="fiA">A</span><span id="fiB">B</span><span id="fiC">C</span><span id="fiD">D</span><span id="fiE">E</span></div>
 <div id="timeTxt">15:00</div>
 <canvas id="compass" width="460" height="26"></canvas>
+<div id="specTimeInd" data-i18n>⏸ 时停中 · K 继续</div>
 </div>
 <div id="killfeed"></div>
 <div id="msgC"></div><div id="scorePop"></div>
@@ -31,13 +81,21 @@
 <div id="interact"></div>
 <div id="coldTip"></div>
 <div id="tbTip"></div>
+<div id="oxyWrap"><div id="oxyBarWrap"><span id="oxyFill"></span></div><span id="oxyTxt" data-i18n>憋气</span></div>
 <div id="braceInd"></div>
 <div id="nadeWarn">⚠ 手雷 ⚠</div>
 <div id="tvOv"></div>
 <div id="leadPip"></div>
+<div id="gunPip"></div>
+<div id="airPip"></div>
+<div id="lockPip"></div>
+<div id="ccipPip"></div>
+<div id="strafePip"></div>
 <div id="tankPip"></div>
 <div id="mgPip"></div>
+<div id="planeLockHud"></div>
 <div id="heatWrap"><div id="heatFill"></div></div>
+<div id="mgHeatWrap"><div id="mgHeatFill"></div></div>
 <div id="vehHpWrap"><span id="vehHpName">坦克</span><span id="vehHpBarWrap"><span id="vehHpBar"></span></span><span id="vehHpNum">100</span></div>
 <div id="scoreboard"><h3 data-i18n>战 场 记 分 板</h3><div id="sbCols"><div><table><thead><tr><th class="t0h">盟军</th><th data-i18n>击杀</th><th data-i18n>阵亡</th><th data-i18n>得分</th></tr></thead><tbody id="sbL"></tbody></table></div><div><table><thead><tr><th class="t1h">德军</th><th data-i18n>击杀</th><th data-i18n>阵亡</th><th data-i18n>得分</th></tr></thead><tbody id="sbR"></tbody></table></div></div></div>
 <div id="fps"></div>
@@ -47,37 +105,45 @@
 </div>
 <div id="touchUI">
 <div id="tStick"><div id="tKnob"></div></div>
-<div class="tbtn" id="tFire">开火</div>
-<div class="tbtn" id="tFire2">开火</div>
-<div class="tbtn" id="tAds">瞄准</div>
-<div class="tbtn" id="tJump">跳</div>
-<div class="tbtn" id="tCrouch">蹲</div>
-<div class="tbtn" id="tProne">趴</div>
-<div class="tbtn" id="tReload">换弹</div>
-<div class="tbtn" id="tNade">雷</div>
-<div class="tbtn" id="tHeal">绷带</div>
-<div class="tbtn" id="tUse">互动</div>
-<div class="tbtn" id="tSwap">切枪</div>
-<div class="tbtn" id="tSprint">疾跑</div>
-<div class="tbtn" id="tSkill" style="display:none">技能</div>
-<div class="tbtn" id="tBuild5" style="display:none">工事</div>
-<div class="tbtn" id="tMelee" style="display:none">近战</div>
-<div class="tbtn" id="tSmoke" style="display:none">烟雾</div>
-<div class="tbtn" id="tIncin" style="display:none">燃烧</div>
-<div class="tbtn" id="tATN" style="display:none">AT雷</div>
-<div class="tbtn" id="tSquad">小队</div>
-<div class="tbtn" id="tFollow">跟随</div>
-<div class="tbtn" id="tScore">战况</div>
+<div class="tbtn" id="tFire" data-i18n>开火</div>
+<div class="tbtn" id="tFire2" data-i18n>开火</div>
+<div class="tbtn" id="tAds" data-i18n>瞄准</div>
+<div class="tbtn" id="tJump" data-i18n>跳</div>
+<div class="tbtn" id="tCrouch" data-i18n>蹲</div>
+<div class="tbtn" id="tProne" data-i18n>趴</div>
+<div class="tbtn" id="tReload" data-i18n>换弹</div>
+<div class="tbtn" id="tNade" data-i18n>雷</div>
+<div class="tbtn" id="tHeal" data-i18n>绷带</div>
+<div class="tbtn" id="tUse" data-i18n>互动</div>
+<div class="tbtn" id="tSwap" data-i18n>切枪</div>
+<div class="tbtn" id="tSprint" data-i18n>疾跑</div>
+<div class="tbtn" id="tSkill" data-i18n style="display:none">技能</div>
+<div class="tbtn" id="tBuild5" data-i18n style="display:none">工事</div>
+<div class="tbtn" id="tMortar" data-i18n style="display:none">迫击炮</div>
+<div class="tbtn" id="tMelee" data-i18n style="display:none">近战</div>
+<div class="tbtn" id="tSmoke" data-i18n style="display:none">烟雾</div>
+<div class="tbtn" id="tIncin" data-i18n style="display:none">燃烧</div>
+<div class="tbtn" id="tATN" data-i18n style="display:none">AT雷</div>
+<div class="tbtn" id="tSquad" data-i18n>小队</div>
+<div class="tbtn" id="tFollow" data-i18n>跟随</div>
+<div class="tbtn" id="tView" data-i18n>视角</div>
+<div class="tbtn" id="tScore" data-i18n>战况</div>
 <div class="tbtn" id="tMenu">≡</div>
 </div>
 <div id="menu" class="screen menuScreen">
+<div id="menuArt">
+<div id="menuArtMap"></div>
+<div id="menuArtFac"></div>
+</div>
 <div id="menuDock">
 <div id="mHome">
 <div class="gameLogo">钢 铁 前 线</div>
 <div class="gameLogoSub" data-i18n>STEEL FRONT · 第二次世界大战</div>
 <div class="subtitle" id="menuSub">—— 战役 ——</div>
 <div class="menuNav">
-<button class="bigBtn navBtn" data-p="mPlay" data-i18n>开 始 游 戏</button>
+<button class="bigBtn navBtn" id="newGameBtn" data-p="mPlay" data-i18n>新 游 戏</button>
+<button class="bigBtn navBtn" id="continueBtn" data-i18n>继 续 游 戏</button>
+<button class="bigBtn navBtn" data-p="mData" data-i18n>战 绩 数 据</button>
 <button class="bigBtn navBtn" data-p="mSet" data-i18n>游 戏 设 置</button>
 <button class="bigBtn navBtn" data-p="mHelp" data-i18n>游 戏 说 明</button>
 </div>
@@ -98,6 +164,21 @@
 <button class="optBtn diffBtn sel" data-d="1" data-i18n>老兵</button>
 <button class="optBtn diffBtn" data-d="2" data-i18n>精英</button>
 </div>
+<div class="secLabel" data-i18n>昼夜</div>
+<div class="rowFlex">
+<button class="optBtn dnBtn" data-dn="day" data-i18n>白天</button>
+<button class="optBtn dnBtn" data-dn="night" data-i18n>黑夜</button>
+<span id="dnLock" style="display:none;opacity:.55;font-size:12px;align-self:center" data-i18n>本图固定为黑夜</span>
+</div>
+<div class="secLabel" data-i18n>天气</div>
+<div class="rowFlex">
+<button class="optBtn wxBtn" data-wx="map">跟随地图</button>
+<button class="optBtn wxBtn" data-wx="clear">晴朗</button>
+<button class="optBtn wxBtn" data-wx="overcast">多云</button>
+<button class="optBtn wxBtn" data-wx="rain">小雨</button>
+<button class="optBtn wxBtn" data-wx="storm">暴雨</button>
+<span id="wxHint" style="display:none;opacity:.55;font-size:12px;align-self:center"></span>
+</div>
 <div class="secLabel" data-i18n>在场人数</div>
 <div class="rowFlex">
 <button class="optBtn sizeBtn sel" data-s="0" data-i18n>标准 11v11</button>
@@ -115,6 +196,7 @@
 <button class="bigBtn" id="startBtn" data-i18n>进 入 战 场</button>
 <button class="bigBtn backBtn" data-i18n>返 回</button>
 </div>
+<div class="secLabel" style="opacity:.55;font-weight:400;text-align:center;letter-spacing:1px" data-i18n>开始新游戏会放弃当前未决出胜负的战局</div>
 </div>
 <div id="mSet" class="mSub hidden">
 <h2 class="mSubTitle" data-i18n>游 戏 设 置</h2>
@@ -123,8 +205,14 @@
 <button class="optBtn qualBtn" data-q="0" data-i18n>低画质</button>
 <button class="optBtn qualBtn sel" data-q="1" data-i18n>中画质</button>
 <button class="optBtn qualBtn" data-q="2" data-i18n>高画质·滤镜·软阴影</button>
-<button class="optBtn" id="ctrlModeBtn">操控: 自动</button>
 </div>
+<div class="secLabel" data-i18n>操作方式</div>
+<div class="rowFlex">
+<button class="optBtn ctrlBtn" data-c="auto" data-i18n>自动</button>
+<button class="optBtn ctrlBtn" data-c="1" data-i18n>触屏</button>
+<button class="optBtn ctrlBtn" data-c="0" data-i18n>键鼠</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:2px" data-i18n-html>自动 = 按设备自动检测; 手柄连接后只在战斗中接管, 菜单与部署界面仍用键鼠/触屏。切换后重载生效。</div>
 <div class="secLabel" data-i18n>语言 / Language</div>
 <div class="rowFlex">
 <button class="optBtn langBtn" id="langZh">中文</button>
@@ -134,9 +222,23 @@
 <div class="rowFlex">
 <button class="optBtn" id="expBtn">⚙ 实验模式: 关</button>
 </div>
+<div class="secLabel" data-i18n>瞄准吸附</div>
+<div class="rowFlex">
+<button class="optBtn aimBtn" data-a="0" data-i18n>关</button>
+<button class="optBtn aimBtn sel" data-a="1" data-i18n>轻度</button>
+<button class="optBtn aimBtn" data-a="2" data-i18n>标准</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:6px" data-i18n-html>普通瞄准/开镜/载具火力的弹道, 在<b>差一点点打中</b>时会被轻轻掰向目标; 明显打偏时不起作用, 隔墙/穿过队友一律不吸。改档即时生效。</div>
 <div class="sliderRow"><span data-i18n>鼠标灵敏度</span> <input type="range" id="sensRange" min="20" max="200" value="100"><span class="val" id="sensVal">1.0</span></div>
 <div class="sliderRow"><span data-i18n>音量</span> <input type="range" id="volRange" min="0" max="100" value="80"><span class="val" id="volVal">80</span></div>
 <div class="sliderRow"><span data-i18n>触控按键大小</span> <input type="range" id="tsizeRange" min="70" max="150" value="100"><span class="val" id="tsizeVal">100%</span></div>
+<div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
+</div>
+<div id="mData" class="mSub hidden">
+<h2 class="mSubTitle" data-i18n>战 绩 数 据</h2>
+<div class="secLabel" data-i18n>各图历史最佳成绩</div>
+<div id="recWrap"><div id="recList" class="recGrid"></div></div>
+<div class="recNote" data-i18n>箭头 ↓ = 该项越少越好 · 观战模式的对局不计入历史记录</div>
 <div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
 </div>
 <div id="mHelp" class="mSub hidden">
@@ -150,26 +252,36 @@
 <div data-i18n-html><b>WASD</b> 移动 · <b>Shift</b> 疾跑(机瞄时为屏息稳枪) · <b>空格</b> 跳跃</div>
 <div data-i18n-html><b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填 · <b>1/2</b> 切换武器 · <b>V</b> 近战</div>
 <div data-i18n-html><b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度) · <b>Q/E</b> 左右侧身探头</div>
+<div data-i18n-html><b>U</b> 第三人称: 开/关 (步行可用; 开镜或上车时自动回到第一人称)</div>
 <div data-i18n-html>蹲下/卧倒/架枪都会显著降低枪口晃动; 疾跑后停下稍等呼吸恢复再开枪更准。</div>
+<div data-i18n-html><b>瞄准吸附</b>(游戏设置内, 默认「轻度」): 差一点点打中的那一枪会被轻轻掰向目标 —— 普通瞄准/开镜/载具火力(主炮·机枪·炮位)都生效, 明显打偏时不起作用, 隔墙或穿过队友一律不吸。</div>
 </div>
 <div class="secLabel" data-i18n-html>投掷物与医疗</div>
 <div class="helpDoc">
 <div data-i18n-html><b>G</b> 手雷(可按住烹饪引信) · <b>3</b> 反坦克雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带包扎(+45生命, 受击会打断)</div>
 <div data-i18n-html>燃烧弹: 红色烈焰烟云, 同样遮蔽视线, 云内步兵持续灼烧(突击兵/巡飞弹兵携带)。</div>
-<div data-i18n-html>医护兵按 <b>B</b> 放置医疗箱, 队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
+<div data-i18n-html>医疗箱: 工程兵建造菜单第5件(按<b>5</b>选到后<b>B</b>建造), 放下后队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
 </div>
 <div class="secLabel" data-i18n-html>载具与固定武器</div>
 <div class="helpDoc">
 <div data-i18n-html>靠近载具/重机枪/反坦克炮/防空炮/迫击炮/弹药箱按 <b>F</b> 使用。</div>
 <div data-i18n-html><b>坦克</b>: WASD 驾驶 · 左键主炮(圆环为落点) · 右键同轴机枪 · <b>C</b> 炮手镜 · F 下车; 车速够快可撞塌砖墙</div>
+<div data-i18n-html><b>夜战</b>(选图时可选「黑夜」): <b>L</b> 车辆大灯开关 —— 照亮路面也暴露自己; 旗点上空有周期照明弹, 被探照灯照中会招致远距离集火; 黑夜里小地图只显示近距/开火的敌人。</div>
 <div data-i18n-html><b>飞机</b>: W/S 油门 · A/D 压坡转向 · 鼠标拉杆 · 左键机枪 · 右键/B 投弹 · F 跳伞</div>
-<div data-i18n-html>固定机枪持续射击会过热(屏幕下方热量条), 红色时需停火冷却。</div>
+<div data-i18n-html>击杀、占领、摧毁坦克/建筑工事和救治队友都会得分, 阵亡会消耗本方兵力票。</div>
+</div>
+<div class="secLabel" data-i18n-html>水中与水下</div>
+<div class="helpDoc">
+<div data-i18n-html>深水 (&gt;1.35m) 自动转为游泳: 浮在水面, <b>Shift 下潜</b> / <b>空格 上浮</b>, 游泳与潜水时武器背起(不能开火/投掷/架设)。</div>
+<div data-i18n-html>水下憋气约 <b>22 秒</b>, 耗尽后持续溺水掉血, 出水 4 秒回满; 潜水时被水面遮蔽(岸上难以发现), 子弹与炮弹入水即失能。</div>
+<div data-i18n-html>滩头礁盘可涉水据枪(精度下降), 岸防炮与木桩/龙牙/铁丝网布在礁盘上; 长栈桥桥下可潜泳穿过。</div>
 </div>
 <div class="secLabel" data-i18n-html>兵种与技能</div>
 <div class="helpDoc">
-<div data-i18n-html>步枪兵 / 冲锋枪手 / 突击兵 / 狙击手 / 医护兵 / 反坦克兵 / 迫击炮兵 / 工程兵, 各带不同主武器与投掷物。</div>
-<div data-i18n-html>医护兵 <b>B</b> 放医疗箱 · 迫击炮兵 <b>B</b> 架设/回收迫击炮 · 工程兵 <b>B</b> 建造、<b>5</b> 切换工事(沙袋墙/铁丝网/拒马/MG42) · 架好的迫击炮全员可 <b>F</b> 操作</div>
+<div data-i18n-html>步枪兵 / 突击兵 / 狙击手 / 反坦克兵 / 工程兵, 各带不同主武器与投掷物; 武器还决定移速(手枪最快)与远距离伤害衰减。落地有 0.5 秒出生保护, 开火立即解除。</div>
+<div data-i18n-html>工程兵 <b>B</b> 建造 · 靠近自己工事 <b>B</b> 读条拆除(退点) · <b>5</b> 切换工事(沙袋墙/铁丝网/拒马/MG42/医疗箱) · <b>6</b> 架设/回收迫击炮 · 架好的迫击炮全员可 <b>F</b> 操作</div>
 <div data-i18n-html><b>实验模式</b>(游戏设置中开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 弹上TV制导: <b>F</b> 切换第一/第三视角, 左键自爆, <b>右键加速冲刺</b>(松开回落巡航); 触碰目标/地面即爆, 额外携带燃烧弹(按<b>6</b>)。</div>
+<div data-i18n-html><b>观战模式</b>(实验模式下, 在兵种卡「巡飞弹兵」上再点一次开关): 免伤 · 不被索敌 · 弹药无限, 本局不计入历史记录(只在兵种卡上点开开关又取消的不算)。战斗中开启会先确认, 且<b>下一次部署才生效</b>(关闭立即生效)。<b>双击空格</b>悬停飞行 / <b>H</b> 气动飞行, 两种飞行中<b>左键都能开火</b>; 副武器位换成 <b>观战连狙</b>(半自动·4x, 可开镜); 操控巡飞弹时按 <b>T</b> = 弹体立刻消失并把自身传送到弹体位置。观战者<b>不指挥小队</b>(T/Y 关闭), 出生列表里的坦克/战机/舰艇/两栖车<b>一律标注「观战不可征用」</b>(想开艇请走近按 <b>F</b> 上艇); <b>F</b> = 按需召唤<b>幽灵坦克</b>(全白 · 免伤 · 弹丸穿透 · 可对双方开火, 开场不预置)。观战工具: <b>J</b> 信息层(名字/队属/血量/交火指向线) · <b>K</b> 时停(冻结整个战场与游戏时钟; 你本人 · 正在开的座驾 · 你自己打出的弹丸都不受影响 —— 可以走到任何位置慢慢看, 也可以定点打一发再按 K 把它停在空中; 顶部栏常驻「⏸ 时停中」读数, 回主菜单或战局结束自动解除)。</div>
 </div>
 <div class="secLabel" data-i18n-html>小队与指挥</div>
 <div class="helpDoc">
@@ -180,9 +292,7 @@
 <div data-i18n-html>占领模式: 站在旗帜圈内占领据点; 攻防/征服: 任意一方占满全部旗点→敌方兵力归零; 破袭战: 摧毁敌方全部补给库。</div>
 <div data-i18n-html>一方兵力归零后不立即判负: 该方封重生(含坦克/飞机/你的再部署), 对方须 <b>①攻防/征服先占满全部旗点 ②消灭场上全部残兵</b> 才算获胜 (敌方坦克存活与否不影响胜负)。</div>
 <div data-i18n-html>兵力归零方场上仅剩最后 1 人、且(攻防/征服)对方已占满全部旗点时启动 <b>30 秒清场倒计时</b>: 时间到仍未被歼灭则直接判对方胜 (防止最后一人躲藏拖局; 旗点被翻回则倒计时复位重来)。</div>
-<div data-i18n-html>遭遇战: 无旗点, 双方从对角相向推进; 劫道战: 炸毁整支护运车队→劫道方胜, 半数卡车突围→护运方胜。</div>
-<div data-i18n-html>击杀、占领、摧毁坦克和救治队友都会得分, 阵亡会消耗本方兵力票。</div>
-<div data-i18n-html><b>连杀奖励</b>: 5 秒内连续击杀/摧毁可叠连杀 —— 达成 3/6/9 杀档位即获"战意"增益(移速/换弹/减伤随档提升, 持续 5~7 秒), 连杀期间每次击杀得分按 ×1.5/×2/×3 结算; 阵亡清零。</div>
+<div data-i18n-html><b>连杀奖励</b>: 5 秒内连续击杀/摧毁可叠连杀 —— 达成 3/6/9 杀档位即获"战意"增益(移速/换弹/减伤随档提升, 持续 5~7 秒); 增益期间继续在窗口内击杀即"续杯"(时长回满, 连杀不断就能一直续); 连杀期间每次击杀得分按 ×1.5/×2/×3 结算; 阵亡清零。</div>
 </div>
 <div class="secLabel" data-i18n-html>暂停与结算</div>
 <div class="helpDoc">
@@ -193,19 +303,15 @@
 <div data-i18n-html>左侧虚拟摇杆移动, 右侧滑动转视角; 屏幕按钮对应开火/瞄准/跳跃/蹲/趴/换弹/手雷/绷带/互动/切枪等, 长按疾跑键锁定疾跑。</div>
 <div data-i18n-html>触控按键大小可在 游戏设置 中调整。</div>
 </div>
+<div class="secLabel" data-i18n-html>手柄操作</div>
+<div class="helpDoc">
+<div data-i18n-html>插上/连接手柄即自动生效 (Xbox 标准布局): RT 开火 · LT 瞄准 · 左摇杆 移动(推满外圈=疾跑) · 右摇杆 视角/巡飞弹制导 · A 跳 · B 蹲 · X 互动 · Y 换弹 · LB 疾跑(按住) · RB 手雷(按住烹饪) · LS按 切枪 · RS按 近战 · Back 战况(按住) · Start 暂停; 十字键: 上 绷带(H) · 下 趴(Z) · 左 烟雾(4)/工程兵选工事(5) · 右 AT雷(3)。</div>
+<div data-i18n-html>手柄只在战斗中接管, 菜单与部署界面仍用鼠标/触屏; 拔线或回到菜单会自动松开全部按住的键。</div>
+</div>
 <div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
 </div>
 </div>
 </div>
-<script>
-// 选战役后重载: 页面一解析完就停在「开始游戏」面板, 不让主菜单闪现
-try{
-if(localStorage.getItem('sf_openplay')==='1'){
-var _mh=document.getElementById('mHome'), _mp=document.getElementById('mPlay');
-if(_mh&&_mp){ _mh.classList.add('hidden'); _mp.classList.remove('hidden'); }
-}
-}catch(e){}
-</script>
 <div id="deploy" class="screen hidden">
 <div class="panel">
 <h1 class="title" style="font-size:30px" data-i18n>部 署</h1>
@@ -223,7 +329,8 @@ if(_mh&&_mp){ _mh.classList.add('hidden'); _mp.classList.remove('hidden'); }
 </div>
 </div>
 <div class="center" style="margin-top:20px"><button class="bigBtn" id="deployBtn"><span data-i18n>部 署</span> <span id="respawnTxt"></span></button>
-<button class="bigBtn" id="resumeBtn" style="display:none" data-i18n>返 回 战 斗</button></div>
+<button class="bigBtn" id="resumeBtn" style="display:none" data-i18n>返 回 战 斗</button>
+<button class="bigBtn menuBackBtn" id="deployMenuBtn" style="display:none" data-i18n>返 回 主 界 面</button></div>
 </div>
 </div>
 <div id="end" class="screen hidden">
@@ -240,9 +347,10 @@ if(_mh&&_mp){ _mh.classList.add('hidden'); _mp.classList.remove('hidden'); }
 <div id="endScore">0</div>
 <div id="endBestLine"><span id="endBest"></span><span id="endNewRec" class="hidden" data-i18n>新纪录!</span></div>
 </div>
+<div id="endSpecNote" class="hidden" data-i18n>观战模式 · 本局不计入历史记录</div>
 <div id="endGrid"></div>
 <div id="endTickets"></div>
-<div class="center"><button class="bigBtn" id="againBtn" data-i18n>再 来 一 局</button></div>
+<div class="center"><button class="bigBtn" id="againBtn" data-i18n>返 回 主 界 面</button></div>
 </div>
 </div>
 <div id="pauseOv" class="screen hidden">
@@ -250,44 +358,80 @@ if(_mh&&_mp){ _mh.classList.add('hidden'); _mp.classList.remove('hidden'); }
 <div class="gameLogo" style="font-size:34px" data-i18n>已 暂 停</div>
 <div class="subtitle" data-i18n>战斗冻结 · 按 ESC 继续</div>
 <div class="center"><button class="bigBtn" id="pauseResumeBtn" data-i18n>继 续 战 斗</button></div>
+<div class="center"><button class="bigBtn menuBackBtn" id="pauseMenuBtn" data-i18n>返 回 主 界 面</button></div>
 </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<!-- 2026-09-30 Ctrl+F5 事故修复: three/cannon 原走 jsdelivr CDN 且不带版本戳 —— 硬刷新会连同 CDN
+     一起绕缓存重拉, CDN 抽风 (国内常态) ⇒ THREE 未定义 ⇒ 脚本链首用即抛 ⇒ bootFail (HUD 全裸+黑屏)。
+     现收编进仓库 lib/ (three r152 + cannon 0.6.2, 与 dev/vendor 探针副本同源), file:// 离线可用。
+     版本戳与 js/ 同纪律统一 ?v= (verify-spec T8 把守), 且禁止改回外链 (T8 有 cdn 断言)。 -->
+<script src="lib/three.min.js?v=20261005b"></script>
+<script src="lib/cannon.min.js?v=20261005b"></script>
 
-<script src="js/00-config.js"></script>
-<script src="js/00b-i18n.js"></script>
-<script src="js/01-audio.js"></script>
-<script src="js/02-scene.js"></script>
-<script src="js/03-terrain.js"></script>
-<script src="js/04-collision.js"></script>
-<script src="js/04b-fire.js"></script>
-<script src="js/05-world.js"></script>
-<script src="js/05a-buildings.js"></script>
-<script src="js/05b-props.js"></script>
-<script src="js/05c-layouts.js"></script>
-<script src="js/06-engineering.js"></script>
-<script src="js/07-nav.js"></script>
-<script src="js/08-effects.js"></script>
-<script src="js/09a-defs.js"></script>
-<script src="js/09-weapons.js"></script>
-<script src="js/10-viewmodel.js"></script>
-<script src="js/11-soldiers.js"></script>
-<script src="js/12-ragdolls.js"></script>
-<script src="js/13-combat.js"></script>
-<script src="js/14-bots.js"></script>
-<script src="js/15-vehicles.js"></script>
-<script src="js/15b-trucks.js"></script>
-<script src="js/16-aircraft.js"></script>
-<script src="js/17-emplacements.js"></script>
-<script src="js/18-game.js"></script>
-<script src="js/19-input.js"></script>
-<script src="js/20-player.js"></script>
-<script src="js/20a-seats.js"></script>
-<script src="js/21-match.js"></script>
-<script src="js/22-hud.js"></script>
-<script src="js/23-deploy.js"></script>
-<script src="js/24-main.js"></script>
+<script src="js/00-config.js?v=20261005b"></script>
+<script src="js/00b-i18n.js?v=20261005b"></script>
+<script src="js/01-audio.js?v=20261005b"></script>
+<script src="js/02-scene.js?v=20261005b"></script>
+<script src="js/03-terrain.js?v=20261005b"></script>
+<script src="js/04-collision.js?v=20261005b"></script>
+<script src="js/04b-fire.js?v=20261005b"></script>
+<script src="js/05-world.js?v=20261005b"></script>
+<script src="js/05a-buildings.js?v=20261005b"></script>
+<script src="js/05b-props.js?v=20261005b"></script>
+<script src="js/05c-layouts.js?v=20261005b"></script>
+<script src="js/06-engineering.js?v=20261005b"></script>
+<script src="js/07-nav.js?v=20261005b"></script>
+<script src="js/08-effects.js?v=20261005b"></script>
+<script src="js/09a-defs.js?v=20261005b"></script>
+<script src="js/09-weapons.js?v=20261005b"></script>
+<script src="js/10-viewmodel.js?v=20261005b"></script>
+<script src="js/11-soldiers.js?v=20261005b"></script>
+<script src="js/12-ragdolls.js?v=20261005b"></script>
+<script src="js/13-combat.js?v=20261005b"></script>
+<script src="js/14-bots.js?v=20261005b"></script>
+<script src="js/15-vehicles.js?v=20261005b"></script>
+<script src="js/15b-trucks.js?v=20261005b"></script>
+<script src="js/15c-specveh.js?v=20261005b"></script>
+<!-- 2026-09-20N 海战批: 15e(剪影建模) 必须在 15d(载具本体) 之前 —— 15d 的构造器调用 15e 的
+     navBuildModel, 两者都走 const/函数声明, 倒序会在 TDZ 里抛错。15f(反舰炮位) 依赖 15d 的
+     navalNear 索敌接口, 故排在其后、17-emplacements 之前 (炮位在布局期由 17 架设)。 -->
+<script src="js/15e-navmodels.js?v=20261005b"></script>
+<script src="js/15d-naval.js?v=20261005b"></script>
+<script src="js/15f-battery.js?v=20261005b"></script>
+<!-- 2026-09-30 阶段五 P4 (大舰): 15g(剪影建模) 必须在 15h(本体) 之前 —— 15h 的构造器调用 15g 的
+     capBuildModel (与 15e→15d 同一条 TDZ 纪律)。15h 依赖 15d 的 navalRaySeg/navalPtSeg2/水态接口,
+     故排在 15f 之后、16-aircraft 之前 (战机只需大小艇并列的命中链在运行时可见)。 -->
+<script src="js/15g-capmodels.js?v=20261005b"></script>
+<script src="js/15h-capital.js?v=20261005b"></script>
+<script src="js/16-aircraft.js?v=20261005b"></script>
+<script src="js/17-emplacements.js?v=20261005b"></script>
+<script src="js/18-game.js?v=20261005b"></script>
+<script src="js/19-input.js?v=20261005b"></script>
+<script src="js/19b-gamepad.js?v=20261005b"></script>
+<script src="js/20-player.js?v=20261005b"></script>
+<script src="js/20a-seats.js?v=20261005b"></script>
+<script src="js/21-match.js?v=20261005b"></script>
+<script src="js/22-hud.js?v=20261005b"></script>
+<script src="js/22a-menuart.js?v=20261005b"></script>
+<script src="js/22b-speclayer.js?v=20261005b"></script>
+<script src="js/23-deploy.js?v=20261005b"></script>
+<script src="js/23b-worldrestore.js?v=20261005b"></script>
+<script src="js/24-main.js?v=20261005b"></script>
+<script>
+// 兜底: 首屏 pre-hide 之后若主脚本链中途抛错, 不要留下"全黑屏且无 UI"的死局 ——
+// 只有 24-main 正常跑完才会置 window.__sfBooted; 未置位则解除隐藏并把菜单抬到最前, 让报错可见可交互。
+// 2026-09-30 升级: 报错不止进控制台 —— 头部钩子记下的 window.__sfErrs 写进 #bootErr 大字浮层
+// (file:// 下用户不挂 DevTools 也能把错误行抄过来; 样式见 css #bootErr, body.bootFail 时显示)。
+if(!window.__sfBooted){
+document.body.classList.remove('inMenu');
+document.body.classList.add('bootFail');
+var _be=document.getElementById('bootErr');
+if(!_be){ _be=document.createElement('div'); _be.id='bootErr'; document.body.appendChild(_be); }
+_be.textContent='启动失败 (bootFail)\n'+
+(window.__sfErrs&&window.__sfErrs.length?window.__sfErrs.slice(0,4).join('\n'):'主脚本链未跑完且未捕获到错误细节; 若反复出现请按 F12 看控制台');
+console.error('[BOOT] 主脚本链未跑完:', window.__sfErrs);
+}
+</script>
 
 </body>
 </html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>22a-menuart 目视检查台 (dev, 不进游戏)</title>
+<!-- ?c=N 指定战役 (缺省取存档)。localStorage 垫片只拦 sf_campaign 一个键, 其余透传真存档 ——
+     00-config 按真实游戏路径读档, 沙盘拿到的 CAMPAIGN/RIVER/BRIDGES/WOOD/STEPPE/MAP_SIZE 与实机一致 -->
+<script>
+(function(){
+var q=new URLSearchParams(location.search), c=q.get('c');
+if(c===null) return;
+try{
+var real=window.localStorage;
+var shim={getItem:function(k){ return k==='sf_campaign'?String(Number(c)):real.getItem(k); },
+setItem:function(k,v){ return real.setItem(k,v); },
+removeItem:function(k){ return real.removeItem(k); }, key:function(i){ return real.key(i); }};
+Object.defineProperty(shim,'length',{get:function(){ return real.length; }});
+Object.defineProperty(window,'localStorage',{configurable:true,get:function(){ return shim; }});
+}catch(e){}
+})();
+</script>
+<script src="../js/00-config.js"></script>
+<script src="../js/22a-menuart.js"></script>
+<style>
+body { margin:0; padding:16px 20px 40px; background:#0b0d0a; color:#cfc9b4;
+font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+h2 { font-size:15px; letter-spacing:3px; color:#d8c894; font-weight:600; margin:22px 0 10px;
+border-bottom:1px solid rgba(200,180,130,.25); padding-bottom:5px; }
+.row { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start; }
+.cell { width:240px; }
+/* 真实尺寸: 与游戏内 #menuArtMap 一致 */
+.mapCard { width:240px; line-height:0; border:1px solid rgba(210,200,160,.28); border-radius:4px;
+overflow:hidden; background:rgba(8,10,7,.45); box-shadow:0 6px 26px rgba(0,0,0,.6); }
+.mapCard svg { width:100%; height:auto; display:block; }
+/* 真实尺寸: 与游戏内 #menuArtFac .facCard 一致 */
+.facRow { display:flex; gap:12px; }
+.facCard { width:82px; line-height:0; padding:2px; border:1px solid rgba(210,200,160,.18); border-radius:4px;
+background:rgba(8,10,7,.4); }
+.facCard.on { border-color:#e0ca8a; background:rgba(200,175,95,.16); box-shadow:0 0 16px rgba(214,182,102,.4); }
+.facCard.dim { opacity:.45; filter:grayscale(.7) brightness(.82); }
+.facCard svg { width:100%; height:auto; display:block; }
+.big .facCard { width:150px; }
+.nav { font-size:12px; line-height:2; }
+.nav a { color:#a8c8e8; text-decoration:none; margin-right:9px; }
+.nav a.here { color:#ffe9b0; font-weight:700; }
+.note { font-size:12px; color:#7f7a68; line-height:1.9; }
+</style>
+</head>
+<body>
+<div class="note">22a-menuart 目视检查台 —— 上=当前战役沙盘 (真实 240px), 下=双方盾徽 (真实 82px / 高亮+暗态) 与六阵营放大 150px。仅开发期使用, 不进 index.html。</div>
+<div class="nav" id="nav"></div>
+<h2 id="h1">战役沙盘 menuMapSVG()</h2>
+<div class="row" id="maps"></div>
+<h2>阵营盾徽 menuFactionSVG() 真实尺寸: 高亮态 / 暗态</h2>
+<div class="row" id="facs"></div>
+<h2>六阵营盾徽 放大 150px (头盔 / 徽记 / 斜分带)</h2>
+<div class="row big" id="facsBig"></div>
+<script>
+'use strict';
+// 战役切换靠"重新加载" (?c=N): 不能就地改 CAMPAIGN —— MAP_SIZE/RIVER/BRIDGES/WOOD/STEPPE 是 const。
+const nav=document.getElementById('nav');
+nav.innerHTML='战役: '+CAMPAIGNS.map((c,i)=>
+'<a href="?c='+i+'"'+(i===CAMPAIGN_IDX?' class="here"':'')+'>'+i+' '+c.id+'</a>').join('')
++'<br>存档当前 = '+CAMPAIGN_IDX+' ('+CAMPAIGN.id+')';
+document.getElementById('h1').textContent='战役沙盘 menuMapSVG() —— '+CAMPAIGN.id+' · '+CAMPAIGN.title+' · '+(CAMPAIGN.mapSize||320)+' · '+CAMPAIGN.terr;
+document.getElementById('maps').innerHTML='<div class="cell"><div class="mapCard">'+menuMapSVG()
++'</div><div style="font-size:11px;color:#8f8a76;text-align:center;margin-top:5px">'+CAMPAIGN.id+'</div></div>';
+// 双方盾徽 (本战役 TEAM_FACTION[0/1]) + 全部六阵营放大
+const facs=document.getElementById('facs');
+for(let t=0;t<2;t++){
+const w=document.createElement('div');
+w.innerHTML='<div style="font-size:11px;color:#8f8a76;text-align:center;margin-bottom:4px">team'+t+' '+TEAM_FACTION[t].sym+' '+TEAM_FACTION[t].short+'</div>';
+for(const cls of ['on','dim']){
+const d=document.createElement('div'); d.className='facCard '+cls;
+d.innerHTML=menuFactionSVG(t); d.style.display='inline-block'; d.style.marginRight='8px';
+w.appendChild(d);
+}
+facs.appendChild(w);
+}
+const big=document.getElementById('facsBig');
+for(const key of ['us','ger','sov','jp','kmt','cpc']){
+const F=FACTIONS[key], back=TEAM_FACTION[0];
+TEAM_FACTION[0]=F;
+const svg=menuFactionSVG(0);
+TEAM_FACTION[0]=back;
+const w=document.createElement('div');
+w.innerHTML='<div style="font-size:11px;color:#8f8a76;text-align:center;margin-bottom:4px">'+key+' '+F.sym+' '+F.short+'</div>';
+const d=document.createElement('div'); d.className='facCard'; d.innerHTML=svg;
+w.appendChild(d); big.appendChild(w);
+}
+</script>
+</body>
+</html>

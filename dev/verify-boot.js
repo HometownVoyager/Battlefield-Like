@@ -67,7 +67,13 @@ getZ(i){return (this.array&&this.array[i*this.itemSize+2])||0;}
 setX(i,v){if(this.array)this.array[i*this.itemSize]=v;}
 setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
-class _Color{constructor(c){this.c=c;}set(){return this;}}
+class _Color{constructor(c){this.c=c;}set(){return this;}
+// lerp/getHex (2026-10-05 补): 昼夜批 nightFogColor 在夜档 boot 用 c.lerp(夜蓝,fogMix) 混合雾色 ——
+// 铁底湾锁夜 boot(#13)曾因缺这两个方法整局 FAIL (既有假阴, 与 verify-daynight/verify-weather 的补法对齐)。
+lerp(t,a){ const _p=h=>{h=typeof h==='number'?h:0;return [(h>>16)&255,(h>>8)&255,h&255];};
+const c0=_p(this.c), c1=_p(t&&t.c!==undefined?t.c:t);
+const mix=c0.map((v,i)=>Math.round(v+(c1[i]-v)*a)); this.c=(mix[0]<<16)|(mix[1]<<8)|mix[2]; return this; }
+getHex(){ return typeof this.c==='number'?this.c:0; }}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
 const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
@@ -100,7 +106,10 @@ Texture:class{constructor(){this.repeat=new V3(1,1,1);this.offset=new V3(0,0,0);
 DirectionalLight:class extends Obj3{constructor(c,i){super();this.intensity=i?i:1;this.color=new _Color(c);this.target=new Obj3();this.shadow={mapSize:new V3(1,1,1),bias:0,camera:{updateProjectionMatrix(){},left:0,right:0,top:0,bottom:0,far:0,near:0}} } },
 AmbientLight:class extends Obj3{constructor(c,i){super();this.intensity=i;this.color=new Color(c);}},
 HemisphereLight:class extends Obj3{constructor(a,b,i){super();this.intensity=i;}},
-PointLight:class extends Obj3{},
+PointLight:class extends Obj3{constructor(c,i,d,dec){super();this.color=new _Color(c);this.intensity=i||0;this.distance=d||0;this.decay=dec||1;}},
+// SpotLight (2026-10-05 补): 昼夜批 N2 探照灯/大灯真灯池 (08-effects nightGearTick) 在夜档 boot 构建
+// SpotLight —— 铁底湾锁夜 boot 曾因缺此构造器 FAIL (既有假阴; 与 verify-daynight 的补法对齐)。
+SpotLight:class extends Obj3{constructor(c,i,d,a,p,dec){super();this.color=new _Color(c);this.intensity=i||0;this.distance=d||0;this.angle=a||0;this.penumbra=p||0;this.decay=dec||1;this.castShadow=false;this.target=new Obj3();}},
 Box3:class{setFromObject(){return this;}expandByObject(){return this;}},
 Clock:class{getDelta(){return 0;}},
 Matrix4:class{compose(){return this;}makeRotationFromEuler(){return this;}makeScale(){return this;}},
@@ -157,7 +166,7 @@ const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 for(const f of files) load(ctx,f); // 不含 24 的 loop 启动? 24 会调用 initMenuUI & setInterval? 探针只调 fn
 return ctx;
 }

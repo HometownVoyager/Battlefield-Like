@@ -9,7 +9,9 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+// 曝光: 昼 1.05 / 夜 NIGHT_CFG.exposure, 天气在其上再乘 expoMul (2026-10-05 口追⑨: 全画面统一压暗,
+// storm 0.7 ⇒ 暴雨昼总亮度≈晴天 35%; ACES 保高光, 枪焰/闪电/探照灯不受累; 晴档 ×1 逐位)
+renderer.toneMappingExposure = (NIGHT_MODE?NIGHT_CFG.exposure:1.05)*WX_CFG.expoMul;
 renderer.autoClear = false;
 renderer.domElement.className='game';
 document.body.appendChild(renderer.domElement);
@@ -33,33 +35,77 @@ renderer.shadowMap.type=q===2?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
 renderer.domElement.style.filter=q===2?'saturate(1.1) contrast(1.06) brightness(1.02)':(q===1?'saturate(1.04) contrast(1.02)':'none');
 // 2026-09-12 巨桥改版: 主题系数与图幅系数相乘 (旧版互斥三元 —— deepjungle 640 大图永远吃不到放宽)
 // 2026-09-13 许特根改版: deepjungle 硬编码 0.72 抽成主题字段 THEME.fogMul (woods=0.42 能见度极低)
-scene.fog.far = (q===0?240:(q===1?340:420))*((WEATHER==='rain'||WEATHER==='storm')?0.78:(WEATHER==='snow'?0.85:1))*(THEME.fogMul||1)*((CAMPAIGN.mapSize||320)>=640?1.35:1);
+scene.fog.far = dryFogFar();
 }
 addEventListener('resize',()=>{
 camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
 vmCamera.aspect=camera.aspect; vmCamera.updateProjectionMatrix();
 renderer.setSize(innerWidth,innerHeight);
 });
-scene.fog = new THREE.Fog(THEME.fog, 40, 340);
+// ── 干态雾距/雾起 单源 (★2026-09-26E 审计 40): applyQuality 与 22-hud 的水下雾基准重采共读这一支 ──
+// (旧版这两个数字只写在 applyQuality 的表达式里, 潜水期改画质时没有第二处能重算 ⇒ 出水还原成旧档。)
+function dryFogFar(){
+const q=SETTINGS.quality;
+// 天气槽 (天气设计 §5-2): 原 (rain||storm)?0.78:snow?0.85:1 收编为 WX_CFG.fogFarMul —— 值逐位相同, 乘序不变 (R1/R3)。
+return (q===0?240:(q===1?340:420))*WX_CFG.fogFarMul*(THEME.fogMul||1)*((CAMPAIGN.mapSize||320)>=640?1.35:1)*(NIGHT_MODE?NIGHT_CFG.fogFarMul:1);
+}
+function dryFogNear(){
+// 雾起 (天气设计 §4.1 渐变口径, 2026-10-05 口追): 白天 40m ×WX_CFG.fogNearMul —— 40m 内零雾在暴雨里
+//   读作"近处清晰+远处一面墙"; near 提前让雾从近处开始线性爬坡 (小雨 20m / 暴雨·暴风雪 14m)。
+//   晴/阴/中雪 ×1 = 原值 40m 逐位; 夜档 NIGHT_CFG.fogNearMul 在天气系数之上再乘 (R3 顺序)。
+return 40*WX_CFG.fogNearMul*(NIGHT_MODE?NIGHT_CFG.fogNearMul:1);
+}
+// 夜档雾色: 各图雾色向夜蓝 0x101a28 mix (保留色相差异, 见 NIGHT_CFG.fogMix)。
+// 水下雾 (22-hud) 是"进入时快照当前色 / 出水还原"口径 —— 夜色会随快照自动保住, 无需第二处接线。
+const NIGHT_FOG_HEX=0x101a28;
+function nightFogColor(hex){
+const c=new THREE.Color(hex), n=new THREE.Color(NIGHT_FOG_HEX);
+c.lerp(n,NIGHT_CFG.fogMix);
+return c.getHex();
+}
+// 天气灰度 (2026-10-05 口追⑥⑧): 把天穹渐变色向"灰"混合 w∈[0,1], 目标灰亮度 = 基色亮度×lum ——
+// 晴档 w=0 原字符串逐字节返回 (零回归); lum<1 即"去饱和并压暗" (暴雨 0.55 出暗天), 暴风雪 0.9 保白毛风。
+function _skyGreyMix(s,w,lum){
+if(!w)return s;
+const n=parseInt(s.slice(1),16), r=n>>16&255, g=n>>8&255, b=n&255;
+const t=Math.min(1,(0.299*r+0.587*g+0.114*b)/255*lum+0.02)*255;
+const m=x=>Math.round(x+(t-x)*w);
+return 'rgb('+m(r)+','+m(g)+','+m(b)+')';
+}
+// 雾色亮度乘子 (口追⑧): fogFar 压低后视野大半是雾色, 不压雾色=拿亮灰漆满世界。昼夜两档同乘;
+// 水下雾 (22-hud) 进入时快照当前色/出水还原 → 自动继承, 无需第二处接线。
+function _fogDimCol(hex,w){
+if(w>=1)return hex;
+const r=(hex>>16)&255, g=(hex>>8)&255, b=hex&255;
+return ((Math.round(r*w)<<16)|(Math.round(g*w)<<8)|Math.round(b*w))>>>0;
+}
+const _fogBase=NIGHT_MODE?nightFogColor(THEME.fog):THEME.fog;
+scene.fog = new THREE.Fog(_fogDimCol(_fogBase,WX_CFG.fogDim), dryFogNear(), 340);
 let SKY=null;
 {
 const c=document.createElement('canvas'); c.width=16; c.height=256;
 const g=c.getContext('2d');
 const gr=g.createLinearGradient(0,0,0,256);
-const st=THEME.sky;
-gr.addColorStop(0,st[0]); gr.addColorStop(0.42,st[1]);
-gr.addColorStop(0.62,st[2]); gr.addColorStop(0.75,st[3]); gr.addColorStop(1,st[4]);
+// 夜档天空: 统一用 nightsea 月夜色板做基线 (NIGHT_CFG.sky / THEME.skyNight 可覆盖);
+// 白天档逐位用 THEME.sky 原值; 天气灰度在两族色板上统一混 (口追⑥, 晴档 w=0 逐位)。
+const st=NIGHT_MODE?(NIGHT_CFG.sky||THEME.skyNight||THEMES.nightsea.sky):THEME.sky;
+const _sw=WX_CFG.skyGrey, _sl=WX_CFG.skyLum;
+gr.addColorStop(0,_skyGreyMix(st[0],_sw,_sl)); gr.addColorStop(0.42,_skyGreyMix(st[1],_sw,_sl));
+gr.addColorStop(0.62,_skyGreyMix(st[2],_sw,_sl)); gr.addColorStop(0.75,_skyGreyMix(st[3],_sw,_sl)); gr.addColorStop(1,_skyGreyMix(st[4],_sw,_sl));
 g.fillStyle=gr; g.fillRect(0,0,16,256);
 const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
 SKY=new THREE.Mesh(new THREE.SphereGeometry(760,24,16), new THREE.MeshBasicMaterial({map:tex,side:THREE.BackSide,fog:false}));
 SKY.frustumCulled=false;
 scene.add(SKY);
 }
-const hemi = new THREE.HemisphereLight(THEME.hemi[0], THEME.hemi[1], THEME.hemi[2]);
+const hemi = new THREE.HemisphereLight(THEME.hemi[0], THEME.hemi[1], THEME.hemi[2]*(NIGHT_MODE?NIGHT_CFG.hemiMul:1));
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(THEME.sun, THEME.sunI);
+// 夜档 sun=月光: 冷蓝低强度 (阴影视锥/方向不动, updateSunShadow 照旧); 白天档原色原强度
+const sun = new THREE.DirectionalLight(NIGHT_MODE?NIGHT_CFG.moonCol:THEME.sun, THEME.sunI*(NIGHT_MODE?NIGHT_CFG.sunMul:1));
 sun.position.set(-90, 120, 40);
-sun.castShadow = true;
+// 影随盘 (口追⑨): 硬影子只在日盘可见时投 (sunVis≥0.5 = 晴朗/细雪); 阴/雨/暴/中雪/暴风雪 = 漫射光无影;
+// 夜档不受此门 (月光影子保持昼改前原样)
+sun.castShadow = NIGHT_MODE?true:WX_CFG.sunVis>=0.5;
 sun.shadow.camera.left=-60; sun.shadow.camera.right=60;
 sun.shadow.camera.top=60; sun.shadow.camera.bottom=-60;
 sun.shadow.camera.far=400; sun.shadow.bias=-0.0012; sun.shadow.normalBias=0.02;
@@ -72,34 +118,78 @@ const cz=Math.round(camera.position.z/texel)*texel;
 sun.target.position.set(cx,0,cz);
 sun.position.set(cx-72,96,cz+32);
 }
-{
+if(!NIGHT_MODE){
+// 白天: 硬编码暖白太阳光晕 (原样, 零回归)
 const c=document.createElement('canvas'); c.width=128; c.height=128;
 const g=c.getContext('2d');
 const gr=g.createRadialGradient(64,64,2,64,64,64);
 gr.addColorStop(0,'rgba(255,250,230,1)'); gr.addColorStop(0.25,'rgba(255,240,200,.55)'); gr.addColorStop(1,'rgba(255,240,200,0)');
 g.fillStyle=gr; g.fillRect(0,0,128,128);
 const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),fog:false,depthWrite:false}));
+// 口追⑥: 太阳盘接天气档 (阴/雨/暴/暴雪整隐, 细雪×0.5/中雪×0.3 减淡; 光照强度另走 sunMul, 互不替代)
+sp.material.opacity=WX_CFG.sunVis; if(WX_CFG.sunVis<=0)sp.visible=false;
 sp.position.set(-380,480,170); sp.scale.setScalar(220); scene.add(sp);
+}else{
+// 夜档 (昼夜设计 §3.3): 太阳光晕换**月亮** (冷白小盘 + 弱晕) + **星星** (Points 一次生成, 走 rand 非种子流)
+const c=document.createElement('canvas'); c.width=128; c.height=128;
+const g=c.getContext('2d');
+const gr=g.createRadialGradient(64,64,2,64,64,64);
+gr.addColorStop(0,'rgba(226,236,255,1)'); gr.addColorStop(0.18,'rgba(210,224,252,.9)'); gr.addColorStop(0.30,'rgba(190,208,244,.30)'); gr.addColorStop(1,'rgba(190,208,244,0)');
+g.fillStyle=gr; g.fillRect(0,0,128,128);
+const moon=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),fog:false,depthWrite:false}));
+// 口追⑥: 月盘/月斑/星空接天气档 (阴天薄云残月稀星, 雨夜几乎不见, 暴风雪全隐; 晴档 ×1 逐位)
+moon.material.opacity=WX_CFG.moonVis; if(WX_CFG.moonVis<=0)moon.visible=false;
+moon.position.set(-380,480,170); moon.scale.setScalar(110); scene.add(moon);
+// 月面暗斑: 同一张画布上再叠一层 (读作月海, 不再是纯白圆盘)
+const mc=document.createElement('canvas'); mc.width=64; mc.height=64;
+const mg=mc.getContext('2d');
+for(let i=0;i<9;i++){
+const x=rand(14,50),y=rand(14,50),r=rand(3,9);
+const mgr=mg.createRadialGradient(x,y,1,x,y,r);
+mgr.addColorStop(0,'rgba(140,156,190,.30)'); mgr.addColorStop(1,'rgba(140,156,190,0)');
+mg.fillStyle=mgr; mg.fillRect(0,0,64,64);
+}
+const moonSpots=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(mc),fog:false,depthWrite:false,transparent:true}));
+moonSpots.material.opacity=WX_CFG.moonVis; if(WX_CFG.moonVis<=0)moonSpots.visible=false;
+moonSpots.position.set(-380,480,169); moonSpots.scale.setScalar(110); scene.add(moonSpots);
+// 星空: 半球上半均匀撒点 (Points, sizeAttenuation 关 = 恒定像素大小, 不受雾)
+const STAR_N=260, sp2=[];
+for(let i=0;i<STAR_N;i++){
+const a=rand(0,TAU), e=Math.acos(rand(0.08,0.95)); // 高度角 >~4.6°, 地平线附近不撒
+sp2.push(Math.cos(a)*Math.sin(e)*740, Math.cos(e)*740, Math.sin(a)*Math.sin(e)*740);
+}
+const sgm=new THREE.BufferGeometry();
+sgm.setAttribute('position',new THREE.Float32BufferAttribute(sp2,3));
+const stars=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xcfd8ee,size:2.2,sizeAttenuation:false,transparent:true,opacity:0.85,fog:false,depthWrite:false}));
+stars.material.opacity=0.85*WX_CFG.starVis; if(WX_CFG.starVis<=0)stars.visible=false;
+stars.frustumCulled=false; scene.add(stars);
 }
 {
+// 口追⑦⑧ (2026-10-05): 云层数量/浓度随天气档 —— 晴档 9×1 逐位现状; 非晴档加密 (cloudN) 并放宽
+// 幅面压低云底 (_wide: ±750/高150-300, 晴档保持原 ±600/180-280 区间, 逐次 rand 消耗数不变);
+// 云朵画布同率灰化压暗 (_puff = 255×min(1,skyLum)×(1-0.35×skyGrey): 暴雨/暴雪出深灰云盖; 晴档 255 = 原白逐位)。
+const _cn=WX_CFG.cloudN, _co=WX_CFG.cloudOpMul, _wide=_cn>9;
+const _puff=Math.round(255*Math.min(1,WX_CFG.skyLum)*(1-0.35*WX_CFG.skyGrey));
+const _px2=_puff+','+_puff+','+_puff;
 const c=document.createElement('canvas'); c.width=256; c.height=128;
 const g=c.getContext('2d');
 for(let i=0;i<46;i++){
 const x=rand(30,226),y=rand(40,90),r=rand(14,34);
 const gr=g.createRadialGradient(x,y,1,x,y,r);
-gr.addColorStop(0,'rgba(255,255,255,.22)'); gr.addColorStop(1,'rgba(255,255,255,0)');
+gr.addColorStop(0,'rgba('+_px2+',.22)'); gr.addColorStop(1,'rgba('+_px2+',0)');
 g.fillStyle=gr; g.fillRect(0,0,256,128);
 }
 const tex=new THREE.CanvasTexture(c);
-for(let i=0;i<9;i++){
-const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:rand(.5,.85),fog:false,depthWrite:false}));
-sp.position.set(rand(-600,600), rand(180,280), rand(-600,600));
-sp.scale.set(rand(180,340),rand(60,110),1);
+const _cOp=(NIGHT_MODE?NIGHT_CFG.cloudMul:1)*_co;   // 夜档云压暗 (白天晴档 ×1 逐位不变)
+for(let i=0;i<_cn;i++){
+const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:Math.min(1,rand(.5,.85)*_cOp),fog:false,depthWrite:false}));
+sp.position.set(rand(_wide?-750:-600,_wide?750:600), rand(_wide?150:180,_wide?300:280), rand(_wide?-750:-600,_wide?750:600));
+sp.scale.set(rand(_wide?220:180,_wide?420:340),rand(_wide?70:60,_wide?120:110),1);
 scene.add(sp);
 }
 }
-vmScene.add(new THREE.HemisphereLight(0xcfd8e8, 0x5a5844, 0.9));
-{ const l=new THREE.DirectionalLight(0xffeed0,1.6); l.position.set(-1,1.6,0.6); vmScene.add(l); }
+vmScene.add(new THREE.HemisphereLight(0xcfd8e8, 0x5a5844, 0.9*(NIGHT_MODE?NIGHT_CFG.vmLightMul:1)));
+{ const l=new THREE.DirectionalLight(0xffeed0,1.6*(NIGHT_MODE?NIGHT_CFG.vmLightMul:1)); l.position.set(-1,1.6,0.6); vmScene.add(l); }
 function makeTex(w,h,fn,repX=1,repY=1){
 const c=document.createElement('canvas'); c.width=w; c.height=h;
 fn(c.getContext('2d'),w,h);
@@ -118,6 +208,27 @@ g.fillRect(rand(0,w),rand(0,h),s,s);
 g.globalAlpha=1;
 }
 const TEX = {};
+// ── 逐块色抖单源 (2026-09-27 用户实报"部分建筑出现了严重的材质不一致") ─────────────────────────
+// 旧版砖/石/木/瓦的逐块颜色写成 `rgb(randi(...),randi(...),randi(...))` —— 三通道**各抖各的**,
+// 于是同一堵墙上相邻两块可以一个偏粉 (hue 13°)、一个偏青 (hue 156°): 实测 TEX.stone 的逐块色相跨度
+// 13°~156° (143°), 实机就是"拼色马赛克"。现口径: 只抖**明度** (三通道乘同一系数 k), 再给一点同向的
+// 暖冷偏移 w (ΔR=-ΔB, ±4) —— 砖石木瓦的天然色差本来就在这几档里, 不再出现跨色相跳变 (跨度 <10°)。
+// k 区间 0.86~1.14 与旧版三通道各自的 0.8~1.2 覆盖同一亮度包线 ⇒ 材质亮度观感不变, 只收敛色相。
+function shade(base,k,w){
+w=w||0;
+return `rgb(${clamp(Math.round(base[0]*k+w),0,255)},${clamp(Math.round(base[1]*k),0,255)},${clamp(Math.round(base[2]*k-w),0,255)})`;
+}
+// ── 平铺闭合检查用: 元素越出画布时在对边补等价副本 (见下面各生成器) ──
+// 返回需要绘制的偏移组合: 只有"平移后仍与本格相交"的副本才画 (含 0,0 自身)
+function wrapOffs(x,y,rx,ry,W,H){
+const out=[[0,0]];
+for(const dx of [-W,0,W]) for(const dy of [-H,0,H]){
+if(!dx&&!dy) continue;
+const nx=x+dx, ny=y+dy;
+if(nx+rx>0&&nx-rx<W&&ny+ry>0&&ny-ry<H) out.push([dx,dy]);
+}
+return out;
+}
 TEX.grass = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#6b7a48'; g.fillRect(0,0,w,h);
 speckle(g,w,h,2600,'#7d8c52','#55643a',1,3);
@@ -130,40 +241,78 @@ speckle(g,w,h,1600,'#f8fafc','#dde3ea',1,3);
 speckle(g,w,h,420,'#cfd6de','#e6ebf0',1,2);
 for(let i=0;i<70;i++){ g.strokeStyle='rgba(200,208,216,.28)'; g.beginPath(); const x=rand(0,w),y=rand(0,h); g.moveTo(x,y); g.lineTo(x+rand(-6,6),y+rand(-4,4)); g.stroke(); }
 },40,40);
+// 塔拉瓦环礁地面底图 (2026-09-18): 中性偏白的珊瑚沙 —— 沙滩/礁盘/草甸/跑道全部由顶点色带乘法上色
+TEX.sand = makeTex(256,256,(g,w,h)=>{
+g.fillStyle='#d9cfb0'; g.fillRect(0,0,w,h);
+speckle(g,w,h,2400,'#e6ddc2','#c8bd9c',1,3);
+speckle(g,w,h,520,'#f2ecd6','#b8ac8a',1,2);
+for(let i=0;i<90;i++){ g.fillStyle='rgba(255,252,240,.5)'; g.beginPath(); g.arc(rand(0,w),rand(0,h),rand(0.6,1.6),0,TAU); g.fill(); }
+},40,40);
+// 塔拉瓦环礁地面底图 (2026-09-18b 复调"太亮·绿色太少"): 中性偏灰的珊瑚土/椰林地被颗粒 ——
+// 沙滩/礁盘/草甸/跑道全部由 03-terrain 顶点色带乘法上色, 底图只管颗粒与碎屑。
+// 亮度定标 (2026-09-18b 实测口径): 贴图线性均值≈0.39 × 顶点色 × 光照(半球 0.78 + 日照 1.78×0.773)
+// × ground 0xe9ecd8 → 沙滩顶点 1.12 落到显示亮度≈0.85 (亮而不爆), 草甸顶点 0.17/0.41/0.18 → 显示≈(0.37,0.52,0.28)。
+// (旧版把白珊瑚沙贴图 (线性 0.69) 当地面 + 日照 2.1 → 沙滩显示亮度 >1 全爆白, 就是"太亮"的根)
+TEX.island = makeTex(256,256,(g,w,h)=>{
+g.fillStyle='#a9a693'; g.fillRect(0,0,w,h);
+speckle(g,w,h,2600,'#b6b39d','#96937f',1,3);
+speckle(g,w,h,700,'#8b8878','#c0bda6',1,3);
+for(let i=0;i<220;i++){ g.fillStyle=Math.random()<0.5?'rgba(226,220,196,.5)':'rgba(150,144,120,.4)'; g.beginPath(); g.arc(rand(0,w),rand(0,h),rand(0.6,1.8),0,TAU); g.fill(); }
+for(let i=0;i<80;i++){ g.strokeStyle='rgba(104,116,72,.22)'; g.beginPath(); const x=rand(0,w),y=rand(0,h); g.moveTo(x,y); g.lineTo(x+rand(-4,4),y-rand(3,7)); g.stroke(); }
+},40,40);
+// 碎波泡沫 (岸线浪花带): 透明底 + 白色泡沫团, 沿水线滚动
+TEX.foam = makeTex(128,64,(g,w,h)=>{
+g.clearRect(0,0,w,h);
+for(let i=0;i<150;i++){
+const x=rand(0,w), y=rand(0,h);
+g.fillStyle='rgba(255,255,255,'+rand(0.25,0.9).toFixed(2)+')';
+g.beginPath(); g.arc(x,y,rand(0.8,3.4),0,TAU); g.fill();
+}
+},6,1);
 TEX.dirt = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#7a6a4e'; g.fillRect(0,0,w,h);
 speckle(g,w,h,2200,'#8a7a5a','#655640',1,4);
 speckle(g,w,h,300,'#93835f','#54462f',2,5);
 },8,8);
+// 砖: 逐块只抖明度 (shade); 砖列相位与贴图同宽 (64×4=256) ⇒ 左右缘半砖是同一块 (列色表复用, 见下)
+const BRICK_C=[136,84,63], STONE_C=[138,135,126], WOOD_C=[110,82,54], WOODD_C=[67,51,32], ROOF_C=[115,66,53];
 TEX.brick = makeTex(256,256,(g,w,h)=>{
-g.fillStyle='#8a5a44'; g.fillRect(0,0,w,h);
-const bh=20,bw=42;
+g.fillStyle='#6e5849'; g.fillRect(0,0,w,h);
+// ★2026-09-28B 重做 (用户实报"材质不一致", 淞沪砖构大厂房实机截图): 单砖 32×16px (每贴 8×16 块 ⇒
+//   1.8m/贴 下砖 0.225×0.1125m) —— 旧 64×32px 的大砖在大厂房立面上读作"玩具积木"; 砖缝与砖面的
+//   反差也收小 (旧版米白缝+高光条, 受光面/背光面看着像两种材料)。逐块只抖明度 (贴图契约),
+//   行内奇偶错缝, 越界半块取对边同列色 (平铺闭合, 不再"缝上换色")。
+const bh=16,bw=32, cols=w/bw|0, rows=h/bh|0;
+const colFill=[]; for(let r2=0;r2<rows;r2++){ colFill[r2]=[]; for(let c2=0;c2<cols;c2++) colFill[r2][c2]=shade(BRICK_C,rand(0.88,1.12),rand(-3,3)); }
 for(let y=0;y<h;y+=bh){
 const off=((y/bh)|0)%2? bw/2:0;
-for(let x=-bw;x<w;x+=bw){
-g.fillStyle=`rgb(${randi(120,155)},${randi(75,95)},${randi(55,70)})`;
-g.fillRect(x+off+1,y+1,bw-2,bh-2);
+for(let x=(off?-bw/2:0);x<w;x+=bw){
+const ci=((((x%w)+w)%w)/bw|0);
+g.fillStyle=colFill[(y/bh)|0][ci];
+g.fillRect(x+1,y+1,bw-2,bh-2);
+g.fillStyle='rgba(255,232,205,0.10)'; g.fillRect(x+1,y+1,bw-2,1);
+g.fillStyle='rgba(25,15,10,0.22)'; g.fillRect(x+1,y+bh-2,bw-2,1);
 }
 }
-speckle(g,w,h,900,'#6a4634','#9a7055',1,3);
+speckle(g,w,h,1200,'#5c4536','#8a6a50',1,2);
 },2,1.4);
 TEX.plaster = makeTex(256,256,(g,w,h)=>{
-g.fillStyle='#b0a891'; g.fillRect(0,0,w,h);
-speckle(g,w,h,1800,'#bcb49c','#9a9078',1,4);
-for(let i=0;i<5;i++){
-const x=rand(0,w),y=rand(h*0.5,h),r=rand(12,34);
-g.fillStyle='#7c5240'; g.globalAlpha=.55;
-g.beginPath(); g.ellipse(x,y,r,r*0.7,rand(0,3),0,TAU); g.fill(); g.globalAlpha=1;
-}
-for(let i=0;i<7;i++){ g.strokeStyle='rgba(70,60,50,.3)'; g.beginPath(); let x=rand(0,w),y=rand(0,h); g.moveTo(x,y); for(let k=0;k<4;k++){ x+=rand(-18,18); y+=rand(6,20); g.lineTo(x,y);} g.stroke(); }
+g.fillStyle='#b6ad97'; g.fillRect(0,0,w,h);
+// ★2026-09-28 重做 (用户实报"材质问题仍十分严重", 附实机截图): 抹灰面**不再画离散图形**。
+//   旧的 5 个棕色返潮椭圆 + 7 条波浪"裂纹"是每 1.8m 复现一次的**图形**, 平铺到墙上就是
+//   "白色墙面钉着规则的棕色圆点 + 一排毛线" —— 截图里最刺眼的一条 (旧斑块直接以 alpha 0.55 叠加,
+//   比噪声层强 3~8 倍)。现在只留细颗粒: 抹灰的真实质感来自水泥/砂粒的细密噪点, 不是斑块。
+//   ★2026-09-28B: 颗粒对比度上调 (与 SVG 版 4 层 fBm 的可见度对齐, 首版远看minify成"白模")。
+speckle(g,w,h,2400,'#bab29c','#9c9480',1,3);
+speckle(g,w,h,700,'#c8c0aa','#948c76',1,6);
 },2,1.5);
 TEX.stone = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#8d8a80'; g.fillRect(0,0,w,h);
-for(let y=0;y<h;y+=26){
-const off=((y/26)|0)%2?30:0;
+for(let y=0;y<h;y+=32){                                // 行高 32 × 8 行 = 256 (整周期; 旧 26px 行高平铺错位)
+const off=((y/32)|0)%2?30:0;
 for(let x=-60;x<w;x+=60){
-g.fillStyle=`rgb(${randi(125,155)},${randi(122,150)},${randi(112,138)})`;
-g.fillRect(x+off+2,y+2,56,22);
+g.fillStyle=shade(STONE_C,rand(0.86,1.14),rand(-4,4));
+g.fillRect(x+off+2,y+2,56,28);
 }
 }
 speckle(g,w,h,900,'#6d6a60','#a5a296',1,3);
@@ -171,7 +320,7 @@ speckle(g,w,h,900,'#6d6a60','#a5a296',1,3);
 TEX.wood = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#6e5638'; g.fillRect(0,0,w,h);
 for(let x=0;x<w;x+=32){
-g.fillStyle=`rgb(${randi(95,125)},${randi(72,92)},${randi(46,62)})`;
+g.fillStyle=shade(WOOD_C,rand(0.86,1.14),rand(-4,4));
 g.fillRect(x+1,0,30,h);
 g.strokeStyle='rgba(50,36,20,.5)';
 for(let i=0;i<4;i++){ g.beginPath(); const yy=rand(0,h); g.moveTo(x,yy); g.bezierCurveTo(x+10,yy+rand(-6,6),x+20,yy+rand(-6,6),x+32,yy+rand(-8,8)); g.stroke(); }
@@ -180,7 +329,9 @@ speckle(g,w,h,350,'#54402a','#84684a',1,2);
 },1.5,1.5);
 TEX.woodDark = makeTex(128,128,(g,w,h)=>{
 g.fillStyle='#4a3a24'; g.fillRect(0,0,w,h);
-for(let i=0;i<26;i++){ g.strokeStyle=`rgba(${randi(30,60)},${randi(24,44)},${randi(12,26)},.6)`; g.beginPath(); g.moveTo(0,rand(0,h)); g.bezierCurveTo(w*.3,rand(0,h),w*.7,rand(0,h),w,rand(0,h)); g.stroke(); }
+for(let i=0;i<26;i++){ const k=rand(0.86,1.14), ww=rand(-4,4);   // 逐条只抖明度 (旧版三通道各抖各的 → 条与条跨色相)
+g.strokeStyle=`rgba(${clamp(Math.round(WOODD_C[0]*k+ww),0,255)},${clamp(Math.round(WOODD_C[1]*k),0,255)},${clamp(Math.round(WOODD_C[2]*k-ww),0,255)},.6)`;
+g.beginPath(); g.moveTo(0,rand(0,h)); g.bezierCurveTo(w*.3,rand(0,h),w*.7,rand(0,h),w,rand(0,h)); g.stroke(); }
 },1,1);
 TEX.sandbag = makeTex(128,128,(g,w,h)=>{
 g.fillStyle='#9a8a62'; g.fillRect(0,0,w,h);
@@ -214,10 +365,10 @@ g.beginPath(); g.ellipse(x,y,rand(3,7),rand(2,5),rand(0,3),0,TAU); g.fill();
 });
 TEX.roof = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#6e4438'; g.fillRect(0,0,w,h);
-for(let y=0;y<h;y+=24){
-for(let x=0;x<w;x+=30){
-g.fillStyle=`rgb(${randi(100,130)},${randi(58,74)},${randi(46,60)})`;
-g.fillRect(x+1,y+1,28,22);
+for(let y=0;y<h;y+=32){                                // 32×8 = 256: 整周期 (旧 24×30 格子与 256 不成整除 → 平铺缝错位)
+for(let x=0;x<w;x+=32){
+g.fillStyle=shade(ROOF_C,rand(0.86,1.14),rand(-4,4));
+g.fillRect(x+1,y+1,30,30);
 }
 }
 speckle(g,w,h,500,'#4f2f26','#8a5a48',1,3);
@@ -359,6 +510,40 @@ return `<rect width="256" height="256" fill="#eef1f5"/>`
 +svgGrain('sn3','0.6',[0.55,0.6,0.7],0.12,17)
 +b.join('');
 });
+// 塔拉瓦环礁: 珊瑚沙地面 (中性偏白, 供顶点色带乘法上色) —— 基色与 Canvas 兜底版一致
+svgReg('sand',256,256,()=>{
+const b=[];
+for(let i=0;i<120;i++){
+b.push(`<circle cx="${rand(0,256).toFixed(1)}" cy="${rand(0,256).toFixed(1)}" r="${rand(0.5,1.7).toFixed(1)}" fill="rgb(${randi(248,255)},${randi(246,252)},${randi(232,244)})" opacity="${rand(0.25,0.6).toFixed(2)}"/>`);
+}
+for(let i=0;i<70;i++){
+b.push(`<ellipse cx="${rand(0,256).toFixed(1)}" cy="${rand(0,256).toFixed(1)}" rx="${rand(1.2,3.2).toFixed(1)}" ry="${rand(0.6,1.4).toFixed(1)}" fill="rgb(${randi(196,224)},${randi(186,214)},${randi(158,186)})" opacity="${rand(0.2,0.5).toFixed(2)}" transform="rotate(${rand(0,360).toFixed(0)} ${rand(0,256).toFixed(1)} ${rand(0,256).toFixed(1)})"/>`);
+}
+return `<rect width="256" height="256" fill="#d9cfb0"/>`
++svgMottle('sd1','0.03',4,[0.86,0.82,0.68],0.85,-0.7,0.4,41)
++svgMottle('sd2','0.11',3,[0.98,0.95,0.86],0.8,-0.72,0.28,43)
++svgGrain('sd3','0.6',[0.62,0.58,0.46],0.14,47)
++b.join('');
+});
+svgReg('island',256,256,()=>{
+const b=[];
+for(let i=0;i<150;i++) b.push(`<circle cx="${rand(0,256).toFixed(1)}" cy="${rand(0,256).toFixed(1)}" r="${rand(0.5,1.6).toFixed(1)}" fill="rgb(${randi(214,232)},${randi(208,226)},${randi(182,200)})" opacity="${rand(0.2,0.55).toFixed(2)}"/>`);
+for(let i=0;i<90;i++) b.push(`<ellipse cx="${rand(0,256).toFixed(1)}" cy="${rand(0,256).toFixed(1)}" rx="${rand(1.1,3.0).toFixed(1)}" ry="${rand(0.6,1.4).toFixed(1)}" fill="rgb(${randi(122,150)},${randi(116,144)},${randi(92,116)})" opacity="${rand(0.2,0.45).toFixed(2)}" transform="rotate(${rand(0,360).toFixed(0)} ${rand(0,256).toFixed(1)} ${rand(0,256).toFixed(1)})"/>`);
+for(let i=0;i<60;i++){ const x=rand(0,256), y=rand(0,256); b.push(`<path d="M${x.toFixed(1)} ${y.toFixed(1)}L${(x+rand(-4,4)).toFixed(1)} ${(y-rand(3,7)).toFixed(1)}" stroke="rgba(104,116,72,0.26)" stroke-width="0.9" fill="none"/>`); }
+return `<rect width="256" height="256" fill="#a9a693"/>`
++svgMottle('il1','0.035',4,[0.74,0.72,0.62],0.8,-0.66,0.40,53)
++svgMottle('il2','0.12',3,[0.58,0.56,0.48],0.8,-0.6,0.24,57)
++svgGrain('il3','0.62',[0.52,0.48,0.36],0.14,59)
++b.join('');
+});
+// 碎波泡沫 (岸线浪花带, 透明底; 沿水线滚动 UV = 破浪观感)
+svgReg('foam',128,64,()=>{
+let b='';
+for(let i=0;i<170;i++){
+b+=`<circle cx="${rand(0,128).toFixed(1)}" cy="${rand(0,64).toFixed(1)}" r="${rand(0.8,3.4).toFixed(1)}" fill="rgb(255,255,255)" opacity="${rand(0.2,0.85).toFixed(2)}"/>`;
+}
+return b;
+});
 svgReg('dirt',256,256,()=>{
 const b=[];
 for(let i=0;i<38;i++){
@@ -381,38 +566,37 @@ return `<rect width="256" height="256" fill="#7a6a4e"/>`
 });
 svgReg('brick',256,256,()=>{
 const b=[];
-for(let ry=0;ry<8;ry++){
-const off=(ry%2)?32:0;
-for(let x=-64+off;x<256;x+=64){
-const r=randi(118,152),g=randi(74,96),bl=randi(55,72);
-b.push(`<g><rect x="${(x+1.5).toFixed(1)}" y="${(ry*32+2.5).toFixed(1)}" width="61" height="29" fill="rgba(38,24,16,0.4)"/>`
-+`<rect x="${x.toFixed(1)}" y="${(ry*32+1).toFixed(1)}" width="61" height="29" rx="1.5" fill="rgb(${r},${g},${bl})"/>`
-+`<line x1="${x.toFixed(1)}" y1="${(ry*32+1.5).toFixed(1)}" x2="${(x+61).toFixed(1)}" y2="${(ry*32+1.5).toFixed(1)}" stroke="rgba(255,236,214,0.2)" stroke-width="1.4"/>`
-+`<line x1="${x.toFixed(1)}" y1="${(ry*32+29).toFixed(1)}" x2="${(x+61).toFixed(1)}" y2="${(ry*32+29).toFixed(1)}" stroke="rgba(30,18,12,0.35)" stroke-width="1.4"/></g>`);
+// ★2026-09-28B (与上方 Canvas 版同口径): 单砖 32×16px (每贴 8×16 块 ⇒ 0.225×0.1125m @1.8m/贴),
+//   逐块只抖明度 (旧版整列同色 ⇒ 墙面竖向色带), 行内奇偶错缝, 越界半块取对边同列色 (平铺闭合);
+//   砖缝压暗 (#6e5849) + 高光/阴影条收细收淡 —— 旧版米白宽缝在受光面/背光面读作两种材料。
+const bw=32,bh=16,cols=8,rows=16;
+const colFill=[]; for(let ry2=0;ry2<rows;ry2++){ colFill[ry2]=[]; for(let c2=0;c2<cols;c2++) colFill[ry2][c2]=shade(BRICK_C,rand(0.88,1.12),rand(-3,3)); }
+for(let ry=0;ry<rows;ry++){
+const off=(ry%2)?bw/2:0;
+for(let x=(off?-bw/2:0);x<256;x+=bw){
+const fill=colFill[ry][((((x%256)+256)%256)/bw|0)];
+b.push(`<rect x="${(x+1).toFixed(1)}" y="${(ry*bh+1).toFixed(1)}" width="${bw-2}" height="${bh-2}" rx="1" fill="${fill}"/>`
++`<line x1="${(x+1).toFixed(1)}" y1="${(ry*bh+1.5).toFixed(1)}" x2="${(x+bw-1).toFixed(1)}" y2="${(ry*bh+1.5).toFixed(1)}" stroke="rgba(255,232,205,0.10)" stroke-width="1"/>`
++`<line x1="${(x+1).toFixed(1)}" y1="${(ry*bh+bh-2).toFixed(1)}" x2="${(x+bw-1).toFixed(1)}" y2="${(ry*bh+bh-2).toFixed(1)}" stroke="rgba(25,15,10,0.22)" stroke-width="1"/>`);
 }
 }
-return `<rect width="256" height="256" fill="#8a8172"/>`
+return `<rect width="256" height="256" fill="#6e5849"/>`
 +svgMottle('br1','0.012',3,[0.4,0.3,0.22],0.9,-0.75,0.18,7)
 +b.join('')
 +svgGrain('br2','0.55',[0.15,0.1,0.07],0.14,11);
 });
 svgReg('plaster',256,256,()=>{
-const b=[];
-for(let i=0;i<6;i++){
-const x=rand(10,246),y=rand(40,240),r=rand(16,44);
-b.push(`<radialGradient id="plg${i}"><stop offset="0" stop-color="rgb(${randi(96,120)},${randi(76,92)},${randi(56,68)})" stop-opacity="${rand(0.16,0.3).toFixed(2)}"/><stop offset="1" stop-color="rgb(120,90,70)" stop-opacity="0"/></radialGradient><ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r*rand(0.5,0.85)).toFixed(1)}" fill="url(#plg${i})"/>`);
-}
-for(let i=0;i<8;i++){
-let x=rand(0,256),y=rand(0,140),d=`M${x.toFixed(1)} ${y.toFixed(1)}`;
-for(let k=0;k<4;k++){ x+=rand(-18,18); y+=rand(8,24); d+=` L${x.toFixed(1)} ${y.toFixed(1)}`; }
-b.push(`<path d="${d}" stroke="rgba(72,62,46,0.28)" stroke-width="${rand(0.7,1.3).toFixed(1)}" fill="none"/>`);
-}
-return `<rect width="256" height="256" fill="#b0a891"/>`
-+svgMottle('pl1','0.012',4,[0.62,0.58,0.5],0.9,-0.72,0.4,4)
-+svgMottle('pl2','0.06',3,[0.78,0.75,0.66],0.8,-0.7,0.28,8)
-+b.join('')
-+`<rect y="212" width="256" height="44" fill="rgba(80,72,56,0.14)"/>`
-+svgGrain('pl3','0.6',[0.35,0.32,0.25],0.12,12);
+// ★2026-09-28 重做 (用户实报"材质问题仍十分严重"): 抹灰面**不画任何离散图形** —— 旧版的棕色返潮斑
+//   (径向渐变, alpha 0.16~0.3) 和波浪"裂纹"是每 1.8m 复现一次的图形, 平铺到墙上就是规则的圆点+毛线。
+// ★2026-09-28B 二次校准 (用户实报"材质不一致", 诺曼底灰白楼实机截图): 首版把亮度压过头 ——
+//   svgMottle 的 α = s·(R+G+B)+bias (三通道和, 均值 1.5), 首版参数合成明度调制只有 ~2%,
+//   远看minify后整面墙平均成"没上材质的白模"。现在 4 层 fBm (大修斑/晒褪斑/细斑/微齿)
+//   合成调制 ~5-8%, 无离散图形、stitchTiles 无缝、无单层 >0.5 (不会再出现"圆点")。
+return `<rect width="256" height="256" fill="#b6ad97"/>`
++svgMottle('pl1','0.012',4,[0.50,0.47,0.40],0.9,-0.60,0.45,4)   // 大尺度修补斑 (−16% 暗云, 蜂窝状不做圆)
++svgMottle('pl2','0.05',3,[0.88,0.85,0.77],0.85,-0.55,0.30,8)   // 中尺度晒褪斑 (+9% 亮云)
++svgGrain('pl3','0.6',[0.42,0.38,0.30],0.12,12)                 // 细颗粒
++svgGrain('pl4','1.2',[0.30,0.27,0.22],0.08,21);                // 微齿 (近看不是纯平)
 });
 svgReg('stone',256,256,()=>{
 const b=[];
@@ -421,13 +605,12 @@ let x=0;
 while(x<256){
 let w=Math.round(rand(40,84)/4)*4;
 if(256-x-w<40) w=256-x;
-const r=randi(125,155),g=randi(122,150),bl=randi(112,138);
 b.push(`<g><rect x="${(x+2).toFixed(1)}" y="${(ry*32+2.5).toFixed(1)}" width="${w-3}" height="27.5" fill="rgba(30,30,26,0.45)"/>`
-+`<rect x="${x}" y="${ry*32+1}" width="${w-3}" height="27.5" rx="2" fill="rgb(${r},${g},${bl})"/>`
++`<rect x="${x}" y="${ry*32+1}" width="${w-3}" height="27.5" rx="2" fill="${shade(STONE_C,rand(0.86,1.14),rand(-4,4))}"/>`
 +`<line x1="${x+2}" y1="${ry*32+2.2}" x2="${(x+w-5).toFixed(1)}" y2="${ry*32+2.2}" stroke="rgba(255,255,250,0.16)" stroke-width="1.3"/>`
 +`<line x1="${x+2}" y1="${ry*32+28}" x2="${(x+w-5).toFixed(1)}" y2="${ry*32+28}" stroke="rgba(20,20,16,0.3)" stroke-width="1.3"/></g>`);
-if(Math.random()<0.3){
-b.push(`<ellipse cx="${(x+rand(6,w-8)).toFixed(1)}" cy="${(ry*32+28).toFixed(1)}" rx="${rand(3,7).toFixed(1)}" ry="2" fill="rgb(${randi(70,92)},${randi(88,108)},${randi(44,58)})" opacity="0.3"/>`);
+if(Math.random()<0.22){ // 苔痕: 只压在砌缝上、留在格内 (旧版 0.3 概率 + 三通道随机绿 ⇒ 补丁感)
+b.push(`<ellipse cx="${(x+rand(6,w-8)).toFixed(1)}" cy="${(ry*32+28)}" rx="${rand(3,7).toFixed(1)}" ry="2" fill="${shade([80,98,50],rand(0.9,1.1),0)}" opacity="0.26"/>`);
 }
 x+=w;
 }
@@ -440,10 +623,13 @@ svgReg('wood',256,256,()=>{
 const b=[];
 for(let p=0;p<8;p++){
 const x=p*32;
-b.push(`<rect x="${x}" y="0" width="32" height="256" fill="rgb(${randi(95,125)},${randi(72,92)},${randi(46,62)})"/>`);
+b.push(`<rect x="${x}" y="0" width="32" height="256" fill="${shade(WOOD_C,rand(0.86,1.14),rand(-4,4))}"/>`);
 for(let i=0;i<3;i++){
-const gx=x+rand(4,28);
-b.push(`<path d="M${gx.toFixed(1)} -4 q${rand(-3,3).toFixed(1)} 64 ${rand(-4,4).toFixed(1)} 132 q${rand(-3,3).toFixed(1)} 64 ${rand(-4,4).toFixed(1)} 132" stroke="rgba(52,38,22,0.4)" stroke-width="${rand(0.8,1.6).toFixed(1)}" fill="none"/>`);
+// 木纹: 形状逐字固定 (起点在局部原点), 位置/相位全走 transform —— 纵向越界时在对边补同一段
+const gx=x+rand(4,28), y0=rand(-8,8);
+const d=`M0 0 q${rand(-3,3).toFixed(1)} 64 ${rand(-4,4).toFixed(1)} 132 q${rand(-3,3).toFixed(1)} 64 ${rand(-4,4).toFixed(1)} 132`;
+const sw=rand(0.8,1.6).toFixed(1);
+for(const dy of [0,-256,256]) b.push(`<path d="${d}" transform="translate(${gx.toFixed(1)} ${(y0-4+dy).toFixed(1)})" stroke="rgba(52,38,22,0.4)" stroke-width="${sw}" fill="none"/>`);
 }
 b.push(`<line x1="${x+30.5}" y1="0" x2="${x+30.5}" y2="256" stroke="rgba(28,18,9,0.55)" stroke-width="2.2"/>`);
 b.push(`<line x1="${x+1}" y1="0" x2="${x+1}" y2="256" stroke="rgba(210,178,128,0.12)" stroke-width="1"/>`);
@@ -458,10 +644,13 @@ svgReg('woodDark',128,128,()=>{
 const b=[];
 for(let p=0;p<4;p++){
 const x=p*32;
-b.push(`<rect x="${x}" y="0" width="32" height="128" fill="rgb(${randi(58,76)},${randi(44,58)},${randi(26,38)})"/>`);
+b.push(`<rect x="${x}" y="0" width="32" height="128" fill="${shade(WOODD_C,rand(0.86,1.14),rand(-4,4))}"/>`);
 for(let i=0;i<2;i++){
-const gx=x+rand(4,28);
-b.push(`<path d="M${gx.toFixed(1)} -4 q${rand(-3,3).toFixed(1)} 34 ${rand(-3,3).toFixed(1)} 68 q${rand(-3,3).toFixed(1)} 30 ${rand(-3,3).toFixed(1)} 64" stroke="rgba(24,16,8,0.5)" stroke-width="${rand(0.8,1.4).toFixed(1)}" fill="none"/>`);
+// 与 TEX.wood 同规: 形状固定 + transform 定位, 纵向越界在对边补同一段 (128 高的小格同样要平铺闭合)
+const gx=x+rand(4,28), y0=rand(-8,8);
+const d=`M0 0 q${rand(-3,3).toFixed(1)} 34 ${rand(-3,3).toFixed(1)} 68 q${rand(-3,3).toFixed(1)} 30 ${rand(-3,3).toFixed(1)} 64`;
+const sw=rand(0.8,1.4).toFixed(1);
+for(const dy of [0,-128,128]) b.push(`<path d="${d}" transform="translate(${gx.toFixed(1)} ${(y0-4+dy).toFixed(1)})" stroke="rgba(24,16,8,0.5)" stroke-width="${sw}" fill="none"/>`);
 }
 b.push(`<line x1="${x+30.5}" y1="0" x2="${x+30.5}" y2="128" stroke="rgba(12,8,4,0.6)" stroke-width="2.4"/>`);
 }
@@ -469,13 +658,15 @@ return b.join('')+svgStreak('wdk1','0.5','0.016',[0.1,0.07,0.04],0.85,-0.75,0.2,
 });
 svgReg('sandbag',128,128,()=>{
 const b=[];
+// 缝线用"形状固定 + transform 定位"写法 (与 wood 同规): 平铺闭合检查里同形副本才认得出
+const DASH='M-14 -5 Q0 -11 14 -5';
 for(let ry=0;ry<4;ry++){
 const off=(ry%2)?21.3:0;
 for(let x=-21.3+off;x<128+21.3;x+=42.7){
 const cx=x, cy=ry*32+16;
 b.push(`<ellipse cx="${cx.toFixed(1)}" cy="${(cy+3).toFixed(1)}" rx="19.5" ry="12.5" fill="rgba(50,42,26,0.35)"/>`);
 b.push(`<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="20" ry="13" fill="url(#sbg)" stroke="rgba(72,62,40,0.55)" stroke-width="1"/>`);
-b.push(`<path d="M${(cx-14).toFixed(1)} ${(cy-5).toFixed(1)} Q${cx.toFixed(1)} ${(cy-11).toFixed(1)} ${(cx+14).toFixed(1)} ${(cy-5).toFixed(1)}" stroke="rgba(96,84,56,0.5)" stroke-width="0.9" fill="none" stroke-dasharray="2.5 2"/>`);
+b.push(`<path d="${DASH}" transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})" stroke="rgba(96,84,56,0.5)" stroke-width="0.9" fill="none" stroke-dasharray="2.5 2"/>`);
 }
 }
 return `<rect width="128" height="128" fill="#6e6349"/>`
@@ -532,11 +723,11 @@ const b=[];
 for(let ry=0;ry<8;ry++){
 for(let cx=0;cx<8;cx++){
 const x=cx*32,y=ry*32;
-b.push(`<path d="M${x+1} ${y+31} L${x+1} ${y+7} Q${x+16} ${y+1} ${x+31} ${y+7} L${x+31} ${y+31} Z" fill="rgb(${randi(100,130)},${randi(58,74)},${randi(46,60)})"/>`);
+b.push(`<path d="M${x+1} ${y+31} L${x+1} ${y+7} Q${x+16} ${y+1} ${x+31} ${y+7} L${x+31} ${y+31} Z" fill="${shade(ROOF_C,rand(0.86,1.14),rand(-4,4))}"/>`);
 b.push(`<path d="M${x+1} ${y+31} L${x+1} ${y+7} Q${x+16} ${y+1} ${x+31} ${y+7} L${x+31} ${y+31}" fill="none" stroke="rgba(255,220,190,0.14)" stroke-width="1.2"/>`);
 b.push(`<line x1="${x+1}" y1="${y+31}" x2="${x+31}" y2="${y+31}" stroke="rgba(38,20,14,0.5)" stroke-width="2"/>`);
 if(Math.random()<0.22){
-b.push(`<ellipse cx="${(x+rand(6,26)).toFixed(1)}" cy="${y+28}" rx="${rand(2,5).toFixed(1)}" ry="1.8" fill="rgb(${randi(74,94)},${randi(92,112)},${randi(48,62)})" opacity="0.35"/>`);
+b.push(`<ellipse cx="${(x+rand(6,26)).toFixed(1)}" cy="${y+28}" rx="${rand(2,5).toFixed(1)}" ry="1.8" fill="${shade([84,102,55],rand(0.9,1.1),0)}" opacity="0.3"/>`);
 }
 }
 }
@@ -696,6 +887,7 @@ return `<rect width="128" height="128" fill="rgb(150,142,124)"/>`
 
 // ── 对既有 TEX 库逐张发起 SVG 重绘 (Canvas 版继续作为即时兜底) ──
 svgApply(TEX.grass,'grass'); svgApply(TEX.snowGround,'snowGround'); svgApply(TEX.dirt,'dirt');
+svgApply(TEX.sand,'sand'); svgApply(TEX.island,'island'); svgApply(TEX.foam,'foam');
 svgApply(TEX.brick,'brick'); svgApply(TEX.plaster,'plaster'); svgApply(TEX.stone,'stone');
 svgApply(TEX.wood,'wood'); svgApply(TEX.woodDark,'woodDark'); svgApply(TEX.sandbag,'sandbag');
 svgApply(TEX.metal,'metal'); svgApply(TEX.bark,'bark'); svgApply(TEX.leaves,'leaves');
@@ -730,7 +922,13 @@ MAT.grass.color.set(THEME.ground);
 MAT.leaves.color.set(THEME.leaf);
 MAT.roof.color.set(THEME.roof);
 if(THEME.snow){ MAT.grass.map=TEX.snowGround; MAT.sandbag.color.set(0xd8dade); MAT.hay.color.set(0xcfd2d6); MAT.stone.color.set(0xc8ccd2); }
+// 塔拉瓦环礁 (2026-09-18b pacific): 地面底图换**中性偏暗的珊瑚土/椰林地被** (TEX.island) ——
+// 03-terrain 顶点色带 (白沙滩/湿沙/礁盘/草甸/密林/跑道) 在其上乘法, 色相完全由顶点色决定
+if(CAMPAIGN.theme==='pacific'){ MAT.grass.map=TEX.island; MAT.stone.color.set(0xd8d2c0); MAT.plaster.color.set(0xd6d0bc); }
 if(CAMPAIGN.theme==='loess'){ MAT.stone.color.set(0xd8c8a0); MAT.plaster.color.set(0xe0d0a8); }
+// 贴图密度归一 (2026-09-20c): 把 00-config.UV_DENSITY 挂到材质上 —— 05-world.mesh() 建盒时读 mat.uvRef
+// 归一化面 UV, 使整段墙/窗台/门楣/墙垛保持同一贴图密度 (修用户实机"窗户下面的部分和总体材质总是不同")。
+for(const _uk in UV_DENSITY){ if(MAT[_uk]) MAT[_uk].uvRef=UV_DENSITY[_uk]; }
 // 雪檐房顶覆盖: 雪地战役给屋顶叠加一层带出檐的积雪盖板 (作为屋顶子节点, 随屋顶坍塌一并消失)
 MAT.snowCap=new THREE.MeshLambertMaterial({color:0xedf2f8});
 function addSnowCap(rm){
@@ -743,3 +941,254 @@ cap.castShadow=false; cap.receiveShadow=true;
 rm.add(cap);
 return rm;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 海战批贴图扩展 (2026-09-20N, owner: naval-model) —— 6 张, **仅追加**, 上方既有条目一行未动。
+// 消费方: 15e-navmodels.js (海战载具本体) + 05b-props/05a-buildings 的残骸三件 (tankWreck/planeWreck/
+//   landingCraft)。键名与拼写已冻结: rust / paintPeel / scorch / waterline / barnacle / deckWood;
+//   wreck-art 按这六个名字取用 —— 改名必须先通报 Lead 与他。
+// 口径与既有 TEX 一致: **白底相对明度贴图** (材质 color 做乘法决定色相, 均值≈1 不改亮度) —— 因此
+//   同一张 rust/barnacle 能挂到任何涂装的载具/残骸上而不串色。
+//   例外是 waterline: 污带画在贴图**下缘** —— 盒面 UV 是 0..1, 会把污带落在每个面的底部 =
+//   吃水线位置 (15e 的艇体干舷、wreck-art 的登陆艇舷侧三条水线污都靠这条)。
+// 管线: makeTex (Canvas2D 即时兜底) → svgReg 登记 → svgApply (浏览器里 SVG 滤镜重绘, 加载期无缝替换);
+//   Node 沙箱/低端环境停留在 Canvas 版, 布局与指纹零漂移 (与既有 22 张同一条路)。
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── rust 锈蚀: 橙褐锈斑 + 沿板缝垂挂的锈痕 (载具排气/管件/浮筒 + 残骸主锈) ──
+TEX.rust=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+speckle(g,w,h,110,'#a8663a','#7b4622',2,10);
+speckle(g,w,h,70,'#d0964f','#8a5730',1,5);
+g.fillStyle='rgba(111,74,42,.28)';
+for(let i=0;i<7;i++) g.fillRect(rand(0,w),rand(0,h*0.5),rand(1,3),rand(h*0.25,h*0.6));
+g.globalAlpha=1;
+},1,1);
+svgReg('rust',128,128,()=>{
+let st='';
+for(let i=0;i<7;i++)
+st+=`<rect x="${rand(4,124).toFixed(1)}" y="${rand(2,64).toFixed(1)}" width="${rand(1,3).toFixed(1)}" height="${rand(30,84).toFixed(1)}" fill="rgb(110,72,40)" opacity="${rand(0.12,0.30).toFixed(2)}"/>`;
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('ru1','0.045',4,[0.72,0.42,0.20],0.90,-0.55,0.55,41)
++svgMottle('ru2','0.16',2,[0.55,0.30,0.14],0.85,-0.60,0.32,42)
++svgGrain('ru3','0.6',[0.45,0.30,0.18],0.10,43)
++st;
+});
+svgApply(TEX.rust,'rust');
+
+// ── paintPeel 剥落漆: 灰底漆斑 + 未伤的原涂装(白) + 板缘刮痕 (残骸"露出原涂装一角"的信息量来源) ──
+TEX.paintPeel=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+for(let i=0;i<34;i++){
+const x=rand(0,w), y=rand(0,h), s=rand(4,15);
+g.globalAlpha=rand(.30,.70); g.fillStyle=Math.random()<.5?'#9a958a':'#7d7a70';
+g.beginPath(); g.ellipse(x,y,s,s*rand(.5,.9),rand(0,3),0,TAU); g.fill();
+}
+g.globalAlpha=1;
+speckle(g,w,h,50,'#ffffff','#6e6a60',1,3);
+},1,1);
+svgReg('paintPeel',128,128,()=>{
+let fl='';
+for(let i=0;i<26;i++){
+const cx=rand(12,116), cy=rand(12,116), r=rand(4,15), n=randi(5,7);
+let pts='';
+for(let k=0;k<n;k++){ const a=TAU*k/n+rand(-0.25,0.25), rr=r*rand(0.6,1.2);
+pts+=`${(cx+Math.cos(a)*rr).toFixed(1)},${(cy+Math.sin(a)*rr).toFixed(1)} `; }
+fl+=`<polygon points="${pts.trim()}" fill="rgb(150,146,138)" stroke="rgb(96,92,84)" stroke-width="0.7" opacity="${rand(0.35,0.70).toFixed(2)}"/>`;
+}
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('pp1','0.08',3,[0.60,0.58,0.54],0.85,-0.66,0.24,44)
++svgGrain('pp2','0.65',[0.42,0.40,0.38],0.08,45)
++fl;
+});
+svgApply(TEX.paintPeel,'paintPeel');
+
+// ── scorch 烟熏焦黑: 软边烟斑 + 上飘烟痕 (载具排气口/炮口 + 残骸烧黑) ──
+TEX.scorch=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+for(let i=0;i<14;i++){
+const x=rand(0,w), y=rand(0,h), r=rand(8,26);
+const gr=g.createRadialGradient(x,y,1,x,y,r);
+gr.addColorStop(0,'rgba(24,20,16,.85)'); gr.addColorStop(.55,'rgba(40,34,28,.45)'); gr.addColorStop(1,'rgba(60,52,44,0)');
+g.fillStyle=gr; g.fillRect(x-r,y-r,r*2,r*2);
+}
+speckle(g,w,h,60,'#2a2620','#4a443c',1,4);
+},1,1);
+svgReg('scorch',128,128,()=>{
+let bl='';
+for(let i=0;i<12;i++)
+bl+=`<circle cx="${rand(10,118).toFixed(1)}" cy="${rand(10,118).toFixed(1)}" r="${rand(9,28).toFixed(1)}" fill="url(#scG)" opacity="${rand(0.35,0.85).toFixed(2)}"/>`;
+return `<rect width="128" height="128" fill="#ffffff"/>`
++`<defs><radialGradient id="scG"><stop offset="0" stop-color="rgb(20,17,14)"/><stop offset="0.55" stop-color="rgb(44,38,32)"/><stop offset="1" stop-color="rgb(70,62,54)" stop-opacity="0"/></radialGradient></defs>`
++svgMottle('sc1','0.09',3,[0.30,0.27,0.24],0.85,-0.50,0.42,46)
++bl;
+});
+svgApply(TEX.scorch,'scorch');
+
+// ── waterline 水线污: 下缘一条(锈水带 + 硬水线 + 水下藻绿), 其余留白 —— 见文件头"例外"说明 ──
+TEX.waterline=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+g.fillStyle='#8a6a44'; g.fillRect(0,h*0.61,w,h*0.39);       // 锈水带
+g.fillStyle='#5f5236'; g.fillRect(0,h*0.61,w,2);            // 水线硬边
+g.fillStyle='#4e5a3c'; g.fillRect(0,h*0.86,w,h*0.14);       // 水下藻绿
+speckle(g,w,h,80,'#6b5232','#3f4a30',2,7);
+g.globalAlpha=.35; g.fillStyle='#7d9660'; g.fillRect(0,h*0.585,w,3); g.globalAlpha=1; // 浪花线 (水线之上浅污)
+},1,1);
+svgReg('waterline',128,128,()=>{
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('wl1','0.05',3,[0.68,0.52,0.30],0.90,-0.70,0.20,47)
++`<rect x="0" y="78" width="128" height="50" fill="rgb(138,106,68)" opacity="0.55"/>`
++`<rect x="0" y="74" width="128" height="3" fill="rgb(60,52,36)" opacity="0.55"/>`
++`<rect x="0" y="106" width="128" height="22" fill="rgb(78,90,60)" opacity="0.60"/>`
++svgStreak('wl2','0.02','0.50',[0.45,0.40,0.30],0.80,-0.70,0.14,48)
++svgGrain('wl3','0.70',[0.40,0.38,0.30],0.08,49);
+});
+svgApply(TEX.waterline,'waterline');
+
+// ── barnacle 藤壶藻绿: 藻绿底 + 成簇藤壶(白点带暗环) —— 水下艇底/吃水线下方 ──
+TEX.barnacle=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+g.globalAlpha=.55; g.fillStyle='#7d8c58'; g.fillRect(0,0,w,h); g.globalAlpha=1;
+for(let i=0;i<70;i++){
+const x=rand(0,w), y=rand(0,h), r=rand(1.2,3.6);
+g.fillStyle='rgba(70,80,52,.5)'; g.beginPath(); g.arc(x,y,r*1.5,0,TAU); g.fill();
+g.fillStyle='#e8e8dc'; g.beginPath(); g.arc(x,y,r,0,TAU); g.fill();
+}
+},1,1);
+svgReg('barnacle',128,128,()=>{
+let bn='';
+for(let i=0;i<60;i++){
+const x=rand(4,124).toFixed(1), y=rand(4,124).toFixed(1), r=rand(1.2,3.6).toFixed(1);
+bn+=`<circle cx="${x}" cy="${y}" r="${(r*1.6).toFixed(1)}" fill="rgb(72,84,54)" opacity="0.45"/>`
+ +`<circle cx="${x}" cy="${y}" r="${r}" fill="rgb(232,232,220)" opacity="0.90"/>`;
+}
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgMottle('bn1','0.06',4,[0.46,0.56,0.32],0.90,-0.45,0.58,50)
++svgGrain('bn2','0.55',[0.35,0.45,0.28],0.10,51)
++bn;
+});
+svgApply(TEX.barnacle,'barnacle');
+
+// ── deckWood 艇甲板木纹: 板缝(沿艇长=贴图 x 分板) + 顺纹拉丝 —— 木壳艇/登陆艇甲板 ──
+TEX.deckWood=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+const n=6, pw=w/n;
+for(let i=0;i<n;i++){
+g.globalAlpha=rand(.05,.18); g.fillStyle=(i%2)?'#c9c2b2':'#8e8878'; g.fillRect(i*pw,0,pw,h);
+g.globalAlpha=.55; g.fillStyle='#3e382e'; g.fillRect(i*pw,0,1.6,h);
+}
+g.globalAlpha=1;
+for(let i=0;i<26;i++){ g.globalAlpha=rand(.06,.20); g.fillStyle='#6f6a5c'; g.fillRect(rand(0,w),0,rand(.6,1.6),h); }
+g.globalAlpha=1;
+},1,1);
+svgReg('deckWood',128,128,()=>{
+let pl='';
+const n=6, pw=128/n;
+for(let i=0;i<n;i++){
+pl+=`<rect x="${(i*pw).toFixed(1)}" y="0" width="${pw.toFixed(1)}" height="128" fill="rgb(${randi(150,205)},${randi(146,198)},${randi(132,180)})" opacity="${rand(0.10,0.30).toFixed(2)}"/>`
+ +`<rect x="${(i*pw).toFixed(1)}" y="0" width="1.6" height="128" fill="rgb(62,56,46)" opacity="0.55"/>`;
+}
+return `<rect width="128" height="128" fill="#ffffff"/>`
++svgStreak('dw1','0.45','0.012',[0.62,0.58,0.50],0.85,-0.60,0.26,52)
++svgStreak('dw2','0.30','0.008',[0.75,0.70,0.62],0.80,-0.62,0.16,53)
++pl;
+});
+svgApply(TEX.deckWood,'deckWood');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 模型翻新批贴图扩展 (2026-09-21B, owner: lead) —— 4 张, **仅追加**, 上方既有条目一行未动。
+// 消费方:
+//   · steelPlate —— 固定火力点 (17-emplacements 反坦克炮 / 05c 重机枪位) 的钢板件 + 舰船炮塔/艇体
+//   · concrete   —— 固定火力点底座/胸墙/混凝土场地 (与 TEX.stone 分档: stone 是砌块, 本张是浇筑面)
+//   · canvas     —— 帆布/罩布/伪装网兜布 (炮位罩布、弹药箱盖布)
+//   · stencil    —— 舷号/队标/编号喷涂 (载具与炮位侧面的识别标记)
+// 口径与既有 22 张一致: **白底相对明度贴图** (材质 color 做乘法决定色相, 均值≈1 不改亮度) ——
+//   于是同一张 steelPlate/concrete 能挂到任何涂装上而不串色。
+//   stencil 是**例外**: 标记要"比周围亮", 只能把底色压到 0.78 灰、标记留 1.0 白 ⇒ 平方后
+//   标记=原涂装色、周围=原色×0.78, 读起来就是"刷上去的编号"(见下方注释)。
+// 管线: 只走 makeTex (Canvas2D 即时生成) —— 与既有 6 张海战贴图同规格 (128×128)、同色彩空间,
+//   不做 svgReg/svgApply 升级 (那需要为每张写一份 SVG 等价实现; Canvas 版在浏览器与沙箱里是同一份图,
+//   反而消除了"两套实现漂移"的风险)。调参只改本段。
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── steelPlate 钢板: 两道横向板缝 + 铆钉列 + 焊接竖痕 (固定火力点/炮塔的钢板件主材质) ──
+TEX.steelPlate=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+speckle(g,w,h,240,'#d8dad6','#b9bcb6',1,3);                 // 轧制面微斑
+const seams=[42,86];
+for(const y of seams){
+g.fillStyle='rgba(70,74,70,.55)'; g.fillRect(0,y,w,2);       // 板缝
+g.fillStyle='rgba(255,255,255,.35)'; g.fillRect(0,y+2,w,1);   // 缝下受光棱
+for(let x=6;x<w;x+=13){                                       // 铆钉列 (暗点 + 左上高光)
+g.fillStyle='rgba(72,76,72,.75)'; g.beginPath(); g.arc(x,y-4,2.1,0,TAU); g.fill();
+g.fillStyle='rgba(255,255,255,.55)'; g.beginPath(); g.arc(x-0.7,y-4.7,0.9,0,TAU); g.fill();
+g.fillStyle='rgba(72,76,72,.75)'; g.beginPath(); g.arc(x+6.5,y+6,2.1,0,TAU); g.fill();
+g.fillStyle='rgba(255,255,255,.5)'; g.beginPath(); g.arc(x+5.8,y+5.3,0.9,0,TAU); g.fill();
+}
+}
+for(let i=0;i<5;i++){                                          // 焊接/划痕竖痕
+const x=rand(0,w);
+g.strokeStyle='rgba(96,100,96,.28)'; g.lineWidth=rand(0.7,1.6);
+g.beginPath(); g.moveTo(x,rand(0,20)); g.lineTo(x+rand(-2,2),rand(60,128)); g.stroke();
+}
+},1,1);
+
+// ── concrete 浇筑混凝土: 骨料颗粒 + 模板竖缝 + 细裂纹 (固定火力点底座/场地) ──
+TEX.concrete=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+speckle(g,w,h,520,'#e2e2df','#c3c3bf',1,3);                   // 水泥浆斑
+for(let i=0;i<190;i++){                                        // 骨料 (亮暗各半, 小颗粒)
+g.fillStyle=Math.random()<0.5?'rgba(255,255,255,.5)':'rgba(128,128,124,.35)';
+const s=rand(1,2.4); g.beginPath(); g.arc(rand(0,w),rand(0,h),s,0,TAU); g.fill();
+}
+for(let x=0;x<w;x+=32){ g.fillStyle='rgba(122,124,120,.30)'; g.fillRect(x,0,1.4,h); }  // 模板竖缝
+for(let i=0;i<6;i++){                                          // 细裂纹 (折线)
+g.strokeStyle='rgba(96,96,92,.42)'; g.lineWidth=rand(0.6,1.1);
+let x=rand(0,w), y=rand(0,h); g.beginPath(); g.moveTo(x,y);
+for(let k=0;k<4;k++){ x+=rand(-9,9); y+=rand(6,16); g.lineTo(x,y); } g.stroke();
+}
+},1,1);
+
+// ── 2026-09-25 补: MAT.earth / MAT.concrete (05a-buildings 引用了, 但 MAT 表里从来没有定义过这两个键) ──
+// 现象: 窑洞前脸/侧墙写 `MAT.earth||MAT.brick`、龙牙三角锥写 `MAT.concrete||MAT.stone`, 两个键都 undefined
+//   ⇒ 兜底悄悄生效: 黄土窑洞变成**砖墙**、混凝土龙牙变成**石料** (TEX.concrete 本来就在下面, 是给火力点底座建的)。
+// 位置必须在 TEX.concrete 之后 —— 上方 MAT 字面量那一区里 TEX.concrete 还没创建, 写在那里 map 会是 undefined。
+// uvRef 在此显式挂 (UV_DENSITY 的挂载循环在上方, 早于本块), 取同一个表: uvRef = 米/张贴图。
+MAT.earth=new THREE.MeshLambertMaterial({map:TEX.dirt});
+MAT.earth.uvRef=UV_DENSITY.earth;
+MAT.concrete=new THREE.MeshLambertMaterial({map:TEX.concrete});
+MAT.concrete.uvRef=UV_DENSITY.concrete;
+
+// ── canvas 帆布: 平纹织物经纬 + 两处补丁缝线 (罩布/伪装网兜布) ──
+TEX.canvas=makeTex(128,128,(g,w,h)=>{
+g.fillStyle='#fff'; g.fillRect(0,0,w,h);
+for(let y=0;y<h;y+=3){                                          // 纬线
+g.fillStyle=(y/3|0)%2?'rgba(190,190,186,.55)':'rgba(255,255,255,.30)';
+g.fillRect(0,y,w,1.5);
+}
+for(let x=0;x<w;x+=3){                                          // 经线
+g.fillStyle=(x/3|0)%2?'rgba(178,178,174,.45)':'rgba(255,255,255,.22)';
+g.fillRect(x,0,1.5,h);
+}
+speckle(g,w,h,120,'#a8a8a4','#e8e8e4',1,3);                     // 织物起毛
+for(const p of [[26,30],[92,84]]){                              // 补丁 + 缝线
+g.strokeStyle='rgba(120,120,116,.55)'; g.lineWidth=1;
+g.strokeRect(p[0],p[1],rand(20,32),rand(16,26));
+g.setLineDash([2,2]); g.strokeStyle='rgba(90,90,86,.5)';
+g.beginPath(); g.moveTo(p[0]-0.5,p[1]-2.5); g.lineTo(p[0]+22,p[1]-2.5); g.stroke();
+g.setLineDash([]);
+}
+},1,1);
+
+// ── stencil 编号/队标喷涂: 底色 0.78 灰 + 白色数字/五角星 (平方后 = 原色底 + 满色标记) ──
+TEX.stencil=makeTex(128,64,(g,w,h)=>{
+g.fillStyle='#c7c7c7'; g.fillRect(0,0,w,h);                     // 底色压到 0.78 (见段头注释)
+g.fillStyle='#ffffff'; g.font='bold 34px monospace'; g.textBaseline='middle';
+g.fillText('7',14,34); g.fillText('A',44,34);                   // 舷号 "7A"
+g.beginPath();                                                  // 五角星 (队标)
+const cx=100, cy=32, R=15, r=6.2;
+for(let i=0;i<10;i++){ const a=-HPI+i*Math.PI/5, rr=(i%2)?r:R;
+const px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr; i?g.lineTo(px,py):g.moveTo(px,py); }
+g.closePath(); g.fill();
+speckle(g,w,h,60,'#b4b4b4','#e0e0e0',1,2);                      // 喷涂颗粒/掉色
+},1,1);

@@ -200,10 +200,86 @@ addCoverAround(x,z,8,9,ry);
 coverPoints.push({x:ctx.L(-1.5,1)[0],z:ctx.L(-1.5,1)[1]});
 BUILD_REG.push({type:'twoStory',x,z,ry,w:8,d:9,floor:f.floor,doors:ctx.doors.slice(),roofY:F1+H2+0.28});
 }
+// ★ 2026-09-21 WS5 ㈠ 哨亭直爬梯解析几何 —— **单一数据源**: watchtower() 与 dev/verify-watchtower.js 共读本函数
+//   (验证脚本不许另写第二套数学; 用户第 7 条"哨亭在有坡度的地方楼梯不接地"的对治)。
+//   改动前 (:236-251) 的三处病根:
+//     ① 单点采样: base=heightAt(ctx.L(0,2.2)) 只在梯顶附近采一次; 而最下一级踏步落在局部 z≈6.63,
+//        比采样点远 4.4m ⇒ 坡地上梯脚凭空高出地面 (平地上实测也已高出 0.218m)。
+//     ② rise=Math.max(3.8,deckTop-base) 有 3.8m 硬下限 ⇒ 采样点偏高时顶踏步会越过平台面。
+//     ③ 踏步是 0.2m 厚薄板 + 承力靠悬挑, 梯下撑柱是纯视觉 mesh() (无碰撞) ⇒ 下方全是悬空板。
+//   Lead 2026-09-21 裁定 (观感优先, 否决"实心木坡"): 做成真正的梯段 ——
+//     踏面 = 薄板 (tread ≤0.2m), 踏面顶高成等差数列 (级高恒 sr, 顶踏步顶面严格 = deckTop);
+//     踢面 = 每级一块竖向立板 (riser 0.14m 厚, **有碰撞**), 从下一级踏面顶连到本级踏面底 ⇒ 连续支承;
+//     接地 = 最下一级的立板**逐级采样**下探到本级自己脚下的地形 (gi-0.05) —— 踢面与接地垫块合一,
+//            平地上只多 0.05m 埋深, 坡地上自动"长"出接地段 (用户报的"楼梯不接地"的正解)。
+//   为什么上方各级不下探到地面: 薄踏步 + 恒定级高 + 顶步=deckTop 三者一定死, 上方各级踏面底必然离地
+//     (4.6m 塔梯最高一级离地 4.4m), 强行下探就退化成"实心木坡", 与 Lead 裁定冲突。上方各级的"不悬空"
+//     由踢面链保证: 每级立板底 = 下一级踏面顶 (嵌 0.02), 承力链一路落到梯脚地形。
+//   o.legacy=true **只供 dev/verify-watchtower.js 的阴性对照**复刻旧几何 (生产路径永不传该开关) ——
+//   用来证明"逐级采样判据"抓得住用户报的现象, 而不是判据本身失效。
+function towerStairGeom(ctx,deckTop,o){
+o=o||{};
+const tr=o.tr!==undefined?o.tr:0.46;        // 踏面进深 (旧值: 11 级×0.46 ≈ 5.06m 梯段)
+const topZ=o.topZ!==undefined?o.topZ:1.8;   // 顶踏步 z 基准 (旧值: 顶踏步内缘贴平台边 z=1.8)
+const w=o.width!==undefined?o.width:1.1;    // 净宽 (护栏豁口 1.2m)
+const maxRise=0.44;                         // 单级最大级高 (旧值口径; ≤ 玩家一步 0.55/standHeight)
+const riser=0.14;                           // 踢面(立板)厚
+const groundAt=lz=>{ const p=ctx.L(0,lz); return heightAt(p[0],p[1]); };
+if(o.legacy){ // ── 改动前几何 (只做对照, 绝不进生产): 单点采样 + 3.8 硬下限 + 0.2 薄板 + 无踢面/无接地段 ──
+const base=groundAt(2.2);
+const rise=Math.max(3.8,deckTop-base);
+const n=Math.ceil(rise/0.44), sr=rise/n, steps=[];
+for(let i=0;i<n;i++){
+const lz=topZ+tr*(n-i-0.5);
+const top=base+sr*(i+1);
+steps.push({lz,gi:groundAt(lz),top,bot:top-0.2,webBot:top,webTop:top,webH:0,webZ:lz,clamped:false});
+}
+return {n,sr,tr,width:w,topZ,footZ:topZ+tr*n,tread:0.2,riser,steps,legacy:true};
+}
+// 步数↔梯脚位置是隐式方程 (n 决定梯脚落在哪, 梯脚地面高又决定 rise=n·sr): 定点迭代, 地形平滑 2~3 轮收敛
+let n=11;
+for(let it=0;it<6;it++){
+const gi=groundAt(topZ+tr*(n-0.5));
+n=clamp(Math.ceil((deckTop-gi)/maxRise),3,24);
+}
+// 收敛后仍可能差一级 (地形在两次采样之间又变): 抬 n 直到 sr ≤ maxRise —— 保证"一级不大于一步可迈高度"
+while(n<24&&(deckTop-groundAt(topZ+tr*(n-0.5)))/n>maxRise+1e-9) n++;
+const footZ=topZ+tr*(n-0.5), footGi=groundAt(footZ);
+const rise=deckTop-footGi, sr=rise/n;
+const tread=Math.min(0.2,sr*0.5);           // 踏面板厚: 级高极小时按比例收薄, 保证踢面高度不为负
+const steps=[];
+for(let i=0;i<n;i++){
+const lz=topZ+tr*(n-i-0.5);
+const gi=groundAt(lz);
+const top=deckTop-sr*(n-1-i);               // 等差数列 ⇒ 相邻踏面顶高差恒为 sr; i=n-1 时 top=deckTop (与平台齐平)
+const bot=top-tread;
+// 踢面: 从下一级踏面顶(嵌 0.02)连到本级踏面底; i=0 改为**本级自己脚下的地形-0.05** (逐级采样 = 接地段)
+let webBot=(i>0)?steps[i-1].top-0.02:gi-0.05;
+let clamped=false;
+if(bot-webBot<0.1){ webBot=bot-0.1; clamped=true; }   // 退化保护 (级高过小/地面高于踏面底) 供验证打印
+steps.push({lz,gi,top,bot,webBot,webTop:bot,webH:bot-webBot,webZ:lz+tr/2-riser/2,clamped});
+}
+return {n,sr,tr,width:w,topZ,footZ,footGi,rise,tread,riser,steps,legacy:false};
+}
 // 瞭望塔: 楼梯顶端与平台齐平衔接(顶踏步贴平台边缘), 护栏留准确豁口, 顶棚有碰撞
 function watchtower(x,z,ry=0){
 const ctx=bctx(x,z,ry,0);
-// 腿柱落地高度采样 → 平台面 = 最高柱地+4.6
+// ★ 2026-09-21 WS5: 补 foundation —— 本函数原是全仓**唯一不调 foundation 的建筑** (没有整平平台):
+//   坡地上塔腿各踩各的高度、楼梯下方直接是原始坡面 ⇒ 用户第 7 条"哨亭在坡地上楼梯不接地"。
+//   足迹只取塔身 4.6×4.6 (裙墙=有碰撞的实心盒); **不把楼梯拉进足迹** —— 裙墙长在足迹四边,
+//   足迹一旦覆盖梯脚, 裙墙正好横在登梯口把梯脚围死 (2026-09-21 Lead 硬要求)。
+const f=foundation(x,z,ry,4.6,4.6);
+// 楼梯段整平平台: 中心局部 z=+5.1, hw 1.7 / hd 2.8 ⇒ 矩形 lz∈[2.3, 7.9], 与塔身足迹 (lz≤2.3)
+//   **只贴边不重叠** —— 塔内地面仍由 foundation 自己那块 pad 决定, 不会被改成另一个高度;
+//   高度取 f.floor (同一个楼面值) ⇒ 两块 pad 在交界处同高, 交界不产生台阶。
+//   门限沿用全库 0.5m 口径 (terrainDelta>0.5 才登记, 与 foundation 一致): 平地上不凭空冒出一块整平地面;
+//   无 addPad 的沙箱不登记 —— 两种情况逐级采样都独立保证梯脚贴地。
+{
+const pc=ctx.L(0,5.1);
+const rel=terrainDelta(pc[0],pc[1],ry,3.4,5.6);
+if(typeof addPad==='function'&&rel>0.5) addPad(pc[0],pc[1],ry,1.7,2.8,clamp(rel*3,3,10),f.floor);
+}
+// 腿柱落地高度采样 → 平台面 = 最高柱地+4.6 (pad 生效后四腿同高, 平台天然水平)
 let gMax=-1e9;
 const legP=[];
 for(const [lx,lz] of [[-1.5,-1.5],[1.5,-1.5],[-1.5,1.5],[1.5,1.5]]){
@@ -233,29 +309,32 @@ CYLS.push({x:p[0],z:p[1],r:0.1,y0:deckTop,y1:deckTop+2.3});
 }
 const rp=ctx.L(0,0);
 addSnowCap(solidBox(MAT.woodDark,4.2,0.18,4.2,rp[0],deckTop+2.21,rp[1],ry));
-// 直爬梯(陡踏步): 底端贴地, 顶踏步顶面=平台面且内缘贴平台边缘(齐平衔接)
-const sb=ctx.L(0,2.2);
-const base=heightAt(sb[0],sb[1]);
-const rise=Math.max(3.8,deckTop-base);
-const n=Math.ceil(rise/0.44), sr=rise/n, tr=0.46;
-for(let i=0;i<n;i++){
-const p=ctx.L(0,1.8+tr*(n-i-0.5));
-solidBox(MAT.woodDark,1.1,0.2,tr,p[0],base+sr*(i+1)-0.1,p[1],ry);
+// 直爬梯: 踏面板 + 踢面立板 (两级都走 solidBox=视觉与碰撞同源) ——
+// 逐级采样使最下一级的踢面下探到本级自己脚下的地形 (接地), 其余各级踢面落在下一级踏面顶上 (连续支承)
+const st=towerStairGeom(ctx,deckTop);
+for(const s of st.steps){
+const p=ctx.L(0,s.lz);
+const b0=BOXES.length;
+solidBox(MAT.woodDark,st.width,st.tread,st.tr,p[0],s.top-st.tread/2,p[1],ry);      // 踏面 (薄板)
+if(s.webH>0.02){
+const q=ctx.L(0,s.webZ);
+solidBox(MAT.woodDark,st.width,s.webH,st.riser,q[0],(s.webTop+s.webBot)/2,q[1],ry); // 踢面/立板 (有碰撞)
+}
+for(let k=b0;k<BOXES.length;k++) BOXES[k].stair=1;  // 踏步标记: 沙箱"梯道净高"断言排除自身 (同 05-world:617 口径)
 }
 const tp=ctx.L(0,1.3); // 平台护栏豁口内登顶落点
-STAIRS.push({x:tp[0],z:tp[1],topY:deckTop,sr,width:1.1});
-// 梯下支撑(视觉)
-for(const sgn of [-0.5,0.5]){
-const p=ctx.L(sgn,1.8+tr*n*0.5);
-mesh(boxGeo(0.14,deckTop-base-1.5,0.14),MAT.woodDark,p[0],(deckTop+base)/2-0.5,p[1]);
-}
+STAIRS.push({x:tp[0],z:tp[1],topY:deckTop,sr:st.sr,width:st.width,n:st.n});
+// (旧 :247-251 "梯下支撑(视觉)"已删: 撑柱是纯视觉 mesh() 无碰撞 —— 现由踢面链 + 梯脚接地段承力)
 coverPoints.push({x,z});
-BUILD_REG.push({type:'watchtower',x,z,ry,w:4,d:7,floor:base,doors:[],roofY:deckTop+2.3});
+BUILD_REG.push({type:'watchtower',x,z,ry,w:4,d:7,floor:f.floor,doors:[],roofY:deckTop+2.3});
 }
 // 帐篷: 双坡帆布小屋式——四面墙(正面门洞, 墙段框架自动登记通行区)+
 // 实心帆布坡顶(挡弹/挡视线), 全部件有碰撞; 旧 A 型两块帆布板与墙互相穿模, 弃用
 const tentMatA=new THREE.MeshLambertMaterial({color:0x5e6244,map:TEX.cloth}); // B8/P3-12
 const tentMatB=new THREE.MeshLambertMaterial({color:0x565a3e,map:TEX.cloth});
+// ★2026-09-27 贴图密度归一: 帆布纹按"1.6m 一贴"铺 (00-config.UV_DENSITY.cloth 单源) ——
+//   旧版没挂 uvRef, 坡板/檐口/山墙各按自身尺寸把 0..1 铺满整面 ⇒ 同一顶帐篷上织纹相差 17×。
+tentMatA.uvRef=UV_DENSITY.cloth; tentMatB.uvRef=UV_DENSITY.cloth;
 function tent(x,z,ry){
 const f=foundation(x,z,ry,3.2,4.4,{raise:0.02});
 const ctx=bctx(x,z,ry,f.floor);
@@ -301,11 +380,11 @@ const ctx=bctx(x,z,face,f.floor);
 const H=2.15,t=0.55;
 // 前墙(+z=face 朝向): 射击孔 1.05~1.55m (眼高可击出, 弹道可穿)
 wallSeg(ctx,{along:'x',at:1.7,from:-1.9,to:1.9,h:H,t,mat:MAT.stone,
-ops:[{c:0,w:1.5,b:1.05,h:0.5,ht:H,type:'slit'}]});
+ops:[{c:0,w:1.5,b:1.05,h:0.5,type:'slit'}]});
 // 侧墙: 窄射击孔
 for(const at of [1.9,-1.9]){
 wallSeg(ctx,{along:'z',at,from:-1.7+t,to:1.7-t,h:H,t,mat:MAT.stone,
-ops:[{c:0,w:0.8,b:1.05,h:0.45,ht:H,type:'slit'}]});
+ops:[{c:0,w:0.8,b:1.05,h:0.45,type:'slit'}]});
 }
 // 背墙: 入口净宽1.4 净高2.05
 wallSeg(ctx,{along:'x',at:-1.7,from:-1.9,to:1.9,h:H,t,mat:MAT.stone,
@@ -618,6 +697,7 @@ const roofM=solidBox(MAT.stone,7.6,0.34,6.0,rp[0],f.floor+H+0.17,rp[1],ry);
 addSnowCap(roofM);
 const roofRef={m:[roofM],bands:BOXES.slice(rbi),slabs:[],dead:0,done:false,carry:wallGs.filter(w=>w&&!w.dead)};
 for(const g2 of roofRef.carry) g2.roofRef=roofRef;
+roofRefFinalize(roofRef); // B2: 平顶也吃"直接轰屋顶"的伤害 (旧版只有坡顶房有承重链, 平顶打不着)
 // 亭内长椅 + 瓦砾块 (纯视觉, 不进 PROPS —— 足迹内道具会破坏互斥断言)
 let p=ctx.L(1.4,-1.6);
 solidBox(MAT.woodDark,1.8,0.5,0.5,p[0],heightAt(p[0],p[1])+0.25,p[1],ry);
@@ -637,7 +717,7 @@ p=rotL(1.4,-0.9); dBox(MAT.woodDark,2.2,1.3,1.5, p[0],heightAt(p[0],p[1])+0.65,p
 p=rotL(0.4,1.6); dBox(MAT.wood,1.6,1.1,1.2, p[0],heightAt(p[0],p[1])+0.55,p[1], ry+0.9);
 p=rotL(-0.4,-1.6); dBox(MAT.metalDark,1.4,1.5,1.4, p[0],heightAt(p[0],p[1])+0.75,p[1], ry);
 const g=dEnd();
-if(g) g.hp=720;
+if(g){ g.hp=720; g.noScale=true; }   // 2026-09-27N: 破袭目标血量 = 规则数值, 不参与"按组规模归一" (B1)
 for(let i=0;i<3;i++){ p=rotL(wr(-3,3),wr(-3,3)); barrel(p[0],p[1]); }
 p=rotL(3.6,0); sandbagWall(p[0],p[1],4,ry+HPI);
 p=rotL(-3.6,0); sandbagWall(p[0],p[1],4,ry+HPI);
@@ -742,11 +822,12 @@ mesh(boxGeo(0.5,0.14,3.4),MAT.woodDark,p[0],g0+0.02,p[1],ry,false,true);
 for(const fz of [-18,-6]){
 const p=L(17,fz);
 const fit=groundFit(p[0],p[1],ry,1.6,3.9);
-solidBox(MAT.metalDark,3.0,1.25,7.5,p[0],fit.y+0.85,p[1],ry); // 车皮 (无 crush: 坦克不可碾)
+const fy=fit.max; // 车皮坐在轨面最高处 (均值会让一端埋进轨面: 沙箱报"轨面采样点落在碰撞盒内")
+solidBox(MAT.metalDark,3.0,1.25,7.5,p[0],fy+0.85,p[1],ry); // 车皮 (无 crush: 坦克不可碾)
 for(const wz of [-2.6,2.6]){
 const q=L(17,fz+wz);
 const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,2.6,9),MAT.metalDark);
-wh.position.set(q[0],fit.y+0.4,q[1]);
+wh.position.set(q[0],fy+0.4,q[1]);
 wh.rotation.order='YXZ';
 wh.rotation.y=ry; wh.rotation.z=HPI; // 轮轴沿厂房长轴垂直方向 (车皮纵轴)
 wh.castShadow=true;
@@ -946,6 +1027,7 @@ BUILD_REG.push({type:'reichstag',x,z,ry,w:fw,d:fd,floor:f.floor,doors:ctx.doors.
 //   屋顶平台中心偏南架 88 高炮 (FLAK_DECKS → 17-emplacements aaGun yDeck) —— 平台 9.2m = 半场制高点;
 //   坍塌链同 ruinBlock: 8 面墙组 (2 层×4 面, wFloor 0/1 + wallAbove) + 手造 roofRef (顶板/女儿墙/楼板/楼梯挂牌)
 const FLAK_DECKS=[]; // 塔顶平台登记 (17-emplacements 读取并架设可操作高炮)
+const COASTAL_PITS=[]; // 岸防炮位登记 (2026-09-18 塔拉瓦: 17-emplacements 读取并在胸墙内架 atGun)
 function flakTower(x,z,ry){
 const f=foundation(x,z,ry,14,14,{maxDh:1.6});
 const ctx=bctx(x,z,ry,f.floor);
@@ -956,17 +1038,17 @@ const mkWall=(at,along,from,to,y0,h,ops,faceKey,fl)=>{
 const g=wallSeg(ctx,{along,at,from,to,y0,h,t,mat:wallMat,destr:true,ops});
 if(g){ carry.push(g); g.wFloor=fl; faces[faceKey].push(g); }
 };
-const slit={c:0,w:1.4,b:1.05,h:0.5,ht:FH};
+const slit={c:0,w:1.4,b:1.05,h:0.5};
 // ── 一层 (0~4.6): 南面门 + 三面射击孔 ──
-mkWall(hd,'x',-hw,hw,0,FH,[{c:0,w:1.6,ht:2.6,h:0,type:'door'},{c:-4,w:1.4,b:1.05,h:0.5,ht:FH},{c:4,w:1.4,b:1.05,h:0.5,ht:FH}],'front',0);
+mkWall(hd,'x',-hw,hw,0,FH,[{c:0,w:1.6,ht:2.6,h:0,type:'door'},{c:-4,w:1.4,b:1.05,h:0.5},{c:4,w:1.4,b:1.05,h:0.5}],'front',0);
 mkWall(-hd,'x',-hw,hw,0,FH,[slit],'back',0);
 mkWall(hw,'z',-hd+t,hd-t,0,FH,[slit],'east',0);
 mkWall(-hw,'z',-hd+t,hd-t,0,FH,[slit],'west',0);
 // ── 二层 (4.6~9.2): 四面射击孔 ──
-mkWall(hd,'x',-hw,hw,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6,ht:FH},{c:-4,w:1.4,b:1.0,h:0.6,ht:FH},{c:4,w:1.4,b:1.0,h:0.6,ht:FH}],'front',1);
-mkWall(-hd,'x',-hw,hw,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6,ht:FH},{c:-4,w:1.4,b:1.0,h:0.6,ht:FH},{c:4,w:1.4,b:1.0,h:0.6,ht:FH}],'back',1);
-mkWall(hw,'z',-hd+t,hd-t,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6,ht:FH},{c:-4,w:1.4,b:1.0,h:0.6,ht:FH},{c:4,w:1.4,b:1.0,h:0.6,ht:FH}],'east',1);
-mkWall(-hw,'z',-hd+t,hd-t,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6,ht:FH},{c:-4,w:1.4,b:1.0,h:0.6,ht:FH},{c:4,w:1.4,b:1.0,h:0.6,ht:FH}],'west',1);
+mkWall(hd,'x',-hw,hw,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6},{c:-4,w:1.4,b:1.0,h:0.6},{c:4,w:1.4,b:1.0,h:0.6}],'front',1);
+mkWall(-hd,'x',-hw,hw,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6},{c:-4,w:1.4,b:1.0,h:0.6},{c:4,w:1.4,b:1.0,h:0.6}],'back',1);
+mkWall(hw,'z',-hd+t,hd-t,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6},{c:-4,w:1.4,b:1.0,h:0.6},{c:4,w:1.4,b:1.0,h:0.6}],'east',1);
+mkWall(-hw,'z',-hd+t,hd-t,FH,FH,[{c:0,w:1.6,b:1.0,h:0.6},{c:-4,w:1.4,b:1.0,h:0.6},{c:4,w:1.4,b:1.0,h:0.6}],'west',1);
 // ── 二层楼板 (留西侧楼梯井) + 屋顶平台 (留东侧楼梯井) ──
 const F2=f.floor+FH;
 const slab=(x0,x1,z0,z1,y,mat,thick)=>{
@@ -1004,8 +1086,9 @@ for(let i=0;i<a.length-1;i++){ if(a[i]&&a[i+1]) a[i].wallAbove=a[i+1]; }
 }
 const ref={m:roofM,bands:BOXES.slice(rbi),slabs:chain,dead:0,done:false,carry:carry.filter(w=>w&&!w.dead)};
 for(const g2 of ref.carry) g2.roofRef=ref;
+roofRefFinalize(ref); // B2: 顶板/女儿墙吃"直接轰屋顶"的伤害
 const gp=ctx.L(0,3.2); // 平台南半 (朝向主攻方向)
-FLAK_DECKS.push({x:gp[0],z:gp[1],y:f.floor+RT});
+FLAK_DECKS.push({x:gp[0],z:gp[1],y:f.floor+RT,ref});
 addCoverAround(x,z,14,14,ry);
 coverPoints.push({x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]});
 BUILD_REG.push({type:'flaktower',x,z,ry,w:14,d:14,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT+parH});
@@ -1683,10 +1766,12 @@ new THREE.CylinderGeometry(0.85,0.85,2.4,10,1,true,0,Math.PI),
 MAT.woodDark);
 cover.position.set(x,g0+0.55,z);
 cover.rotation.order='YXZ';
-cover.rotation.y=ry+HPI/2;   // 圆柱默认轴=Y, 转到水平沿船长
-cover.rotation.z=0;
-// 再绕船长转 90° 让开口朝下
-cover.rotation.x=HPI;
+// ★ 2026-09-26 B5 修: 旧写法 rotation.set(HPI, ry+HPI/2, 0) 把半周壳的**鼓面转到了水平方向**
+//   (世界截面实测: 鼓向 -z、开口朝 +z, 壳缘竖着张开到轴心上下 ±0.85) ⇒ 乌篷变成"立着扣在船上"的
+//   一片竖筒, 下缘扎进船底以下 0.30m。半周壳在局部系里鼓面 = +X、轴 = +Y, 需要的映射是
+//   "轴 → 船长 (cos ry,0,-sin ry) 且鼓面 → 世界 +Y": 先绕 Z 转 +HPI (x→y, y→-x ⇒ 鼓面朝上、轴躺到 -x),
+//   再绕世界 Y 转 ry+PI 把轴摆到船长方向 (绕 Y 转不动 +Y ⇒ 鼓面保持朝上)。
+cover.rotation.set(0,ry+Math.PI,HPI);
 cover.castShadow=true;
 world.add(cover);
 }
@@ -1713,3 +1798,742 @@ if(freeSpot(rx,rz,1.5)) sandbagWall(rx,rz,2.4,B.yaw+HPI/2);
 coverPoints.push({x:bx,z:bz});
 }
 }
+
+// ═══════════ 草原遭遇 1943 · 库尔斯克改版 (2026-09-13) 新建大件 ═══════════
+// 风车磨坊 (纲领§十点名的草原特色大件): 八角截锥木塔 + 旋转风叶 + 西北外挂阶梯瞭望台
+// 空间逻辑核算 (局部坐标, 塔对径 4.6m/墙面 apothem 2.3/墙高 8.4m):
+//   门(正面 k=0, 南): 净宽1.4/净高2.05 (硬性标准) —— 面板拆 左柱0.3+右柱0.3+门楣(2.05..8.4) 三段;
+//   东西面 (k=2/k=6) 各一条 0.7×0.8 炮窗 (台高4.2) —— 拆 下墙/上墙/左右柱 四段, 门洞真开=拼件构图;
+//   风叶: 毂心高 6.8m 半径 3.2m —— 顶梢 10.0 < 塔帽锥顶 10.3; 下梢 3.6 > 门楣 2.05 (净距1.55 不扫门);
+//   叶面在塔前方 (offset 2.9 > 墙 apothem 2.3+叶厚), 不与塔身/瞭望台(西侧)相交 —— 纯视觉可旋转 (无碰撞);
+//   瞭望台: 西北面外挂 平台 2.0×1.5 顶面 7.0 + 外缘护栏高 1.0 (顶 8.0, 站立眼高 8.62 可越栏射击);
+//   阶梯: 单跑 16 步 rise 0.4375(≤0.45) tread 0.4 run 6.4, 沿西墙外侧 z -3.2→+3.2 ( lx=-2.75, 距墙面 0.45 净距),
+//   顶步 7.0 与台面严格齐平 (纲领 6.1: 顶踏面=上层楼面), 登顶落点=台面 (有支撑, 头顶净空: 塔帽锥底 8.4 - 眼 8.62 ——
+//   眼位在台外缘 x -3.5 处不进塔身投影, 无穿模);
+//   塔身 8 面墙/顶帽/台/梯 全部永久件 (不可毁建筑, 无 dGroup) —— 坍塌链完整性法则三态之①。
+const WIND_ROTORS=[]; // 风叶旋转登记 (24-main 每帧步进, 纯视觉)
+function updateWindRotors(dt){
+for(const r of WIND_ROTORS) r.g.rotation.z+=dt*(r.w||0.5);
+}
+function windmill(x,z,ry){
+const g0=heightAt(x,z);
+// 磨坊地基平台 (2026-09-20 建筑地基平台同一支): 塔身 8 面墙/磨盘/门全部按中心 g0 落位,
+// 而塔基坐坡时室内天然是坑 (实测 steppe 风车 1.41m —— 磨坊有门可进, 属"进门就是大凹坑"同族)。
+if(typeof addPad==='function') addPad(x,z,ry,5.0,5.0,5,g0);
+const ctx=bctx(x,z,ry,g0);
+const R=2.3, FACE=2.0, H=8.4, t=0.32;
+// 8 面墙 (45°/面): k=0 正面(门) / k=2,k=6 (局部 ±x) 高窗炮位, 其余整面
+for(let k=0;k<8;k++){
+const phi=k*HPI/2;                       // 45°步进 (HPI/4=22.5° 是16面坑 —— 已修)
+const nx=Math.sin(phi), nz=Math.cos(phi);
+const fc=ctx.L(nx*R,nz*R);               // 面中心
+const yaw=ry+phi;                        // 面板长轴垂直法线
+if(k===0){
+// 正面: 门净宽1.4 居中 —— 左右柱各 0.3 + 门楣 (开洞=拼件, 不是少放一块)
+const pL=ctx.L(nx*R-0.85*Math.cos(phi),nz*R+0.85*Math.sin(phi));
+const pR=ctx.L(nx*R+0.85*Math.cos(phi),nz*R-0.85*Math.sin(phi));
+solidBox(MAT.wood,0.32,H,t,pL[0],g0+H/2,pL[1],yaw);
+solidBox(MAT.wood,0.32,H,t,pR[0],g0+H/2,pR[1],yaw);
+solidBox(MAT.wood,1.5,H-2.05,t,fc[0],g0+2.05+(H-2.05)/2,fc[1],yaw);
+NAV_CLEARS.push({x:fc[0],z:fc[1],r:1.5});
+ctx.doors.push({x:fc[0],z:fc[1],w:1.4,dx:nx*ctx.cs+nz*ctx.sn,dz:-nx*ctx.sn+nz*ctx.cs,g0});
+}else if(k===2||k===6){
+// ±x 面: 高窗炮位 (0.7 宽, 台 4.2 楣 5.0) —— 面内偏移: 面中心 + c·切向 (切向=(cosφ,-sinφ))
+const pieces=[[-1.0,1.0,0,4.2],[-1.0,1.0,5.0,H],[-1.0,-0.35,4.2,5.0],[0.35,1.0,4.2,5.0]];
+for(const [a,b,y0,y1] of pieces){
+const c=(a+b)/2;
+const p=ctx.L(nx*R+c*Math.cos(phi), nz*R-c*Math.sin(phi));
+solidBox(MAT.wood,b-a,y1-y0,t,p[0],g0+(y0+y1)/2,p[1],yaw);
+}
+}else{
+solidBox(MAT.wood,FACE+0.1,H,t,fc[0],g0+H/2,fc[1],yaw);
+}
+}
+// 四角基石 (方足迹四角落地 —— verify-buildings 逐角着地断言; 亦是磨坊石基座观感)
+for(const [sx,sz] of [[-2.75,-2.75],[2.75,-2.75],[2.75,2.75],[-2.75,2.75]]){
+const pc2=ctx.L(sx,sz);
+solidBox(MAT.stone,1.7,1.3,1.7,pc2[0],g0+0.05,pc2[1],ry);
+}
+// 室内: 磨盘 (纯视觉小件, 不进 PROPS)
+const ms=ctx.L(0.9,-0.7);
+mesh(new THREE.CylinderGeometry(0.62,0.66,0.34,10),MAT.stone,ms[0],g0+0.17,ms[1]);
+mesh(new THREE.CylinderGeometry(0.2,0.2,0.5,8),MAT.woodDark,ms[0],g0+0.55,ms[1]);
+CYLS.push({x:ms[0],z:ms[1],r:0.64,y0:g0,y1:g0+0.75});
+// 塔帽: 八棱锥 (锥底 8.4 → 梢 10.3, 锥体内 4.0 方碰撞盒=屋顶碰撞带) + 尾杆 (视觉)
+mesh(new THREE.CylinderGeometry(0.06,2.75,1.9,8),MAT.woodDark,x,g0+9.35,z);
+solidBox(MAT.woodDark,4.0,1.9,4.0,x,g0+9.35,z,0);
+const tail=ctx.L(-0.2,3.6);
+mesh(boxGeo(0.14,0.14,2.6),MAT.woodDark,tail[0],g0+9.1,tail[1],ry+0.35,false,true);
+// 风叶组: 毂 + 4 叶 (木框+帆面) —— 纯视觉, WIND_ROTORS 每帧绕法线轴慢转
+const hub=new THREE.Group();
+hub.position.set(x+Math.sin(ry)*2.9, g0+6.8, z+Math.cos(ry)*2.9);
+hub.rotation.order='YXZ';                // 先朝向(Y)后自转(Z): R=Ry·Rz, 自转轴=叶面法线
+hub.rotation.y=ry;
+const hubM=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.5,8),MAT.woodDark);
+hubM.rotation.x=HPI; hub.add(hubM);
+for(let b=0;b<4;b++){
+const arm=new THREE.Group(); arm.rotation.z=b*HPI/2;
+const beam=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.14,3.2,0.1),MAT.woodDark),MAT.woodDark);
+beam.position.y=1.6+0.4; arm.add(beam);
+const sail=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.78,2.3,0.04),MAT.hay),MAT.hay);
+sail.position.set(0.47,1.9,0.05); sail.rotation.z=0.22; arm.add(sail);
+hub.add(arm);
+}
+hub.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
+world.add(hub);
+WIND_ROTORS.push({g:hub,w:0.5});
+// 瞭望台 (西北外侧): 平台顶 7.0 与梯顶齐平 + 西/北两侧护栏 (南侧=登临口, 东侧贴塔身)
+// 世界账 (ry=HPI 门朝东时): 梯沿西墙外 world x≈-2.75 由南向北爬升, 梯顶 world(-2.75,-3.2);
+// 台中心 world(-2.9,-4.05), 台面 world x -3.65..-2.15 (贴墙) / z -5.05..-3.05 (接梯顶)
+const bx3=4.05, bz3=-2.9;               // 台中心局部 (lx,lz) → world=(lz,-lx), 顶面=g0+7.0
+const pb=ctx.L(bx3,bz3);
+solidBox(MAT.woodDark,2.0,0.24,1.5,pb[0],g0+7.0-0.12,pb[1],ry);
+const rw=ctx.L(4.05,-3.65);              // 西护栏 (world x -3.65, 南北向 2.0)
+solidBox(MAT.woodDark,2.0,1.0,0.1,rw[0],g0+7.0+0.5,rw[1],ry);
+const rn=ctx.L(5.05,-2.9);               // 北护栏 (world z -5.05, 东西向 1.5)
+solidBox(MAT.woodDark,0.1,1.0,1.5,rn[0],g0+7.0+0.5,rn[1],ry);
+coverPoints.push({x:pb[0],z:pb[1]});
+// 外挂阶梯: 单跑 16 步 (rise 0.4375≤0.45 / tread 0.4 / run 6.4), 顶步 7.0 与台面严格齐平;
+// 默认登顶落点 local(3.55,-2.75) → world(-2.75,-3.55) 落在台面上 (有支撑, 纲领 6.1)
+stairFlight(ctx,{lx:-3.2,lz:-2.75,dir:'x+',width:1.0,base:g0,topY:g0+7.0,maxRise:0.45,tread:0.4});
+BUILD_REG.push({type:'windmill',x,z,ry,w:6.6,d:6.6,floor:g0,doors:ctx.doors.slice(),roofY:g0+10.3});
+}
+
+// 水塔 (普罗霍罗夫卡车站地标): 四腿砖柱 + 铆接水柜 + 锥顶 —— 不可毁纯地标+掩体
+// ★ 2026-09-25 改名 waterTower → stationWaterTower: 05c-layouts 另有一份**同名** waterTower (斯大林格勒给水塔,
+//   钢腿/矮一档), 两文件都是顶层 function ⇒ 后加载的 05c 覆盖本版, 草原车站拿到的是另一张图的地标 (矮 ~2m)。
+//   重名消除后本函数才真正被 layoutSteppe 用上 (调用点同步改)。
+// 空间账: 腿柱高 6.8 (CYL r0.28), 水柜 r2.2 y 6.8..9.8 (CYL), 锥顶 9.8..11.2 (视觉);
+// 柱距 3.4 (对角 4.8) —— 底部可穿行 (净高 6.8/净宽 2.8), 步兵掩体位; 顶柜不可登 (无梯, 纯地标)
+function stationWaterTower(x,z){
+const g0=heightAt(x,z);
+for(const [lx,lz] of [[-1.7,-1.7],[1.7,-1.7],[-1.7,1.7],[1.7,1.7]]){
+mesh(new THREE.CylinderGeometry(0.28,0.34,6.8,8),MAT.brick,x+lx,g0+3.4,z+lz);
+CYLS.push({x:x+lx,z:z+lz,r:0.3,y0:g0,y1:g0+6.8});
+}
+for(const [ax,az,bx2,bz2] of [[-1.7,-1.7,1.7,1.7],[1.7,-1.7,-1.7,1.7],[-1.7,-1.7,-1.7,1.7],[1.7,-1.7,1.7,1.7]]){
+mesh(boxGeo(Math.hypot(bx2-ax,bz2-az),0.14,0.14),MAT.woodDark,x+(ax+bx2)/2,g0+5.6,z+(az+bz2)/2,Math.atan2(bz2-az,bx2-ax),false,true);
+}
+const tank=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.2,3.0,12),MAT.metalDark);
+tank.position.set(x,g0+8.3,z); tank.castShadow=true; world.add(tank);
+CYLS.push({x,z,r:2.2,y0:g0+6.8,y1:g0+9.8});
+mesh(new THREE.CylinderGeometry(0.06,2.4,1.4,12),MAT.woodDark,x,g0+10.5,z);
+mesh(new THREE.CylinderGeometry(0.05,0.05,2.2,6),MAT.metalDark,x,g0+11.9,z);
+}
+// ═══════════ 太平洋岛屿组 (2026-09-18 塔拉瓦环礁批) ═══════════
+// 长栈桥 (CAMPAIGN.bridges kind='pier'): 走桥管线 —— heightAt 经 bridgeDeckY 返回绝对桥面高 deckY,
+// 因此"可站/可走/Bot 可通行/建筑避让/freeSpot 让位"全部自动成立 (与大桥同源)。
+// 空间逻辑账 (载具预留关键项):
+//   桥面高 deckY=2.45 (制高点: 站姿眼高 2.45+1.62=4.07 俯瞰礁盘, 又不遮挡岸上视线);
+//   桥下净空 = 桥面底 2.13 - 潮位 0 = 2.13m > 游泳者头部高度 (潜水 1.45+0.3) → **潜泳可穿桥而过**;
+//   桥面宽 6m (两人并行 + 担架/弹药箱通过); 桩距 6.5m; 桥根踏步 5 级 (步高≤0.42, 顶面=桥面, 登桥不卡步);
+//   两侧泊位水深 1.2~1.7m (bridge 段在礁盘平台 d=11~36m 区间) —— 日后登陆艇/两栖车靠泊位见 config.sea.berths
+function pierTrestle(B){
+const t=B.w/2, half=B.len/2, dy=B.deckY;
+const sn=Math.sin(B.yaw), cs=Math.cos(B.yaw);
+const P=(u,v)=>[B.x+u*sn+v*cs, B.z+u*cs-v*sn];
+// 桥面 (实心盒: 可站立/挡弹/挡视线)
+solidBox(MAT.wood,B.w,0.32,B.len,B.x,dy-0.16,B.z,B.yaw);
+// 横铺面板条 (视觉: 一眼读出是木栈桥)
+// ★ 2026-09-21 WS4 修"栈桥显示 BUG/图层打架"(用户实机):
+//   旧写法 `boxGeo(B.w+0.24,0.07,0.36)` 放在 `dy+0.03` ⇒ 底面 2.445 **比桥面顶面 2.45 低 5mm**(埋进桥面),
+//   且宽 6.24 > 桥面 6.0 ⇒ 两侧各外伸 0.12m 的悬空薄唇。5mm 埋入量小于该视距上的深度分辨率
+//   (near=.08/far=900 ⇒ 24bit 分辨率 ≈ z²/(near·2²⁴), 100m≈7.5mm) ⇒ 面板条底面与桥面顶面在远端必闪。
+//   新口径: 宽 = B.w (侧面与桥面盒侧面对齐, 无外伸悬空边), 中心 dy+0.035 ⇒ **底面 2.450 恰在桥面顶面之上**,
+//   与 stoneBridge 铺装 (本文件 :1197, 底面=dy 的贴面口径) 一致; 材质走 05-world `depthVariant` 的
+//   pavement 档 (polygonOffset -1/-1, 全库按 base+tier 只克隆 1 个实例, 不污染共享 MAT.woodDark)。
+const _pierPav=(typeof depthVariant==='function')?depthVariant(MAT.woodDark,'pavement'):MAT.woodDark;
+for(let u=-half+0.9;u<half-0.6;u+=1.7){
+const p=P(u,0);
+mesh(boxGeo(B.w,0.07,0.36),_pierPav,p[0],dy+0.035,p[1],B.yaw,false,true);
+}
+// 纵梁 (桥面下两侧)
+for(const v of [-t+0.4,t-0.4]){
+const p=P(0,v);
+mesh(boxGeo(0.32,0.44,B.len-0.3),MAT.woodDark,p[0],dy-0.44,p[1],B.yaw);
+}
+// 桩排 (每 6.5m 一对): 从真实海床打到桥面下 (heightAt noBridge=true 取海床, 不取桥面)
+for(let u=-half+2.2;u<=half-2;u+=6.5){
+const pa=P(u,-t+0.4), pb=P(u,t-0.4);
+for(const p of [pa,pb]){
+const gb=heightAt(p[0],p[1],true);
+const h=Math.max(1.0,dy-0.44-gb);
+mesh(new THREE.CylinderGeometry(0.24,0.30,h,7),MAT.woodDark,p[0],gb+h/2,p[1]);
+CYLS.push({x:p[0],z:p[1],r:0.33,y0:gb,y1:dy-0.3});
+}
+// 横撑 + X 斜撑 (视觉: 排架感; 不设碰撞, 人在水里可从排架间穿过)
+const gy=Math.max(heightAt(pa[0],pa[1],true),heightAt(pb[0],pb[1],true));
+const bar=mesh(boxGeo(B.w-0.8,0.16,0.16),MAT.woodDark,(pa[0]+pb[0])/2,gy+0.9,(pa[1]+pb[1])/2,B.yaw+HPI,false,true);
+for(const s2 of [-1,1]){
+const m2=mesh(boxGeo(0.13,Math.hypot(B.w-0.8,1.5),0.13),MAT.woodDark,(pa[0]+pb[0])/2,gy+1.7,(pa[1]+pb[1])/2,B.yaw+HPI,false,true);
+m2.rotation.z=s2*Math.atan2(1.5,B.w-0.8);
+}
+}
+// 桥根踏步: 顶面=桥面 (登桥不卡步), 步高≤0.42, 自桥端向陆侧铺 (踏步盒打 stair 标记: 梯道净高断言按梯段放行)
+{
+const rp=P(-half-0.4,0);
+const base=heightAt(rp[0],rp[1]);
+const rise=Math.max(0.3,dy-base);
+const n=Math.max(1,Math.ceil(rise/0.42)), sr=rise/n, tr=0.55;
+for(let i=0;i<n;i++){
+const p=P(-half-tr*(n-i-0.5),0);
+const b0=BOXES.length;
+solidBox(MAT.wood,B.w,0.26,tr+0.08,p[0],base+sr*(i+1)-0.13,p[1],B.yaw);
+for(let k=b0;k<BOXES.length;k++) BOXES[k].stair=1;
+}
+const foot=P(-half-tr*n,0), tp=P(-half-tr*0.5,0), land=P(-half+0.7,0);
+STAIRS.push({x:land[0],z:land[1],topY:dy,sr,width:B.w-0.8,fx:foot[0],fz:foot[1],tx:tp[0],tz:tp[1],n});
+}
+// 系缆桩 (泊位标志: 桥面两侧后半段) + 桥端灯柱
+for(let u=2;u<half-3;u+=7){
+for(const v of [-t+0.55,t-0.55]){
+const p=P(u,v);
+mesh(new THREE.CylinderGeometry(0.17,0.19,0.72,7),MAT.woodDark,p[0],dy+0.36,p[1]);
+CYLS.push({x:p[0],z:p[1],r:0.22,y0:dy,y1:dy+0.7});
+}
+}
+{
+const hp=P(half-0.6,-t+0.6);
+mesh(new THREE.CylinderGeometry(0.09,0.11,3.4,6),MAT.woodDark,hp[0],dy+1.7,hp[1]);
+mesh(boxGeo(0.42,0.42,0.42),new THREE.MeshLambertMaterial({color:0x2e2c28,map:TEX.grime}),hp[0],dy+3.5,hp[1]);
+CYLS.push({x:hp[0],z:hp[1],r:0.16,y0:dy,y1:dy+3.4});
+}
+// 桥面通行带 (Bot 走栈桥: NAV_CLEARS 沿桥轴) + 掩体点
+for(let u=-half+2;u<=half-1;u+=5){
+const p=P(u,0);
+NAV_CLEARS.push({x:p[0],z:p[1],r:t-0.4});
+}
+const cp=P(-half*0.35,0), cp2=P(half*0.45,0);
+coverPoints.push({x:cp[0],z:cp[1]},{x:cp2[0],z:cp2[1]});
+}
+// 灯塔 (左翼制高 / 观通站): 方形收分混凝土塔 9×9, 两层 (每层 5.0m) + 10m 环廊平台 + 腿撑灯室.
+// 空间逻辑账: 环廊顶面 10.0 (站姿眼高 11.62 俯瞰全湾, 仍低于灯室底 12.2 → 廊下可通行可射击);
+//   双跑梯各 13 步 (步高 0.385/步距 0.55, 每跑 7.15m 落在 8.1m 净进深内), 顶步面与楼面严格齐平;
+//   灯室由 4 腿撑起 (腿位在四角 ±1.7, 不碍通行), 锥顶到 16.5 = 全图最高构筑物 (基础海拔 ~16 → 塔尖 ~32m)
+// ★ 2026-09-19 用户裁定"让灯塔无法被摧毁": 全部墙段走 `wallSeg` 的**不可毁**分支 (destr 省略 = solidBox,
+//   不进 DESTRUCTIBLES、无 roofRef 承重链) —— 炸不塌、环廊观察所永久可用, 只留弹痕/无碎块;
+//   BUILD_REG 标 indestr 供沙箱断言 (verify-layouts ⑨)。
+function lighthouse(x,z,ry){
+const f=foundation(x,z,ry,9,9,{maxDh:1.6});
+const ctx=bctx(x,z,ry,f.floor);
+const t=0.45, FH=5.0, hw=4.5, hd=4.5, RT=FH*2, parH=1.1;
+const carry=[], faces={front:[],back:[],east:[],west:[]}, chain=[];
+const mkWall=(at,along,from,to,y0,h,ops,key,fl)=>{
+const g=wallSeg(ctx,{along,at,from,to,y0,h,t,mat:MAT.stone,ops});
+if(g){ g.hp=620; carry.push(g); g.wFloor=fl; faces[key].push(g); }
+};
+const slitX={c:2.9,w:1.2,b:1.15,h:0.5};
+const slit={c:0,w:1.3,b:1.15,h:0.5};
+// 一层: 南面 (+z, 朝海) 门 1.6×2.2 + 门两侧射击孔 (不可与门同位: 同位会在门洞里塞一块窗台石 = 堵门)
+mkWall(hd,'x',-hw,hw,0,FH,[{c:0,w:1.6,ht:2.2,h:0,type:'door'},{...slitX,c:-2.9},{...slitX,c:2.9}],'front',0);
+mkWall(-hd,'x',-hw,hw,0,FH,[slit],'back',0);
+mkWall(hw,'z',-hd+t,hd-t,0,FH,[slit],'east',0);
+mkWall(-hw,'z',-hd+t,hd-t,0,FH,[slit],'west',0);
+// 二层: 四面观察窗 (1.6×0.9 窗台 1.15)
+for(const k of ['front','back','east','west']){
+const along=(k==='front'||k==='back')?'x':'z';
+const at=(k==='front'?hd:k==='back'?-hd:k==='east'?hw:-hw);
+mkWall(at,along,along==='x'?-hw:-hd+t,along==='x'?hw:hd-t,FH,FH,[{c:0,w:1.6,b:1.15,h:0.9,type:'win'}],k,1);
+}
+// 二层楼板 (留西侧梯井) + 环廊平台 (留东侧梯井) —— 井位与梯段逐段对齐 (梯道净高断言兜底)
+const slab=(x0,x1,z0,z1,y,thick)=>{
+const p=ctx.L((x0+x1)/2,(z0+z1)/2);
+const b0=BOXES.length;
+const m=solidBox(MAT.stone,x1-x0,thick,z1-z0,p[0],y-thick/2,p[1],ry);
+chain.push({m,b:BOXES.slice(b0)});
+return m;
+};
+// 二层楼板: 梯井 x[-3.75,-2.05] z[-3.6,2.7] (跑一沿此上行)
+slab(-2.05,4.05,-4.05,4.05,f.floor+FH,0.3);
+slab(-4.05,-3.75,-4.05,4.05,f.floor+FH,0.3);
+slab(-3.75,-2.05,-4.05,-3.6,f.floor+FH,0.3);
+slab(-3.75,-2.05,2.7,4.05,f.floor+FH,0.3);   // 跑一登顶落脚板 (exit z=2.9 在板上)
+// 双跑梯: 西侧自北向南 0→5.0; 东侧自南向北 5.0→10.0 (步高 0.417/步距 0.5, 每跑 6.0m)
+stairFlight(ctx,{lx:-2.9,lz:-3.5,dir:'z+',width:1.5,base:f.floor,topY:f.floor+FH,maxRise:0.42,tread:0.5,exit:[-2.9,2.9],parts:chain});
+stairFlight(ctx,{lx:2.9,lz:3.5,dir:'z-',width:1.5,base:f.floor+FH,topY:f.floor+RT,maxRise:0.42,tread:0.5,exit:[2.9,-2.9],parts:chain});
+// 环廊平台 (留东侧梯井 x[2.05,3.75] z[-2.7,3.6]) + 女儿墙
+const roofM=[];
+const rslab=(x0,x1,z0,z1,y,thick)=>{
+const p=ctx.L((x0+x1)/2,(z0+z1)/2);
+const m=solidBox(MAT.stone,x1-x0,thick,z1-z0,p[0],y-thick/2,p[1],ry);
+roofM.push(m); return m;
+};
+const rbi=BOXES.length;
+rslab(-4.6,2.05,-4.6,4.6,f.floor+RT,0.34);
+rslab(2.05,4.6,-4.6,-2.7,f.floor+RT,0.34);   // 跑二登顶落脚板 (exit z=-2.9 在板上)
+rslab(3.75,4.6,-2.7,4.6,f.floor+RT,0.34);
+rslab(2.05,3.75,3.6,4.6,f.floor+RT,0.34);
+for(const [w,d,lx,lz] of [[9.4,0.3,0,-4.6],[9.4,0.3,0,4.6],[0.3,9.4,-4.6,0],[0.3,9.4,4.6,0]]){
+rslab(lx-w/2,lx+w/2,lz-d/2,lz+d/2,f.floor+RT+parH,parH);
+}
+// 灯室 (4 腿撑起 5×5 玻璃罩 + 锥顶): 自环廊面起腿高 2.2 → 灯室底 12.2, 顶 14.8, 锥尖 16.5
+const LY=f.floor+RT;
+for(const [lx,lz] of [[-1.7,-1.7],[1.7,-1.7],[-1.7,1.7],[1.7,1.7]]){
+const p=ctx.L(lx,lz);
+mesh(new THREE.CylinderGeometry(0.14,0.16,2.2,6),MAT.metalDark,p[0],LY+1.1,p[1]);
+CYLS.push({x:p[0],z:p[1],r:0.2,y0:LY,y1:LY+2.2});
+}
+const lampP=ctx.L(0,0);
+mesh(boxGeo(5.0,0.3,5.0),MAT.metalDark,lampP[0],LY+2.35,lampP[1],ry);
+const glass=new THREE.MeshLambertMaterial({color:0xdfe8ee,transparent:true,opacity:0.45,map:TEX.grime});
+mesh(boxGeo(4.4,2.0,4.4),glass,lampP[0],LY+3.5,lampP[1],ry,false,false);
+for(const [w,d,lx,lz] of [[4.6,0.14,0,-2.2],[4.6,0.14,0,2.2],[0.14,4.6,-2.2,0],[0.14,4.6,2.2,0]]){
+const p=ctx.L(lx,lz);
+mesh(boxGeo(w,2.0,d),MAT.metalDark,p[0],LY+3.5,p[1],ry);
+}
+mesh(new THREE.CylinderGeometry(0.2,3.3,1.5,8),MAT.metalDark,lampP[0],LY+5.25,lampP[1]);
+mesh(new THREE.CylinderGeometry(0.05,0.05,1.4,5),MAT.metalDark,lampP[0],LY+6.6,lampP[1]);
+// 探照灯灯座 (环廊东南角, 视觉: 读作观通站)
+{
+const p=ctx.L(3.4,3.4);
+mesh(new THREE.CylinderGeometry(0.4,0.5,0.9,8),MAT.metalDark,p[0],LY+0.45,p[1]);
+const drum=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,1.5,10),MAT.metal);
+drum.rotation.z=HPI; drum.rotation.y=ry+0.6;
+drum.position.set(p[0],LY+1.5,p[1]); drum.castShadow=true; world.add(drum);
+CYLS.push({x:p[0],z:p[1],r:0.5,y0:LY,y1:LY+1.6});
+// N2 4.3 (昼夜设计): 夜档给灯塔探照灯座接真实光柱 (08-effects nightGearTick); 相位不进种子
+if(NIGHT_MODE) SEARCHLIGHTS.push({x:p[0],z:p[1],y:LY+2.35,az0:ry+0.6,phase:Math.random()*TAU});
+}
+// 承重链收口 (不可毁灯塔: 无 roofRef 塌顶链 —— 打不塌; 顶板带保留供沙箱"无浮空楼板"口径一致)
+for(const k in faces){
+const a=faces[k];
+for(let i=0;i<a.length-1;i++){ if(a[i]&&a[i+1]) a[i].wallAbove=a[i+1]; }
+}
+const ref={m:roofM,bands:BOXES.slice(rbi),slabs:chain,dead:0,done:false,carry:carry.filter(w=>w&&!w.dead)};
+addCoverAround(x,z,9,9,ry);
+coverPoints.push({x:lampP[0],z:lampP[1]});
+BUILD_REG.push({type:'lighthouse',x,z,ry,w:9,d:9,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT+parH,indestr:true});
+const _kreg=BUILD_REG[BUILD_REG.length-1];
+for(const e of chain) for(const b of (e.b||[])) b.building=_kreg;
+}
+// 机场塔台 (中线会战枢纽 / 观通+防空): 8×8 两层混凝土塔 —— 一层 4.6m 指挥室 (门+射击孔),
+// 二层 3.0m 玻璃观察室 (四面大窗), 屋顶平台 7.6m + 女儿墙 1.0 → FLAK_DECKS 架高炮 (17-emplacements).
+// 空间逻辑账: 双跑梯 12 步×0.383 (0→4.6, 每跑 6.6m < 7.1m 净进深) + 8 步×0.375 (4.6→7.6, 每跑 4.4m);
+//   顶步面与楼面严格齐平; 平台留东侧梯井; 屋顶净高 (灯室无) 全平台可站 —— 半径 8m 视野覆盖跑道两端
+function controlTower(x,z,ry){
+const f=foundation(x,z,ry,8,8,{maxDh:1.2});
+const ctx=bctx(x,z,ry,f.floor);
+const t=0.4, F1=4.6, F2=3.0, hw=4, hd=4, RT=F1+F2, parH=1.0;
+const carry=[], faces={front:[],back:[],east:[],west:[]}, chain=[];
+const mkWall=(at,along,from,to,y0,h,ops,key,fl)=>{
+const g=wallSeg(ctx,{along,at,from,to,y0,h,t,mat:MAT.stone,destr:true,ops});
+if(g){ g.hp=600; carry.push(g); g.wFloor=fl; faces[key].push(g); }
+};
+const slit={c:0,w:1.2,b:1.15,h:0.45};
+mkWall(hd,'x',-hw,hw,0,F1,[{c:0,w:1.5,ht:2.2,h:0,type:'door'},{c:-2.4,w:1.0,b:1.15,h:0.45},{c:2.4,w:1.0,b:1.15,h:0.45}],'front',0);
+mkWall(-hd,'x',-hw,hw,0,F1,[slit],'back',0);
+mkWall(hw,'z',-hd+t,hd-t,0,F1,[slit],'east',0);
+mkWall(-hw,'z',-hd+t,hd-t,0,F1,[slit],'west',0);
+// 二层玻璃观察室: 四面通窗 (窗台 0.9 / 高 1.5)
+for(const k of ['front','back','east','west']){
+const along=(k==='front'||k==='back')?'x':'z';
+const at=(k==='front'?hd:k==='back'?-hd:k==='east'?hw:-hw);
+mkWall(at,along,along==='x'?-hw:-hd+t,along==='x'?hw:hd-t,F1,F2,[{c:0,w:2.6,b:0.9,h:1.5,type:'win'}],k,1);
+}
+const slab=(x0,x1,z0,z1,y,thick)=>{
+const p=ctx.L((x0+x1)/2,(z0+z1)/2);
+const b0=BOXES.length;
+const m=solidBox(MAT.stone,x1-x0,thick,z1-z0,p[0],y-thick/2,p[1],ry);
+chain.push({m,b:BOXES.slice(b0)});
+return m;
+};
+// 二层楼板: 梯井 x[-3.25,-1.75] z[-3.2,2.6] (跑一沿此上行)
+slab(-1.75,3.6,-3.6,3.6,f.floor+F1,0.28);
+slab(-3.6,-3.25,-3.6,3.6,f.floor+F1,0.28);
+slab(-3.25,-1.75,-3.6,-3.2,f.floor+F1,0.28);
+slab(-3.25,-1.75,2.6,3.6,f.floor+F1,0.28);   // 跑一登顶落脚板 (exit z=2.8 在板上)
+stairFlight(ctx,{lx:-2.5,lz:-3.1,dir:'z+',width:1.35,base:f.floor,topY:f.floor+F1,maxRise:0.42,tread:0.5,exit:[-2.5,2.8],parts:chain});
+stairFlight(ctx,{lx:2.5,lz:3.1,dir:'z-',width:1.35,base:f.floor+F1,topY:f.floor+RT,maxRise:0.42,tread:0.5,exit:[2.5,-1.3],parts:chain});
+const roofM=[];
+const rslab=(x0,x1,z0,z1,y,thick)=>{
+const p=ctx.L((x0+x1)/2,(z0+z1)/2);
+const m=solidBox(MAT.stone,x1-x0,thick,z1-z0,p[0],y-thick/2,p[1],ry);
+roofM.push(m); return m;
+};
+const rbi=BOXES.length;
+// 屋顶平台 (留东侧梯井 x[1.75,3.25] z[-1.1,3.2]) + 女儿墙
+rslab(-4.2,1.75,-4.2,4.2,f.floor+RT,0.3);
+rslab(1.75,4.2,-4.2,-1.1,f.floor+RT,0.3);   // 跑二登顶落脚板 (exit z=-1.3 在板上)
+rslab(3.25,4.2,-1.1,4.2,f.floor+RT,0.3);
+rslab(1.75,3.25,3.2,4.2,f.floor+RT,0.3);
+for(const [w,d,lx,lz] of [[8.6,0.28,0,-4.2],[8.6,0.28,0,4.2],[0.28,8.6,-4.2,0],[0.28,8.6,4.2,0]]){
+rslab(lx-w/2,lx+w/2,lz-d/2,lz+d/2,f.floor+RT+parH,parH);
+}
+for(const k in faces){
+const a=faces[k];
+for(let i=0;i<a.length-1;i++){ if(a[i]&&a[i+1]) a[i].wallAbove=a[i+1]; }
+}
+const ref={m:roofM,bands:BOXES.slice(rbi),slabs:chain,dead:0,done:false,carry:carry.filter(w=>w&&!w.dead)};
+for(const g2 of ref.carry) g2.roofRef=ref;
+roofRefFinalize(ref); // B2: 顶板/女儿墙吃"直接轰屋顶"的伤害
+// 塔顶高炮平台 (与 flakTower 同一消费口径: 17-emplacements 读 FLAK_DECKS 架 aaGun);
+// ref 一并登记 → 平台坍塌时 17-emplacements killDeckGuns 把炮一起撤掉 (2026-09-19 防空炮浮空修复)
+{
+const gp=ctx.L(0,-2.2);
+FLAK_DECKS.push({x:gp[0],z:gp[1],y:f.floor+RT,ref});
+}
+// 塔顶风速计杆 + 环形天线 (视觉: 一眼读作机场塔台)
+// ★ 2026-09-21 WS5 用户第 4 条"杆子会在建筑被摧毁后浮空": 这两件原先是裸 mesh(), 不在任何坍塌链上 ——
+//   塔顶平台塌落后杆子留在半空。修法沿用既有台账: 推进 roofM (= ref.m, 坡板/楼板同一张表),
+//   collapseRoof 会把它们与坡板同批碎块化 + 世界移除; 无碰撞件不产生 band, 所以只需登记网格。
+{
+const p=ctx.L(3.3,-3.3);
+roofM.push(mesh(new THREE.CylinderGeometry(0.06,0.06,2.6,5),MAT.metalDark,p[0],f.floor+RT+1.3,p[1]));
+roofM.push(mesh(boxGeo(0.7,0.1,0.1),MAT.metal,p[0],f.floor+RT+2.4,p[1],ry));
+}
+addCoverAround(x,z,8,8,ry);
+coverPoints.push({x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]});
+BUILD_REG.push({type:'controltower',x,z,ry,w:8,d:8,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT+parH});
+const _kreg=BUILD_REG[BUILD_REG.length-1];
+for(const e of chain) for(const b of (e.b||[])) b.building=_kreg;
+}
+// 机库 (跑道地标 / 大件可毁): 22×15 钢架棚, 檐高 5.6 + 低坡双坡顶 ——
+// 正面 (+z) 两个 7.0×4.6 大门洞 (可拖机/通车, 净宽 7 净高 4.6), 其余三面高窗带 3.6~5.0;
+// 墙组抗爆 650 (与红十月 950 同思路: 不是两发榴弹就塌); 四墙承重链 → 打穿两面同层墙整体塌顶
+function hangar(x,z,ry){
+const fw=22, fd=15, HW=11, HD=7.5, WH=5.6, wt=0.45;
+const f=foundation(x,z,ry,fw,fd);
+const ctx=bctx(x,z,ry,f.floor);
+const carry=[], chain=[];
+let g;
+for(const sgn of [1,-1]){
+g=wallSeg(ctx,{along:'x',at:sgn*HD,from:-HW,to:HW,h:WH,t:wt,mat:MAT.metalDark,destr:true,
+ops:sgn>0?[{c:-5.6,w:7.0,ht:4.6,h:0,type:'door'},{c:5.6,w:7.0,ht:4.6,h:0,type:'door'}]
+:[{c:-5.6,w:1.6,b:3.6,h:1.4,type:'win'},{c:0,w:1.6,b:3.6,h:1.4,type:'win'},{c:5.6,w:1.6,b:3.6,h:1.4,type:'win'}]});
+if(g){ g.hp=650; carry.push(g); }
+}
+for(const sgn of [1,-1]){
+g=wallSeg(ctx,{along:'z',at:sgn*HW,from:-HD+wt,to:HD-wt,h:WH,t:wt,mat:MAT.metalDark,destr:true,
+ops:[{c:-3.4,w:1.6,b:3.6,h:1.4,type:'win'},{c:3.4,w:1.6,b:3.6,h:1.4,type:'win'}]});
+if(g){ g.hp=650; carry.push(g); }
+}
+pitchedRoof(ctx,{axis:'x',w:fw,d:fd,y0:WH,rise:1.7,mat:MAT.roof,gableMat:MAT.metalDark,over:0.55,t:wt,wallGs:carry,slabs:chain});
+// 门洞滑轨 + 半开的机库门 (视觉: 一眼读作机库, 不挡 7m 净宽通行)
+// ★ 2026-09-21 WS5 用户第 4 条"机场的库房建筑被摧毁后会有一部分留存": 这两件原先是裸 mesh() ——
+//   四面墙塌、屋顶塌落后滑轨与门板留在原地。修法沿用既有台账: 登记进 chain (= pitchedRoof 的
+//   o.slabs → ref.slabs), 塌顶时随坡板一起碎块化 + 世界移除。**保持"不挡 7m 净宽"的设计**: 只登记
+//   网格 (b:[] 空碰撞表), 不给碰撞 —— 门板按设计是纯视觉半开门, 加了碰撞会把 7m 门洞缩到 5.9m。
+for(const sgn of [1,-1]){
+const p=ctx.L(sgn*5.6,HD+0.3);
+chain.push({m:mesh(boxGeo(7.4,0.16,0.16),MAT.metalDark,p[0],f.floor+4.7,p[1],ry,false,true),b:[]});
+const q=ctx.L(sgn*5.6-3.1,HD+0.15);
+chain.push({m:mesh(boxGeo(1.4,4.4,0.12),MAT.metal,q[0],f.floor+2.3,q[1],ry),b:[]});
+}
+// 棚内: 工具箱/油桶/工作台 (纯道具, 走道具占位链)
+{
+const p=ctx.L(-8.5,-5.5);
+if(freeSpot(p[0],p[1],1.4)){ crate(p[0],p[1],1.3,wr(0,3)); crate(p[0]+1.6,p[1]+0.4,1.1,wr(0,3)); }
+const q=ctx.L(8.6,5.6);
+if(freeSpot(q[0],q[1],1)) barrel(q[0],q[1]);
+}
+addCoverAround(x,z,fw,fd,ry);
+coverPoints.push({x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]});
+BUILD_REG.push({type:'hangar',x,z,ry,w:fw,d:fd,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+WH+1.45});
+const _kreg=BUILD_REG[BUILD_REG.length-1];
+for(const e of chain) for(const b of (e.b||[])) b.building=_kreg;
+}
+// 椰子木掩体 (日军滩头/椰林工事): 原木堆墙 4.6×4.2 内高 1.95 + 正面射击缝 + 背面出入口 +
+// 顶部椰木盖板 + 覆沙层 (挡弹/挡视线; 空间账: 缝口 1.5×0.5 眼高 1.05→1.55 可据枪, 门净宽 1.4 净高 2.05)
+// ★ 2026-09-19 用户实机反馈"屋顶和底下的条状物不会随墙倒塌而倒塌"(截图即本掩体):
+//   旧版四墙 destr:true 但**盖板/覆沙层/原木横条都不挂任何坍塌链** ⇒ 墙炸光后顶盖与横条浮在空中。
+//   修法: 四墙组收进 carry, 盖板+覆沙层+横条登记为 ref.m/slabs (横条带碰撞盒归属标记),
+//   残余承重墙 ≤2 面即整体塌落 (走 05-world collapseRoof 同一支: 即刻碎块化 + 扬尘 + 碰撞击杀)。
+function logBunker(x,z,face){
+const f=foundation(x,z,face,4.6,4.2,{raise:0.08});
+const ctx=bctx(x,z,face,f.floor);
+const H=1.95, t=0.42;
+const logMat=MAT.woodDark;
+const carry=[];
+let g;
+g=wallSeg(ctx,{along:'x',at:2.1,from:-2.3,to:2.3,h:H,t,mat:logMat,destr:true,
+ops:[{c:0,w:1.5,b:1.05,h:0.5,type:'slit'}]});
+if(g){ g.hp=320; carry.push(g); }
+for(const at of [2.3,-2.3]){
+g=wallSeg(ctx,{along:'z',at,from:-2.1+t,to:2.1-t,h:H,t,mat:logMat,destr:true,ops:[]});
+if(g){ g.hp=320; carry.push(g); }
+}
+g=wallSeg(ctx,{along:'x',at:-2.1,from:-2.3,to:2.3,h:H,t,mat:logMat,destr:true,
+ops:[{c:0,w:1.4,ht:2.05,h:0,type:'door'}]});
+if(g){ g.hp=320; carry.push(g); }
+// 原木纹理横条 (视觉: 叠在墙上读作椰子木堆) —— 登记进坍塌链, 随墙塌落 (旧版浮空 bug 的直接来源)
+const roofM=[], slabs=[];
+for(let y=0.28;y<H-0.1;y+=0.42){
+for(const sgn of [1,-1]){
+const p=ctx.L(0,sgn*2.1);
+roofM.push(mesh(boxGeo(4.62,0.18,0.1),MAT.wood,p[0],f.floor+y,p[1],face,false,true));
+}
+}
+// 顶部椰木盖板 + 覆沙层 (实心盖板带碰撞 → 碰撞盒一并登记, 塌顶时连碰撞一起击杀)
+const rp=ctx.L(0,0);
+const b0=BOXES.length;
+const cap=addSnowCap(solidBox(logMat,5.0,0.3,4.6,rp[0],f.floor+H+0.15,rp[1],face));
+roofM.push(cap);
+slabs.push({m:cap,b:BOXES.slice(b0)});
+roofM.push(mesh(boxGeo(5.2,0.22,4.8),MAT.sandbag,rp[0],f.floor+H+0.41,rp[1],face,false,true));
+// 坍塌链收口: 残余承重墙 ≤2 面 → 盖板/覆沙层/横条整体塌落 (与坡顶房同一消费口径)
+const ref={m:roofM,bands:[],slabs,dead:0,done:false,carry};
+for(const wg of carry) wg.roofRef=ref;
+roofRefFinalize(ref); // B2: 无 bands 时以盖板碰撞盒 (slabs[].b) 作屋顶承重件 —— 直接轰盖板同样有效
+addCoverAround(x,z,4.6,4.2,face);
+coverPoints.push({x:ctx.L(0,3.8)[0],z:ctx.L(0,3.8)[1]},{x,z});
+BUILD_REG.push({type:'logbunker',x,z,ry:face,w:5.0,d:4.6,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+0.52});
+}
+// 击毁的日机 (跑道/机库地标): 2026-09-20 残骸重做 —— 按 00-config 的 pl 剪影规格出**按机型各异**的残骸, 硬掩体 (坦克不可碾)。
+// 数据单源: `pl`{shape,span,flen,fr,nose,tip,fin,canopy,belly,biplane,pylons} + def.col/size (与 16-aircraft 的工厂同源)。
+// 构造: 断翼 (翼根撕裂上翘 + 另一侧断翼插在沙里) / 弯桨 (桨毂挂着 + 断叶插沙) / 座舱盖碎裂缺失 (只剩框肋 + 敞开黑腔) /
+//   机身断成两段 (后段连垂尾整体错位) / **铝色剥落** (未烧透的蒙皮才认得出是哪一型) + 残留涂装 + 焦土。
+// 空间账 (与改造前同一套口径, 逐字不动): 实体盒 7.5×1.5×6.4 (ry 交换) + coverPoints 两点;
+//   主质量 (机身两段/主翼/尾翼) 落在盒的 XZ 投影内; 盒外只放半埋扁平碎件 (机轮/断桨叶/灰堆, 顶面 ≤0.28)。
+// 取数红线: 本函数**不得**出现 wr/wri/wRand (改造前就是 0 次全局取数) —— 一切抖动走 wkRand 本地哈希。
+// 造型件复用 05b 的残骸工具箱 (wkRand/wkPaint/wkPart); 05b 在 05c 之前必然已求值 (index.html 与 verify-layouts 同一顺序)。
+// 第 4 参归一化 (与 tankWreck 的 tk 归一化同构): ① 完整机型定义 FACTIONS[f].planes[i] (.pl/.col/.size)
+//   ② 裸 pl 规格 (.span/.flen/...) —— 后者按**守方主力机型**补齐涂装, size 取 1 (与 05c:1690 "断翼零战" 同一口径)。
+function wkPlanePool(){
+const B=TEAM_FACTION[1];                       // 守方 = 被击落的一方 (塔拉瓦 = 日本帝国陆军)
+return (B&&B.planes&&B.planes.length)?B.planes:[TEAM_FACTION[0].planes[0]];
+}
+function wkPlaneDef(o){
+const base=wkPlanePool()[0];
+if(!o) return {pl:base.pl,col:base.col,size:base.size||1,name:base.name};
+if(o.pl||o.span!==undefined) return {pl:o.pl||o, col:o.col!==undefined?o.col:base.col, size:o.size||1, name:o.name||''};
+return {pl:o, col:base.col, size:1, name:''}; // 裸 pl 规格
+}
+function planeWreck(x,z,ry,plIn){
+if(!propFree(x,z,3.6)||!freeSpot(x,z,3.4)) return;
+propTake(x,z,3.6);
+const fit=groundFit(x,z,ry,3.4,1.6);
+const grp=new THREE.Group();
+grp.position.set(x,fit.y,z);
+grp.rotation.order='YXZ';
+grp.rotation.set(fit.pitch,ry,fit.roll);
+grp.wkRole='plane';   // 角色标记 (直挂属性)
+world.add(grp);
+const R=wkRand(x,z,ry,0x9a17);
+const D=plIn?wkPlaneDef(plIn):wkPlaneDef(R.pick(wkPlanePool()));
+const P=D.pl, s=D.size||1, M=wkPaint(D.col,0x33362e);
+// ── 尺寸账 (pl 表 × size; 翼展按硬掩体盒半宽 3.75 收口 —— 断翼本来就该是断的) ──
+const FR=(P.fr!==undefined?P.fr:0.32)*s, FL=(P.flen!==undefined?P.flen:4.0)*s;
+const FW=Math.min((P.span!==undefined?P.span:7.6)*s/2,3.55);
+const CH=Math.max(0.9*s,FL*0.30), nose=P.nose||'inline', tip=P.tip||'square';
+const finH=(P.fin!==undefined?P.fin:0.84)*s;
+const rotSgn=R.chance(0.5)?1:-1;               // 留存翼侧 / 断翼落侧
+// ── ① 机身前段 (含机鼻档) + 断口撕裂面 ──
+const fz=-FL*0.20, fy=FR*0.95;
+wkPart(grp,new THREE.CylinderGeometry(FR*0.92,FR*1.02,FL*0.46,10),M.burnt,0,fy,fz,HPI,0,0,'fwdFus');
+if(nose==='radial'){ // 星型: 又粗又钝的整流罩 (La-5/雷电/霍克III 的正面剪影)
+wkPart(grp,new THREE.CylinderGeometry(FR*1.22,FR*1.04,FL*0.20,10),M.burnt,0,fy+FR*0.10,-FL*0.44,HPI,0,0,'cowl');
+}else{ // 直列: 细长机鼻 + 桨毂锥 (零式/隼/BF-109)
+wkPart(grp,new THREE.CylinderGeometry(FR*0.46,FR*0.84,FL*0.16,10),M.alu,0,fy+FR*0.04,-FL*0.44,HPI,0,0,'nose');
+wkPart(grp,new THREE.ConeGeometry(FR*0.42,FL*0.09,8),M.steel,0,fy+FR*0.04,-FL*0.53,-HPI,0,0,'spinner');
+}
+wkPart(grp,boxGeo(FR*1.75,FR*1.35,0.10),M.burnt,0,fy,FL*0.03,-0.22,0,0,'breakRim');
+// ── ② 机身断成两段: 后段连垂尾/平尾整体错位倒地 (子组 ⇒ 一次摆位整段跟着走) ──
+// 为什么后段近乎横置 (yaw 1.15~1.45 ≈ 66°~83°): 硬掩体盒半长只有 3.2m, 而甩出的后段连尾翼有 2m+;
+//   只有把长轴转成横置, 这一段才整体落在盒内 —— 视觉上也正是"尾段被炸得横躺在车侧沙上"。
+const rg=new THREE.Group(); grp.add(rg);
+rg.position.set(rotSgn*R.r(1.10,1.60),FR*0.72,Math.min(FL*0.22,0.90)+R.r(-0.08,0.08));
+rg.rotation.set(R.r(-0.14,0.14),rotSgn*R.r(1.15,1.35),rotSgn*R.r(0.10,0.24));
+const rl=Math.min(FL*0.40,1.9), rz0=rl*0.50;
+wkPart(rg,new THREE.CylinderGeometry(FR*0.50,FR*0.88,rl,10),M.burnt,0,0,rl*0.16,HPI,0,0,'rearFus');
+wkPart(rg,boxGeo(FW*0.42,0.08*s,CH*0.72),M.burnt,0,-FR*0.10,rz0*0.80,0,0,rotSgn*0.10,'stab');   // 平尾 (随段倒地)
+wkPart(rg,boxGeo(0.07*s,finH,CH*0.72),M.paint,0,FR*0.34+finH*0.5,rz0*0.92,0,0,0,'fin');            // 垂尾 (涂装 → 机型可辨)
+// ── ③ 主翼: 留存一侧翼根撕裂上翘 + 断口; 翼尖档 square|clip|round|ellipse 决定剪影 ──
+const wz=FL*0.06, wy=FR*1.02, up=rotSgn;
+const wIn=FW*0.50, wOut=FW-wIn;
+wkPart(grp,boxGeo(wIn,0.10*s,CH),M.burnt,up*wIn/2,wy,wz,0,0,up*0.10,'wingRoot');
+wkPart(grp,boxGeo(wOut*0.70,0.09*s,CH*0.74),M.burnt,up*(wIn+wOut*0.35),wy+0.10*s,wz-CH*0.05,0,0,up*0.30,'wingOuter');
+if(tip==='round'||tip==='ellipse'){ // 圆/椭圆翼尖: 圆锥压扁成翼型薄片 (零式的椭圆翼展弦比最大)
+const rr=CH*(tip==='ellipse'?0.50:0.34);
+wkPart(grp,new THREE.CylinderGeometry(0.02,rr,wOut*0.28,8),M.burnt,up*(FW-wOut*0.14),wy+0.12*s,wz-CH*0.08,0,0,-up*HPI,'wingTip');
+}
+// ── ④ 断翼: 另一侧整片插在沙里 (翼尖朝上, 翼根入土) ──
+wkPart(grp,boxGeo(FW*0.84,0.10*s,CH*0.92),M.burnt,-up*R.r(1.35,2.15),FR*0.42+R.r(0.10,0.30),wz+R.r(-0.85,0.85),
+ R.r(-0.22,0.22),R.r(-0.45,0.45),-up*R.r(0.58,0.85),'wingBroken');
+if(P.biplane){ // 霍克III 双翼: 上翼残片 + 翼间支柱
+const uy=FR*s+0.30*s;
+wkPart(grp,boxGeo(FW*1.34,0.09*s,CH*0.82),M.burnt,up*FW*0.30,uy,wz,0,0,up*0.42,'wingUpper');
+for(const sx of[1,-1]) wkPart(grp,boxGeo(0.06*s,uy-wy,0.10*s),M.burnt,sx*FW*0.42,(uy+wy)/2,wz-CH*0.05,0,0,0,'wingStrut');
+}
+// ── ⑤ 座舱盖碎裂缺失: 只剩框肋 + 敞开黑腔 + 头靠 ──
+wkPart(grp,boxGeo(FR*1.5,0.26*s,FL*0.30),M.burnt,0,FR*1.42,FL*0.12,0,0,0,'cockpitBay');
+for(let i=0;i<3;i++) wkPart(grp,boxGeo(FR*1.62,0.05,0.08),M.steel,0,FR*1.60-i*0.02,FL*0.02+i*FL*0.085,0,0,0,'canopyRib');
+wkPart(grp,boxGeo(FR*1.24,0.20*s,0.10),M.steel,0,FR*1.58,FL*0.29,0,0,0,'headrest');
+// ── ⑥ 弯桨: 桨毂还挂着 2 叶 (各带扭角) + 1 叶从根部折断插进沙里 ──
+const pz=-FL*0.55;
+wkPart(grp,new THREE.CylinderGeometry(FR*0.22,FR*0.22,0.22,8),M.steel,0,fy+FR*0.04,pz,HPI,0,0,'propHub');
+for(let i=0;i<2;i++){
+const a=R.r(0,TAU), bl=FR*R.r(2.1,2.7);
+wkPart(grp,new THREE.CylinderGeometry(0.055,0.035,bl,6),M.steel,Math.sin(a)*bl*0.34,fy+FR*0.04+Math.cos(a)*bl*0.34,pz,0.9,0,-a,'propBlade');
+}
+wkPart(grp,new THREE.CylinderGeometry(0.05,0.03,FR*1.9,6),M.steel,rotSgn*R.r(0.9,1.7),0.10,pz+R.r(-0.7,0.5),HPI+1.30,0,R.r(-0.5,0.5),'debrisBlade');
+// ── ⑦ 起落架弯折支柱 + 机轮半埋 (扁平碎件: 轴竖立 ⇒ 顶面 = 轮宽) ──
+for(const sx of[1,-1]){
+wkPart(grp,new THREE.CylinderGeometry(0.05,0.06,0.50,6),M.steel,sx*FR*1.05,FR*0.26,-FL*0.28,0,0,sx*0.60,'gearStrut');
+wkPart(grp,new THREE.CylinderGeometry(FR*0.62,FR*0.62,0.10,10),M.burnt,sx*FR*1.70,0.055,-FL*0.32,0,0,0,'gearWheel');
+}
+// ── ⑧ 机腹散热器 (P-51/雷电) / 翼下挂架 + 变形弹体 ──
+if(P.belly) wkPart(grp,boxGeo(FR*1.3,0.26*s,FL*0.26),M.burnt,0,FR*0.22,FL*0.04,0,0,0,'bellyRadiator');
+if(P.pylons) for(const sx of[1,-1]){
+wkPart(grp,boxGeo(0.10*s,0.16*s,0.34*s),M.steel,sx*FW*0.40,FR*0.72,wz,0,0,0,'pylon');
+wkPart(grp,new THREE.CylinderGeometry(FR*0.36,FR*0.30,FL*0.30,8),M.rust,sx*FW*0.40,0.22,wz,HPI,0,0,'bombDeformed');
+}
+// ── ⑨ 铝色剥落 (未烧透的蒙皮才认得出是哪一型) + 残留涂装 + 焦土 ──
+wkPart(grp,boxGeo(FR*0.86,0.03,FL*0.30),M.alu,0,fy+FR*1.01,fz,0,0,0,'aluPatch');
+wkPart(grp,boxGeo(FR*1.55,0.03,FL*0.15),M.alu,0,fy+FR*1.01,FL*0.02,0,0,0,'aluPatch');
+wkPart(grp,boxGeo(FR*0.82,0.03,FL*0.13),M.paint,0,fy+FR*1.01,-FL*0.12,0,0,0,'paintPatch');
+wkPart(grp,boxGeo(0.03,0.16*s,CH*0.48),M.paint,up*FW*0.44,wy+0.14*s,wz,0,0,0,'paintPatch');
+for(let i=0;i<2;i++){
+const a=R.r(0,TAU);
+wkPart(grp,boxGeo(R.r(0.5,0.9),0.15,R.r(0.5,0.9)),M.soil,clamp(Math.cos(a)*R.r(1.2,2.4),-3.2,3.2),0.02,clamp(Math.sin(a)*R.r(1.0,2.2),-2.9,2.9),0,R.r(0,TAU),0,'ashMound');
+}
+grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+addBoxCollider(x,fit.y+0.75,z, Math.abs(Math.sin(ry))>0.5?6.4:7.5, 1.5, Math.abs(Math.sin(ry))>0.5?7.5:6.4);
+coverPoints.push({x:x+Math.cos(ry)*2.6,z:z-Math.sin(ry)*2.6},{x:x-Math.cos(ry)*2.6,z:z+Math.sin(ry)*2.6});
+}
+// 岸防炮位 (岬角/滩头): 混凝土胸墙环 (8 段, 后方留 2.6m 出入口) + 弹药壁龛;
+// 空间账: 胸墙露出 1.15 (站姿可越顶射击/蹲姿全掩蔽), 埋深 1.05 (坡地逐角着地: 岬角圆顶坡度大,
+//   只放"坐在坡上"的短件会四角悬空), 内径 5.2 → 炮位半径 2.6 的 atGun 可在内 360° 回旋
+// 炮由 17-emplacements 依 COASTAL_PITS 架设 (该文件后加载; 与 flakTower 的 FLAK_DECKS 同一消费口径)
+function coastalPit(x,z,face){
+const g0=heightAt(x,z);
+const R=5.2, segs=8, H_TOP=1.15, H_BUR=1.05;
+// 炮位平台 (2026-09-20 建筑地基平台同一支): 胸墙环逐段贴坡, 坡地上四段顶面高低不一 (沙箱报"屋顶碰撞缺失")。
+// 先把炮位圈削平到中心地面高 —— 混凝土炮位本来就坐在平整过的场地上, 顺带与邻建地基互不打架。
+if(typeof addPad==='function') addPad(x,z,face,R+2.6,R+2.6,6,g0); // 半宽含外接方角 (√2·R≈7.4)
+for(let i=0;i<segs;i++){
+const a=face+Math.PI+i*TAU/segs; // 自炮口反侧起绕 (后方=入口)
+if(Math.abs(((a-face-Math.PI+Math.PI*3)%TAU)-Math.PI)<0.42) continue; // 后方出入口缺口 (~2.6m)
+const px=x+Math.sin(a)*R, pz=z+Math.cos(a)*R;
+const ry=a+HPI;
+const fit=groundFit(px,pz,ry,R*Math.sin(Math.PI/segs)+0.3,0.5);
+const m=solidBox(MAT.stone,R*2*Math.tan(Math.PI/segs)+0.34,H_TOP+H_BUR,0.62,px,fit.y+H_TOP-(H_TOP+H_BUR)/2,pz,ry);
+applyFit(m,ry,fit);
+}
+// 弹药壁龛 (两个半埋弹药箱) + 掩体点
+const a1=face+HPI*1.0, a2=face-HPI*1.0;
+for(const a of [a1,a2]){
+const px=x+Math.sin(a)*(R-1.5), pz=z+Math.cos(a)*(R-1.5);
+if(freeSpot(px,pz,1)) ammoCratePit(px,pz);
+}
+// 注: 炮位不设整体圆柱碰撞 —— 胸墙 8 段各自有碰撞, 炮位内部必须可站可回旋
+for(let i=0;i<6;i++){
+const a=face+i*TAU/6;
+coverPoints.push({x:x+Math.sin(a)*(R+1.2),z:z+Math.cos(a)*(R+1.2)});
+}
+BUILD_REG.push({type:'coastalpit',x,z,ry:face,w:R*2,d:R*2,floor:g0,doors:[],roofY:g0+1.15});
+COASTAL_PITS.push({x,z,face});
+}
+// 炮位弹药: 纯视觉木箱 (不走 05c 的 ammoCrate 补给逻辑, 只作掩体/布景)
+function ammoCratePit(x,z){
+const g0=heightAt(x,z);
+const m=solidBox(MAT.woodDark,1.1,0.62,0.8,x,g0+0.31,z,wr(0,3));
+const lid=mesh(boxGeo(1.15,0.08,0.85),MAT.wood,x,g0+0.66,z,m.rotation.y);
+}
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// 中障壁混凝土工事 (strongpoint / 观通站, 2026-09-21 WS3 用户第 3 条)
+// 用户原话: "现在岛上的不可摧毁工事只有一个灯塔, 中间部分应当还有一个。"
+// 定位: 岛腰中障壁旗圈旁的**第二座不可摧毁工事**, 量级与灯塔同级 (两层混凝土 + 屋顶观测台);
+//   归属 = 中立可占领强点 (坐落在 00-config island.spawns 的中立条目上, 与旗点同机制, 见 21-match updateSpots)。
+//
+// 【不可摧毁口径】全部墙段走 wallSeg **不带 destr** —— 05-world.js:417 `const emit=o.destr?dBox:solidBox;`
+//   ⇒ 不进 dBox/dEnd: 不进 DESTRUCTIBLES、无 dGroup、无 roofRef 承重链, 炸不烂 (灯塔 05a:1919-1922 同一支)。
+//   反面代价要说清: 不可毁墙**不返回结构组** (wallSeg 末尾 `const g=o.destr?dEnd(...):null`) ⇒ 没有 g.hp
+//   台账可挂 —— "抗爆"由"不在 DESTRUCTIBLES"这条机制保证, 不是一个血量数字 (灯塔的 g.hp=620 只挂在可毁分支)。
+//   结构件 (楼板/梯/女儿墙) 照旧登记 roofM/chain 台账并回挂 b.building, 供沙箱"无浮空板"口径检查
+//   (BUILD_REG.roofY 处必须有碰撞盒; 每个实体件都能顺着 reg.ref 找到自己的归属)。
+//
+// 【空间逻辑账】(米, 相对地基楼面 g0 = foundation 多点采样最高地面 + 0.06)
+//   一层 10×9 墙高 4.4 墙厚 0.55 (灯塔 9×9 / 5.0 / 0.45 —— 本工事更矮更厚 = 碉堡体量):
+//     南面 (+z, 朝南登陆湾) 双射击孔 (孔口 1.15~1.65 = 眼高据枪位), 正面不给门 (敌正面无入口);
+//     北面 (-z, 朝机场纵深) 北门 1.7×2.25 + 射击孔;  东面 (+x, 朝中障壁公路口) 东门 1.5×2.2 + 两孔;
+//     西面 (-x, 朝中障壁旗圈/公路) 三孔 = 主射面。
+//     门由 wallSeg 自动登记 NAV_CLEARS (半径 max(w/2+0.75, 1.55)) + 门外缓冲台阶 ⇒ 人与 Bot 都进得来。
+//   一层顶 g0+4.4 = 环廊走道 (10×9 整幅, 女儿墙 1.0 高) —— 对位灯塔 10.0m 环廊观察所, 低 5.6m;
+//   二层观察室 7×6 (四周收分 1.5m), 墙高 3.4 (g0+4.4 → g0+7.8), 四面观察窗 (窗台 1.05 / 高 1.3);
+//   屋顶观测台 g0+7.8 + 女儿墙 0.85 ⇒ BUILD_REG.roofY = g0+8.65 = 岛腰制高点 (比一层楼面高 8.65m)。
+//   两跑直跑梯 (顶步面与上层楼面严格齐平 ±0; 台阶是实心锯齿盒, 无悬空踏步):
+//     跑一 西侧 x[-3.5,-2.2] z[-2.6,2.9]: g0 → g0+4.4, rise 4.4 → 11 级 × 步高 0.4 / 步距 0.5 (跑长 5.5m);
+//     跑二 东侧 x[1.7,3.0]  z[-2.0,2.0]: g0+4.4 → g0+7.8, rise 3.4 → 8 级 × 步高 0.425 / 步距 0.5 (跑长 4.0m);
+//     梯井洞口 = 梯段足迹外扩 0.05 (跑一洞口 x[-3.55,-2.15] z[-2.7,3.0] 开在一层顶板上;
+//     跑二洞口 x[1.65,3.05] z[-2.05,2.05] 开在屋顶板上) ⇒ 爬梯全程无"顶板挡头", 井口外侧各留 ≥0.9m 落脚板,
+//     且洞边**不切任何墙基** (洞的每个边都落在墙内侧或房间内部 ⇒ 没有"墙站在洞上"的浮空墙)。
+//     动线: 地面 → 一层内 → 跑一 → 一层顶环廊 → 二层观察室北门进入 → 跑二 → 屋顶观测台。
+//   掩体: addCoverAround(10×9) 四点 + 室内/一层顶环廊两点 = 6 点 (Bot 掩体选择读 coverPoints)。
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+function strongpoint(x,z,ry){
+const W=10, D=9, H1=4.4, H2=3.4, RT=H1+H2, t1=0.55, t2=0.45, parH=0.85;
+const hw=W/2, hd=D/2, hw2=3.5, hd2=3.0;
+const f=foundation(x,z,ry,W,D,{maxDh:1.6});
+const ctx=bctx(x,z,ry,f.floor);
+const g0=f.floor;
+const owned=[], chain=[], roofM=[];   // owned=本工事全部碰撞盒 (b.building 回挂 + 沙箱"本体仍在"断言)
+// 墙段: 从 BOXES 尾部收下本次 wallSeg 产生的碰撞盒 (不可毁墙不返回组, 没有组可收)
+const seg=(o)=>{ const b0=BOXES.length; wallSeg(ctx,o); for(let i=b0;i<BOXES.length;i++) owned.push(BOXES[i]); };
+// 楼板/女儿墙: 实心盒 + 台账 (isRoof=true→roofM 可视台账; 否则 chain={m,b} 塌顶链口径)
+const slab=(x0,x1,z0,z1,y,thick,isRoof)=>{
+const p=ctx.L((x0+x1)/2,(z0+z1)/2);
+const b0=BOXES.length;
+const m=solidBox(MAT.stone,x1-x0,thick,z1-z0,p[0],y-thick/2,p[1],ry);
+const bs=BOXES.slice(b0);
+for(const b of bs) owned.push(b);
+if(isRoof) roofM.push(m); else chain.push({m,b:bs});
+return m;
+};
+const mkStair=(o)=>{ const n0=chain.length; stairFlight(ctx,Object.assign({parts:chain},o)); for(let i=n0;i<chain.length;i++) for(const b of (chain[i].b||[])) owned.push(b); };
+// 射击孔: 孔口 1.15~1.65 (眼高), 楣顶 ht=1.65 与孔顶齐平 ⇒ 孔以上是实心墙
+// (灯塔/塔台的 slit 传了 ht=墙高, 而 wallSeg 的判据是 upFrom<墙顶才发楣上段 ⇒ 那两处的孔其实一路开到墙顶;
+//  本工事按 wallSeg 的原意传 ht=b+h, 孔就是一条 1.5×0.5 的射孔 —— 不改既有建筑, 只把新工事写对)
+const slit=(c,w)=>({c,w,b:1.15,h:0.5,ht:1.65});
+const win=(c,w)=>({c,w,b:1.05,h:1.3});
+const w1=(at,along,from,to,ops)=>seg({along,at,from,to,y0:0,h:H1,t:t1,mat:MAT.stone,ops});
+// ── 一层四面墙 (destr 省略 = 不可毁; 四角由 wallSeg 的侧墙外伸 t 咬住前后墙中线, 无竖向透缝) ──
+w1( hd,'x',-hw,hw,[slit(-2.2,1.5),slit(2.2,1.5)]);                                          // 南 (正面, 朝登陆湾)
+w1(-hd,'x',-hw,hw,[{c:-2.4,w:1.7,ht:2.25,h:0,type:'door'},slit(2.4,1.5)]);                  // 北 (背面, 朝机场纵深): 北门 + 孔
+w1( hw,'z',-hd+t1,hd-t1,[{c:2.5,w:1.5,ht:2.2,h:0,type:'door'},slit(0,1.6),slit(-2.9,1.2)]);  // 东 (+x, 朝公路口): 东门 + 两孔
+w1(-hw,'z',-hd+t1,hd-t1,[slit(-2.4,1.4),slit(0,1.4),slit(2.4,1.4)]);                        // 西 (-x, 朝旗圈/公路): 三孔主射面
+// ── 一层顶板 = 环廊走道 + 跑一梯井 (井以外铺满 10×9; 洞边不切墙基) ──
+slab(-hw,-3.55,-2.7,3.0,g0+H1,0.3,false);   // 西带 (含二层西墙墙基与环廊西段)
+slab(-2.15,hw,-2.7,3.0,g0+H1,0.3,false);    // 井东 (含二层东墙墙基与环廊东段)
+slab(-hw,hw,-hd,-2.7,g0+H1,0.3,false);      // 北条 (梯井以北整幅, 含环廊北段)
+slab(-hw,hw,3.0,hd,g0+H1,0.3,false);        // 南条 (跑一登顶落脚板 + 环廊南段)
+// ── 二层观察室 7×6 ──
+const w2=(at,along,from,to,ops)=>seg({along,at,from,to,y0:H1,h:H2,t:t2,mat:MAT.stone,ops});
+w2( hd2,'x',-hw2,hw2,[win(-1.4,1.7),win(1.4,1.7)]);                                     // 南: 双观察窗
+w2(-hd2,'x',-hw2,hw2,[{c:-1.6,w:1.4,ht:2.15,h:0,type:'door'},win(1.4,1.5)]);              // 北: 观察室门 + 窗
+w2( hw2,'z',-hd2+t2,hd2-t2,[win(0,1.5)]);                                                // 东: 观察窗
+w2(-hw2,'z',-hd2+t2,hd2-t2,[win(0,1.6)]);                                                // 西: 观察窗
+// ── 两跑梯 (跑一落在一层顶南条上; 跑二落在屋顶梯顶落脚板上) ──
+mkStair({lx:-2.85,lz:-2.6,dir:'z+',width:1.3,base:g0,topY:g0+H1,maxRise:0.42,tread:0.5,exit:[-2.85,3.6]});
+mkStair({lx:2.35,lz:-2.0,dir:'z+',width:1.3,base:g0+H1,topY:g0+RT,maxRise:0.42,tread:0.5,exit:[2.35,2.5]});
+// ── 屋顶板 = 二层顶 + 跑二梯井 + 两层女儿墙 (rbi 起 = 碰撞带台账 bands) ──
+const rbi=BOXES.length;
+slab(-hw2,1.65,-hd2,hd2,g0+RT,0.3,true);     // 西幅
+slab(1.65,hw2,2.05,hd2,g0+RT,0.3,true);      // 梯顶落脚板 (0.95m 深, 跑二 exit 在板上)
+slab(1.65,hw2,-hd2,-2.05,g0+RT,0.3,true);    // 井北条 (二层北墙墙基)
+slab(3.05,hw2,-2.05,2.05,g0+RT,0.3,true);    // 二层东墙墙基带
+for(const [dx,dz,lx,lz] of [[W,0.3,0,-(hd-0.15)],[W,0.3,0,hd-0.15],[0.3,D,-(hw-0.15),0],[0.3,D,hw-0.15,0]])
+slab(lx-dx/2,lx+dx/2,lz-dz/2,lz+dz/2,g0+H1+1.0,1.0,true);       // 一层顶女儿墙 (1.0m, 对位灯塔 1.1m)
+for(const [dx,dz,lx,lz] of [[7,0.3,0,-(hd2-0.15)],[7,0.3,0,hd2-0.15],[0.3,6,-(hw2-0.15),0],[0.3,6,hw2-0.15,0]])
+slab(lx-dx/2,lx+dx/2,lz-dz/2,lz+dz/2,g0+RT+parH,parH,true);    // 屋顶女儿墙 (0.85m)
+// ── 观通站识别件: 屋顶测距仪座 (基座+镜筒) + 天线杆 —— 站在屋顶板上 (不悬空), 基座与天线杆给碰撞圆柱 ──
+{
+const p=ctx.L(-1.8,1.4);
+mesh(new THREE.CylinderGeometry(0.5,0.62,0.9,10),MAT.stone,p[0],g0+RT+0.45,p[1]);
+const drum=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,1.5,10),MAT.metalDark);
+drum.rotation.z=HPI; drum.rotation.y=ry+0.5; drum.position.set(p[0],g0+RT+1.15,p[1]); drum.castShadow=true; world.add(drum);
+CYLS.push({x:p[0],z:p[1],r:0.55,y0:g0+RT,y1:g0+RT+1.1});
+const q=ctx.L(1.3,-1.7);
+mesh(new THREE.CylinderGeometry(0.06,0.09,3.6,6),MAT.metalDark,q[0],g0+RT+1.8,q[1]);
+CYLS.push({x:q[0],z:q[1],r:0.12,y0:g0+RT,y1:g0+RT+3.6});
+}
+// ── 掩体与登记 (灯塔同一支: addCoverAround + coverPoints + BUILD_REG + b.building 回挂) ──
+addCoverAround(x,z,W,D,ry);
+coverPoints.push({x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]},{x:ctx.L(0,3.75)[0],z:ctx.L(0,3.75)[1]},{x:ctx.L(-4.2,0)[0],z:ctx.L(-4.2,0)[1]});
+const reg={type:'strongpoint',x,z,ry,w:W,d:D,floor:g0,doors:ctx.doors.slice(),roofY:g0+RT+parH,indestr:true,
+  levels:2, ringY:g0+H1, deckY:g0+RT};
+// 结构件台账 (不可毁工事无 roofRef 塌顶链 —— 台账只为"无浮空楼板"口径与残骸/归属查询服务)
+reg.ref={m:roofM,bands:BOXES.slice(rbi),slabs:chain,dead:0,done:false,carry:[]};
+BUILD_REG.push(reg);
+for(const b of owned) b.building=reg;
+}
+

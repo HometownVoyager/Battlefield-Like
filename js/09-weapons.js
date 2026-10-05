@@ -461,17 +461,105 @@ return g;
 };
 return { L:mk(), R:mk() };
 }
-function buildNadeModel(team){
+// ── 手雷模型单源 (2026-09-30 批) ──
+// 手上 (10-viewmodel VM.nadeMs) 与出手后 (13-combat throwNade) **共用同一份建模** ——
+//   手里握的与扔出去的必须是同一件东西。旧版手上只有"阵营档"一种模型 (buildNadeModel 只分 egg/stick),
+//   于是选烟雾弹/燃烧弹/反坦克雷出手前手里都是普通手雷的样子 (用户 2026-09-30 报)。
+// 尺寸 = 真实口径 (m), 原点 = 握点 (木柄雷在柄根/其余在弹体中心); 出手件另乘 NADE_WORLD_SCALE
+//   放大一档 (远距离辨识; 旧世界件本就是手上件的近 2 倍, 现在只留 1.5 倍且两处同模)。
+const NADE_WORLD_SCALE=1.5;
+const nadeMats={
+smoke:new THREE.MeshLambertMaterial({color:0x8f948c,map:TEX.metalBrush}),   // 发烟罐罐身 (马口铁灰)
+smokeCap:new THREE.MeshLambertMaterial({color:0x5c6058,map:TEX.metalBrush}),
+smokeBand:new THREE.MeshLambertMaterial({color:0xb8b0a0}),                 // 罐身标签带 (与罐身异色, 一眼分档)
+incin:new THREE.MeshLambertMaterial({color:0x9a3a26,map:TEX.metalBrush}),  // 燃烧弹罐身 (锈红)
+incinCap:new THREE.MeshLambertMaterial({color:0x3c3a34,map:TEX.metalBrush}),
+charge:new THREE.MeshLambertMaterial({color:0x4a4e44,map:TEX.metalBrush}), // 反坦克装药
+strap:new THREE.MeshLambertMaterial({color:0x33352e}),                     // 捆带/卡箍
+lever:new THREE.MeshLambertMaterial({color:0x8d9078}),                     // 保险握片 (涂漆铁片)
+body0:new THREE.MeshLambertMaterial({color:0x3a4232,map:TEX.metalBrush}),  // 卵形雷体 (美/日, 沿用 vmMats.nade 口径)
+body1:new THREE.MeshLambertMaterial({color:0x4a4436,map:TEX.metalBrush}),  // 木柄雷战斗部 (德/国军)
+body2:new THREE.MeshLambertMaterial({color:0x55523c,map:TEX.metalBrush}),  // 苏式木柄雷战斗部
+wood:new THREE.MeshLambertMaterial({color:0x8a6a44,map:TEX.woodDark}),     // 木柄 (贴图之外再压一层木色: 出图取证与游戏里一致)
+gunL:vmMats.gunL,                                                          // 引信头/顶盖/底盖/铁夹 (与枪件同料)
+};
+const NADE_KINDS=['frag','smoke','incin','at'];
+function nadeFamilyOf(team){ const f=TEAM_FACTION[team]||TEAM_FACTION[0]; return f.nade||'egg'; }
+function buildNadeMesh(kind,team){
 const g=new THREE.Group();
-if(TEAM_FACTION[team].nade==='egg'){
-const b=new THREE.Mesh(new THREE.SphereGeometry(0.032,10,8),vmMats.nade);
-b.scale.y=1.25; g.add(b);
-bx(vmMats.gunL,0.012,0.03,0.012, 0.012,0.04,0,g);
-} else {
-cyl(vmMats.nade,0.02,0.02,0.07, 0,0.01,0,g,0);
-cyl(vmMats.woodD,0.011,0.011,0.11, 0,-0.07,0,g,0);
-}
+if(kind==='smoke') buildSmokeCan(g);
+else if(kind==='incin') buildIncinCan(g);
+else if(kind==='at') buildATCharge(g);
+else buildFragNade(g,nadeFamilyOf(team));
+// 手上件不投影 (VM 场景的光照/阴影链与主场景不同源); 出手件由 throwNade 自己打开 castShadow
+g.traverse(o=>{ if(o.isMesh){ o.castShadow=false; o.receiveShadow=false; } });
 return g;
+}
+// 引信组 (引信头 + 保险握片 + 拉环): 四件投掷物共用, 只按弹径缩放/移位 —— 省得四条建模各写一遍拉环。
+// 握片是**外挂斜条**: 上端贴引信头 (细, 半径 r*0.40) 下端压在弹体/罐顶的肩上 (粗, r) —— 实机就是这种
+// "从引信头搭到体肩"的姿势。写成竖直条会整根埋进弹体里看不见 (2026-09-30 出图抓到)。
+function nadeFuzetop(g,r,y){
+cyl(nadeMats.gunL,r*0.36,r*0.40,0.030, 0,y,0,g,0);
+const lv=bx(nadeMats.lever,r*0.22,r*1.05,r*0.22, r*0.70,y-0.012,0,g);
+lv.rotation.z=Math.atan2(0.55,0.85);
+const rg=new THREE.Mesh(new THREE.TorusGeometry(0.0095,0.0022,4,10),nadeMats.gunL);
+rg.position.set(r*0.86,y+0.012,0); rg.rotation.y=HPI; g.add(rg);
+return rg;
+}
+// 普通手雷: 三档阵营剪影 (卵形 Mk2 菠萝 / 德式木柄 StG24 / 苏式木柄+破片套)
+function buildFragNade(g,fam){
+if(fam==='egg'){
+// 卵形雷 (美 M67/Mk2 · 日 九七式): 低分段球 = 刻槽棱面, 顶上引信头 + 握片 + 拉环
+const b=new THREE.Mesh(new THREE.SphereGeometry(0.031,10,7),nadeMats.body0);
+b.scale.set(1,1.24,1); g.add(b);
+nadeFuzetop(g,0.031,0.046);
+} else if(fam==='stickS'){
+// 苏式木柄雷 (РГД 族): 细长战斗部 + 外挂破片套 (多一圈棱) + 短柄 + 柄底拉绳珠
+cyl(nadeMats.body2,0.026,0.026,0.070, 0,0.035,0,g,0);         // 战斗部 (底面 0 = 木柄顶端, 咬合不悬空)
+cyl(nadeMats.strap,0.033,0.033,0.040, 0,0.032,0,g,0);         // 破片套
+cyl(nadeMats.gunL,0.027,0.026,0.010, 0,0.075,0,g,0);          // 顶盖
+nadeFuzetop(g,0.026,0.088);
+cyl(nadeMats.wood,0.0115,0.0105,0.125, 0,-0.0625,0,g,0);      // 木柄
+cyl(nadeMats.gunL,0.0125,0.0125,0.010, 0,-0.128,0,g,0);       // 柄底盖
+const bead=new THREE.Mesh(new THREE.SphereGeometry(0.008,8,6),new THREE.MeshLambertMaterial({color:0xd8cfb8}));
+bead.position.set(0,-0.139,0); g.add(bead);                   // 拉绳瓷珠
+} else {
+// 德式木柄雷 (StG24 · 国军同型): 等径筒形战斗部 + 铁夹 + 长木柄 + 柄底拉绳
+cyl(nadeMats.body1,0.033,0.033,0.070, 0,0.035,0,g,0);         // 战斗部 (底面 0 = 木柄顶端)
+cyl(nadeMats.gunL,0.0345,0.033,0.012, 0,0.075,0,g,0);         // 顶盖
+bx(nadeMats.gunL,0.007,0.024,0.020, 0.034,0.036,0,g);         // 腰带铁夹
+nadeFuzetop(g,0.033,0.088);
+cyl(nadeMats.wood,0.0115,0.0105,0.135, 0,-0.0675,0,g,0);      // 木柄
+cyl(nadeMats.gunL,0.0125,0.0125,0.010, 0,-0.138,0,g,0);       // 柄底盖
+const bead=new THREE.Mesh(new THREE.SphereGeometry(0.008,8,6),new THREE.MeshLambertMaterial({color:0xd8cfb8}));
+bead.position.set(0,-0.149,0); g.add(bead);
+}
+}
+// 烟雾弹: 细长马口铁罐 + 上下压盖 + 标签带 (与燃烧弹的矮胖罐形成剪影差)
+function buildSmokeCan(g){
+cyl(nadeMats.smoke,0.0265,0.0265,0.115, 0,0,0,g,0);
+cyl(nadeMats.smokeCap,0.029,0.0265,0.014, 0,0.0645,0,g,0);
+cyl(nadeMats.smokeCap,0.0265,0.029,0.014, 0,-0.0645,0,g,0);
+cyl(nadeMats.smokeBand,0.0272,0.0272,0.026, 0,-0.016,0,g,0);
+nadeFuzetop(g,0.0265,0.082);
+}
+// 燃烧弹: 矮胖罐 + 点火头/喷嘴 (铝热剂罐, 与烟雾罐同高不同形)
+function buildIncinCan(g){
+cyl(nadeMats.incin,0.031,0.031,0.082, 0,0,0,g,0);
+cyl(nadeMats.incinCap,0.033,0.031,0.012, 0,0.047,0,g,0);
+cyl(nadeMats.incinCap,0.031,0.033,0.012, 0,-0.047,0,g,0);
+cyl(nadeMats.strap,0.0318,0.0318,0.018, 0,-0.022,0,g,0);
+nadeFuzetop(g,0.031,0.064);
+cyl(vmMats.brass,0.005,0.009,0.020, 0,0.088,0,g,0);           // 点火喷嘴 (从拉环中间穿出)
+}
+// 反坦克雷: 圆柱装药 + 顶部锥形聚能罩 + 两道捆带 + 底板 (体量明显大于三件手雷)
+function buildATCharge(g){
+cyl(nadeMats.charge,0.046,0.050,0.140, 0,0,0,g,0);
+cyl(nadeMats.charge,0.018,0.046,0.055, 0,0.0975,0,g,0);       // 聚能罩
+cyl(nadeMats.strap,0.0505,0.0505,0.012, 0,0.042,0,g,0);
+cyl(nadeMats.strap,0.0505,0.0505,0.012, 0,-0.042,0,g,0);
+cyl(nadeMats.gunL,0.052,0.048,0.012, 0,-0.076,0,g,0);          // 底板
+nadeFuzetop(g,0.020,0.132);
 }
 function buildKnife(){
 const g=new THREE.Group();

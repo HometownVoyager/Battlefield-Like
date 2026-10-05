@@ -42,18 +42,19 @@ this.grp.rotation.set(0,this.yaw,0);
 }
 buildMesh(){
 this.grp=new THREE.Group();
-const addM=(g,x,y,z)=>{
-const m=new THREE.Mesh(g,MAT.metalDark); m.position.set(x,y,z); m.castShadow=true;
+const addM=(g,x,y,z,mat)=>{
+const mm=mat||MAT.metalDark;
+const m=new THREE.Mesh(uvGeo(g,mm),mm); m.position.set(x,y,z); m.castShadow=true;
 this.grp.add(m);
 return m;
 };
 // 底盘
 addM(boxGeo(2.1,0.35,6.4),0,0.95,0);
 // 驾驶室
-const cab=addM(boxGeo(1.9,0.85,1.3),0,1.5,1.75); cab.material=MAT.metal;
+const cab=addM(boxGeo(1.9,0.85,1.3),0,1.5,1.75,MAT.metal);
 addM(boxGeo(1.9,0.5,1.3),0,1.25,2.02);
 // 货厢 + 帆布
-const bed=addM(boxGeo(2.05,1.1,3.55),0,1.6,-0.85); bed.material=MAT.woodDark;
+const bed=addM(boxGeo(2.05,1.1,3.55),0,1.6,-0.85,MAT.woodDark);
 const tarp=new THREE.Mesh(boxGeo(1.85,0.45,3.2),truckTarpMat); tarp.position.set(0,2.05,-0.85); tarp.castShadow=true; this.grp.add(tarp);
 // 引擎盖
 addM(boxGeo(1.75,0.42,0.9),0,1.28,2.72);
@@ -131,8 +132,23 @@ s.bandRefillT=nowT+9;
 }
 }
 this.grp.position.copy(this.pos);
-this.grp.rotation.set(0,this.yaw,0);
-for(const w of this.wheels) w.rotation.x+=this.vel*dt*1.6;
+// ★ 2026-09-26 B16 修: 卡车也要吃地形姿态 (旧版只有 yaw ⇒ 上坡/过坎时整车水平穿过坡面: 车头埋土、
+//   后轮悬空)。口径与坦克同源: 车头/车尾与左右两侧各取两点 heightAt, 得俯仰/侧倾, 再过 dampF。
+//   只写 grp.rotation = 纯观感, 不碰 pos / 碰撞盒 / 碾压判定。
+{
+const cp=Math.cos(this.yaw), sp2=Math.sin(this.yaw);
+const SH=(typeof tankSurfH==='function')?tankSurfH:heightAt;   // 与坦克同一采样面 (含可跨越障碍顶)
+// 符号与坦克逐字一致 (15-vehicles 悬挂段): 前高 ⇒ 俯仰为负 (抬头); 右高 ⇒ 侧倾为正。
+const pitchT=-Math.atan2(SH(this.pos.x+sp2*2.6,this.pos.z+cp*2.6)-SH(this.pos.x-sp2*2.6,this.pos.z-cp*2.6),5.2);
+const rollT=Math.atan2(SH(this.pos.x+cp*1.1,this.pos.z-sp2*1.1)-SH(this.pos.x-cp*1.1,this.pos.z+sp2*1.1),2.2);
+this.suspP=dampF(this.suspP||0,pitchT,7,dt);
+this.suspR=dampF(this.suspR||0,rollT,7,dt);
+}
+this.grp.rotation.order='YXZ';
+this.grp.rotation.set(this.suspP||0,this.yaw,this.suspR||0);
+// ★ 2026-09-26 A10 修: 车轮滚动速率按**几何半径**折算 (与坦克 update 同一口径) —— 旧版写死 ×1.6
+// = 0.72 倍车速 ⇒ 车轮比车体慢 28% (明显打滑)。半径取不到时回退 0.45 (本车 wGeo 的实测值)。
+for(const w of this.wheels){ const wr=(w.geometry&&w.geometry.parameters&&w.geometry.parameters.radiusTop)||0.45; w.rotation.x+=this.vel*dt/wr; }
 }
 takeDmg(amt,attacker){
 if(!this.alive) return;
@@ -153,6 +169,7 @@ igniteArea(this.pos.x,this.pos.z,2.6,attacker||null);
 explosionFlora(this.pos,4.5);
 }
 	// 残骸: 烧黑+倾角+碰撞体, 然后逐渐沉入地下消失 (update 中处理)
+	if(typeof vehHeadlightKill==='function') vehHeadlightKill(this); // 夜战大灯先拆 (N2): 同 Tank.die, 焦黑化会把光锥换成不透明材质
 	this.grp.traverse(o=>{ if(o.isMesh) o.material=wreckMat; });
 	this.grp.rotation.set(rand(-0.08,0.08),this.yaw,rand(-0.22,0.22));
 	this.grp.position.y=this.pos.y+0.2;
@@ -168,6 +185,7 @@ attacker.kills=(attacker.kills||0)+1;
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁运输车',SCORE_TABLE.truck);
 else attacker.score=(attacker.score||0)+SCORE_TABLE.truck;
 addKillfeed(attacker,this,false);
+if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击毁红档 (2026-09-30 批): 卡车无乘员死亡链
 }
 addKillMsg(`运输车被摧毁! 剩余 ${CONVOY_STATE?CONVOY_STATE.left:0} 辆`,attacker?attacker.team:player.team);
 }

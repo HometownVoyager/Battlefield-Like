@@ -3,6 +3,105 @@
 // 源: Index.original.html 第 4478-5636 行
 // ─────────────────────────────────────────────
 'use strict';
+// 多路推进 (2026-09-20 出生点位二轮翻新): 出生扇区方向对目标选择的软加权。
+// 出生时 Bot.laneDx/laneDz 记录本路出发方位 (17-emplacements.pickSpawnPoint 按 lane 扇区给定);
+// 目标与该方位夹角越小加分越多 (最大 46) —— 分在左/中/右出发区的同一批人因此各扑一路,
+// 而不是又汇成一股再挤在同一个点上。与"同目标人数惩罚"互补, 不覆盖距离项。
+function laneAlignBonus(self,x,z){
+if(self.laneDx===undefined||self.laneDz===undefined) return 0;
+const dx=x-self.pos.x, dz=z-self.pos.z, l=Math.hypot(dx,dz);
+if(l<1) return 0;
+return Math.max(0,(dx*self.laneDx+dz*self.laneDz)/l)*46;
+}
+// ── Bot「闪现」修复参数 (2026-09-20 · task-3 根因排查型) ─────────────────────────
+// 根因 (逐帧位移取证, dev/probe-botflash.js): 唯一"玩家真的看得见"的 >3m 单帧位移来自**固定火力点上机链路** ——
+// 旧版 decide() 只要 bot 落在炮位 14~18m 内就立刻起 0.9s 前摇 (玩家同规前摇, 但玩家必须先走到 2.6~3m 内按 F),
+// 前摇期间 Bot 原地不动 (不走向炮位), 计时一到就把 this.pos 硬 set 到炮位 —— 于是观感就是"隔空上炮/人闪到炮上"。
+// 实测: berlin 45s×60 帧一次跑出 32 次"前后都可见且都存活"的单帧位移 8.4m(均值)/13.1m(最大);
+// steppe 两次跑出 6 次(11.4m)/5 次(13.2m); 同一位炮位被同一批人反复瞬移上机 ([-57.4,-6.4]×5)。
+// 修法 (三条, 缺一不可):
+//   ① 接近段: 只有走到站位半径 EMPL_STAND_R 内才允许起前摇 —— 走不到就放弃, 不再隔空上炮;
+//   ② 落位段: 前摇结束用 EMPL_SNAP_DUR 秒阻尼滑到站位 (短距离过渡, 观感=跨上炮位), 不再硬 set;
+//   ③ 安全阀: 前摇结束时若已离站位超过 EMPL_SNAP_GUARD (被推挤/走位), 直接放炮 —— 任何情况下都不瞬移过去。
+const EMPL_STAND_R=1.8;      // 站位半径: 走到离落位点这么近才允许起前摇 (玩家按 F 是 2.6~3m, 同量级)
+const EMPL_APPROACH_R=18;    // 接近半径: 这个距离内才走过去 (各炮原有的兴趣半径 14/15/16 仍然生效)
+const EMPL_GO_TIMEOUT=6;     // 接近段超时: 走不到就放弃, 避免围着炮打转
+const EMPL_SNAP_DUR=0.28;    // 前摇结束后的落位过渡时长 (阻尼滑到站位)
+const EMPL_SNAP_SPD=4.0;     // 落位限速 (m/s): AI LOD 会用 0.15s 补帧, 只靠时间常数挡不住"一帧滑完"
+const EMPL_SNAP_GUARD=5.5;   // 安全阀: 前摇结束时离站位 > 此值 → 放炮, 绝不硬 set 过去
+const SPAWN_UP_T=0.5;        // 重生登场过渡时长 (2026-09-20): 重生是设计必需的远处换位, 但不能"凭空跳出"
+const SPAWN_UP_DIP=0.55;     // 重生登场起始下沉高度 (从低处起身到位, 给玩家一个可见的登场理由)
+const EXIT_SPD=3.6;          // 下车跨出限速 (m/s): 替掉旧版 3.2m 硬 set, 走成"从车里跨出来"
+const EXIT_MAX_T=2.0;        // 下车跨出超时: 被挡住就地结束 (不强制落位 → 不产生瞬移)
+// 上车触达半径 (2026-09-20 闪现修复): 旧版 d<3.8 就上车 —— 人在离车心 3.8m 处 mesh 直接 visible=false
+// (半空中消失), 下一帧 pos.copy(v.pos) 把 3.8m 的差量补掉。取证里这是"其他"类 >3m 事件的全部来源
+// (3.4~3.8m, vis=F→F onV=T→T, 同帧载具自身位移 0.00~0.04m)。改为走到车体侧面 (载具侧推带 2.05+0.38=2.43
+// 之外) 才上车, 消失点是贴着车壳的, 且被隐藏的位移 ≤2.7m, 不再有 >3m 的暗跳。
+const VEH_BOARD_R=2.7;
+const DIR_FLIP_MIN=0.6;      // moveDir 找不到可行方向时的换向冷却: 随机反向加记忆, 不再逐帧重掷
+// ── 逐帧临时向量复用槽 (2026-09-26 性能批) ──
+// 这两处是全库最密的 V3 分配点, 且都在**每帧每 Bot** 的路径上:
+//   · perceive 每候选敌人 2 个 (tp + tp.clone()) —— 40 人 × ~20 敌 × (1/0.16s) ≈ 每秒上万次
+//   · moveDir 的 probe 每次探测 2 个 (膝高射线的 origin/dir), 逐帧 1~7 次探测
+// V8 年轻代能吞掉, 但这是纯垃圾: 值只在本次调用内消费完 (射线的返回值走 _rcResult 共享槽, 不持有入参)。
+// 复用前提 (满足): ①目标函数只读入参不保存引用 ②同一次调用内串行消费, 不跨迭代持有 —— 逐处已核。
+const _pvEye=V3(), _pvT=V3(), _pvD=V3();
+const _prO=V3(), _prD=V3(0,0,1);
+// ── 反舰炮台瞄准解算 (★2026-09-26E 审计 8 抽出的**单源**) ──────────────────────────────
+// 实机唯一在用的那一套限界: 回旋 ±BATTERY_YAW_MAX + 俯角下限 batteryPitchFloor(当前回旋角)。
+// 背景: 15f 自带一份 `Battery.aim`(旧口径: 无回旋限界 + 俯角定角 -0.42) 与 `batteryAI`/`batteryAim`
+// 两个模块级封装, **全库零调用点** —— 真链是本文件的 updateBatteryGun。留着它 = "一件事两支代码,
+// 其中一支随修复批漂移": 谁哪天把 batteryAI 接进帧钩, 就会把回旋限界与俯角下限一起丢掉
+// (炮管穿自家胸墙/扫过操作手)。现在 15f 的 Battery.aim 委托到这里, 两边共用同一份解算。
+// 副作用: 写 g.yaw/g.pitch 的旋转 (调炮)。返回 {relY,wantYaw,wantPit,pitLo,aligned,ey,dh}。
+function batteryAimSolve(g,tgt,dt){
+const spd=(typeof SHELL_SPD_NAVAL==='number'&&SHELL_SPD_NAVAL>0)?SHELL_SPD_NAVAL:150;
+// A#9 实测根因 (2026-09-21): **Battery 没有 y 字段** —— 炮口/瞄准高度单源是 15f 的 `mountY` (炮耳, = 平台高
+// +BATTERY_TRUNNION 1.52)。旧写法 `g.y!==undefined?g.y:heightAt(...)` 落到混凝土平台面 (比炮口低 1.58m),
+// 于是炮口 LOS 预检的射线**从胸墙里出发**, 每次都命中自家胸墙 → cd 被反复重置成 BAT_BLOCKED, 90s 一发不出。
+// 几何实测: 炮口在半径 3.642m / 高于平台 1.945m, 最近墙段盒 (前胸墙, 顶面仅 +0.51m) 间距 1.435m
+// ⇒ 炮口**在墙外且在墙上方**, 15f 自己的 `Battery.fire` 自检 (4.6m 内无命中) 也放行。
+const ey=(g.mountY!==undefined)?g.mountY:((g.y!==undefined)?g.y:heightAt(g.x,g.z));
+const d0=Math.hypot(tgt.pos.x-g.x,tgt.pos.z-g.z);
+const tof=d0/Math.max(spd,1);
+const tv=navTgtVel(tgt);
+const tx=tgt.pos.x+tv[0]*tof, tz=tgt.pos.z+tv[1]*tof;
+const wantYaw=Math.atan2(tx-g.x,tz-g.z);
+const dh=Math.max(Math.hypot(tx-g.x,tz-g.z),4);
+// ★2026-09-26 修 (P1-19a): 与玩家侧同一套限界 —— 回旋 ±BATTERY_YAW_MAX, 俯角下限 batteryPitchFloor(当前回旋角)。
+// 旧写法是 clamp(...,-0.42,0.75) 定角: 炮管转到两翼 (胸墙 1.15m) 仍按 -0.42 压, 就从自家胸墙里穿出去;
+// 且回旋无限制 ⇒ 转到后方时炮口扫过操作手 (站位 2.7m)。射界外的目标: 炮口停在限界上 ⇒
+// aligned 门 (0.05rad) 自然不通过 (不会出现"炮口朝西、炮弹朝东")。
+const YMAX=(typeof BATTERY_YAW_MAX==='number')?BATTERY_YAW_MAX:1.745;
+const relY=clamp(angDiff(g.face||0,wantYaw),-YMAX,YMAX);
+const PITLO=(typeof batteryPitchFloor==='function')?batteryPitchFloor(relY):-0.42;
+const wantPit=clamp(Math.atan2(((tgt.pos.y||0)+1.0)-ey,dh),PITLO,0.75);
+if(g.yaw&&g.yaw.rotation) g.yaw.rotation.y=angleLerpTo(g.yaw.rotation.y,relY,3*dt);
+if(g.pitch&&g.pitch.rotation) g.pitch.rotation.x=dampF(g.pitch.rotation.x,-wantPit,4,dt);
+const aligned=(g.yaw&&g.yaw.rotation?Math.abs(angDiff((g.face||0)+g.yaw.rotation.y,wantYaw))<0.05:true)
+&&(g.pitch&&g.pitch.rotation?Math.abs(g.pitch.rotation.x+wantPit)<0.03:true);
+return {relY:relY,wantYaw:wantYaw,wantPit:wantPit,pitLo:PITLO,aligned:aligned,ey:ey,dh:dh};
+}
+// ── 7d-甲 高炮多机分摊账本 (2026-09-30, 空对地平衡批遗留项 "多架机分炮不集火"): ──
+// 旧口径每门炮走 enemyPlaneAlive(team) = 数组序第一架敌机 ⇒ 同一防空阵地的每门炮都泼同一架机。
+// 分摊: 认领数最少的敌机优先 (平手取水平距近者); 认领后**粘滞**到目标亡 —— 防抖动换目标反复重置
+// 反应窗 (AA_DIFF.react)。只统计**本队** AA 操作者的认领账 (敌方高炮打的是另一队的机, 与我的候选集不相交)。
+// enemyPlaneAlive 仍是"是否有敌机"存在性判据单源 (归队/退炮位等消费点不动), 火控分派从这里走。
+function aaSpreadTarget(team,self,gx,gz){
+if(self._aaTgt&&self._aaTgt.alive&&self._aaTgt.team!==team) return self._aaTgt; // 粘滞续认
+let best=null,bn=1e9,bd=0;
+for(const p of planes){
+if(!p||!p.alive||p.team===team) continue;
+let n=0;
+for(const b of combatants){
+if(b===self||!b.alive||b.team!==team||!b.empUse||b.empUse.kind!=='aa'||!b._aaTgt||!b._aaTgt.alive) continue;
+if(b._aaTgt===p) n++;
+}
+const d=Math.hypot(p.pos.x-gx,p.pos.z-gz);
+if(n<bn||(n===bn&&d<bd)){ best=p; bn=n; bd=d; }
+}
+return best;
+}
 class Bot {
 constructor(team,cls,name){
 this.team=team; this.name=name;
@@ -41,6 +140,9 @@ this.kills=0; this.deaths=0; this.score=0;
 this.respawnT=0; this.deathAnimT=0;
 this.stuckT=0; this.lastPos=V3(); this.moveIntent=false;
 this.unstickT=0; this.unstickDir=1; this.lastUnstickP=null;
+// 闪现修复状态 (2026-09-20): 上炮位接近段/炮位落位过渡/下车跨出/重生登场/兜底换向记忆
+this.emplGo=null; this.emplPinT=0; this.exitSlide=null; this.spawnUpT=0;
+this.dirFlipT=0; this.dirFlipSign=Math.random()<0.5?1:-1;
 this.empUse=null; this.empT=0;
 this.emCast=null; // 固定火力点使用前摇 (与玩家同规 2026-09-02): {kind,g,t,dur}
 this.lastFiredT=-99; this.animT=rand(0,9);
@@ -48,6 +150,11 @@ this.mgUse=null; this.mgT=0;
 this.mortUse=null; this.mortT=0;
 this.meleeT=0;
 this.onVehicle=null; this.targetVeh=null; this.chuting=false;
+// A#8 跳伞状态对账: chuteAirborne() 的通用口径是 (chute && !onGround) —— Bot 走伞降链时同步维护这一对字段,
+// 于是伤害倍率 (chuteDamageMul) / 索敌过滤 (Bot.perceive) 与玩家共用同一支判定, 不再各写一套。
+this.chute=false; this.onGround=true; this.chuteMesh=null;
+// A#9 岸防炮: 认领后的本机操作态 (占用轨是 g.crewBot=this, 见 15f 契约 §6)
+this.batUse=null; this.batT=0; this.batteryTgt=null;
 this.pilotOf=null;
 this.bandageT=0; this.medkitT=0;
 this.speedMul=rand(0.92,1.08);
@@ -65,50 +172,76 @@ this.pReloadT=0;
 const gear=clsGear(cls,this.team); // 投掷物公式单源 (2026-09-06 B7b/P2-5)
 this.nades=gear.nades;
 this.smokes=gear.smoke;
-this.atn=(EXPERIMENT&&cls===5)?(TEAM_FACTION[this.team].atn5||3)*2:gear.atn; // Bot 不吃实验模式 atn 清零变体 (行为等价)
+this.atn=(EXPERIMENT&&cls===3)?(TEAM_FACTION[this.team].atn5||3)*2:gear.atn; // Bot 不吃实验模式 atn 清零变体 (行为等价); 2026-09-28 兵种8→5: 反坦克=3
 this.maxBandages=CLASSES[cls].bandages||4;
 this.bandages=this.maxBandages;
 const kind=gunKindOf(this.wpnKey);
 if(kind!==this.gunKind||this.wgKey!==this.wpnKey){
 if(this.gun) this.mesh.gunG.remove(this.gun);
 this.gunKind=kind; this.wgKey=this.wpnKey;
-this.gun=worldGunModel(kind,this.team,this.wpnKey);
-this.mesh.gunG.add(this.gun);
-// 枪口朝向角色正前方(+z), 枪托收在肩前
-this.gun.position.set(0,-0.02,kind==='launcher'?0.2:kind==='atr'?0.24:0.3);
-this.gun.rotation.order='YXZ';
-this.gun.rotation.y=Math.PI;
+// 契约 J §12.1 (2026-09-21): 挂枪走 11-soldiers 的单源 API —— 建模型 + 前推(CARRIED_FWD) + 微降 +
+// rotation.order='YXZ' + rotation.y=π 全在 mountGunModel 里, 本文件**不再自己设一遍**
+// (旧版这里与 20-player 各写一份, 是"两条挂载路径漂移"的源头; 也是"枪插在左锁骨"的现场之一)。
+this.gun=mountGunModel(this.mesh.gunG,kind,this.team,this.wpnKey);
 }
 }
 spawn(){
 this.setClass(CLS_POOL[randi(0,CLS_POOL.length-1)]);
+this.protUntil=nowT+SPAWN_PROT; // 出生保护 (2026-09-28 阶段三 P1): 首次出生与重生共用本函数 = 唯一盖章点; 开火即解除
+// 落点 (2026-09-19 翻新): 先按"战线+危险+拥挤度"选点位, 再在该点位半径内挑
+// 离同队最近邻最远、且不在建筑足迹里的干净落点 —— 取代旧的"点位坐标 ±2m 随机"。
 const sp=pickSpawnFor(this.team);
-const fp=findFreeSpawn(sp.x,sp.z);
-this.pos.set(fp[0], 0, fp[1]);
-this.pos.y=standHeight(this.pos.x,this.pos.z,10);
+const lp=pickSpawnPoint(this.team,sp);
+this.pos.set(lp.x, 0, lp.z);
+// 全海图 (P4 2026-09-30): 落点吸附到本队大舰甲板 —— 海图上 OCC 整片是水障, 撒在舷外的兵会先落海再游,
+//   而"陆地"只有舰甲板。非海战图 capitalShips 为空 ⇒ capSnapToDeck 返回 null, 逐位保持旧行为。
+if(typeof capSnapToDeck==='function'){ const sn=capSnapToDeck(this.pos.x,this.pos.z,sp&&sp.cx,sp&&sp.cz,this.team); if(sn){ this.pos.x=sn.x; this.pos.z=sn.z; } }
+// 多路推进 (2026-09-20): 记下本路出发方位 —— pickObjective 会给同方位的目标加权,
+// 于是分在左/中/右出发区的同一批人不会又汇到同一条路、同一个点上 (用户口径"开局分散推进")。
+this.laneDx=lp.laneDx; this.laneDz=lp.laneDz;
+this.pos.y=(typeof capSpawnGroundY==='function')?capSpawnGroundY(this.pos.x,this.pos.z,10):standHeight(this.pos.x,this.pos.z,10);  // P4: 甲板出生不设登步门 (15h capSpawnGroundY)
 this.hp=100; this.alive=true; this.crouch=false; this.prone=false;
 this.ragdolled=false;
 this.mag=this.def.mag; this.reloadT=0; this.suppression=0;
 this.target=null; this.lastSeenT=-99; this.path=null;
 this.state='idle'; this.mgUse=null; this.empUse=null; this.mortUse=null; this.unstickT=0;
+this.mortarPlaced=false;   // 新的一命重新拿到"架一门迫击炮"的额度 (2026-09-26 补: 旧版跨命保留 ——
+                           // 架过炮的迫击炮兵阵亡重生后再也不架; 玩家侧本来就在 23-deploy 的部署复位里清)
 this.man='hold'; this.manT=0; this.pushPt=null; this.stance='crouch';
 this.peekPhase='in'; this.peekPos=null; this.coverPt=null; this.supFireT=0;
 this.coverCd=0; this.slideCd=0; this.lastCover=null;
 this.fireFleeT=0; this.fireScanT=rand(0,0.22);
 this.onVehicle=null; this.targetVeh=null; this.chuting=false; this.emCast=null;
 this.bandageT=0;
+this.navFails=0; this.dirT=rand(-0.5,0.5); // 寻路失败退避计数 + 兜底直行的固定偏航 (防一列人排成直线)
 	this.mesh.root.visible=true;
+	// 重生登场过渡 (2026-09-20 闪现修复): 重生是把人从死点搬到出生点 (设计必需, 位移可达 300m+);
+	// 尸体在 respawnT<2.5 时就已隐藏, 取证确认不存在"尸体→新位置"的 1 帧残影 (重生帧恒为 vis=F→T)。
+	// 但新兵是**凭空出现**的 —— 给 0.5s 登场动作 (从低处起身到位, 见 updateMesh), 让"这里为什么
+	// 多了一个人"有可见的理由, 而不是"刷"地一闪。
+	this.spawnUpT=SPAWN_UP_T;
+	this.emplGo=null; this.emplPinT=0; this.exitSlide=null;
+	// A#8/A#9 重生复位: 伞模型/炮位操作态一律清空 ——
+	// 上一次死亡留下的 chuteMesh 会挂在新兵头顶, 留下的 batUse 会占着炮位不放。
+	this.chuteClear();
+	if(this.batUse) this.releaseBattery();   // A#9: 重生前先松开上一命的炮位占用 (别把炮锁在死人名下)
+	this.batUse=null; this.batT=0; this.batteryTgt=null;
+	this.chute=false; this.onGround=true; this.chuting=false;
 	this.mesh.root.rotation.set(0,0,0);
 	this.mesh.pelvis.position.y=0.94;
 	// 全局机制 (2026-09-06 用户指定): Bot 部署/重生时若有同队闲置坦克 → 直接部署为车组。
 	// 与玩家部署界面"选载具出生"同一语义 (不限距离, 取最近一辆); 小队成员除外 (随玩家步行);
 	// 战机不在此列 (pilotOf 专属流程), 卡车为劫道模式纯 AI 运输队 (无乘员位) 也不适用。
 	// 厂房坦克产能依赖此条: 苏军战损坦克在厂区重生后, 下一名额度内重生的 Bot 会直接上车开赴前线。
+	// 2026-09-19 修正: 只上"真的会开走"的车 (见 pickIdleDeployVehicle) —— 旧版上车只看
+	// 空车+血量, 停火驻守中的坦克会把乘员一起钉在原地一整局 (用户实报"车里的人像卡住")。
 	if(!this.inSquad){
-	const dv=pickIdleDeployVehicle(this);
+	// 坦克优先 (陆战 11 图的既有行为逐位不变), 没有闲置坦克才看闲置舰艇 (★2026-09-26E 审计 1)
+	const dv=pickIdleDeployVehicle(this)||pickIdleNaval(this);
 	if(dv) this.spawnInVehicle(dv);
 	}
-	this.pickObjective();
+	this.pickObjective(); // 出生即定目标 (不等下一次 decide 抽签), 开局不再有一批人站在基地里没目标
+	this.decisionT=rand(0,0.25);
 }
 spawnInVehicle(v){
 this.hp=100; this.alive=true; this.crouch=false; this.prone=false;
@@ -120,28 +253,70 @@ this.man='hold'; this.manT=0; this.pushPt=null; this.peekPhase='in'; this.peekPo
 this.coverCd=0; this.slideCd=0; this.lastCover=null;
 this.chuting=false; this.bandageT=0; this.deathDir=0;
 this.respawnT=0;
+this.chuteClear();                 // A#8: 带伞入车 = 同帧收伞 (旧伞不跟到车里/下一局)
+this.chute=false; this.onGround=true;
 this.mesh.root.visible=false;
 this.mesh.root.rotation.set(0,0,0);
 this.mesh.pelvis.position.y=0.94;
+	// 契约 §4 v3: 每车 1 名真实 AI 车组 —— crewBot 是唯一跑 AI 的驾驶员; 另 2 个"乘员名额"是
+	// Tank.crewSlots 轻量记录 (tank-core 建/结算), 不进士兵池, 与本文件无关。
 	this.onVehicle=v; v.crewBot=this; v.claimBot=null;
 	this.pos.copy(v.pos);
+	this.crewStillT=0; this.navFails=0;
+	this.laneDx=undefined; this.laneDz=undefined; // 车组不按步行出发区推进
+}
+// A#7 (契约 §4 v2) 随车乘员归属摘除 —— **v3 已作废**: 三人车组的后 2 人是 Tank.crewSlots 轻量记录,
+// 不是士兵, 不存在"随车乘员归属"要摘。车位占用判据回到 v.crewBot / v.playerDriven。
+// A#8 伞模型收伞单源 (契约 §7): 三处 (落地/死亡/重生) 都必须同帧摘掉, 否则伞会挂到下一局/下一命。
+chuteClear(){
+if(this.chuteMesh){
+const g=this.mesh&&this.mesh.root;
+if(g&&g.remove) g.remove(this.chuteMesh);
+this.chuteMesh=null;
+}
+this.chute=false;
+}
+// A#8 开始伞降 (16-aircraft 投放 / 23-deploy 载具投人 共用): 统一置 chuting + chuteAirborne 口径字段
+chuteBegin(x,y,z){
+this.chuting=true; this.chute=true; this.onGround=false;
+if(x!==undefined) this.pos.set(x,y,z);
+this.mesh.root.visible=true;
+this.path=null; this.state='idle'; this.target=null;
+}
+// A#7 契约 §4 v3: AI 驾驶员的车毁连带死亡入口 (tank-core 的 Tank.die 对 crewBot 调用) ——
+// 走既有死亡链 (1 死 / 1 票 / 1 杀), 只压掉**本乘员那条 killfeed**: 车毁由 Tank.die 记一条
+// "坦克名 · 乘员×3", 否则同一辆车会刷 2 行 (驾驶员 1 条 + 坦克 1 条)。
+crewKill(attacker){
+this._noFeed=true;
+try{ this.die(attacker,false); } finally{ this._noFeed=false; }
 }
 enterVehicle(v){
 if(v.crewBot||v.playerDriven) return;
 v.crewBot=this; v.claimBot=null;
 this.onVehicle=v;
+// A#7/A#8: 步行上车 = 不是随车乘员; 带伞上车同帧收伞
+this.chuteClear(); this.onGround=true;   // A#8: 带伞上车同帧收伞
+// 入车落位 (2026-09-20 闪现修复): 上车的最后一段差量 (≤VEH_BOARD_R) 在**隐藏帧同时**结清 ——
+// 旧版把它留给下一帧的乘员同步 (pos.copy(v.pos)), 于是"人已在车上、位置还在车外"多留一帧暗跳。
+this.pos.copy(v.pos);
+this.exitSlide=null;
+this.crewStillT=0; this.navFails=0;
 this.targetVeh=null; this.path=null;
 this.state='idle';
 this.crouch=false; this.prone=false; this.bandageT=0;
 if(this.mgUse){ releaseEmpl(this.mgUse,true); this.mgUse=null; }
 if(this.empUse){ releaseEmpl(this.empUse,true); this.empUse=null; }
 if(this.mortUse){ releaseEmpl(this.mortUse,true); this.mortUse=null; }
+if(this.batUse){ this.releaseBattery(); }   // A#9: 上车/入座即松开岸防炮
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
 this.mesh.root.visible=false;
 }
 dismountVehicle(bailing){
 const v=this.onVehicle;
 this.onVehicle=null; this.chuting=false;
+// A#8 契约: 跳伞途中下车/被投放 → 一致地收伞并回到"落地"口径
+this.chuteClear();
+this.onGround=true;
 if(v){
 if(v.crewBot===this) v.crewBot=null;
 v.noEnterT=nowT+(bailing?12:6);
@@ -150,14 +325,69 @@ for(const off of [[3.2,0],[-3.2,0],[0,4],[0,-4],[4,4]]){
 const qx=v.pos.x+off[0], qz=v.pos.z+off[1];
 if(!occBlocked(qx,qz)){ px=qx; pz=qz; break; }
 }
-this.pos.set(px,0,pz);
-this.pos.y=standHeight(px,pz,v.pos.y+2);
+// 下车落位 (2026-09-20 闪现修复): 旧版 this.pos.set(px,0,pz) 是一次 3.2~5.7m 的硬位移 ——
+// 取证里它是"下车位移"那一类 (单次跑出 13 次 3.2m 跳变)。虽然乘员在车上时 mesh 不可见 (不是残影),
+// 但"刷"地出现在车旁仍是瞬移。改为: 位置原地不动 (就在车内坐标), 由 update() 以 EXIT_SPD 限速
+// 跨出到落点 (带走路动画), 到位才结束 —— 全程逐帧位移 ≤ EXIT_SPD*dt ≈ 0.18m。
+this.exitSlide={x:px,z:pz,t:EXIT_MAX_T};
+this.pos.y=standHeight(this.pos.x,this.pos.z,v.pos.y+2);
 }
 this.mesh.root.visible=true;
 this.path=null; this.state='idle'; this.decisionT=0; this.targetVeh=null;
+this.crewStillT=0;
 this.man='hold'; this.manT=0; this.pushPt=null; this.peekPhase='in'; this.peekPos=null; this.coverPt=null;
-this.coverCd=0; this.slideCd=0; this.lastCover=null; this.emCast=null;
+this.coverCd=0; this.slideCd=0; this.lastCover=null; this.emCast=null; this.emplGo=null; this.emplPinT=0;
 if(bailing){ this.suppression=0.9; }
+}
+// ── 固定火力点上机链 (2026-09-20 闪现修复, 参数见文件头) ──────────────────────
+// 站位单源: 这里算出的站位必须与 update 内逐帧钉住炮手的位置完全一致 (mg/mortar 0.85m, at AT_CREW_DIST,
+// aa AA_CREW_DIST, bat = 15f 的 batteryStandSpot) —— 否则"走到站位"与"上炮后钉住"会差出一截, 又变成小瞬移。
+emplStandSpot(g,kind){
+if(kind==='at') return {x:g.x-Math.sin(g.face)*AT_CREW_DIST, z:g.z-Math.cos(g.face)*AT_CREW_DIST};
+if(kind==='aa') return g.crew?{x:g.crew.x,z:g.crew.z}:{x:g.x, z:g.z-AA_CREW_DIST};   // 站位单源 (00-config + 建炮避障点): 退出炮口扫掠圈
+// A#9 岸防炮: 站位函数由 15f 提供 (契约 §6 冻结名 batteryStandSpot); 缺模块时按同一口径兜底
+// (沿 -face 2.7m, 与 15f 的 2.7 一致) —— 这里只兜底站位, 不兜底任何开火。
+if(kind==='bat') return (typeof batteryStandSpot==='function')?batteryStandSpot(g):{x:g.x-Math.sin(g.face)*2.7,z:g.z-Math.cos(g.face)*2.7};
+return {x:g.x-Math.sin(g.face)*0.85, z:g.z-Math.cos(g.face)*0.85};
+}
+// 上炮位统一入口: 站位半径内 → 起前摇 (g.user 认领); 接近半径内 → 走过去; 其余不动作。
+// 返回 true = 本帧已决定去上炮, 调用方应 return (与旧版"直接起前摇"的调用形态一致)。
+// A#9: 后两参可选 —— 岸防炮在岬角 (离战线几十~上百米), 沿用 18m 兴趣半径会永远上不了炮,
+// 故由调用方给"接近半径 + 赶路超时" (默认值 = 陆战固定火力点原参数, 行为零漂移)。
+emplMount(g,kind,approachR,goTimeout){
+const sp=this.emplStandSpot(g,kind);
+const d=Math.hypot(sp.x-this.pos.x,sp.z-this.pos.z);
+const AR=approachR||EMPL_APPROACH_R, GT=goTimeout||EMPL_GO_TIMEOUT;
+if(d<=EMPL_STAND_R){
+g.user=this; this.emCast={kind,g,t:0,dur:EM_CAST_DUR}; this.emplGo=null;
+this.state='defend'; this.path=null; this.decisionT=0; return true;
+}
+if(d<=AR){
+if(!this.emplGo||this.emplGo.g!==g){
+this.emplGo={g,kind,exp:nowT+GT};
+this.path=null; this.setPathTo(sp.x,sp.z); this.repathT=rand(1.2,1.8);
+}
+this.state='toEmpl'; this.decisionT=rand(0.3,0.5); return true;
+}
+return false;
+}
+// 前摇结束后的落位: 阻尼趋近站位, 并叠加**单帧限速** —— 全程无硬 set, 单帧位移 ≤ EMPL_SNAP_SPD*dt
+// (AI LOD 会以 min(tickAcc,0.15) 补帧, 纯时间常数在 0.15s 步长下仍可能一帧滑掉 0.95 倍距离)
+pinEmpl(px,pz,dt){
+const dx=px-this.pos.x, dz=pz-this.pos.z, d=Math.hypot(dx,dz);
+if(d<=0.05){ this.pos.x=px; this.pos.z=pz; return; } // 稳态: 已在站位, 钉死 (零位移)
+if(this.emplPinT>0) this.emplPinT-=dt;
+if(this.emplPinT>0){
+const k=clamp(1-Math.max(this.emplPinT,0)/EMPL_SNAP_DUR,0,1);
+let step=d*(1-Math.exp(-(9+22*k)*dt));
+const lim=EMPL_SNAP_SPD*dt;
+if(step>lim) step=lim;
+this.pos.x+=dx/d*step; this.pos.z+=dz/d*step;
+}else{
+// 过渡结束 (或上炮瞬间就被推开): 小残差直接钉死; 大残差限速追平 —— 任何情况都不瞬移
+if(d<=0.8){ this.pos.x=px; this.pos.z=pz; }
+else{ const step=Math.min(d,EMPL_SNAP_SPD*dt); this.pos.x+=dx/d*step; this.pos.z+=dz/d*step; }
+}
 }
 eyePos(){ return V3(this.pos.x,this.pos.y+(this.prone?0.5:this.crouch?1.15:1.62),this.pos.z); }
 noticeThreat(enemy){
@@ -169,13 +399,25 @@ if(nowT-this.lastSeenT>4) this.lastSeenT=nowT-2.8;
 }
 damage(amt,attacker,isHead){
 if(!this.alive) return;
+// 出生保护 (2026-09-28 阶段三 P1): 落地 0.5s 内**敌方来源**伤害免掉 (开火即解除) —— 与玩家同口径;
+// 环境伤 (attacker=null: 溺水/激流/严寒) 不挡 (Bot 落水照样淹, 保护不是免死金牌)。
+if(this.protUntil&&nowT<this.protUntil&&attacker&&attacker.team!==this.team) return;
+// A#8 契约 §7: 伞降中受到的伤害乘 CHUTE_DEF.dmgMul (0.40) —— 判定单源在 13-combat.chuteDamageMul,
+// 与玩家 player.damage 同一支; "不下线"口径: 只是显著更难打死, 不是无敌。
+amt*=chuteDamageMul(this);
 this.hp-=amt;
+// 残血钉零 (2026-10-01d, 实机"总是有Bot在0血时赖着不死"): 溅射衰减/伞降减免都带小数, hp 会停在
+//   0~1 之间 —— 名牌四舍五入显示 "0/100" 而人还活着 (读作"赖着不死")。hp∈(0,1) ⇒ 钉到 0 = 击杀;
+//   活着的 Bot 血量恒 ≥1, 名牌读数与生死不再出现"0 血站桩"的组合。
+if(this.hp>0&&this.hp<1) this.hp=0;
 this.lastHitT=nowT;
 this.suppression=Math.min(1.6,this.suppression+0.45);
 this.aimSettle=Math.max(0.1,this.aimSettle-0.4);
 if(attacker&&attacker.team!==this.team&&!attacker.spectator){ // 观战者的攻击不会引来还击锁定
 this.noticeThreat(attacker);
-if(!this.target&&!attacker.isCrew&&!attacker.onVehicle&&Math.random()<0.8){
+// A#8: 伞降目标的索敌口径同 perceive —— 25m 内才把它当还击目标 (与"远距离看不见伞兵"同一条)
+const aD=Math.hypot(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
+if(!this.target&&!attacker.isCrew&&!attacker.onVehicle&&!(chuteAirborne(attacker)&&aD>CHUTE_DEF.botEngageR*(NIGHT_MODE?NIGHT_CFG.rangeMul:1)*WX_CFG.rangeMul)&&Math.random()<0.8){
 this.target=attacker;
 this.lastSeenPos.copy(attacker.pos);
 this.lastSeenT=nowT-1.2;
@@ -187,8 +429,20 @@ if(this.hp<=0) this.die(attacker,isHead);
 die(attacker,isHead){
 this.alive=false; this.deaths++;
 this.deathAnimT=0.6;
-this.respawnT=rand(7,11);
+// ★2026-10-04 (海战审计 F1 炮手票务悬崖): 甲板炮手 (capCrew) 阵亡**不扣票、不进重生循环** ——
+//   15h 的编制契约 (capCrewSpawn 注释) 写明 "respawnT=1e9 ⇒ 阵亡不占用重生, die() 零票务副作用",
+//   但旧版走全兵种共用的这条无条件扣票 ⇒ 瘫舰时 spec.ticket 之外每个炮手再漏 1 票, 逐塔点名也各漏 1 票
+//   (BB 一次瘫掉 129-139 票 = 票池 330 的 ~40%)。炮手是"舰上编制"不是兵力循环单位 —— 大舰的票只在
+//   本体 cripple() 时按 spec.ticket 一次性结算; respawnT 仍钉 1e9 (Bot.update 对 capCrew 整帧跳过,
+//   倒数永远不会跑, 这里钉死是让"不占用重生"不依赖那个跳过)。
+if(this.capCrew){ this.respawnT=1e9; }
+else this.respawnT=rand(7,11);
 this.bandageT=0; this.chuting=false;
+// A#8 契约 §7: 空中死亡必须**同帧**摘伞 —— 旧版只把 chuting 置 false, 伞模型留在 mesh 上跟到重生/下一局
+// (实测: damage(999) 后 chuteMesh!==null)。这里走收伞单源。
+this.chuteClear(); this.onGround=true;
+// A#9: 死在炮位上 → 松开岸防炮占用 (与 mg/emp/mortUse 同一处理)
+if(this.batUse){ this.releaseBattery(); }
 // 清理战斗残留: 尸体不再携带交战状态/目标/机动 (调试层与探针口径一致)
 this.state='idle'; this.target=null; this.pushPt=null; this.coverPt=null;
 this.man='hold'; this.manT=0; this.peekPhase='in'; this.peekPos=null; this.supFireT=0;
@@ -203,12 +457,15 @@ if(this.mgUse){ releaseEmpl(this.mgUse,true); this.mgUse=null; }
 if(this.empUse){ releaseEmpl(this.empUse,true); this.empUse=null; }
 if(this.mortUse){ releaseEmpl(this.mortUse,true); this.mortUse=null; }
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
-tickets[this.team]=Math.max(0,tickets[this.team]-1);
+// A#7 契约 §4: 车毁连带的乘员死亡由 Bot.crewKill() 调进来 —— 死亡/票/杀**照常各记一次**, 只压掉战报行
+// (车毁由 Tank.die 记一条"坦克 · 乘员×3", 否则一辆车刷 4 行)。
+// ★2026-10-04 (F1): capCrew 免票 (见本函数顶注) —— 击杀归因/战报照旧, 只有兵力票这一项豁免。
+if(!this.capCrew) tickets[this.team]=Math.max(0,tickets[this.team]-1);
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
 // 玩家记分唯一入口=onPlayerKill (21-match): 此处只给 Bot/乘员加分, 否则玩家击杀双计 200 (2026-09-06 P0-1)
 if(!attacker.isPlayer) attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
-addKillfeed(attacker,this,isHead);
+if(!this._noFeed) addKillfeed(attacker,this,isHead);
 if(attacker.isPlayer){ onPlayerKill(this,isHead); }
 }
 if(this.pos.distanceTo(camera.position)<30&&Math.random()<0.5) AudioSys.hurt();
@@ -224,8 +481,9 @@ this.repathT=Math.min(this.repathT,0.5);
 return;
 }
 if(GAMEMODE==='clash'){
-// 遭遇战: 无旗点 —— 目标=敌方前哨/敌基地, 双方相向推进在中线发生遭遇
+// 遭遇战强点 (2026-09-13 草原库尔斯克改版): 目标=敌方强点(spawnPtsOf 已按归属动态) + 中立强点 + 敌基地
 const cands=spawnPtsOf(1-this.team).map(s=>({x:s.x,z:s.z}));
+if(typeof SPOTS!=='undefined') for(const s of SPOTS){ if(s.own===-1) cands.push({x:s.x,z:s.z}); }
 cands.push({x:BASES[1-this.team].x,z:BASES[1-this.team].z});
 let best=null,bestScore=-1e9;
 for(const c of cands){
@@ -234,6 +492,7 @@ let sc=-Math.hypot(c.x-this.pos.x,c.z-this.pos.z)*0.6+rand(0,45);
 for(const s of soldiers){
 if(s!==this&&s.alive&&s.team===this.team&&Math.hypot(s.pos.x-c.x,s.pos.z-c.z)<18) sc-=14;
 }
+sc+=laneAlignBonus(this,c.x,c.z); // 本路方位一致的强点优先 (多路推进)
 if(sc>bestScore){ bestScore=sc; best=c; }
 }
 this.objective=best?{id:'X',x:best.x,z:best.z,r:14,owner:1-this.team,cap:0,capTeam:-1,gy:heightAt(best.x,best.z)}:null;
@@ -266,12 +525,24 @@ return;
 }
 let best=null,bestScore=-1e9;
 for(const f of FLAGS){
+// 瘫舰甲板旗 (2026-10-01b): 无阵营陆地, 不可占 ⇒ Bot 不再把它当目标 (不然全队游向废舰)
+if(typeof capFlagActive==='function'&&!capFlagActive(f)) continue;
+// 跨舰远旗不选 (2026-10-01c 修"Bot 海里扎堆"的源头): 目标旗在**另一舰**甲板上而那舰不在跳帮距离
+//   (CAPITAL_CFG.boardR) 内 ⇒ 跳过 —— 旧版 Bot 会为 100~200m 外的敌舰旗走到舷缘集体下水 (capBotTick
+//   旧口径), 然后追着巡航的舰游泳, 永远追不上 = 海里成群漂着的"游泳团"。贴帮 (boardR 内) 照常可跳帮。
+//   已落水的 Bot (被炸下甲板) 同门: 只朝 boardR 内的舰游, 其余就地等溺亡回收。
+if(f.ship!==undefined&&typeof capDeckOf==='function'&&typeof capitalShips!=='undefined'&&capitalShips.length&&typeof capRectDist==='function'){
+const myS=capDeckOf(this.pos.x,this.pos.z);
+const fS=capitalShips[f.ship];
+if(fS&&fS!==myS&&capRectDist(fS,this.pos.x,this.pos.z)>CAPITAL_CFG.boardR) continue;
+}
 let sc=0;
 const d=Math.hypot(this.pos.x-f.x,this.pos.z-f.z);
 sc-=d*0.6;
 if(f.owner!==this.team) sc+=90;
 if(f.owner===this.team&&f.capTeam!==-1&&f.capTeam!==this.team) sc+=140;
 if(f.capTeam===this.team&&f.cap>0.05&&d<55) sc+=130;
+sc+=laneAlignBonus(this,f.x,f.z); // 本路方位一致的旗点优先 (多路推进)
 let cnt=0;
 for(const s of soldiers) if(s.alive&&s.team===this.team&&s.objective===f) cnt++;
 sc-=cnt*26;
@@ -284,27 +555,47 @@ this.repathT=0;
 }
 perceive(){
 const diff=DIFF_TABLE[SETTINGS.diff];
-const viewD=95*diff.visMul;
+// 夜档实战档 (R2, 昼夜设计 §3.3): 索敌距离 ×viewDMul; FOV 门/蹲姿门基于 viewD 自动收窄。
+// 索敌与雾距保持独立常数, 不硬联动 (与白天同口径)。照明弹/探照灯补亮系数在循环内逐目标乘 (N2)。
+// 天气乘子 (天气设计 §5-7/R6): 同语义独立相乘, 晴朗 ×1 逐位不变; nightLitMul/探照灯 searchView 块不动。
+let viewD=95*diff.visMul*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
 let best=null,bestD=1e9;
-const eye=this.eyePos();
+const eye=_pvEye.set(this.pos.x,this.pos.y+(this.prone?0.5:this.crouch?1.15:1.62),this.pos.z); // 复用槽 (见文件头注释)
 for(const e of combatants){
 if(!e.alive||e.team===this.team||e.onVehicle||e.spectator) continue; // 观战者不被索敌
 const dx=e.pos.x-this.pos.x, dz=e.pos.z-this.pos.z;
 const d=Math.hypot(dx,dz);
-if(d>viewD) continue;
+// 夜档补亮 (N2, 昼夜设计 §4.2/§4.3): 照明半径内目标 viewD ×flareLitView; 被探照灯照中 ×searchView
+// 且无视 FOV 门。nightLitMul 单源在 08-effects (白天恒 1, 判定逐位不变)。
+let vD=viewD;
+if(NIGHT_MODE){
+vD*=nightLitMul(e.pos.x,e.pos.y,e.pos.z);
+this._eSearchLit=!!(e._searchLitT&&nowT-e._searchLitT<0.6);
+if(this._eSearchLit) vD=Math.max(vD,viewD*NIGHT_GEAR.searchView);
+}else this._eSearchLit=false;
+if(d>vD) continue;
+// 伞降目标一律不索敌 (2026-09-30 用户裁定, 加严于 A#8 的 25m 门): 跳伞不是被集火靶子, 落地才恢复可被索敌。
+// 还击路径 (damage 里的 attacker 门) 保留 botEngageR —— 伞兵主动开火近距挑衅仍会挨还击, 不白嫖。
+if(chuteAirborne(e)) continue;
 const ang=Math.atan2(dx,dz);
 const isCur=(e===this.target&&nowT-this.lastSeenT<3);
-if(!isCur&&Math.abs(angDiff(this.yaw,ang))>1.15) continue;
-const heard=d<9||(e.lastFiredT&&nowT-e.lastFiredT<1.5&&d<70);
-if(!isCur&&!heard&&d>viewD*0.85&&e.crouch) continue;
-const tp=V3(e.pos.x,e.pos.y+(e.crouch?1.0:1.4),e.pos.z);
-const dir=tp.clone().sub(eye); const dist=dir.length(); dir.normalize();
+if(!isCur&&!this._eSearchLit&&Math.abs(angDiff(this.yaw,ang))>1.15) continue;   // 探照灯照中者无视 FOV 门 (N2)
+const heard=d<9||(e.lastFiredT&&nowT-e.lastFiredT<1.5&&d<70*(NIGHT_MODE?NIGHT_CFG.hearGunMul:1)*WX_CFG.hearGunMul); // 听枪半径: 夜档加大(开火暴露) ×天气缩小 (天气设计 §5-8)
+if(!isCur&&!heard&&d>vD*0.85&&e.crouch) continue;
+const tp=_pvT.set(e.pos.x,e.pos.y+(e.crouch?1.0:1.4),e.pos.z); // 复用槽: 本迭代内消费完, 不跨候选持有
+const dir=_pvD.copy(tp).sub(eye); const dist=dir.length(); dir.normalize();
 const blockHit=raycastWorld(eye,dir,dist);
 if(blockHit&&blockHit.dist<dist-0.6) continue;
 // 烟雾遮蔽: bot 无法看穿烟墙
 if(SMOKES.length&&smokeBlocksLOS(eye.x,eye.y,eye.z,tp.x,tp.y,tp.z)) continue;
 // 高杆庄稼遮蔽: 视线穿入作物田(交点低于作物顶)视为隐蔽; 子弹仍可穿透(与烟雾同一套逻辑)
 if(CROP_FIELDS.length&&cropBlocksLOS(eye.x,eye.y,eye.z,tp.x,tp.y,tp.z)) continue;
+// 植被软遮蔽 (2026-09-20 I5 塔拉瓦植被加密批): 活着的灌木蓬面/蕨丛/树冠挡视线, 只在射线真的穿过
+// 蓬面高度带时生效; 与烟雾/庄稼同一套 continue 语义, **不挡子弹** (弹道链零引用, 见 04b-fire 注释)
+if(foliageBlocksLOS(eye.x,eye.y,eye.z,tp.x,tp.y,tp.z)) continue;
+// 潜水隐蔽 (2026-09-18 塔拉瓦批): 目标头部没入水面 >UW_HIDE_DEPTH → 被水面遮蔽 (潜泳接近滩头的手段);
+// 仅 UW_HIDE_RANGE 米内或开火暴露才算被发现 —— 与载荷命中口径分开 (子弹入水另见 13-combat)
+if(d>UW_HIDE_RANGE&&headDepthAt(e.pos.x,e.pos.y,e.pos.z)>UW_HIDE_DEPTH) continue;
 if(d<bestD){ best=e; bestD=d; }
 }
 if(best){
@@ -328,7 +619,7 @@ if(!this.target){
 for(const ev of gunEvents){
 if(ev.team===this.team) continue;
 const d=Math.hypot(ev.x-this.pos.x,ev.z-this.pos.z);
-if(d<65&&nowT-ev.t<0.4&&ev.shooter&&ev.shooter.alive){
+if(d<65*(NIGHT_MODE?NIGHT_CFG.hearGunMul:1)*WX_CFG.hearGunMul&&nowT-ev.t<0.4&&ev.shooter&&ev.shooter.alive){
 this.lastSeenPos.set(ev.x,0,ev.z);
 if(nowT-this.lastSeenT>4) this.lastSeenT=nowT-3.5;
 }
@@ -355,8 +646,38 @@ const stillThreat=engaged&&distT>6;
 if(this.mgT<=0||(engaged&&distT<7)||(!stillThreat&&this.mgT<12)){ releaseEmpl(this.mgUse,true); this.mgUse=null; }
 else return;
 }
+// 迫击炮操作态 (2026-09-25 修): 与 empUse/mgUse/batUse/emCast 同构 —— 认领期间不再往下走机动/选目标决策。
+// 旧版这里**没有**这一条, 于是炮位上的 Bot 仍会走完整条决策链: 15m 内有空闲 MG42/AA/AT 就会二次认领
+// (MG 那条门闸只判了 !mgUse), 认领成功后 update() 里 mgUse 分支先于 mortUse return ⇒ 迫击炮的
+// releaseEmpl 在 MG 任期内不可达, 那门炮对玩家和其他 Bot 一直显示"占用中"。
+// 释放规则全在 update() 的 mortUse 分支里 (mortT/敌人逼近/压制), 与本条只挡"再认领"不冲突。
+if(this.mortUse) return;
+// A#9 岸防炮操作态 (契约 §6): 认领后每 0.5s 复核一次 —— 炮毁/被玩家接管/占位易主/到时/海面无敌艇 ⇒ 释放。
+// 释放后不再有本帧决策 (往下走正常的步兵逻辑), 与 mgUse/empUse 的写法同构。
+if(this.batUse){
+const g=this.batUse;
+this.batT-=0.5;
+if(!g||g.alive===false||g.crewBot!==this||this.batT<=0) this.releaseBattery();
+else if(!batteryTargetFor(g)) this.releaseBattery();      // 目标丢失即释放 (契约 §6)
+else return;
+}
 // 固定火力点使用前摇期间: 原地操作, 不机动不换目标 (与玩家同规)
 if(this.emCast){ this.state='defend'; this.path=null; return; }
+// 上炮位接近段 (2026-09-20 闪现修复): 已经选中某门炮 → 先走到站位, 到了下一帧才起前摇。
+// 炮被抢/报废/走太久 → 放弃 (不让 bot 围着炮打转)。这就是"走过去上炮"的那段路。
+// A#9: 岸防炮走同一条路 (emplGo.kind==='bat'), 只是接近半径/超时由 emplMount 的第三/四参给。
+if(this.emplGo){
+const eg=this.emplGo, g=eg.g;
+if(!g||eg.kind!=='bat'&&g.dead||nowT>eg.exp) this.emplGo=null;
+else if(eg.kind==='bat'){
+// A#9: 岸防炮的占有轨是 user/crewBot 双轨 (empReady 不看 crewBot, 这里自己看)
+if(g.alive===false||g.crewBot||g.user||!batteryTargetFor(g)) this.emplGo=null;
+else if(this.emplMount(g,'bat',BAT_APPROACH_R,BAT_GO_TIMEOUT)) return;
+else this.emplGo=null;
+}
+else if(!this.emplMount(g,eg.kind)) this.emplGo=null;
+else return;
+}
 // 小队指令: 最高优先级, 只有敌人近身(20m内)才暂缓执行
 if(this.inSquad&&!(engaged&&distT<20)){
 if(SQUAD.mode==='move'){
@@ -387,8 +708,13 @@ return;
 }
 }
 const eTank=enemyTankNear(this,120);
+// 水面载具扫描 (§5.4 步兵反应, 2026-09-20N 海战批): 在 enemyTankNear() 之后**追加一次** navalNear() 扫描 ——
+// 15d 的 navalNear 只返回 alive 且未沉的载具; 函数体不改 enemyTankNear 一行 (13/15 的既有敌方装甲判定零漂移)。
+// 只有反装甲兵 (cls 3 火箭筒/反坦克枪档, 2026-09-28 兵种8→5 原 cls5) 用得到, 别的兵种连扫描都不做 (省一次 60 人表遍历)。
+const eCraft=(this.cls===3&&typeof navalNear==='function'&&!this.onVehicle)
+?navalNear(this.pos.x,this.pos.z,115,1-this.team):null;
 // 筒子自动打坦克
-if(this.cls===5&&eTank&&eTank.alive&&this.slots&&this.slots[0]&&this.slots[0].def.rocket){
+if(this.cls===3&&eTank&&eTank.alive&&this.slots&&this.slots[0]&&this.slots[0].def.rocket){
 const w2=this.slots[0];
 if(w2.mag>0&&this.fireT<=0&&this.reloadT<=0&&Math.hypot(eTank.pos.x-this.pos.x,eTank.pos.z-this.pos.z)<65){
 const eye2=this.eyePos();
@@ -400,7 +726,7 @@ fireRocket(this,eye2,dir2,w2.def,V3(eTank.pos.x,eTank.pos.y,eTank.pos.z));
 w2.mag=0; this.mag=0; this.fireT=3.6;
 }}}
 // 反坦克枪手打坦克 (PTRD/博伊斯/九七式自动炮)
-if(this.cls===5&&eTank&&eTank.alive&&this.def.atRifle&&this.mag>0&&this.fireT<=0&&this.reloadT<=0&&this.boltT<=0){
+if(this.cls===3&&eTank&&eTank.alive&&this.def.atRifle&&this.mag>0&&this.fireT<=0&&this.reloadT<=0&&this.boltT<=0){
 const dTk=Math.hypot(eTank.pos.x-this.pos.x,eTank.pos.z-this.pos.z);
 if(dTk<95){
 const eye2=this.eyePos();
@@ -423,6 +749,9 @@ this.prone=dTk>30;
 }
 }
 
+// 反装甲兵对水面载具 (§5.4, 2026-09-20N): 打坦克的两条分支**优先** (上面已先后执行), 只有在没有活坦克可打时
+// 才转向水面目标 —— 与打坦克同一档火力 (火箭筒 <65m 走同一支 fireRocket; 反坦克枪 <95m 走同一支 fireBullet)。
+if(eCraft&&eCraft.alive&&(!eTank||!eTank.alive)) navInfATShip(this,eCraft);
 if(eTank){
 const dTank=Math.hypot(eTank.pos.x-this.pos.x,eTank.pos.z-this.pos.z);
 if(this.atn>0&&this.nadeCd<=0&&dTank<26){
@@ -432,15 +761,13 @@ return;
 if(dTank<130){
 for(const g of ATGUNS){
 if(!empReady(g)) continue; // 占用中/上炮冷却中(下炮后EMP_REARM_T秒)
-if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,16)){
-// 解除朝向限制: 炮塔可360°回旋, 就近即可上炮; 使用前摇与玩家同规 (0.9s原地操作); 前摇期间即占位
-g.user=this;
-this.emCast={kind:'at',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null;
-return;
+// 2026-09-20 闪现修复: 旧版在这里 (最远 16m 外) 直接 g.user=this + 起前摇, 前摇期间站住不动,
+// 计时到就硬 set 到炮位 → 单帧闪现 8~18m。改走 emplMount: 到站位半径内才起前摇, 否则先走过去。
+// (empInReach 的 16m 保留为"兴趣半径": 超出就不惦记这门炮, 行为面不变)
+if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,16)&&this.emplMount(g,'at')) return;
 }
 }
-}
-if(this.cls===2&&this.atn>0&&dTank<55&&!engaged){
+if(this.cls===1&&this.atn>0&&dTank<55&&!engaged){
 this.state='hunt';
 if(!this.path||this.repathT<=0){
 this.setPathTo(eTank.pos.x+rand(-8,8),eTank.pos.z+rand(-8,8));
@@ -457,12 +784,18 @@ const ePlane=enemyPlaneAlive(this.team);
 if(ePlane&&!engaged&&!this.inSquad&&Math.random()<0.4){
 for(const g of AAGUNS){
 if(!empReady(g)) continue;
-if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,15)){
-g.user=this;
-this.emCast={kind:'aa',g,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
-return;
+if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,15)&&this.emplMount(g,'aa')) return;
 }
 }
+// A#9 岸防炮 (契约 §6, 与 ATGUNS 同规则): 没在近身交战/不在小队/没有别的炮位在用时, 去岬角上炮。
+// 三层门: ①3 参 batteryNear = 15f 冻结的"可上炮"语义 (存活 + user/crewBot 皆空 + 过了重上冷却);
+//         ②炮位阵营必须是自己队 (反舰炮位是日军专属设施, 敌方 Bot 不该去操作);
+//         ③海面上确有敌艇 (batteryTargetFor) —— 否则只是站岗, 不如去打陆战。
+// 随机门 0.4/次 是防"整队同时扑向同一门炮" (与 AAGUNS 分支同款门控写法)。
+if(!engaged&&!this.inSquad&&!this.pilotOf&&!this.batUse&&!this.mgUse&&!this.empUse&&!this.mortUse&&!this.emCast
+&&typeof batteryNear==='function'&&typeof BATTERIES!=='undefined'&&BATTERIES.length&&Math.random()<0.4){
+const bg=batteryNear(this.pos.x,this.pos.z,BAT_APPROACH_R);
+if(bg&&bg.alive!==false&&bg.team===this.team&&!bg.crewBot&&!bg.user&&batteryTargetFor(bg)&&this.emplMount(bg,'bat',BAT_APPROACH_R,BAT_GO_TIMEOUT)) return;
 }
 if(seenNow){
 if(distT<2.6){ this.state='melee'; return; }
@@ -544,8 +877,8 @@ return;
 	// 驻停射击: 姿态按距离/压制选定; 连续驻停保持原姿态 (防蹲站闪烁), 到期由 decide 重抽
 	const wasHold=this.man==='hold';
 	this.man='hold'; this.manT=rand(1.2,2.2);
-	const ns=distT>40?(this.suppression>0.5||this.cls===3?'prone':'crouch')
-	:distT>22?(this.cls===3?'prone':(Math.random()<0.7?'crouch':'stand'))
+	const ns=distT>40?(this.suppression>0.5||this.cls===2?'prone':'crouch')
+	:distT>22?(this.cls===2?'prone':(Math.random()<0.7?'crouch':'stand'))
 	:(this.suppression>0.9?'crouch':'stand');
 	if(!(wasHold&&Math.random()<0.85)) this.stance=ns;
 	return;
@@ -595,55 +928,33 @@ return;
 }
 }
 }
-// 医护兵放置医疗箱
-if(this.cls===4&&(this.medkitT||0)<=nowT){
-let allies=0;
-for(const s of soldiers){
-if(s!==this&&s.alive&&s.team===this.team&&!s.onVehicle&&Math.hypot(s.pos.x-this.pos.x,s.pos.z-this.pos.z)<14) allies++;
-}
-let hasOwn=false;
-// 同队 5m 内已有医疗箱即视为"已放" (placeMedkit 会刷新复用, 不再叠放扎堆)
-for(const c of MED_CRATES){
-if(c.team===this.team&&c.uses>0&&c.life>0&&Math.hypot(c.x-this.pos.x,c.z-this.pos.z)<5){ hasOwn=true; break; }
-}
-if(allies>=1&&!hasOwn){
-placeMedkit(this,this.pos.x+Math.sin(this.yaw)*0.9,this.pos.z+Math.cos(this.yaw)*0.9);
-this.medkitT=nowT+35;
-}
-}
+// (2026-09-28 阶段三 P1: 医护兵兵种删除, Bot 医疗箱放置分支随撤 —— 医疗箱=工程兵建造件 (玩家侧), Bot 仍可从医疗箱取绷带)
 if(!this.objective||Math.random()<0.06) this.pickObjective();
 const f=this.objective;
 if(!f) return; // 无旗点模式兜底: 目标缺失时本帧只维持索敌与射击
 const dObj=Math.hypot(this.pos.x-f.x,this.pos.z-f.z);
 if(dObj<f.r*0.85){
 this.state='defend';
-// 迫击炮兵: 防守时架设迫击炮 (炮口朝敌方基地)
-if(this.cls===6&&!this.mortarPlaced&&!this.mortUse&&!this.mgUse&&!this.empUse&&Math.random()<0.35){
+// 工程兵: 防守时架设迫击炮 (炮口朝敌方基地) —— 2026-09-28 兵种 8→5: 原迫击炮兵(cls6)分支并入工程兵(cls4)
+if(this.cls===4&&!this.mortarPlaced&&!this.mortUse&&!this.mgUse&&!this.empUse&&Math.random()<0.35){
 const eb=basePos(1-this.team);
 const dyaw=Math.atan2(eb.x-this.pos.x,eb.z-this.pos.z);
 if(deployMortar(this,this.pos.x+Math.sin(dyaw)*1.3,this.pos.z+Math.cos(dyaw)*1.3,dyaw)){
 this.decisionT=rand(0.5,1);
 }
 }
-// 空闲迫击炮: 防守Bot就近上炮 (迫击炮兵优先; 使用前摇与玩家同规)
-if(!this.mortUse&&!this.mgUse&&!this.empUse&&Math.random()<(this.cls===6?0.5:0.12)){
+// 空闲迫击炮: 防守Bot就近上炮 (工程兵优先; 使用前摇与玩家同规)
+if(!this.mortUse&&!this.mgUse&&!this.empUse&&Math.random()<(this.cls===4?0.5:0.12)){
 for(const mo of MORTARS){
 if(!mo.alive||!empReady(mo)) continue;
-if(Math.hypot(mo.x-this.pos.x,mo.z-this.pos.z)<(this.cls===6?18:11)){
-mo.user=this;
-this.emCast={kind:'mortar',g:mo,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null;
-return;
+// 2026-09-20 闪现修复: 兴趣半径保留, 改成"走到站位才起前摇"
+if(Math.hypot(mo.x-this.pos.x,mo.z-this.pos.z)<(this.cls===4?18:11)&&this.emplMount(mo,'mortar')) return;
 }
 }
-}
-if(!this.mgUse&&Math.random()<0.25){
+if(!this.mgUse&&!this.mortUse&&Math.random()<0.25){ // 2026-09-25 修: 与同段迫击炮门闸同规补 !mortUse (decide 里也加了 mortUse 提前 return, 这里是第二道)
 for(const mg of MG42S){
 if(!empReady(mg)) continue;
-if(empInReach(mg,this.pos.x,this.pos.y,this.pos.z,14)){
-mg.user=this;
-this.emCast={kind:'mg',g:mg,t:0,dur:EM_CAST_DUR}; this.state='defend'; this.path=null; // 使用前摇与玩家同规
-return;
-}
+if(empInReach(mg,this.pos.x,this.pos.y,this.pos.z,14)&&this.emplMount(mg,'mg')) return;
 }
 }
 if(!this.defendPt||Math.random()<0.3){
@@ -658,12 +969,24 @@ if(dd<bd){ bd=dd; best=cp; }
 }
 }
 this.defendPt=best||{x:f.x+rand(-6,6),z:f.z+rand(-6,6)};
+// ★2026-10-03 (甲板驻点夹取): 舰上没有 coverPoints ⇒ best 恒 null, ±6 抖动会把驻点甩出舷缘
+// (旗在舷侧走道时必中), 驻守变成贴栏杆罚站。capSnapToDeck 单点夹回甲板矩形 (非海图返回 null 零变化)。
+if(typeof capSnapToDeck==='function'){
+const sn=capSnapToDeck(this.defendPt.x,this.defendPt.z,f.x,f.z);
+if(sn){ this.defendPt.x=sn.x; this.defendPt.z=sn.z; }
+}
 this.setPathTo(this.defendPt.x,this.defendPt.z);
 }
 } else {
 this.state='advance';
 if(!this.path||this.repathT<=0){
-this.setPathTo(f.x+rand(-6,6),f.z+rand(-6,6));
+// ★2026-10-03 (甲板目标点夹取, 与 defendPt 同族): ±6 抖动点同样不许落到舷外
+let ax=f.x+rand(-6,6), az=f.z+rand(-6,6);
+if(typeof capSnapToDeck==='function'){
+const sn2=capSnapToDeck(ax,az,f.x,f.z);
+if(sn2){ ax=sn2.x; az=sn2.z; }
+}
+this.setPathTo(ax,az);
 this.repathT=rand(4,7);
 }
 }
@@ -782,21 +1105,110 @@ this.prone=false;
 this.setPathTo(cp.x,cp.z);
 }
 setPathTo(x,z){
-if(NAV.budget<=0){ this.repathT=Math.min(this.repathT>0?this.repathT:0.3,0.3); return; }
+// 2026-09-19 Bot 机制翻新: 返回布尔"是否拿到路径", 并把"每帧都重试同一条死路"改成指数退避。
+// 旧版两种失败都只是把 path 置空就返回 —— 调用方下一帧 !this.path 又立刻重试,
+// 一条不可达目标能把 NAV 预算 (每帧 2 次寻路) 吃干, 连带别的 bot 也拿不到路 (放大效应)。
+// 大舰甲板 (2026-09-30 阶段五 P4, 15h capNavDirect): 甲板不在 OCC/NAV 网格里 (舰在巡航, 网格是
+//   载入期烘焙的静态图), 而全海图的 OCC 整片是水障 ⇒ A* 恒 null ⇒ 落到甲板上的 Bot 全部站桩。
+//   甲板是平坦净空面 (唯一障碍是上层建筑, 由 15h capLocalSolve 每帧推出) ⇒ 直接给**直行单点路径**。
+//   不占 NAV 预算 (没有 A* 开销), 也不走 navFails 退避 (它不是"失败")。
+if(typeof capNavDirect==='function'){ const dp=capNavDirect(this,x,z); if(dp){ this.path=dp; this.pathI=0; this.moveIntent=true; this.navFails=0; return true; } }
+this.navFails=this.navFails||0;
+if(NAV.budget<=0){
+// 预算耗尽不是"无路", 只是排不上队: 短退避后重试, 不计入失败次数
+this.repathT=this.repathT>0?Math.min(this.repathT,0.3):0.3;
+return false;
+}
 NAV.budget--;
-this.path=NAV.findPath(this.pos.x,this.pos.z,x,z);
-this.pathI=0;
-this.moveIntent=!!this.path;
+const p=NAV.findPath(this.pos.x,this.pos.z,x,z);
+if(p){ this.path=p; this.pathI=0; this.moveIntent=true; this.navFails=0; return true; }
+this.path=null; this.moveIntent=false;
+this.navFails++;
+// 退避: 0.45s → 0.9 → 1.8 → … 上限 4s (成功一次即清零); 目标点不可达时不再打死重试
+this.repathT=Math.max(this.repathT,Math.min(4,0.45*Math.pow(2,Math.min(this.navFails-1,4))));
+return false;
+}
+// 就近可达中转点: 目标不可达时退而求其次 —— 沿"我→目标"方向逐级回收, 取第一个真能到的点。
+// 起点是自己脚下 (一定可达), 所以第一级必然成功; 找不到就把指向目标的直行航向交回调用方。
+stepToward(tx,tz,frac){
+const dx=tx-this.pos.x, dz=tz-this.pos.z;
+const d=Math.hypot(dx,dz);
+if(d<3) return null;
+for(let f=frac;f>=0.25;f-=0.25){
+const px=this.pos.x+dx*f, pz=this.pos.z+dz*f;
+if(occBlocked(px,pz,true)||!freeSpot(px,pz,0.6)) continue; // 深水格放行 (swim 兜底), 只躲实体与建筑足迹
+if(this.setPathTo(px,pz)) return this.path;
+}
+return null;
+}
+// 无路可走的兜底推进: 目标不可达 (被墙/水/桥隔断) 时也要动起来 ——
+// 之前 advance/defend/hunt 三个分支都是"followPath 返回 null 就站住", 于是不可达目标 = 永久站桩。
+// 这里给一个"朝目标直行 + 定期重寻路"的降级行为 (moveDir 内自带避障与膝高射线)。
+pushToward(tx,tz,dt,dirT){
+this.navFails=this.navFails||0;
+if(this.repathT<=0){
+// 先试中转点 (可能绕得到), 失败再退化为直行
+if(this.stepToward(tx,tz,0.5)) return this.yaw;
+this.navFails++;
+this.repathT=Math.min(4,0.6*Math.pow(2,Math.min(this.navFails-1,4)));
+}
+this.dirT=this.dirT||rand(-0.5,0.5);
+return Math.atan2(tx-this.pos.x,tz-this.pos.z)+this.dirT;
 }
 update(dt){
+// 海战 AI 帧钩 (2026-09-20N 海战批 · task-4): 兜底用 —— 仅当 15d/15f 不在脚本链上时才驱动艇/两栖车/反舰炮位
+// (见文件末 navalAIFrameTick 的 typeof 判据)。15d 在链上时本行只做一次 nowT 比较, 零副作用: 驱动权归 15d。
+navalAIFrameTick();
+// ── 落水/游泳标志对账 (2026-09-20N, naval-hull 实测 + Lead 裁定) ──────────────────
+// 旧实现只在 moveDir() 里按水深赋 this.swim ⇒ AI 本帧不动 (hold/idle/被压制/落水后没目标) 时标志位不更新:
+// 水态机已是 swim、人不会溺水, 但 swim=false 会让"游泳不可开火/探针水态判据"读错 (15d 报的落水车组缺陷)。
+// 这里按 03-terrain 的**水态单源** waterStateAt(x,y,z) 对账 (它把"脚在水面之上"判 dry ⇒ 栈桥/桥面/干地不会误判),
+// 且**只单向补位**: 真水态是 swim/wade/wet 才写, dry 只在标志已置位时清 —— 不凭空把陆上/桥上的人判成游泳 (跨图零行为变化)。
+// 0.25s 一次: 水态不会在更短时间里来回翻, 也把 heightAt 采样的开销压在可忽略量级。
+this.swimScanT=(this.swimScanT||0)-dt;
+if(this.swimScanT<=0){
+this.swimScanT=0.25;
+const ws=waterStateAt(this.pos.x,this.pos.y,this.pos.z);
+if(ws.state==='swim'){ this.swim=true; this.wading=false; }
+else if(ws.state==='wade'){ this.swim=false; this.wading=true; }
+else if(ws.state==='wet'){ this.swim=false; this.wading=false; }
+else if(this.swim){ this.swim=false; this.wading=false; }
+}
+// 大海致命化 (2026-10-01c 用户设想"大海能够迅速杀死里面的 Bot"): 纯海战图 (terr:'opensea') 落水
+//   宽限 seaBotGrace 秒 (跳帮爬回/贴舷被捞起的窗口), 之后每秒 seaBotDmg 溺伤 —— 100 血 ~5.5s 耗尽。
+//   游向远舰的路已被 pickObjective/capBotTick 拦掉, 真落水的只剩被炸下甲板/跳帮间隙没跳过的:
+//   迅速减员 → 走部署复活回本舰甲板, "海里扎堆的游泳团"自净。陆战图河流/湖泊零变化。
+if(CAMPAIGN.terr==='opensea'&&this.swim&&this.alive&&!this.onVehicle){
+this._seaT=(this._seaT||0)+dt;
+if(this._seaT>CAPITAL_CFG.seaBotGrace){
+this._seaAcc=(this._seaAcc||0)+CAPITAL_CFG.seaBotDmg*dt;
+if(this._seaAcc>=1){ const dd=Math.floor(this._seaAcc); this._seaAcc-=dd; this.damage(dd,null,false); }
+}
+}else this._seaT=0;
 if(!this.alive){
 this.deathAnimT-=dt;
 if(!this.ragdolled){
 const k=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
 if(k<=1){
 if(!this.deathDir) this.deathDir=Math.random()<0.5?1:-1;
-this.mesh.root.rotation.x=-HPI*k*this.deathDir;
-this.mesh.pelvis.position.y=lerp(0.94,0.2,k);
+// A#10 审计⑤ (旧倒地动画分支, = 无 CANNON / 布娃娃链不可用时的交接):
+// ① 姿态必须从**当前姿态**出发: 旧版无条件 lerp(0.94→0.2), 趴姿死亡那一帧骨盆从 0.22 弹到 0.94
+//    (实测 0.72m 的竖向跳变) —— 现在从死亡时的实际骨盆高起算。
+// ② 倒地幅度按姿态缩放: 站着死 = 整身倒下 (-90°); 蹲着死 ≈ -50°; 已经趴着的只需 16° 的瘫倒 ——
+//    旧版对趴姿尸体也转 90°, 把人从"趴"翻成"竖"。
+// ③ 绕脚跟旋转会把躯干盒中心压到 y≈0 ⇒ 半个身子埋在地里 (实测最低关节 -0.30m 站 / -0.38m 蹲);
+//    骨盆下沉必须与倒地角**同步** (见下): 旧版把骨盆独立地 lerp 到 0.2, 于是倒到一半时腿还挂在骨盆下
+//    却已经贴地 ⇒ 实测蹲姿尸体的关节最深 -0.45m。
+const p0=this.prone?0.22:this.crouch?0.6:0.94;
+const fallK=this.prone?0.18:this.crouch?0.55:1;
+const th=HPI*k*fallK;
+this.mesh.root.rotation.x=-th*this.deathDir;
+// 骨盆高 = p0·cos(倒地角): 站立链的骨盆高 (0.94) 与脚到根的腿长 (0.94) 相等 ⇒ 靴底恒在地面 (0), 全身像
+// 绕脚跟倒下的"木头人"一样贴地旋转; 下限 0.14 = 躯干盒半高, 躺着时不再下沉。初始帧 cosθ≈1 ⇒ 无竖向跳变。
+this.mesh.pelvis.position.y=Math.max(0.14,p0*Math.cos(th));
+// 残余抬升: 绕脚跟旋转时脚在**倒地中途**会短暂低于地面 (几何量 = p0·cosθ·(1-cosθ), θ=45° 时最深),
+// 按同一式子给等量抬升 ⇒ 全程最低关节贴地不穿地; θ=0/90° 两端为 0 (起手与落地都不跳)。
+this.mesh.root.position.y=this.pos.y+p0*Math.cos(th)*(1-Math.cos(th))*1.05;
 this.mesh.tag.visible=false;
 }
 }
@@ -817,26 +1229,83 @@ else {
 this.pos.copy(v.pos); this.vel.set(0,0,0);
 this.suppression=Math.max(0,this.suppression-dt*0.5);
 this.target=null;
+// ── 驻守车下车兜底 (2026-09-19 用户: 坦克乘员长期站桩像卡住) ──
+// 车停在目标圈内驻守/对炮时, 乘员随车定格可能整局不动。载具停稳累计 P 秒仍无自主行动
+// 就下车归建 (步行去前线); 车被重新开动 (vel 起来) 计时清零。下车后该车仍会被别的 bot 认领。
+const moving=Math.abs(v.vel||0)>0.8;
+if(moving){ this.crewStillT=0; }
+else{
+this.crewStillT=(this.crewStillT||0)+dt;
+// 阈值分档: 车本来就在推进 (目标还远) → 多等一会 (46s); 车已在目标圈驻守 (crewIdle) → 26s 就归建
+const idling=typeof tankRollingToObjective==='function'?!tankRollingToObjective(v):true;
+if(this.crewStillT>(idling?26:46)){
+this.crewStillT=0;
+this.dismountVehicle(false);
+this.pickObjective();
+this.decisionT=0;
+}
+}
 return;
 }
 }
 // 跳伞下落 (bot)
 if(this.chuting){
 this.vel.set(0,0,0);
+this.chute=true; this.onGround=false;   // A#8: 与 chuteAirborne() 的口径对账 (伞降中 = chute && !onGround)
 this.pos.y-=7*dt;
 if(!this.chuteMesh){ this.chuteMesh=mkChuteForBot(); this.mesh.root.add(this.chuteMesh); this.chuteMesh.position.set(0,2.5,0); }
 const gh=standHeight(this.pos.x,this.pos.z,this.pos.y);
+// 海图水面地板 (★2026-10-03, 与玩家同批修"跳伞下到海底才解除伞"): 深水上空触水面即收伞转游泳
+//   (浮位给到 wy-FLOAT_PAD 下, 下一帧水态块按 dampF 接管), 不再坠到海床才"落地"。
+//   wy>gh+0.6 门挡掉旱地/浅水; 水面承接不算接地 (onGround=false, 不吃落地账)。
+if(typeof waterYAt==='function'){
+const wy=waterYAt(this.pos.x,this.pos.z);
+if(wy>-1e8&&this.pos.y<=wy&&wy>gh+0.6&&(typeof waterDepthAt!=='function'||waterDepthAt(this.pos.x,this.pos.z)>1.2)){
+this.pos.y=wy-((typeof FLOAT_PAD!=='undefined')?FLOAT_PAD:0.95)-0.3;
+this.chuting=false; this.decisionT=0;
+this.chuteClear(); this.onGround=false;
+this.updateMesh(dt,0);
+return;
+}
+}
 if(this.pos.y<=gh){
 this.pos.y=gh; this.chuting=false; this.decisionT=0;
-if(this.chuteMesh){ this.mesh.root.remove(this.chuteMesh); this.chuteMesh=null; }
+// A#8 落地即收伞: 与 player 侧 playerChuteClear() 同一条纪律 —— 旧版等下一帧才摘, 落地那帧伞还在头顶
+this.chuteClear(); this.onGround=true;
 }
 	this.updateMesh(dt,0);
 	return;
 }
+// ── 下车跨出 (2026-09-20 闪现修复): 限速走到车旁落点, 带走路动画; 到位/超时即结束 ──
+// 全程单帧位移 ≤ EXIT_SPD*dt; 被车身推挤最多再叠载具侧推 (15-vehicles.vehiclePushSoldiers), 仍远小于闪现阈值。
+if(this.exitSlide){
+const es=this.exitSlide;
+es.t-=dt;
+const mx0=this.pos.x, mz0=this.pos.z;
+const dx=es.x-this.pos.x, dz=es.z-this.pos.z, d=Math.hypot(dx,dz);
+if(d>1e-4){
+const step=Math.min(d,EXIT_SPD*dt);
+this.pos.x+=dx/d*step; this.pos.z+=dz/d*step;
+}
+collideMove(this.pos,0.4);
+this.vel.set(0,0,0);
+this.pos.y=dampF(this.pos.y,standHeight(this.pos.x,this.pos.z,this.pos.y+1),20,dt);
+if(d<=0.06||es.t<=0){ // 到位才吸附落点 (残差 ≤6cm); 超时则就地结束 —— 绝不把 pos 硬搬到远处
+if(d<=0.06){ this.pos.x=es.x; this.pos.z=es.z; }
+this.exitSlide=null; this.decisionT=0;
+}
+// A#10 审计④: 动画速度用**本帧真实位移**换算, 不再恒定喂 EXIT_SPD ——
+// 旧版下车跨出期间一律传 3.6 m/s: 被墙/车体挡住 (单帧位移 0.02m) 时腿仍以 3.6 m/s 迈步 = 原地滑步;
+// 末帧吸附落点会在一帧里走出 2× 步长, 也应被动画反映。实测固定 3.6 vs 真实 1.2~3.6 m/s (差 2.4 m/s)。
+const moved=Math.hypot(this.pos.x-mx0,this.pos.z-mz0);
+this.updateMesh(dt,clamp(dt>1e-6?moved/dt:0,0,EXIT_SPD));
+return;
+}
 // ── 固定火力点使用前摇 (2026-09-02 用户指定: Bot与玩家同规): 计时完成才认领, 占位被夺/报废即取消 ──
 if(this.emCast){
 const ec=this.emCast;
-if((ec.g.user&&ec.g.user!==this)||(ec.kind==='mortar'&&!ec.g.alive)){
+// A#9: 岸防炮没有 dead 字段 (存活判据是 alive) —— 前摇期间炮位被打塌/被玩家接管即取消
+if((ec.g.user&&ec.g.user!==this)||(ec.kind==='mortar'&&!ec.g.alive)||(ec.kind==='bat'&&ec.g.alive===false)){
 if(ec.g.user===this) ec.g.user=null;
 this.emCast=null;
 }
@@ -847,10 +1316,22 @@ const g2=ec.g;
 this.emCast=null;
 if(g2.user===this){
 this.state='defend'; this.path=null;
-if(ec.kind==='mg'){ this.mgUse=g2; this.mgT=rand(14,24); this.pos.x=g2.x-Math.sin(g2.face)*0.8; this.pos.z=g2.z-Math.cos(g2.face)*0.8; }
-else if(ec.kind==='mortar'){ this.mortUse=g2; this.mortT=rand(14,24); this.pos.x=g2.x-Math.sin(g2.face)*0.8; this.pos.z=g2.z-Math.cos(g2.face)*0.8; }
-else if(ec.kind==='at'){ this.empUse=g2; this.empT=rand(18,30); this.pos.x=g2.x-Math.sin(g2.face)*1.2; this.pos.z=g2.z-Math.cos(g2.face)*1.2; }
-else if(ec.kind==='aa'){ this.empUse=g2; this.empT=rand(14,24); this.pos.x=g2.x; this.pos.z=g2.z-0.9; }
+// 2026-09-20 闪现修复 (本任务的主根因): 旧版在这里把 pos 硬 set 到炮位 —— 前摇是从 14~18m 外起的,
+// 前摇期间又不走向炮位, 于是这一行就是"人闪到炮上"的现场 (实测单帧 8~18m, 全部前后都可见)。
+// 现在: ①先按站位单源算落位点; ②超出安全阀 (被推挤/被别人挤开) → 放炮, 绝不硬 set 过去;
+//        ③否则进入 EMPL_SNAP_DUR 秒阻尼落位 (pinEmpl), 观感=跨上炮位。
+const sp=this.emplStandSpot(g2,ec.kind);
+if(Math.hypot(sp.x-this.pos.x,sp.z-this.pos.z)>EMPL_SNAP_GUARD){
+releaseEmpl(g2,true); // 安全阀: 离得太远就不上了 (下炮冷却由 releaseEmpl 统一承担)
+}else{
+if(ec.kind==='mg'){ this.mgUse=g2; this.mgT=rand(14,24); }
+else if(ec.kind==='mortar'){ this.mortUse=g2; this.mortT=rand(14,24); }
+else if(ec.kind==='at'){ this.empUse=g2; this.empT=rand(18,30); }
+else if(ec.kind==='aa'){ this.empUse=g2; this.empT=rand(14,24); }
+// A#9 契约 §6: 前摇结束 = 认领 —— 占用轨从 user 交到 crewBot (双轨互斥; 玩家 batteryMountPlayer 也查这两项)
+else if(ec.kind==='bat'){ g2.crewBot=this; g2.user=null; this.batUse=g2; this.batT=rand(24,40); }
+this.emplPinT=EMPL_SNAP_DUR;
+}
 this.decisionT=0;
 }else{ if(g2.user===this) g2.user=null; }
 }
@@ -875,6 +1356,7 @@ if(!occBlocked(px,pz)&&!fireThreat(px,pz,0.8)){ this.fleeYaw=back+da; break; }
 if(this.mgUse){ releaseEmpl(this.mgUse,true); this.mgUse=null; }
 if(this.mortUse){ releaseEmpl(this.mortUse,true); this.mortUse=null; }
 if(this.empUse){ releaseEmpl(this.empUse,true); this.empUse=null; }
+if(this.batUse){ this.releaseBattery(); }   // A#9: 岸防炮同样弃置 (火线上的炮位站不住)
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
 if(this.bandageT>0) this.bandageT=0;
 if(this.state==='cover'){
@@ -954,13 +1436,15 @@ if(this.coverCd>0) this.coverCd-=dt;
 if(this.slideCd>0) this.slideCd-=dt;
 if(this.target&&this.target.onVehicle) this.target=null;
 const engaged=this.target&&this.target.alive&&nowT-this.lastSeenT<4;
+// A#9 岸防炮操作态 (契约 §6): 有人 (crewBot=this) 才瞄船/开炮 —— 无人时这条分支根本不进, 也不存在别的开火链
+if(this.batUse){ this.updateBatteryGun(dt); return; }
 if(this.empUse){ this.updateEmplacement(dt); return; }
 if(this.mgUse){
 const mg=this.mgUse;
 this.crouch=false; this.prone=false;
 this.vel.set(0,0,0);
-this.pos.x=mg.x-Math.sin(mg.face)*0.85;
-this.pos.z=mg.z-Math.cos(mg.face)*0.85;
+// 2026-09-20 闪现修复: 落位用 pinEmpl (上炮头 0.28s 阻尼滑到站位, 之后钉死) —— 与 emplStandSpot 同源
+this.pinEmpl(mg.x-Math.sin(mg.face)*0.85, mg.z-Math.cos(mg.face)*0.85, dt);
 this.pos.y=standHeight(this.pos.x,this.pos.z,this.pos.y+1);
 if(engaged){
 const tp=this.target.pos;
@@ -970,7 +1454,9 @@ this.yaw=angleLerpTo(this.yaw,wantYaw,4*dt);
 mg.yaw.rotation.y=angDiff(mg.face,this.yaw);
 const dy=(tp.y+1.2)-(mg.y);
 const dh=Math.hypot(tp.x-mg.x,tp.z-mg.z);
-mg.pitch.rotation.x=-clamp(Math.atan2(dy,dh),-0.7,0.45);
+const mgPit=clamp(Math.atan2(dy,dh),-0.7,0.45);
+mg.pitch.rotation.x=-mgPit;
+this.pitch=mgPit;   // A#10 审计③: 机枪手的枪口俯仰与机枪同源 (旧版 this.pitch 全程不变, 与炮口差 0.46 rad)
 mg.fireT-=dt; // 射速间隔在炮上: 换人不重置 (与玩家同规)
 if(this.reactT<=0&&mg.fireT<=0&&mg.heat<1){
 const eye=V3(mg.x,mg.y+EMPL_MG_EYE,mg.z);
@@ -981,7 +1467,8 @@ emplMGFire(mg,this,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-c
 }
 }
 mg.heat=Math.max(0,mg.heat-dt*0.15); // AI 散热档 0.15 (玩家 0.22 且开火不散) —— 显式节奏分叉, README 口径
-this.updateMesh(dt,0);
+// 落位过渡期给"走路速度": 腿在迈, 而不是滑行 (2026-09-20 闪现修复的观感配套)
+this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0);
 return;
 }
 if(this.mortUse){
@@ -989,10 +1476,13 @@ const mo=this.mortUse;
 this.mortT-=dt; mo.cd-=dt;
 this.crouch=true; this.prone=false;
 this.vel.set(0,0,0);
-this.pos.x=mo.x-Math.sin(mo.face)*0.85;
-this.pos.z=mo.z-Math.cos(mo.face)*0.85;
+// 2026-09-20 闪现修复: 同 pinEmpl (迫击炮位落位过渡)
+this.pinEmpl(mo.x-Math.sin(mo.face)*0.85, mo.z-Math.cos(mo.face)*0.85, dt);
 this.pos.y=standHeight(this.pos.x,this.pos.z,this.pos.y+1);
 this.yaw=angleLerpTo(this.yaw,mo.face,4*dt);
+// A#10 审计③: 迫击炮手是"高抛架设"姿态 —— 让身体俯仰跟炮管仰角 (旧版 this.pitch 停在进炮位之前的值)。
+// mo.tube.rotation.x 是该炮位炮管的当前仰角状态 (06-engineering 建的, 开火时被写成 0.5 后阻尼回 0.62)。
+this.pitch=clamp(mo.tube?mo.tube.rotation.x:0.6,0,1.0);
 if(mo.cd<=0){
 // 选target: 已知敌人暴露点 > 敌占/被夺旗点(附近无友军)
 let tx=null,tz=null;
@@ -1026,7 +1516,7 @@ const engagedClose=this.target&&this.target.alive&&nowT-this.lastSeenT<3&&Math.h
 if(this.mortT<=0||engagedClose||this.suppression>1.2){
 releaseEmpl(mo,true); this.mortUse=null; // 离炮: 上炮冷却
 }
-this.updateMesh(dt,0);
+this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0); // 落位过渡期腿在迈 (2026-09-20)
 return;
 }
 if(this.state==='melee'&&engaged){
@@ -1057,7 +1547,7 @@ this.nadeAnimT-=dt;
 this.mesh.armR.sh.userData.swing=0.6;
 if(this.nadeAnimT<=0){
 this.atn--; this.nadeCd=rand(8,14);
-if(this.cls===5&&this.def.rocket&&this.slots[0]&&this.mag<=0){ this.reloadT=this.def.reload; }
+if(this.cls===3&&this.def.rocket&&this.slots[0]&&this.mag<=0){ this.reloadT=this.def.reload; } // 2026-09-28 兵种8→5: 反坦克=3
 const eye=this.eyePos();
 const lead=V3(tk.pos.x+Math.sin(tk.yaw)*tk.vel*0.5,tk.pos.y+0.8,tk.pos.z+Math.cos(tk.yaw)*tk.vel*0.5);
 const dist=eye.distanceTo(lead);
@@ -1177,12 +1667,35 @@ this.scanT=(this.scanT||0)-dt;
 if(this.scanT<=0){ this.scanT=rand(1.2,2.2); this.scanYaw=this.yaw+rand(-1.5,1.5); }
 this.yaw=angleLerpTo(this.yaw,this.scanYaw??this.yaw,2.2*dt);
 }
+else{
+// 2026-09-19: 追踪目标不可达 (隔墙/隔水/死在孤岛) 也要推进, 不再原地等信息过期
+moveYaw=this.pushToward(this.lastSeenPos.x,this.lastSeenPos.z,dt,0);
+wantMove=true; speed=this.suppression>0.5?2.4:3.4;
+this.crouch=this.suppression>0.8;
+}
 this.prone=false;
 }
 else if(this.state==='advance'){
 const my=this.followPath(dt);
 if(my!==null){ moveYaw=my; wantMove=true; speed=this.suppression>0.6?3.0:5.0;
 if(this.suppression>0.25) moveYaw+=Math.sin(nowT*2.0+this.wanderSeed*4)*0.35;
+}
+else{
+// 2026-09-19: 推进目标不可达的兜底 —— 朝目标直行 (moveDir 内避障), 定期重试中转点
+const f0=this.objective;
+if(f0){
+moveYaw=this.pushToward(f0.x,f0.z,dt,0);
+wantMove=true; speed=this.suppression>0.6?3.0:5.0;
+}else{
+// 连目标都没有 (理论上该由 decide 立刻补): 至少别站着 —— 朝战场中心/敌基地方向挪
+// ★2026-10-03 (纯海图): 旧 fallback 直指敌方静态 BASES —— opensea 的 BASES 是海里一个死点,
+//   全旗瘫痪后的清场阶段, 残兵全体贴着自家栏杆"向海行军"。改朝本队基地舰甲板 (capBasePos 单源,
+//   全瘫返回 null 再退 BASES), 残兵在自家甲板上保持机动。
+const ob=(CAMPAIGN.terr==='opensea'&&typeof capBasePos==='function')?capBasePos(this.team):null;
+const eb=ob||(BASES.length?BASES[1-this.team]:basePos(1-this.team));
+moveYaw=this.pushToward(eb.x,eb.z,dt,0);
+wantMove=true; speed=3.2;
+}
 }
 this.crouch=false; this.prone=false;
 }
@@ -1192,17 +1705,47 @@ if(!tv||!tv.alive||tv.crewBot||tv.playerDriven||tv.hp<tv.maxHp*0.4){ this.state=
 else {
 tv.claimT=nowT;
 const d=Math.hypot(tv.pos.x-this.pos.x,tv.pos.z-this.pos.z);
-if(d<3.8){ this.enterVehicle(tv); return; }
+if(d<VEH_BOARD_R){ this.enterVehicle(tv); return; }
 const my=this.followPath(dt);
-moveYaw=my!==null?my:Math.atan2(tv.pos.x-this.pos.x,tv.pos.z-this.pos.z);
+if(my!==null){ moveYaw=my; }
+else {
+// 2026-09-19: 走近载具的路被挡/不可达 → 直行兜底 (旧版站住等 claim 超时)
+if(d>26){ this.state='idle'; if(tv.claimBot===this) tv.claimBot=null; this.targetVeh=null; this.navFails=0; }
+else moveYaw=this.pushToward(tv.pos.x,tv.pos.z,dt,0);
+}
 wantMove=true; speed=5.2;
 this.crouch=false; this.prone=false;
 }
+}
+else if(this.state==='toEmpl'){
+// 上炮位接近段 (2026-09-20 闪现修复): 走到固定火力点站位旁才起前摇 —— 取代旧版"隔空上炮"。
+// 炮被占/报废/超时即放弃; 路径不可达时在接近半径内直行兜底 (走不到就放弃, 不硬 set 到炮位)。
+const eg=this.emplGo;
+if(!eg||!eg.g||eg.g.dead||!empReady(eg.g)||nowT>eg.exp){ this.emplGo=null; this.state='idle'; }
+else{
+const sp=this.emplStandSpot(eg.g,eg.kind);
+const d=Math.hypot(sp.x-this.pos.x,sp.z-this.pos.z);
+if(d<=EMPL_STAND_R){ this.emplMount(eg.g,eg.kind); } // 到位: 起前摇 (下一帧起原地操作), 本帧站住
+else{
+const my=this.followPath(dt);
+if(my!==null) moveYaw=my;
+else if(d>EMPL_APPROACH_R*1.3){ this.emplGo=null; this.state='idle'; }
+else moveYaw=this.pushToward(sp.x,sp.z,dt,0);
+wantMove=true; speed=4.2;
+}
+}
+this.crouch=false; this.prone=false;
 }
 else if(this.state==='defend'){
 const my=this.followPath(dt);
 if(my!==null){ moveYaw=my; wantMove=true; speed=2.6; }
 else {
+// 2026-09-19: 驻守点不可达时也要往目标圈挪 (旧版原地站到天荒地老)
+const f1=this.objective;
+if(f1&&Math.hypot(f1.x-this.pos.x,f1.z-this.pos.z)>f1.r*0.85){
+moveYaw=this.pushToward(f1.x,f1.z,dt,0);
+wantMove=true; speed=2.6;
+}else{
 this.crouch=Math.random()<0.002?!this.crouch:this.crouch;
 if(!engaged){
 this.scanT=(this.scanT||0)-dt;
@@ -1211,11 +1754,16 @@ this.yaw=angleLerpTo(this.yaw,this.scanYaw??this.yaw,1.2*dt);
 }
 }
 }
+}
 // 逃命覆盖: 火线上不做战术机动, 背火疾跑脱身 (瞄准/还击由下方 faceTo 独立处理, 不中断)
 if(this.fireFleeT>0){
 wantMove=true; moveYaw=this.fleeYaw; speed=5.7;
 this.crouch=false; this.prone=false; this.stance='stand';
 }
+// 前摇 = 原地操作 (与玩家同规): 2026-09-20 闪现修复补齐这一条 —— 旧版只有 decide() 提前返回,
+// 位移照旧朝 objective 走, 前摇 0.9s 能走出 2.3m, 结束时离炮位更远 (正是"隔空上炮"的放大器)。
+// 严禁用"把速度调低"掩盖问题: 这里只是把前摇期间的位移按规则清零 (玩家同样不能边按 F 边跑)。
+if(this.emCast) wantMove=false;
 if(wantMove){ this.moveDir(moveYaw,speed*this.speedMul,dt); } else { this.vel.x*=0.7; this.vel.z*=0.7; }
 if(wantMove&&this.unstickT<=0){
 this.stuckT+=dt;
@@ -1291,11 +1839,14 @@ if(this.mag>0&&this.fireT<=0&&dT>22&&dT<100){
 const eye=this.eyePos();
 const tx=this.lastSeenPos.x+rand(-7,7), tz=this.lastSeenPos.z+rand(-7,7);
 const dist2=Math.hypot(tx-this.pos.x,tz-this.pos.z);
-const tof=clamp(dist2/15,1.7,3.4);
-const v=mortarVel(eye.x,eye.z,tx,tz,tof);
+// 2026-09-28 阶段三 P1: tof 单源化到 mortarArcTof (13-combat) —— 高抛越障 (顶点 3.7~11m),
+// 与玩家迫击炮座(emplMortarShell)同一支解算器; 旧 dist2/30 平抛会被田块缓坡/树篱半路吃掉 (取证见 _farm-block-probe)
+const tof=mortarArcTof(dist2);
+const dy=(heightAt(tx,tz)+0.05)-eye.y;   // 高差项 (2026-09-28): 落点解在任何地形恒精确
+const v=mortarVel(eye.x,eye.z,tx,tz,tof,dy);
 const m=new THREE.Mesh(nadeGeoAT,vmMats.gun);
 m.position.copy(eye); scene.add(m);
-nades.push({m,pos:eye.clone(),vel:v,fuse:9,thrower:this,team:this.team,spin:V3(4,0,1),bounces:0,mortar:true});
+nades.push({m,pos:eye.clone(),vel:v,fuse:9,thrower:this,team:this.team,spin:V3(4,0,1),bounces:0,mortar:true,src:'迫击炮'});
 AudioSys.mortarThunk(this.pos.distanceTo(camera.position));
 this.mag--;
 this.fireT=rand(4.5,6.5);
@@ -1326,6 +1877,53 @@ if(this.def.type==='bolt') this.boltT=this.def.boltT||1.0;
 if(this.mag<=0&&this.reloadT<=0){ this.reloadT=this.def.reload*rand(1,1.25); }
 this.updateMesh(dt,Math.hypot(this.vel.x,this.vel.z));
 }
+// A#9 岸防炮: 释放占用 (下车/死亡/目标丢失/退场) —— 清 crewBot/user 双轨并给"重上冷却"。
+// 重上冷却与固定火力点同规 (EMP_REARM_T): 否则一门炮会被同一个人反复上下, 或被抢来抢去。
+releaseBattery(){
+const g=this.batUse;
+this.batUse=null; this.batteryTgt=null; this.batT=0;
+if(!g) return;
+if(g.crewBot===this) g.crewBot=null;
+if(g.user===this) g.user=null;
+if(g.cdLock!==undefined) g.cdLock=nowT+EMP_REARM_T;
+}
+// A#9 岸防炮操作 (契约 §6): 钉站位 → 搜敌艇 → 转炮 → 对准才开炮 (唯一入口 batteryFire)。
+// 与 updateEmplacement 的 atGun 分支同构; 差异只有"目标在海上"(navalCraft) 与"炮位/弹速单源在 15f"。
+updateBatteryGun(dt){
+const g=this.batUse;
+if(!g||g.alive===false||g.crewBot!==this){ this.releaseBattery(); return; }
+this.crouch=false; this.prone=false;
+this.vel.set(0,0,0);
+const sp=this.emplStandSpot(g,'bat');
+this.pinEmpl(sp.x,sp.z,dt);                       // 站位单源 (15f batteryStandSpot; 缺模块时同口径兜底)
+this.pos.y=standHeight(this.pos.x,this.pos.z,this.pos.y+1);
+// 搜敌艇 (与 15f pickTarget 同条件: 敌队/未沉/射程内/LOS 通)
+const tgt=batteryTargetFor(g);
+this.batteryTgt=tgt;
+if(!tgt){ this.releaseBattery(); this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0); return; }
+// 提前量 = 距离 / 弹速 (弹速取 SHELL_SPD_NAVAL 单源); 目标速度走 navTgtVel (15d 的 vel+yaw 语义)
+// ★2026-09-26E (审计 8): 瞄准解算走模块级单源 batteryAimSolve —— 15f 退役的 Battery.aim 委托同一支,
+// 两边共用"回旋 ±BATTERY_YAW_MAX + 俯角下限 batteryPitchFloor"这一套限界 (旧版本函数内联、15f 那份旧口径)。
+const solve=batteryAimSolve(g,tgt,dt);
+const ey=solve.ey, dh=solve.dh, wantYaw=solve.wantYaw, wantPit=solve.wantPit;
+this.yaw=(g.yaw&&g.yaw.rotation)?(g.face||0)+g.yaw.rotation.y:wantYaw;
+// A#10 审计③ 的一致性口径: 操作者的身体朝向/俯仰与炮口同源 (旧版只同步 yaw, pitch 停在进炮位之前的值)
+this.pitch=clamp(wantPit,solve.pitLo,0.75);
+if(!solve.aligned||g.cd>0) { this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0); return; }
+// 炮口预检 (LOS 被自家胸墙/地形挡住 → 短退避重试, 与 atGun 的"被挡 3.5s"同档)。
+// 起点走 15f 的 muzzle() 单源 (含 3.66m 前移 + 当前俯仰), 缺模块时才用本地等价式 —— 不自己另写一套前移量。
+const er=0.02*DIFF_TABLE[SETTINGS.diff].spreadMul;
+const dir=V3(Math.sin(wantYaw)*Math.cos(wantPit),Math.sin(wantPit),Math.cos(wantYaw)*Math.cos(wantPit));
+dir.x+=rand(-er,er); dir.y+=rand(-er,er)*0.6; dir.z+=rand(-er,er); dir.normalize();
+const o=(typeof g.muzzle==='function')?g.muzzle():V3(g.x,by,g.z).addScaledVector(dir,3.66);
+const chk=raycastWorld(o,dir,dh);
+if(chk&&chk.dist<=dh-1.5){ g.cd=BAT_BLOCKED; this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0); return; }
+// 唯一开火入口 (契约 §6 冻结签名 batteryFire(g,dir,owner)); 冷却在 Battery.fire 内部单源重置
+this._src=g.name||'反舰炮台';
+if(typeof batteryFire==='function') batteryFire(g,dir,this);
+this.mesh.armR.sh.userData.swing=0.2;
+this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0);
+}
 updateEmplacement(dt){
 const g=this.empUse;
 this.crouch=false; this.prone=false;
@@ -1333,18 +1931,22 @@ this.vel.set(0,0,0);
 this.pos.y=standHeight(this.pos.x,this.pos.z,this.pos.y+1);
 g.cd-=dt;
 if(g.kind==='at'){
-this.pos.x=g.x-Math.sin(g.face)*AT_CREW_DIST; // 站位单源常量 (00-config; 旧 1.2 与玩家 1.3 均嵌沙袋墙)
-this.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
+this.pinEmpl(g.x-Math.sin(g.face)*AT_CREW_DIST, g.z-Math.cos(g.face)*AT_CREW_DIST, dt); // 站位单源 (00-config AT_CREW_DIST); 2026-09-20 落位过渡同 pinEmpl
 const tk=enemyTankNear(this,160);
 if(tk){
 const wantYaw=Math.atan2(tk.pos.x-g.x,tk.pos.z-g.z);
-// 解除回旋钳制: 360°转向目标
-const rel=angDiff(g.face,wantYaw);
+// 方向机限界 (★2026-09-26 修, P1-12): 与玩家侧同一条 (00-config AT_YAW_MAX) —— 旧版 360° 转向目标,
+// 炮口会从操作手躯干中间穿过去 (炮口 2.69m / 站位 0.9m)。限界外的目标: 炮口停在限界上,
+// 下面的"转塔对准才开火"门 (容差 0.05) 自然不通过 ⇒ 不会出现"炮口朝西、炮弹朝东"的错位弹道。
+const rel=clamp(angDiff(g.face,wantYaw),-AT_YAW_MAX,AT_YAW_MAX);
 g.yaw.rotation.y=dampF(g.yaw.rotation.y,rel,4,dt);
 this.yaw=g.face+g.yaw.rotation.y;
 const dh=Math.hypot(tk.pos.x-g.x,tk.pos.z-g.z);
-const pit=clamp(Math.atan2((tk.pos.y+1.2)-g.y,dh),-0.55,0.6);
+const pit=clamp(Math.atan2((tk.pos.y+1.2)-g.y,dh),-AT_PITCH_DOWN,0.6); // 俯角下限单源 (00-config)
 g.pitch.rotation.x=dampF(g.pitch.rotation.x,-pit,4,dt);
+// A#10 审计③: 操作者的枪口俯仰与炮口同源 —— 旧版只同步 yaw, this.pitch 停在"进炮位之前"的值
+// (实测整个上炮期间 pitchRange=0, 与炮口最大差 0.43 rad ≈ 24°; 蹲着进炮位就一直仰角 8°)。
+this.pitch=clamp(pit,-AT_PITCH_DOWN,0.6);
 if(Math.abs(angDiff(g.face+g.yaw.rotation.y,wantYaw))<0.05&&g.cd<=0&&this.reactT<=0){
 const dir=V3(Math.sin(this.yaw)*Math.cos(pit),Math.sin(pit),Math.cos(this.yaw)*Math.cos(pit));
 const er=0.02*DIFF_TABLE[SETTINGS.diff].spreadMul; // AI 散布档 (DIFF_TABLE)
@@ -1357,22 +1959,31 @@ emplATFire(g,this,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-co
 }
 }
 } else {
-this.pos.x=g.x; this.pos.z=g.z-0.9;
-const pl=enemyPlaneAlive(this.team);
+this.pinEmpl(g.crew?g.crew.x:g.x, g.crew?g.crew.z:(g.z-AA_CREW_DIST), dt); // 2026-09-20 闪现修复: AA 位落位过渡 (与 emplStandSpot 'aa' 同源)
+const pl=aaSpreadTarget(this.team,this,g.x,g.z); // 7d-甲: 分摊账本 (旧 enemyPlaneAlive 齐射第一架绝迹)
+// 7b-乙 反应窗 (AA_DIFF.react): 换目标/新目标进距后不即刻开火 —— 旧版无反应门, 新目标当帧就泼弹。
+// 专用 aaReactT, 不与步兵 reactT 混账 (离炮位后枪械反应不该吃高炮的账); 瞄准跟踪照常, 只封扳机。
+if(pl){
+if(pl!==this._aaTgt){ this._aaTgt=pl; this.aaReactT=Math.max(this.aaReactT||0,AA_DIFF[SETTINGS.diff].react); }
+if(this.aaReactT>0) this.aaReactT-=dt;
+}
 if(pl){
 const lead=pl.pos.clone();
 const dist=lead.distanceTo(V3(g.x,g.y,g.z));
-const tof=dist/SHELL_SPD;
-lead.x+=Math.sin(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-25,25);
-lead.z+=Math.cos(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-25,25);
-lead.y+=Math.sin(pl.pitch)*pl.speed*tof*0.5+rand(-8,8);
+const tof=dist/FLAK_SPD; // 7d-乙: 高炮弹速单源 FLAK_SPD (旧借 SHELL_SPD, 四联 20mm 定稿后独立)
+// 7b-甲: 瞄准点随机散布按难度分档 (AA_DIFF 单源; 旧写死 ±25/±8 = 老兵档等效, 对机伤害倍率走 Plane.takeDmg 的 DIFF_TABLE.dmgMul)
+const aj=AA_DIFF[SETTINGS.diff].jit, ajY=aj*0.32;
+lead.x+=Math.sin(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-aj,aj);
+lead.z+=Math.cos(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-aj,aj);
+lead.y+=Math.sin(pl.pitch)*pl.speed*tof*0.5+rand(-ajY,ajY);
 const wantYaw=Math.atan2(lead.x-g.x,lead.z-g.z);
 g.yaw.rotation.y=angleLerpTo(g.yaw.rotation.y,wantYaw,3*dt);
 this.yaw=g.yaw.rotation.y;
 const dh=Math.hypot(lead.x-g.x,lead.z-g.z);
 const pit=clamp(Math.atan2(lead.y-g.y,Math.max(dh,3)),-0.45,1.35);
 g.pitch.rotation.x=dampF(g.pitch.rotation.x,-pit,5,dt);
-if(g.cd<=0&&dist<220){
+this.pitch=clamp(pit,-0.45,1.35);   // A#10 审计③: 高炮操作者的仰角同样跟炮口 (旧版停在进炮位前的值)
+if(g.cd<=0&&dist<EMPL_AA_ENGAGE_R*(NIGHT_MODE?NIGHT_CFG.rangeMul:1)*WX_CFG.rangeMul&&this.aaReactT<=0){ // 7b-乙: 反应窗走完才准开火; 交战距离单源 (2026-09-30 空对地平衡批, 旧写死 220); 夜档 ×rangeMul (昼夜设计 §3.3)
 g.cd=EMPL_AA_CD; // D1=c: 与玩家同档 0.34 (旧 0.62 分叉), Bot 强度差异走 DIFF_TABLE 散布
 const dir=V3(Math.sin(wantYaw)*Math.cos(pit),Math.sin(pit),Math.cos(wantYaw)*Math.cos(pit));
 const er=0.05*DIFF_TABLE[SETTINGS.diff].spreadMul;
@@ -1382,14 +1993,20 @@ this.lastFiredT=nowT;
 }
 }
 }
-this.updateMesh(dt,0);
+// 落位过渡期给"走路速度": 腿在迈, 而不是滑行 (2026-09-20 闪现修复的观感配套)
+this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0);
 }
 followPath(dt){
-if(!this.path||this.pathI>=this.path.length){ this.path=null; return null; }
+// 2026-09-20 闪现修复 (可疑点#5 等价改写): 旧版对"已到达的路点"递归 `return this.followPath(dt)`,
+// 退化路径 (waypoint 重合/极近) 会一次吃掉大量路点并突然折向, 且有栈深风险。行为等价 + 有界: 同一次调用
+// 仍然跳过所有已到达的路点, 但改为迭代 —— 实测该现象 0 次 (pathI 单帧跳变 ≥6 = 0), 属预防性改写。
+while(this.path&&this.pathI<this.path.length){
 const wp=this.path[this.pathI];
 const dx=wp[0]-this.pos.x, dz=wp[1]-this.pos.z;
-if(dx*dx+dz*dz<1.44){ this.pathI++; return this.followPath(dt); }
+if(dx*dx+dz*dz<1.44){ this.pathI++; continue; }
 return Math.atan2(dx,dz);
+}
+this.path=null; return null;
 }
 moveDir(yaw,speed,dt){
 if(this.unstickT>0){
@@ -1399,9 +2016,10 @@ speed=Math.min(speed,2.2); // 脱困侧蹿限速: 大步幅侧跳看起来就是
 } else {
 const probe=(a)=>{
 const px=this.pos.x+Math.sin(a)*1.1, pz=this.pos.z+Math.cos(a)*1.1;
-if(occBlocked(px,pz)) return false;
+if(occBlocked(px,pz,this.swim||this.onCapDeck)) return false; // 游泳态 (2026-09-18): 深水格放行, 只躲实体 —— 落水后游得回岸; onCapDeck (P4 2026-09-30): 站在大舰甲板上时水障格同样放行 (甲板是海上陆地, OCC 里那格是海)
 // 膝高射线兜底: 半埋矮石/矮坎低于占用格门槛( maxY<gh+0.5 ), 占用格看不见但物理挡人
-const low=raycastWorld(V3(this.pos.x,this.pos.y+0.35,this.pos.z),V3(Math.sin(a),0,Math.cos(a)),1.1);
+// (复用槽 _prO/_prD: raycastWorld 只读入参, 结果走 _rcResult 共享槽 —— 不跨调用持有)
+const low=raycastWorld(_prO.set(this.pos.x,this.pos.y+0.35,this.pos.z),_prD.set(Math.sin(a),0,Math.cos(a)),1.1);
 return !low;
 };
 if(!probe(yaw)){
@@ -1409,7 +2027,14 @@ let found=false;
 for(const da of [0.55,-0.55,1.1,-1.1,1.65,-1.65]){
 if(probe(yaw+da)){ yaw+=da; found=true; break; }
 }
-if(!found) yaw+=Math.PI*(Math.random()<0.5?0.5:-0.5);
+// 全向都走不动时的兜底换向 (2026-09-20 闪现/打摆修复, 可疑点#6): 旧版逐帧重掷 Math.random() ——
+// 相邻两帧可能一边一个方向 (moveYaw 被下面的 angleLerpTo 平滑, 结果就是原地左右打摆)。
+// 改为方向记忆 + 冷却: 同一侧至少坚持 DIR_FLIP_MIN 秒, 到期才允许换边。
+if(!found){
+if(this.dirFlipT>0) this.dirFlipT-=dt;
+if(this.dirFlipT<=0){ this.dirFlipSign=Math.random()<0.5?1:-1; this.dirFlipT=DIR_FLIP_MIN; }
+yaw+=HPI*this.dirFlipSign;
+}
 }
 }
 	const cr=this.prone?0.28:this.crouch?0.5:1;
@@ -1421,16 +2046,89 @@ if(!found) yaw+=Math.PI*(Math.random()<0.5?0.5:-0.5);
 	const rd=riverDirAt(this.pos.x,this.pos.z);
 	if(rd){ this.pos.x+=rd[0]*1.5*dt; this.pos.z+=rd[1]*1.5*dt; }
 	}
-	// 浅水/支流 (淞沪圩田): 涉水减速, 无激流伤害
-	const shal=!riv&&inShallowChannel(this.pos.x,this.pos.z);
-this.vel.x=Math.sin(yaw)*speed*cr*wf*(riv?0.4:(shal?0.55:1));
-this.vel.z=Math.cos(yaw)*speed*cr*wf*(riv?0.4:(shal?0.55:1));
-// 坡度物理 (2026-09-12): 与玩家同规则 —— 上坡>40°减速/>65°封(沿等高线滑), 下坡不设限
+	// ── 游泳 (2026-09-18 塔拉瓦批, 与玩家同规则 —— 纲领第 2 条) ──
+	// Bot 无真实重力: 水体状态按**水深**判 (玩家按脚底-水面高差判, 两者在深水里等价)。
+	// 落水自救: 游泳态一律朝最近岸游; 游泳不可开火 (见 aimShot 闸门); 憋气/溺水与玩家同一支代码。
+	// ── 水态 (★2026-09-26E 审计 23 修复: 改读 03-terrain 的**水态单源** waterStateAt) ──
+	// 旧版按 waterDepthAt 判"我是否在水里", 而 waterDepthAt 内部用 heightAt(...,true) **强制取河床、无视桥面**
+	// (那是给"水面高度计算"用的口径) ⇒ 站在桥面时"水深" = 桥面到河床 (胡康大桥 5.73m / 北石拱桥 5.86m) > SWIM_DEPTH
+	// ⇒ 判游泳 ⇒ 同一帧把 y 从桥面拽到桥下水面 (wy−0.95 ≈ −8.92) ⇒ **AI 走上任何"桥下水深>SWIM_DEPTH"的桥
+	// 必然穿桥落水** (实测: 桥西(−52,2)→桥东(46,−6) 的路径确实过桥, 900 帧后停在 (−9.6,16.3)、离目标 59.9m),
+	// 而胡康/淞沪的主题通道正是这几座桥。
+	// waterStateAt 把"脚在水面之上"判 dry ⇒ 桥面/栈桥面/干地不会误判 (与玩家同一条单源, 纲领第 2 条)。
+	const WS=waterStateAt(this.pos.x,this.pos.y,this.pos.z);
+	const swimming=WS.state==='swim';
+	this.swim=swimming;
+	this.wading=WS.state==='wade';
+	const wet=WS.state==='wet';
+if(swimming){
+// ★2026-10-03 (纯海图游泳航向劫持修复): 落水自救"朝最近岸游"在 opensea 是朝 400m 外的图缘游
+// (shoreDist 恒正, shoreDirAt 永有值) —— 被炸下甲板的兵一路游向世界边缘。改为: 朝"要回的舰"游
+// (objective 所在舰优先, 否则最近的本队舰), 进 boardR 圈由 15h capBotTick 的游泳爬舷接手;
+// 够不着 (舰在巡航/全瘫) 就在本队舰旁溺亡回收 —— 大海致命化口径不变, 只是不再游向地平线。
+let swT=null;
+if(CAMPAIGN.terr==='opensea'&&typeof capitalShips!=='undefined'&&capitalShips.length){
+let tS=(this.objective&&this.objective.ship!==undefined)?capitalShips[this.objective.ship]:null;
+if(!tS||tS.team!==this.team){
+let bd=1e9;
+for(const s of capitalShips){
+if(s.team!==this.team) continue;
+const sd=(typeof capRectDist==='function')?capRectDist(s,this.pos.x,this.pos.z):Math.hypot(this.pos.x-s.pos.x,this.pos.z-s.pos.z);
+if(sd<bd){ bd=sd; tS=s; }
+}
+}
+if(tS) swT=(typeof capNearestSurfPt==='function')?capNearestSurfPt(this,tS,0):{x:tS.pos.x,z:tS.pos.z};
+}
+if(swT){ yaw=Math.atan2(swT.x-this.pos.x,swT.z-this.pos.z); this.yaw=yaw; }
+else{ const sd=shoreDirAt(this.pos.x,this.pos.z); if(sd){ yaw=Math.atan2(sd[0],sd[1]); this.yaw=yaw; } }
+// ★航向落回 this.yaw (2026-10-03): 朝向判定 (faceTo/moveYaw 望向) 跑在 WS 块之前, 劫持只改了
+//   积分用的局部 yaw ⇒ this.yaw 仍是旱地决策的 moveYaw —— 泳者"横着游" (T10 dot 判负即此)。
+//   WS 块是 update 的最后一段, 这里落回 this.yaw 即为本帧最终朝向; 岸图自救的朝岸游同样受益。
+speed=Math.min(speed,SWIM_SPD);
+}
+	// 水态三档速度系数 (2026-09-26E 审计 33/26): 游泳=1 (上面已把速度钳到 SWIM_SPD) / 涉水 ×0.55 / 湿沙 ×0.9;
+	// 深谷激流另吃 ×0.4 而**游泳态不吃** (与玩家同口径: 泳速 2.0 > 冲移 1.5, 掉进河里游得回岸)。
+	// 旧版这里写 `inShallowChannel?0.55`: 只覆盖"浅河/汊港/鱼塘"这类地图语义 ⇒ 塔拉瓦礁盘那样的开阔浅水
+	// 不减速 (Bot 涉水全速跑, 玩家 ×0.55), 冰河/湿沙上又叠出 ×0.55×0.9 的双罚 ⇒ 改按水态单源分档。
+	const wmul=swimming?1:(riv?0.4:(this.wading?WADE_SPD:(wet?WET_SPD:1)));
+// 持枪移速系数 (2026-09-28 阶段三 P1, 用户裁定"不同武器移速不同, 手枪最快"): 与玩家同源武器表 wSpd (09a-defs)。
+// 游泳不乘 (泳速已钳 SWIM_SPD, 与玩家口径一致)。
+const gwsp=swimming?1:((this.def&&this.def.wSpd)||1);
+this.vel.x=Math.sin(yaw)*speed*cr*wf*wmul*gwsp;
+this.vel.z=Math.cos(yaw)*speed*cr*wf*wmul*gwsp;
+// 坡度物理 (2026-09-12): 与玩家同规则 —— 上坡>40°减速/>65°封(沿等高线滑), 下坡不设限 (游泳态不适用)
+if(swimming){ this.pos.x+=this.vel.x*dt; this.pos.z+=this.vel.z*dt; }
+else{
 const mvS=slopeGateMove(this.pos,this.vel.x*dt,this.vel.z*dt);
 this.pos.x+=mvS[0]; this.pos.z+=mvS[1];
+}
 collideMove(this.pos,0.4);
+if(swimming){
+// 浮于水面下 0.95m (头露出水面), 受海床限制; 不穿水面也不穿水底
+const bed=heightAt(this.pos.x,this.pos.z,true);
+const wy=waterYAt(this.pos.x,this.pos.z);
+// 2026-09-26E (审计 37): 与玩家同一支波场 (一视同仁)
+const wvB=(typeof navalWaveAt==='function')?navalWaveAt(this.pos.x,this.pos.z):0;
+this.pos.y=dampF(this.pos.y,Math.max(wy-FLOAT_PAD+wvB,bed+0.12),8,dt);
+}else{
 const gh=standHeight(this.pos.x,this.pos.z,this.pos.y+0.6);
 this.pos.y=dampF(this.pos.y,gh,20,dt);
+}
+// 憋气/溺水 (与玩家同一支规则; AI 不主动下潜 → 常态不触发, 规则同源以备日后两栖载具/被击落水)
+{
+const hd=headDepthAt(this.pos.x,this.pos.y,this.pos.z);
+if(hd>0){
+this.oxy=(this.oxy===undefined?1:this.oxy)-dt/OXY_MAX;
+if(this.oxy<=0){
+this.oxy=0;
+this._drownAcc=(this._drownAcc||0)+OXY_DMG*dt;
+if(this._drownAcc>=1){ const dd=Math.floor(this._drownAcc); this._drownAcc-=dd; this.damage(dd,null,false); }
+}
+}else{
+this.oxy=Math.min(1,(this.oxy===undefined?1:this.oxy)+dt/OXY_REFILL);
+this._drownAcc=0;
+}
+}
 }
 faceTo(p,dt,rate){
 const wantYaw=Math.atan2(p.x-this.pos.x,p.z-this.pos.z);
@@ -1440,7 +2138,10 @@ const dh=Math.hypot(p.x-this.pos.x,p.z-this.pos.z);
 this.pitch=dampF(this.pitch,Math.atan2(dy,Math.max(dh,0.1)),8,dt);
 }
 shootAt(tgt,def2){
-const aimP=V3(tgt.pos.x,tgt.pos.y+(tgt.prone?0.32:tgt.crouch?0.9:1.25)+rand(-0.12,0.2),tgt.pos.z);
+// 竖直瞄准偏置 (2026-09-28 阶段三 P1): 旧 rand(-0.12,0.2) 均值 +0.04 系统性偏上, 胸口线常扫进头部球
+// (眼高 1.62+0.06, 球心 1.68) ⇒ "总是被爆头秒"的体感主因之一。改为 rand(-0.15,0.1) 均值 -0.025:
+// 压低 ~7cm, 爆头从"常发"回落到"偶发" —— 只动 Bot 瞄准分布, 玩家火力不受影响。
+const aimP=V3(tgt.pos.x,tgt.pos.y+(tgt.prone?0.32:tgt.crouch?0.9:1.25)+rand(-0.15,0.1),tgt.pos.z);
 if(tgt.vel){ aimP.x+=tgt.vel.x*rand(0,0.12); aimP.z+=tgt.vel.z*rand(0,0.12); }
 this.aimShot(aimP,def2,tgt.vel?Math.hypot(tgt.vel.x,tgt.vel.z):0);
 }
@@ -1449,6 +2150,7 @@ shootAtPos(p,def2){
 this.aimShot(V3(p.x,p.y,p.z),def2,0);
 }
 aimShot(aimP,def2,tSpd){
+if(this.swim) return; // 游泳/潜水不可开火 (2026-09-18 用户定案; 与玩家 playerFireTick 闸门同口径)
 if(def2) this.pMag--;
 else this.mag--;
 const useDef=def2||this.def;
@@ -1477,15 +2179,29 @@ muzzleP.y-=0.12;
 fireBullet(this,eye,dir,useDef,muzzleP);
 this.mesh.armR.sh.userData.swing=0.12;
 }
+// A#10 审计② 两连杆矢状面反解 —— 公式单源已提到 **11-soldiers.legIKPose** (2026-09-26 A2):
+// 原来的注释与实现留在那边; 这里只做同名薄转发, 免得玩家第三人称 (20-player) 再抄一份又漂移。
+legIK(hp,fy,dz,kneeUp){ return legIKPose(hp,fy,dz,kneeUp); }
 updateMesh(dt,speed){
 const m=this.mesh;
 m.root.position.copy(this.pos);
 m.root.rotation.set(0,this.yaw,0);
-const engaged=(this.target&&nowT-this.lastSeenT<4.5)||this.mgUse||this.empUse;
+// A#10 审计③: 操作固定炮位/岸防炮时也按"据枪瞄准"姿态持枪 (旧版 engaged 不含 batUse ⇒ 上炮后枪口姿态掉回低持枪)
+const engaged=(this.target&&nowT-this.lastSeenT<4.5)||this.mgUse||this.empUse||this.batUse;
 const prone=this.prone, crouch=this.crouch&&!prone;
 const sprint=speed>4.4&&!engaged&&!prone;
 const pelY=prone?0.22:crouch?0.6:0.94;
 m.pelvis.position.y=dampF(m.pelvis.position.y,pelY,10,dt);
+// 重生登场 (2026-09-20 闪现修复): 重生是设计必需的远处换位 (死点→出生点, 可达 300m+), 尸体早已隐藏,
+// 所以不存在"尸体残影"; 但新兵是凭空出现的。这里给 SPAWN_UP_T 秒的登场动作 —— 从低处起身到位 +
+// 屈膝起身姿势, 让"这里多了一个人"有一次可见的过渡, 而不是无来由地"闪"出来。
+// (只作用于 0.5s 内的观感偏移, 不改任何 AI/位置/命中判定)
+if(this.spawnUpT>0){
+this.spawnUpT-=dt;
+const k1=clamp(1-Math.max(this.spawnUpT,0)/SPAWN_UP_T,0,1);
+m.root.position.y-=SPAWN_UP_DIP*(1-k1);
+m.pelvis.position.y=Math.min(m.pelvis.position.y,0.22+0.72*k1);
+}
 const torsoX=prone?1.5:crouch?0.14:(sprint?0.3:0.05);
 m.pelvis.rotation.x=dampF(m.pelvis.rotation.x,torsoX,8,dt);
 const pp=m.pelvis.rotation.x;
@@ -1498,20 +2214,37 @@ const t=this.animT, S=Math.sin(t);
 const sw=prone?clamp(speed/1.2,0,1)*0.35:clamp(speed/4,0,1.3)*0.62;
 if(prone){
 // 匍匐: 双腿伸直贴地拖在身后, 爬行时交替蹬腿
-m.legL.hip.rotation.x=dampF(m.legL.hip.rotation.x,0.04+S*sw*0.5,10,dt);
-m.legR.hip.rotation.x=dampF(m.legR.hip.rotation.x,0.04-S*sw*0.5,10,dt);
-m.legL.knee.rotation.x=dampF(m.legL.knee.rotation.x,0.08+Math.max(0,S)*sw*0.9,10,dt);
-m.legR.knee.rotation.x=dampF(m.legR.knee.rotation.x,0.08+Math.max(0,-S)*sw*0.9,10,dt);
-} else if(crouch){
-m.legL.hip.rotation.x=dampF(m.legL.hip.rotation.x,-1.05+S*sw*0.5,10,dt);
-m.legR.hip.rotation.x=dampF(m.legR.hip.rotation.x,-0.5-S*sw*0.5,10,dt);
-m.legL.knee.rotation.x=dampF(m.legL.knee.rotation.x,1.3,10,dt);
-m.legR.knee.rotation.x=dampF(m.legR.knee.rotation.x,0.95,10,dt);
+// A#10 审计②: 改为"脚落在地面上"的反解 (旧版写死 hip=0.04 让腿在趴姿过渡期指向地面 → 脚穿地 0.72m)。
+// 高度基准取**当前**骨盆高 (m.pelvis.position.y, 仍在 dampF 过渡中), 不是目标高 —— 否则站→趴的
+// 0.5s 里骨盆还在 0.94 而反解按 0.22 排腿, 腿被拉长 → 脚依旧穿地。脚关节目标 ~0.11m, 爬行时前后交替 ±0.16m。
+const hpNow=m.pelvis.position.y;
+const cr=clamp(speed/1.2,0,1)*0.35;
+const LL=this.legIK(hpNow,0.11+Math.max(0,S)*0.13*cr,-0.92+S*0.16*cr,true);
+const RR=this.legIK(hpNow,0.11+Math.max(0,-S)*0.13*cr,-0.92-S*0.16*cr,true);
+m.legL.hip.rotation.x=dampF(m.legL.hip.rotation.x,LL.hip-pp,10,dt);
+m.legR.hip.rotation.x=dampF(m.legR.hip.rotation.x,RR.hip-pp,10,dt);
+m.legL.knee.rotation.x=dampF(m.legL.knee.rotation.x,LL.knee,10,dt);
+m.legR.knee.rotation.x=dampF(m.legR.knee.rotation.x,RR.knee,10,dt);
 } else {
-m.legL.hip.rotation.x=S*sw-torsoX*0.6;
-m.legR.hip.rotation.x=-S*sw-torsoX*0.6;
-m.legL.knee.rotation.x=Math.max(0,-S)*sw*1.5+0.06;
-m.legR.knee.rotation.x=Math.max(0,S)*sw*1.5+0.06;
+// A#10 审计② 的第三段 (2026-09-26 A3 补): 原「站姿」分支是**直接写死目标角、且不过阻尼** ——
+// 站↔蹲/趴切换的那一帧关节整段跳过去 (实测 hip 单帧 85°、knee 113°), 且站姿角度隐含"骨盆在 0.94",
+// 骨盆还在低位时照站立角度排腿 ⇒ 鞋底入地最深 0.37m、持续约 0.2s。
+// 这里与蹲/趴**同一口径**: 用*当前*骨盆高反解 (脚落在地面), 再与站立摆步角按骨盆高度插值。
+//   站直 (hp=0.94) ⇒ 插值权 0 ⇒ 逐位等于原站立值 (已验收站姿零漂移);
+//   蹲到位 (hp=0.60) ⇒ 权 1 ⇒ 逐位等于原蹲姿反解 (与旧分支同目标, 零漂移);
+//   中间 (起身/下蹲的 0.3s) ⇒ 腿随骨盆屈伸, 不再"悬空半步/入地半步"。
+// 于是蹲姿分支被本条完全吸收 —— 同一帧只有一个写者。
+const hpNow=m.pelvis.position.y;
+const kw=clamp((0.94-hpNow)/(0.94-0.60),0,1);
+const wL=clamp(speed/4,0,1.3)*0.62;                                    // = sw (站/蹲同式)
+const cL=this.legIK(hpNow,0.13+Math.max(0,S)*0.12*wL,0.16+S*0.20*wL,false);
+const cR=this.legIK(hpNow,0.13+Math.max(0,-S)*0.12*wL,0.16-S*0.20*wL,false);
+const jHipL=S*sw-torsoX*0.6, jHipR=-S*sw-torsoX*0.6;
+const jKneeL=Math.max(0,-S)*sw*1.5+0.06, jKneeR=Math.max(0,S)*sw*1.5+0.06;
+m.legL.hip.rotation.x=dampF(m.legL.hip.rotation.x,lerp(jHipL,cL.hip-pp,kw),10,dt);
+m.legR.hip.rotation.x=dampF(m.legR.hip.rotation.x,lerp(jHipR,cR.hip-pp,kw),10,dt);
+m.legL.knee.rotation.x=dampF(m.legL.knee.rotation.x,lerp(jKneeL,cL.knee,kw),10,dt);
+m.legR.knee.rotation.x=dampF(m.legR.knee.rotation.x,lerp(jKneeR,cR.knee,kw),10,dt);
 }
 const rl=this.reloadT>0;
 // 持枪姿态: shX=肩前后摆, shY=肩水平转, shZ=肩外展(横向), el=肘弯
@@ -1531,6 +2264,10 @@ shL=-1.35-ap*0.85; elL=-0.14; shLz=0.55;
 // 疾跑: 枪侧向横端在胸前, 双手保持握枪, 随步幅轻微起伏
 shR=-0.62+S*0.07; elR=-1.05; shRy=0.3; shRz=-0.12;
 shL=-0.78-S*0.07; elL=-1.05; shLy=0.55; shLz=0.35;
+// A#10 审计⑥: 疾跑分支也要有换弹动作 —— 旧版补丁行是 `if(rl&&!sprint&&!prone)`, 疾跑时换弹
+// 左臂增量恒为 0 (实测 dSH=0.036/dEL=0.00 rad, 与站立 0.34/1.17 对比 = 完全无动作)。
+// 疾跑换弹: 左手脱离横向持枪位下探到弹匣并抖动, 右臂把枪压在胸前稳住。
+if(rl){ shL=-0.86+Math.sin(nowT*7)*0.13; elL=-1.72; shLz=0.22; shR=-0.66+S*0.07; elR=-1.18; }
 } else {
 // 低持枪警戒: 枪口斜向下, 双手仍在枪上
 shR=-0.42; elR=-1.3; shRz=-0.24;
@@ -1540,6 +2277,62 @@ if(rl&&!sprint&&!prone){ shL=-0.8+Math.sin(nowT*7)*0.13; elL=-1.45; shLz=0.18; }
 // 侧身补偿: 躯干扭转后手臂仍指向枪身
 shRy+=-m.pelvis.rotation.y*0.85;
 shLy+=-m.pelvis.rotation.y*0.85;
+// (2026-09-26 B3: 原地的 "开火后坐 swing" 自加项已挪到 IK 混合**之后** —— 放这里会被 handK=1 的 lerp 抹掉)
+// ── 契约 J §12.4 (2026-09-21): 双手持枪态 = 两连杆手臂反解把手**放到枪上** ──────────────────
+// 顺序 (Lead 冻结 §12.4.3): 先算 gunG 目标角 → 用该角取 grip/fore 点 → armIK → 与基准姿态 lerp → dampF 写回。
+// 语义: armIK 写的是**躯干局部绝对角**(rotation.y 恒 0, 不乘 setUpperMirror), 镜像只作用于姿态机基准值
+// (所以下面先把基准值的 y/z 乘 MIR, 再与不乘 MIR 的 IK 值混合, 最后直接写回)。
+// handK: 持枪 1 / 刺刀 0.35 / 投弹·包扎 0。**左臂在换弹时单独取 0** —— 换弹的语义就是左手离枪去弹匣
+// (审计⑥ 刚修好"疾跑/匍匐换弹可见", 若左手也被钉回护木, 换弹动作会重新消失); 右臂仍为 1 (枪始终在右手)。
+const gunY_t=-m.pelvis.rotation.y+(sprint?0.95:0);
+const gunZ_t=sprint?0.16:0;
+// A#10 审计①: 枪身挂在骨盆之下, 骨盆前倾 pp 会把枪口一起带偏 —— 旧版只补偿 pitch, 于是"据枪瞄准"时
+// 枪口仰角恒为 pitch - torsoX (实测 站 -0.05 / 蹲 -0.14 / 趴 -0.10 rad ≈ 2.9°/8.0°/5.7°)。减 pp 后仰角 = pitch。
+const gunPitch=(engaged||this.mgUse||this.empUse||this.batUse)?-clamp(this.pitch,-0.7,0.7):(sprint?0.3:0.25);
+const gunX_t=gunPitch-pp;
+const handK=(this.state==='melee')?0.35:((this.state==='nade'||this.state==='atnade'||this.nadeAnimT>0||this.bandageT>0)?0:1);
+const handKL=rl?0:handK;
+// ↑ **不许按 §12.4 字面删掉 `rl`** (Lead 2026-09-21 追认): 换弹的语义就是"左手离枪去弹匣"——审计⑥ 刚修好
+// "疾跑/匍匐换弹可见", 若左手也被 IK 钉回护木, 换弹会重新变成看不见的动作。契约 J 的"手在枪上"针对的是
+// **持枪态**, 不是换弹态。右臂仍为 1 (枪始终在右手)。
+// 契约 J §12.1: 上半身镜像符号 —— 只作用于基准值 (右=-X 已在 11-soldiers 落地)
+const MIR=(typeof setUpperMirror==='function')?setUpperMirror():((typeof UPPER_MIRROR!=='undefined')?UPPER_MIRROR:-1);
+shRy*=MIR; shLy*=MIR; shRz*=MIR; shLz*=MIR;
+let ikRes=null;
+if((handK>0||handKL>0)&&typeof armIK==='function'&&typeof gunGripPoint==='function'){
+// ★ 2026-09-26 A1: 三个锚点都传 pp —— 挂点 (含枪模位置) 随躯干俯角给, 趴姿另取一组 (11-soldiers.gunMountOf);
+// 锚点不传 pp 就会与枪模实际位置差半米 (趴姿), 手会抓空。
+const gp=gunGripPoint(this.gunKind,gunX_t,gunY_t,gunZ_t,pp);
+const L1=(typeof ARM_L1==='number')?ARM_L1:0.32, L2=(typeof ARM_L2==='number')?ARM_L2:0.30;
+const reach=L1+L2-0.02;
+const shLp={x:0.28,y:0.5,z:0};   // 左肩在躯干局部系 (ARM_SIDE.L=+1)
+let fp=(typeof gunForePoint==='function')?gunForePoint(this.gunKind,gunX_t,gunY_t,gunZ_t,pp):gp;
+// infantry 实测提醒: 冻结挂点下左肩到护木 ≈0.85m > 臂长 0.62m ⇒ 左手沿**枪身轴**回退到可达的 t
+// (gunAxisPoint), 手仍在枪上而不是空气里。回退 4 步即可 (t: 1 → 0.25)。
+if(typeof gunAxisPoint==='function'){
+let t=1;
+for(let i=0;i<4;i++){
+fp=gunAxisPoint(this.gunKind,t,gunX_t,gunY_t,gunZ_t,pp);
+if(Math.hypot(fp.x-shLp.x,fp.y-shLp.y,fp.z-shLp.z)<=reach) break;
+t=Math.max(0,t-0.25);
+}
+}
+// armIK 直接写 group.rotation —— 先把 IK 结果读回来, 再与基准值混合, 最后由 dampF 统一写回
+const resR=armIK(m.armR.sh,m.armR.elm,gp);
+const ikR={x:m.armR.sh.rotation.x,y:m.armR.sh.rotation.y,z:m.armR.sh.rotation.z,el:m.armR.elm.rotation.x};
+const resL=armIK(m.armL.sh,m.armL.elm,fp);
+const ikL={x:m.armL.sh.rotation.x,y:m.armL.sh.rotation.y,z:m.armL.sh.rotation.z,el:m.armL.elm.rotation.x};
+if(handK>0){ shR=lerp(shR,ikR.x,handK); shRy=lerp(shRy,ikR.y,handK); shRz=lerp(shRz,ikR.z,handK); elR=lerp(elR,ikR.el,handK); }
+if(handKL>0){ shL=lerp(shL,ikL.x,handKL); shLy=lerp(shLy,ikL.y,handKL); shLz=lerp(shLz,ikL.z,handKL); elL=lerp(elL,ikL.el,handKL); }
+// 残差留档 (探针/交付证据用: 超臂长时 armIK 钳到可达球面并如实返回)
+// null 守卫 (verifier 2026-09-21 报的防御性缺陷): armIK 在缺参数/桩缺 rotation 时返回 null,
+// 直接 .toFixed 会 TypeError。当前调用点参数恒有效 ⇒ 生产路径不可达, 但守卫成本为零, 与玩家路径
+// (20-player 两处都有守卫) 保持同一防御口径。
+ikRes=(resR===null||resL===null)?null:{r:+resR.toFixed(4),l:+resL.toFixed(4)};
+}
+this.ikRes=ikRes;
+// ★ 2026-09-26 B3: 开火后坐的肩部摆动必须叠在 IK 混合**之后** —— 原来在 IK 之前, handK=1 的
+// lerp 会把它整段抹平 (开火时只有枪口上跳可见, 身体没有任何后坐动作)。数值沿用原式不变。
 if(m.armR.sh.userData.swing>0){
 m.armR.sh.userData.swing-=dt;
 shR+=Math.sin(m.armR.sh.userData.swing*16)*0.6;
@@ -1552,12 +2345,18 @@ m.armL.sh.rotation.y=dampF(m.armL.sh.rotation.y,shLy,8,dt);
 m.armR.sh.rotation.y=dampF(m.armR.sh.rotation.y,shRy,8,dt);
 m.armL.sh.rotation.z=dampF(m.armL.sh.rotation.z,shLz,9,dt);
 m.armR.sh.rotation.z=dampF(m.armR.sh.rotation.z,shRz,9,dt);
-m.gunG.rotation.y=dampF(m.gunG.rotation.y,-m.pelvis.rotation.y+(sprint?0.95:0),9,dt);
-m.gunG.rotation.z=dampF(m.gunG.rotation.z,sprint?0.16:0,8,dt);
+m.gunG.rotation.y=dampF(m.gunG.rotation.y,gunY_t,9,dt);
+m.gunG.rotation.z=dampF(m.gunG.rotation.z,gunZ_t,8,dt);
+m.gunG.rotation.x=gunX_t;
+// ★ 2026-09-26 A1: **枪模挂点也要按帧写** (旧版只在挂枪时写一次 = 站姿值, 趴姿下枪整段扎进地面)。
+// 目标 = gunMountOf(kind,pp), 与玩家路径 (20-player 的 gb) 同源同式; 阻尼率也与玩家同档 (10)。
+if(typeof gunMountOf==='function'){
+const mo=gunMountOf(this.gunKind,pp);
+m.gunG.position.x=dampF(m.gunG.position.x,mo.x,10,dt);
+m.gunG.position.y=dampF(m.gunG.position.y,mo.y,10,dt);
+m.gunG.position.z=dampF(m.gunG.position.z,mo.z,10,dt);
+}
 this.gun.rotation.y=Math.PI;
-// 匍匐时枪身反向补偿躯干俯角, 保持枪口朝前
-const gunPitch=(engaged||this.mgUse||this.empUse)?-clamp(this.pitch,-0.7,0.7):(sprint?0.3:0.25);
-m.gunG.rotation.x=prone?gunPitch-pp+0.1:gunPitch;
 const headTgt=(engaged?-clamp(this.pitch,-0.6,0.6)*0.7:0)+(prone?-0.08-pp:-torsoX*0.5);
 m.headG.rotation.x=dampF(m.headG.rotation.x,headTgt,9,dt);
 if(this.flinchT>0){ this.flinchT-=dt; m.torsoG.rotation.z=Math.sin(this.flinchT*40)*0.07; }
@@ -1643,6 +2442,43 @@ else b.dbgLine.visible=false;
 // 闲置判定与 06/14 的既有"就近认领"同口径: 活着/同队/无乘员/非玩家驾驶/
 // 不在禁入冷却(noEnterT)/血量≥40%/无他人 8s 内的有效认领(claimBot)。
 // 最近优先、不限距离 —— 与玩家部署界面"选载具出生"同语义; 厂房产能重生车由此快速获得车组。
+// ★ 2026-09-19 修正 (用户: 坦克乘员长期站桩像卡住): 补"这辆车真的会开走"一条 ——
+//   15-vehicles.driveAI 在距目标 <20m 或与敌坦克对炮时会把车停下驻守, 乘员随车定格,
+//   可能整局不动。故以下情况不上车: ①车已在目标 25m 内 (到场即停) ②车已静止且不在推进
+//   (vel 阈值), 让 bot 走路去前线 —— 需要车组的是"开赴前线的车", 不是停着的炮台。
+//   (原有就近重生的意图不变: 厂区新车/刚重生的车 vel 与目标距离都不满足上述条件, 照常上车。)
+function tankRollingToObjective(v){
+if(!v.objective) return false;
+const d=Math.hypot(v.objective.x-v.pos.x,v.objective.z-v.pos.z);
+if(d<25) return false;                    // 到场驻守: 不再接收车组
+if(Math.abs(v.vel||0)<0.7&&d<60) return false; // 已停车且离目标不远: 判定为驻守炮台
+return true;
+}
+// ★2026-09-26E (审计 1): 海战载具的闲置扫描 —— 与坦克同一条部署补人路径 (旧版只扫 tanks ⇒
+//   舰艇**一条补人路径都没有**: 开局配的那名车组被玩家接管/落水后, 该艇永久是空壳)。
+//   与坦克的差别只有一条: 不做 tankRollingToObjective 的"驻守中不配人"判定 —— 15d/14-bots 的艇 AI
+//   硬纪律是"永远在动"(除搁浅/沉没), 不存在"停着当炮台"的情形。判据其余逐条对齐坦克。
+// ★2026-10-04 (海战审计 A2/F6 同族): 认领距离门 —— 旧版"最近空艇"没有距离上限, 纯海图上会把重生 Bot
+//   派去认领几百米外的空艇: 他得游过致命的大海 (opensea 溺亡口径 seaBotDmg) 才够得着, 实测就是
+//   "重生→跳海→溺亡"的自净消耗。现在只认领 110m 内的艇 (与本队集结点哨戒圈的尺度同档); 没有够得着
+//   的艇就按步兵编制留在甲板上 (调用方对 null 的既有处理)。摆渡中的艇 (ferryTgt 已盖章) 不认领 ——
+//   它正开往敌舰, 半路登艇等于跟着送。
+const NAVAL_CLAIM_R=110;
+function pickIdleNaval(bot){
+if(typeof navalCraft==='undefined'||!Array.isArray(navalCraft)) return null;
+let best=null,bd=(CAMPAIGN.terr==='opensea')?NAVAL_CLAIM_R:1e9;   // 距离门只对纯海图生效 (致命大海); 岛图认领远艇是既有行为 (塔拉瓦红线7 依赖)
+for(const v of navalCraft){
+if(!v||!v.alive||v.team!==bot.team||v.crewBot||v.driverBot||v.playerDriven) continue;
+if(v.state==='sinking'||v.state==='wreck') continue;
+if((v.noEnterT||0)>nowT) continue;
+if(v.hp<(v.maxHp||v.hp||1)*0.4) continue;
+if(v.ferryTgt) continue;
+const d=Math.hypot(v.pos.x-bot.pos.x,v.pos.z-bot.pos.z);
+if(d<bd){ bd=d; best=v; }
+}
+return best;
+}
+// 契约 §4 v3: 车位占用判据 = crewBot / playerDriven (三人车组的后 2 人在 Tank.crewSlots 里, 不占士兵池)。
 function pickIdleDeployVehicle(bot){
 let best=null,bd=1e9;
 for(const v of tanks){
@@ -1650,8 +2486,1288 @@ if(!v.alive||v.team!==bot.team||v.crewBot||v.playerDriven) continue;
 if((v.noEnterT||0)>nowT) continue;
 if(v.hp<v.maxHp*0.4) continue;
 if(v.claimBot&&v.claimBot.alive&&v.claimBot!==bot&&v.claimBot.targetVeh===v&&nowT-(v.claimT||0)<8) continue;
+if(!tankRollingToObjective(v)) continue; // 驻守中的车不进车组 (2026-09-19)
 const d=Math.hypot(v.pos.x-bot.pos.x,v.pos.z-bot.pos.z);
 if(d<bd){ bd=d; best=v; }
 }
 return best;
 }
+// ═══ A#9 岸防炮 (契约 §6, bots 侧) ═══════════════════════════════════════════════
+// 与 ATGUNS 同规则: 靠近 → 前摇 → 认领 (g.crewBot) → 瞄船 → 开炮 → 目标丢失释放。
+//   占用双轨: g.user (玩家, 由 15f batteryMountPlayer 写) / g.crewBot (Bot, 本文件写) —— 两人不得同炮。
+//   **无人时绝不开炮**: 本文件不声明也不调用任何"兜底开火" (帧钩里对 batteryAI 的调用已删);
+//   唯一开火入口是 15f 的 batteryFire(g,dir,owner), 且只在 g.crewBot===this 的操作态里被调用。
+//   数值单源: 射程/弹速/冷却全在 15f (BATTERY_RANGE / SHELL_SPD_NAVAL / batteryFire 内的 cd);
+//   本段只提供"兴趣半径/赶路超时/被挡重试"三个 AI 节奏量 (后两个与 atGun Bot 档同值)。
+const BAT_APPROACH_R=110;   // 兴趣半径: 岬角炮位离战线几十~上百米, 陆战固定的 18m 兴趣半径对它毫无意义
+const BAT_GO_TIMEOUT=45;    // 赶路超时: 110m @ ~4.2m/s ≈ 26s, 留一倍余量
+const BAT_BLOCKED=3.5;      // 炮口被自家胸墙/地形挡住的重试间隔 (与 updateEmplacement 的 atGun 同档)
+// 炮位有没有可打的敌艇 (没有就不去守着一门空炮; 与 15f pickTarget 同一组条件: 敌队/未沉/射程内/LOS 通)
+function batteryTargetFor(g){
+if(!g||g.alive===false||typeof navalCraft==='undefined'||!navalCraft||!navalCraft.length) return null;
+const range=(typeof BATTERY_RANGE==='number')?BATTERY_RANGE:420;
+// 眼高单源: 15f 的 mountY (炮耳) 是**唯一**的瞄准/炮口高度来源 (Battery.y 字段根本不存在 —— 旧写法
+// 落到 heightAt() 上, 会把整个 LOS 判定压到混凝土平台面, 见 updateBatteryGun 的实测说明)。
+const ey=(g.mountY!==undefined)?g.mountY:(((g.y!==undefined)?g.y:heightAt(g.x,g.z))+1.6);
+let best=null,bd=range;
+for(const c of navalCraft){
+if(!c||c.alive===false||c.team===g.team) continue;
+if(c.state==='sinking'||c.state==='wreck') continue;   // 已在沉没链上的不再浪费弹药
+const d=Math.hypot(c.pos.x-g.x,c.pos.z-g.z);
+if(d<1||d>=bd) continue;
+const wy=(typeof waterYAt==='function')?waterYAt(c.pos.x,c.pos.z):-1e8;
+const ay=(wy>-1e8)?wy+1.05:(c.pos.y||0)+0.6;           // 瞄水线以上 (水面高走 waterYAt 单源)
+const dh=Math.hypot(c.pos.x-g.x,ay-ey,c.pos.z-g.z)||1;
+const dir=V3((c.pos.x-g.x)/dh,(ay-ey)/dh,(c.pos.z-g.z)/dh);
+const hit=raycastWorld(V3(g.x,ey,g.z),dir,dh);
+if(hit&&hit.dist<dh-2.5) continue;                      // LOS 不通 (自家胸墙/地形挡住)
+bd=d; best=c;
+}
+return best;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 海战 Bot AI 三层 (2026-09-20N 海战批 · task-4) —— boatAI / amphAI / batteryAI
+// 规格: 海战系统设计定稿-20260920.md §5.1/§5.2/§5.3/§5.4 + §11.3/§11.5 冻结契约。
+//
+// 【与 15d/15f 的边界 (naval-hull / coastal-battery 接口约定)】
+//   · 载具一侧**只读**: 本段从不写 craft.pos/yaw/vel/hp/flood/state/spec/team ——
+//     驾驶只走 `craft.drive(fwd,turn,dt)`, 瞄准只走 `craft.turretAimAt(x,z)`,
+//     开火只走 `fireMain(customDir?)/fireSecondary(dir)/fireMG(dir)/fireTorpedo(side,aimDir?)`。
+//   · AI 自己的状态 (相位/冷却/选湾/航点) 存在本文件的 WeakMap 里, **不往载具对象上挂字段**
+//     (Object.create 影分身承接复用函数 scratch, 见 navAmphShim)。
+//   · 驱动权归 15d: NavalCraft.update 自己调用 boatAI/amphAI (与 Tank.update→driveAI 同构)。
+//     本文件末尾的 navalAIFrameTick 是**兜底**: 艇/两栖车只在 typeof updateNaval!=='function' (15d 不在链上) 时被驱动;
+//     反舰炮位则恒调用 (炮位不动, 无"双驱动"风险) —— 15f 若已调用, 同帧去重会挡掉。
+//   · 三个入口都带 `aiDrive===false` 硬退出; 幂等两道: ① Lead 硬裁定的**帧戳** (craft.__aiBoatTick / craft.__aiAmphTick,
+//     艇/车各自独立字段) ② 通用同帧去重 navAIOnce (WeakMap by nowT, 炮位用)。重复调用一律空转, 不会双倍速度。
+//   · navalCraft/navalNear/BATTERIES/batteryNear/torpedoes/shells 一律 typeof 守卫 ——
+//     15d/15f 未落盘时本文件照常加载, 只加载子集的沙箱探针也不报错 (与 tankRollingToObjective 同一纪律)。
+//
+// 【数值单源】艇炮射程 = SHELL_SPD_NAVAL(190 m/s) × 炮弹存活 3.4s ≈ 646m (2026-09-21B 提速批: 原 115×3s≈345m,
+//   射程包线按"速度×life"守恒 —— 见 15d fireMain 的 life 注释); 反舰炮位射程 = 420m (§4.1);
+//   炮位弹药节奏 = 13-combat.emplATFire 的 5.2+rand(0,1.4) 与"被挡重试 3.5"(14-bots updateEmplacement 同档);
+//   陆战相位的开火门槛/散布/火力距离 = tankAITune() (15-vehicles 三档难度表, 与坦克炮长同档)。
+// ═══════════════════════════════════════════════════════════════════════════════
+const NAV_AI={
+approachR:30,              // 进近点到达半径 (m)
+fireR:340,                 // 艇炮对岸/对艇有效射程 (m)
+standoff:45,               // ★ 已退役 (2026-09-21): 它是"离岸 45m 向海外转"的**逐帧迟滞**门限, 9m 宽的迟滞带
+                           // 容不下 ~74m 的掉头弧 ⇒ 每次外转都冲上礁盘 = 原地极限环。岸轰站位改由
+                           // engOut(70m 最小离岸) + engStance(fire/move 阵位机)表达; 保留此键只为老探针读数对照。
+depthMargin:0.1,          // ★2026-09-26E (审计 19): 最小可航水深 = 吃水 + NAVAL_CFG.shallowPad + 本余量。
+                           // 旧版写死 `+0.55` = shallowPad(0.45) + 0.10 —— 值相同但没人知道那 0.1 是什么; 现在显式。
+reefIn:36,                 // 礁盘平台内边界 (m): 艇误入 (<36m 离岸) 一律先向海外脱离 —— 冲滩是两栖车的事 (§1.1 剖面分工)
+offshoreMax:260,           // 远海余量 (m): 离岸超过它就先收回通航环带 (走 navRing 中段), 不在图缘外打转
+keepSpd:0.55,              // 交战/巡逻的最小速度比 (现行实现: 各相位一律 fwd=1; 保留作老探针对照)
+huntR:340,                 // 追击对方小艇的发现半径 (m)
+evadeR:45,                 // 弹着规避触发半径 (m)
+evadeAmp0:0.55,            // 蛇形基准振幅 (rad)
+evadeAmpK:0.95,            // 振幅随受威胁度上升的斜率 (§5.1: "ampl 随受威胁度上升")
+evadeFreq:0.8,             // ★ 规格相位: sin(nowT*0.8)*ampl (§5.1 原文)
+// ── 船只让路预折 (2026-10-02 实机第四轮"友舰之间撞船穿模十分严重"的撞船半边) ──
+// 探测/让路/减速参数单源; 唯一接线点 = navSteer (advance/hunt/engage/evade/reefOut 全相位共用)。
+// 分工: 物理不穿模由 15d navalPushCraft 的当帧全量解算负责, 这里管的是"别老往对方船上开"。
+avoidLook:2.6,             // 前向探测距离 = (双方半长和)×本系数 + 12m
+avoidPad:5,                // "正瞄着它"的舷向余量 (m): |横向偏移| < 双方半宽和 + 本值
+avoidTurn:1.0,             // 让路舵偏 (rad): 朝目标所在舷的**反侧**让 (对称 ⟹ 双方一左一右, 对开自动错船)
+avoidSlow:22,              // 距它船体小于本值 (m, 已含半长和) ⇒ 油门打 0.45 折 (地板 0.2, 保"艇永远在动")
+torpMin:120, torpMax:600,  // ★ 鱼雷窗口距离带 (§5.1)
+torpAspectMin:30*Math.PI/180, torpAspectMax:90*Math.PI/180, // ★ 目标舷角带 [30°,90°]
+torpEps:1e-6,              // 舷角/距离边界容差: atan2 的浮点误差不能让"正好 30.000°/600m"被误拒 (边界必须确定)
+torpSolveMax:1.65,         // 提前量解所需转舵上限 (rad ≈ 94.6°): 舷角带本身到 90°, 再留一点提前量余量;
+                           // 超过即"解不出来" (目标跑得方向太背), 不空放
+beachIn:10,                // 冲滩点: 自岸线向陆内推 (m)
+wing:30,                   // 滩头两翼偏移 = sea.lanes ± 30m (§5.2)
+ringDep:3.4,               // 巡逻环带最小水深 (m) —— sea.navRing d=43 起即 3.4m (00-config 剖面)
+ringStep:0.22,             // 巡逻方位角步进 (rad)
+batR:420,                  // 反舰炮位射程 (与 15f 同档, §4.1)
+batCd:[5.2,1.4],           // 炮上冷却 (与 emplATFire 同档数值源, 不另写一套)
+batBlocked:3.5,            // 被挡重试 (与 updateEmplacement 同档数值源)
+tgtT:0.4,                  // 岸上目标缓存周期 (s)
+// ══════════════════════════════════════════════════════════════════════════════
+// 跨图会师 / 反极限环 / 炮塔换装 (2026-09-21 海战 AI 全盘优化批 · 用户裁定"两者兼顾")
+//
+// 用户原话: "现在总是在出生点打转, 一局双方的船基本遇不到" + "敌艇可见就追击, 否则轮换压制与巡逻会师"。
+// 三个已量化的机制缺陷 (探针 dev/out/navalai-selfcheck-full.txt) 与这里的对策一一对应:
+//   ① 双方集结点相距 507.7m(直线) / 550m(实际重生位), huntR=fireR=340 ⇒ 出生点互相看不见, 而艇**没有任何
+//      跨图目标** (navMuster 只参与择湾评分) ⇒ 默认行为改成"沿 sea.navRing 深水环带向敌方海域推进"。
+//   ② engage 优先级高于推进且在出生点即可满足 (南侧反舰炮台 246~289m) ⇒ 4200 帧里 engage 4199 帧。
+//      对策: engage 改成**限时轮换** (一轮 ≤ engBout, 两轮冷却 engCd) —— 压制与推进/会师交替, 不再独占。
+//   ③ standoff 45/54m 迟滞环只有 9m, 而掉头 (π 弧) 要 ~74m ⇒ 每次"外转再压上"都冲上礁盘, 再被 reefIn=36
+//      推回 = 极限环。对策: 阵位带抬到 70m+ (离岸), 且用**阵位机动 (压制—脱离—换阵位)** 取代逐帧迟滞比较。
+// ══════════════════════════════════════════════════════════════════════════════
+ringMid:6.4,               // 推进航路最小水深 (m): 剖面 43m→3.4m / 80m→6.9m ⇒ 6.4m ≈ 离岸 75m ——
+                           // 走通航环带**中段**, 不在礁缘 (离岸 43m) 上蹭; 掉头直径 47m 也不会蹭到礁盘
+ringAng:0.55,              // 环带方位步进上限 (rad ≈ 31.5°): 与 14.5m/s ÷ 0.62rad/s 的掉头弧 (~74m) 匹配,
+                           // 一步的弦切内缩 R(1-cos(θ/2)) ≈ 8.6m < (75-43)m 余量
+advCommit:1.2,             // ★ 已退役 (2026-09-21 首轮): 原打算用"离敌方海域还远才允许改签方向"的迟滞,
+                           // 但它仍以**艇当前位置**判向 —— 出生点恰在 ±π 分界上, 被岸炮推歪 0.023rad 就翻向。
+                           // 现改为 navAdvanceDir(): 一律按**集结点常量**判向 (两队互为相反数 ⇒ 空间同向绕岛)。
+wpReach:46,                // 航点到达半径 (m)
+huntClose:120,             // 贴脸追击半径 (m): 小于它不看通视 (已经在眼前); 其余距离必须通视才算"看见"
+engBout:10,                // 一轮岸轰压制的最长时长 (s): 到点必退 ⇒ 压制占比 ≈ engBout/(engBout+E[engCd]) ≈ 34%
+engCd:[14,24],             // 两轮压制之间的冷却 (s): 冷却期内只推进/会师 —— "轮换"的机制保证, 不靠碰巧
+engHold:6.0,               // 同一阵位最长停留 (s): 到点就"脱离"换阵位 (压制—脱离—换阵位 的脱离触发器)
+engMove:9.0,               // 换阵位航段最长时长 (s): 到点或超时转"压制" (兜底, 不许卡在赶路里)
+engPosR:34,                // 阵位到达半径 (m)
+engOut:70,                 // 岸轰阵位的**最小离岸** (m): 与 ringMid 同量级 —— 阵位在礁盘外, 不在 45m 迟滞环上翻
+engRange:[150,300],        // 阵位-目标距离带 (m): 近于此弹道过平不易命中, 远于此超出 battery 射程 420m 的对射节奏
+engOff:[0.40,0.70],        // 换阵位的方位偏移带 (rad, 左右交替): 每轮沿弧错开 ≥23°, 保证有真实航程
+aimLead:0.22,              // 炮塔指向门控的"对齐时间"上限 (s): err/tRate ≤ 它才开火 (tRate 只从 spec 读)
+laneSameAng:0.5,           // 择湾"同侧"容差 (rad): 湾方位与艇方位之差在此之内视为同一侧
+laneCrossW:180,            // 跨岛惩罚当量 (m/rad): 差 π 时折算 ≈475m ⇒ 对岸的湾事实上选不上 (必须绕一整圈)
+looppWin:20,               // 反极限环看门狗窗口 (s)
+looppNeed:38,              // 窗口内净位移下限 (m): 低于它判定"原地打转"
+looppBreak:12,             // 判定原地打转后的强制推进时长 (s): 期间禁止进入 engage
+};
+// AI 私有状态 (WeakMap: 不写载具对象)
+const _navState=new WeakMap(), _navShim=new WeakMap();
+let _navFrameT=-1, _navHookLast=0, _navHookDt=1/60, _navHookWarned=false;
+// AI 私有状态: 相位/冷却/选湾/航点/影分身 scratch 全在这里 (载具对象一行不写)
+function navAIS(o){
+let s=_navState.get(o);
+if(!s){
+s={mode:'approach',lane:null,laneT:0,wp:null,ang:rand(0,TAU),wing:Math.random()<0.5?1:-1,
+fireT:rand(0,0.5),mgT:0,torpT:0,evadeT:0,prev:'patrol',breakT:0,runT:0,engOut:false,
+awayYaw:0,awayYawT:-9,tgt:null,tgtT:0,approach:null,beach:null,route:null,routeI:0,
+groundT:0,land:false,aimT:0,
+// ── 跨图会师 / 反极限环 / 岸轰阵位 (2026-09-21 批; 全部是 AI 私有状态, 不写载具对象) ──
+trk:[],trkT:0,loopT:-9,loopN:0,          // 看门狗: 位置采样 / 采样倒计时 / 改道截止时刻 / 触发次数
+engT:0,engCd:-9,engN:0,engPos:null,engSide:1,engHold:0,engStance:'fire',
+advS:0,advYaw:null};                     // 推进步进方向 / 任务航向 (规避相位把闪避限制在它的 ±90° 内)
+_navState.set(o,s);
+}
+return s;
+}
+// 帧钩 (Bot.update 首行调用): 兜底驱动艇/两栖车 —— 15d 在链上时整段是空转 (驱动权归 15d)。
+// ★ 反舰炮位不在这里驱动 (2026-09-21A 裁定): 岸炮 AI 整支移交 15f (A#9「无人不开炮」+ batteryMountPlayer),
+//   本文件不再声明 batteryAI, 也不再调用它 —— 避免"两个同名全局函数、页面里跑 15f 的、沙箱里测本文件的"。
+function navalAIFrameTick(){
+if(_navFrameT===nowT) return;
+_navFrameT=nowT;
+const d=nowT-_navHookLast; _navHookLast=nowT;
+_navHookDt=clamp(d>1e-4?d:1/60,0.001,0.05);      // 与 24-main 的 dt=min(delta,0.05) 同档
+try{
+if(typeof updateNaval!=='function'&&typeof navalCraft!=='undefined'&&navalCraft&&navalCraft.length){
+for(const c of navalCraft){
+if(!c) continue;
+navAdoptDriver(c);
+const b=c.driverBot;
+if(!b||!b.alive||c.playerDriven||c.aiDrive===false) continue;
+if(c.kind==='boat') boatAI(c,_navHookDt); else amphAI(c,_navHookDt);
+}
+}
+}catch(e){
+// 兜底钩异常不拖垮士兵更新: 只报一次, 之后静默 (探针/实机都能一眼看到)
+if(!_navHookWarned){ _navHookWarned=true; console.warn('[海战AI] 帧钩异常 (只报一次): '+(e&&e.stack||e)); }
+}
+}
+// 车组接线兼容: 23-deploy 用 spawnInVehicle(craft) 塞人 (craft.crewBot=bot) / 或直接写 driverBot;
+// 两种写法都认 —— 缺 driverBot 就补上; driverBot 指向已阵亡的车组时改用 crewBot (载具被打捞/重新配组后仍能被驱动)。
+function navAdoptDriver(c){
+let b=c.driverBot;
+if(!b||b.alive===false){ const cb=c.crewBot; if(cb&&cb.alive!==false) b=cb; }
+if(!b) return;
+if(c.driverBot!==b) c.driverBot=b;
+if(!c.crewBot&&b.onVehicle===c) c.crewBot=b;
+}
+// ── 单源只读接口包装 (岸线/水深一律走 03-terrain 的 waterDepthAt/shoreDist/shoreDirAt, 严禁另写算术) ──
+function navSeaCfg(){ return (typeof SEA!=='undefined'&&SEA)?SEA:null; }
+function navLanes(){ const S=navSeaCfg(); return (S&&S.lanes)||[]; }
+function navMuster(t){ const S=navSeaCfg(); return (S&&S.muster&&S.muster[t])||null; }
+// ── 跨图会师的目标方位 (★ 不写死坐标): 敌方集结点相对**图心**的方位角 ──
+// 为什么是"方位角"而不是"点": 艇要绕岛, 直指敌方集结点会被岛体挡住; 会师要的是"沿环带往敌方海域推"。
+// 单源: sea.muster (00-config 的海上集结点, 四湾四岬之外唯一的双方锚点), 与 15d 重生位同源。
+// ★ 两侧同向绕环的证明 (会师能成立的几何): 两队各取 angDiff(自己方位, 敌方方位) 的符号定步进方向,
+//   而 angDiff(a,b) = -angDiff(b,a) (反对称) ⇒ 双方在环上的**旋转方向一致**, 于是各走半圈后在图上
+//   最远点相遇; 若改成"各自走最近的一侧", 两者会走互补的两段弧、恰好永远不碰面。这条由 dev 自检 ⑨ 断言。
+function navEnemyBearing(team){
+const em=navMuster(1-team);
+if(!em) return null;
+return Math.atan2(em.x,em.z);
+}
+// 工事归属单源 (根因⑤: 无 team 字段的压表不能当靶子):
+//   ① 自带 team (05c 的 MG42S 重机枪位) ② owner.team (06-engineering 的迫击炮位: 谁架的归谁)
+//   ③ 正被某人操作 (user.team) —— 有人在上面的工事, 归属是确定的。
+//   三条都判不出来 ⇒ null ⇒ 调用方**一律跳过**: 宁可不打, 也不能把双方都能用的中立工事
+//   (17-emplacements 的 ATGUNS/AAGUNS 压表不带 team) 当自家人的靶子 —— 这正是用户报的"打自己人"。
+//   注: 若日后 17-emplacements 给压表补上 team, 本函数与调用点**零改动**即可恢复对岸工事压制。
+function navFortTeam(o){
+if(!o) return null;
+if(o.team===0||o.team===1) return o.team;
+if(o.owner&&(o.owner.team===0||o.owner.team===1)) return o.owner.team;
+if(o.user&&(o.user.team===0||o.user.team===1)) return o.user.team;
+return null;
+}
+function navDepth(x,z){ return (typeof waterDepthAt==='function')?waterDepthAt(x,z):-1e9; }
+function navShoreD(x,z){ return (typeof shoreDist==='function')?shoreDist(x,z):1e9; }
+function navDist(a,b){ return Math.hypot(a.pos.x-b.pos.x,a.pos.z-b.pos.z); }
+// 半径内最近的敌方水面载具 (15d 的 navalNear 单源: 只返回 alive 且未沉的; 缺模块时返回 null)
+function navEnemyCraftNear(c,r){
+if(typeof navalNear!=='function') return null;
+const t=navalNear(c.pos.x,c.pos.z,r,1-c.team);
+return (t&&t!==c&&t.alive!==false)?t:null;
+}
+// 视线预检 (与 Bot/坦克同一支 raycastWorld; 命中点近于目标才算通视 —— 与 perceive/tankPerceive 同口径)
+function navLOS(ox,oy,oz,tx,ty,tz,d){
+if(typeof raycastWorld!=='function') return true;
+const hx=tx-ox, hy=ty-oy, hz=tz-oz;
+const l=Math.hypot(hx,hy,hz)||1;
+const hit=raycastWorld(V3(ox,oy,oz),V3(hx/l,hy/l,hz/l),Math.min(l,d));
+return !hit||hit.dist>l-2.5;
+}
+// 岸防强度 (择湾评分用): 该湾口近岸的敌方步兵密度 + 岸防火力点 + 反舰炮位 —— 值越大越硬, 越不该往那登陆
+function navShoreDef(x,z,team){
+let s=0;
+for(const b of soldiers){
+if(!b.alive||b.team===team||b.onVehicle) continue;
+const d=Math.hypot(b.pos.x-x,b.pos.z-z);
+if(d<70) s+=1-d/70;
+}
+if(typeof ATGUNS!=='undefined') for(const g of ATGUNS){ if(!g||g.dead) continue; const d=Math.hypot(g.x-x,g.z-z); if(d<90) s+=1.6*(1-d/90); }
+// 反舰炮位只算**敌方**的 (自家的炮位不该把本方海湾算成"岸防很硬" —— 与 navScanShore 的队别过滤同一条纪律)
+if(typeof BATTERIES!=='undefined') for(const g of BATTERIES){ if(!g||g.alive===false) continue; if(g.team!==undefined&&g.team===team) continue; const d=Math.hypot(g.x-x,g.z-z); if(d<130) s+=2.2*(1-d/130); }
+return s;
+}
+// 择湾 (§5.1): 四湾 sea.lanes 按"距**本艇当前位置**最近 + 岸防强度最低"评分; 结果缓存 8s (不必每帧重扫 60 人表)
+// ★ 2026-09-21 修 (根因③): 旧评分用"距**本方集结点**最近" —— 艇被岸炮推过岬角之后, 重选出来的还是老家湾,
+//   于是朝"跨岛的进近点"开 (实测某艇 approach=4003/4200 帧原地打转)。改为按艇自身位置评分。
+// ★ 同时加"跨岛惩罚": 只用"as-the-crow-flies 距离"会选到岛对面的湾 (直线穿过陆地), 那是必绕一整圈的假近路;
+//   惩罚量 = 湾方位与艇方位之差 × laneCrossW (米当量), 超过 ~0.5rad 起算 —— 岛是居中的, 方位差就是"在岛的哪一侧"。
+function navPickLane(c,ai){
+if(ai.lane&&nowT<ai.laneT) return ai.lane;
+const lanes=navLanes();
+if(!lanes.length) return null;
+const aMe=Math.atan2(c.pos.x,c.pos.z);
+let best=null,bs=-1e9;
+for(const L of lanes){
+const dCraft=Math.hypot(L.x-c.pos.x,L.z-c.pos.z);
+const aLane=Math.atan2(L.x,L.z);
+const dAng=Math.abs(angDiff(aMe,aLane));
+const sc=-(dCraft+Math.max(0,dAng-0.5)*NAV_AI.laneCrossW)-navShoreDef(L.x,L.z,c.team)*14+rand(0,26);
+if(sc>bs){ bs=sc; best=L; }
+}
+ai.lane=best; ai.laneT=nowT+8;
+return best;
+}
+// 离岸外推: 自航道浮标沿"岸法线向海"外推 out 米 = 礁盘外的进近点。
+// shoreDirAt 给出的是"水最浅的方向"(向岸), 取反即向海; 退化 (无岸/无水体) 时用图心径向兜底。
+function navOffshorePt(x,z,out){
+const sd=(typeof shoreDirAt==='function')?shoreDirAt(x,z):null;
+let nx,nz;
+if(sd&&(sd[0]||sd[1])){ nx=-sd[0]; nz=-sd[1]; }
+else{ const l=Math.hypot(x,z)||1; nx=x/l; nz=z/l; }
+return {x:x+nx*out,z:z+nz*out};
+}
+// 冲滩点 (§5.2): 滩头两翼 = 航道浮标沿岸线切向 ±wing(30m) → 沿岸法线向陆推进到入陆 beachIn 米 → findClearSpot 落位
+function navBeachPt(c,L){
+if(!L) return null;
+const sd=(typeof shoreDirAt==='function')?shoreDirAt(L.x,L.z):null;
+let ix,iz;
+if(sd&&(sd[0]||sd[1])){ ix=sd[0]; iz=sd[1]; }                 // 向岸 (水最浅方向)
+else{ const l=Math.hypot(L.x,L.z)||1; ix=-L.x/l; iz=-L.z/l; }
+const tx=-iz, tz=ix;                                          // 沿岸切向
+const side=(((c.ord|0)%2)===0)?1:-1;
+let bx=L.x+tx*NAV_AI.wing*side, bz=L.z+tz*NAV_AI.wing*side;
+for(let k=0;k<26&&navShoreD(bx,bz)>=-NAV_AI.beachIn;k++){ bx+=ix*4; bz+=iz*4; }
+if(typeof findClearSpot==='function'){ const sp=findClearSpot(bx,bz,6,2.0); if(sp){ bx=sp[0]; bz=sp[1]; } }
+return {x:bx,z:bz};
+}
+// 环岛巡逻点 (§5.1 "沿 sea.navRing d=43..200 环岛机动"): 从图心沿方位角向外找第一个够深的点;
+// 纯粹用 waterDepthAt 现算, 不重写剖面算术 (单源纪律)。
+// ★ 2026-09-21 修 (根因④: 岬角方向返回浅水礁盘点):
+//   旧实现半径上限 MAP_SIZE/2-10=310, 而四岬岸线在 268~289m、岬角外的深水要 R≈311~332 —— 探针实测
+//   方位 45/50/310/315° 在 R≤330 内**根本没有 ≥3.4m 的水**, 旧代码 return last = 浅水礁盘点 (实测 1.2m),
+//   于是艇被自己的导航送到礁盘上, 再被 reefIn=36 推回 = 极限环的外半圈。三处修:
+//   ① 半径上限放宽到 MAP_SIZE/2+2 (与 15d `_integrate` 的 pos 钳位 MAP_SIZE/2+6 同量级);
+//   ② 全径都不够深时, 沿**方位角**左右搜索 (±0.06~±0.55 rad): 岬角射线永远扫不到深水, 但邻侧海域扫得到
+//      (探针实测最大只需滑 0.30 rad 即可绕开岬角射线), 效果是"绕岬角走更宽的外弧";
+//   ③ 仍无解 ⇒ 返回扫描过的**最深**点 (best-effort), 不再盲目返回最后一个候选。
+//   want (可选): 目标水深 —— 默认 ringDep(3.4m, 环带内缘); 推进航路传 ringMid(6.4m) 走环带中段。
+function navRingPt(ang,want){
+const dep=(typeof want==='number')?want:NAV_AI.ringDep;
+const lim=((typeof MAP_SIZE==='number')?MAP_SIZE/2:320)+2;
+let best=null,bd=-1e9;
+const scan=a=>{
+for(let R=120;R<=lim;R+=8){
+const x=Math.sin(a)*R, z=Math.cos(a)*R;
+const d=navDepth(x,z);
+if(d>bd){ bd=d; best={x,z}; }
+if(d>=dep) return {x,z};
+}
+return null;
+};
+let p=scan(ang);
+if(p) return p;                                       // 命中 (绝大多数方位)
+for(const da of [0.06,-0.06,0.12,-0.12,0.2,-0.2,0.3,-0.3,0.42,-0.42,0.55,-0.55]){
+p=scan(ang+da);
+if(p) return p;                                       // 岬角射线: 滑到邻侧海域
+}
+return best||{x:Math.sin(ang)*200,z:Math.cos(ang)*200};   // 兜底: 全局最深点 (≥ 旧版"最后一个候选")
+}
+// 向海航向: shoreDirAt 给的是"水最浅的方向"(向岸), 取反即向海; 退化时用图心径向朝外。
+// 这是艇"脱离礁盘/重新拉开距离"的统一航向 —— 比沿切线跑安全 (切线在凹湾/岬角会不知不觉压进浅水)。
+function navSeawardYaw(c){
+const sd=(typeof shoreDirAt==='function')?shoreDirAt(c.pos.x,c.pos.z):null;
+if(sd&&(sd[0]||sd[1])) return Math.atan2(-sd[0],-sd[1]);
+const l=Math.hypot(c.pos.x,c.pos.z)||1;
+return Math.atan2(c.pos.x/l,c.pos.z/l);
+}
+// 礁盘外进近点 (§1.1 剖面分工: 艇停在礁盘外): 自航道浮标沿向海法线外推, 直到水深 ≥ ringDep(3.4m) ——
+// 即礁缘 d=43m 之外; 再留 10m 余量。全凭 waterDepthAt 现算, 不写一条剖面算术。
+function navReefOutPt(L){
+if(!L) return null;
+const sd=(typeof shoreDirAt==='function')?shoreDirAt(L.x,L.z):null;
+let nx,nz;
+if(sd&&(sd[0]||sd[1])){ nx=-sd[0]; nz=-sd[1]; }
+else{ const l=Math.hypot(L.x,L.z)||1; nx=L.x/l; nz=L.z/l; }
+let x=L.x, z=L.z;
+for(let k=0;k<24;k++){
+if(navDepth(x,z)>=NAV_AI.ringDep) break;
+x+=nx*6; z+=nz*6;
+}
+return {x:x+nx*10,z:z+nz*10};
+}
+// 前方水深探测 (舷向安全): 候选航向 25/50m 两点的最浅水深; 指着陆上 6m 以里直接判"不可走"。
+// 只读 waterDepthAt/shoreDist —— 与 15d 的搁浅判定同一支数据, 所以"AI 绕开的正是物理会搁浅的地方"。
+function navAheadDepth(c,yaw){
+const sx=Math.sin(yaw), sz=Math.cos(yaw);
+let m=1e9;
+for(const r of [25,50]){
+const x=c.pos.x+sx*r, z=c.pos.z+sz*r;
+if(navShoreD(x,z)<-6) return -1;
+const d=navDepth(x,z);
+if(d<m) m=d;
+}
+return m;
+}
+// 安全航向: 在 prefer ± [0,±0.4,±0.8,±1.2,±1.9,±2.6] 里挑第一个前方够深的方向; 全不行就用 prefer (交给物理兜底)
+function navSafeYaw(c,prefer,minDep){
+for(const da of [0,0.4,-0.4,0.8,-0.8,1.2,-1.2,1.9,-1.9,2.6,-2.6]){
+if(navAheadDepth(c,prefer+da)>minDep) return prefer+da;
+}
+return prefer;
+}
+// 前方最威胁的一条船 (2026-10-02): 小艇+大舰都算, **不分敌我** —— 让路是航行纪律, 撞谁都算事故。
+// 判据: 在本艇朝向前方 avoidLook 带内, 且舷向偏移落在"我正瞄着它"的走廊里; 取纵向距离最近的一条。
+// 坐标系与本文件既有口径一致: forward=(sin,cos), 舷向右正 = dx·cos−dz·sin (与 15h capToLocal 同式)。
+function navVesselAhead(c){
+const sn=Math.sin(c.yaw), cs=Math.cos(c.yaw);
+const cl=((c.spec&&c.spec.hullL)||20)*0.5, cw=((c.spec&&c.spec.hullW)||5)*0.5;
+let best=null;
+const scan=(ox,oz,ol,ow)=>{
+const dx=ox-c.pos.x, dz=oz-c.pos.z;
+const fz=dx*sn+dz*cs;
+if(fz<=0||(cl+ol)*NAV_AI.avoidLook+12<fz) return;      // 正后/侧后不构成前向威胁
+const lx=dx*cs-dz*sn;
+if(Math.abs(lx)>ow+cw+NAV_AI.avoidPad) return;         // 不在碰撞走廊里
+if(!best||fz<best.fz) best={fz,lx,ol};
+};
+if(typeof navalCraft!=='undefined') for(const o of navalCraft){
+if(!o||o===c||!o.alive||o.state==='wreck'||o.state==='sinking') continue;
+scan(o.pos.x,o.pos.z,((o.spec&&o.spec.hullL)||20)*0.5,((o.spec&&o.spec.hullW)||5)*0.5);
+}
+if(typeof capitalShips!=='undefined') for(const s of capitalShips){
+if(!s||!s.alive) continue;
+scan(s.pos.x,s.pos.z,s.spec.hullL*0.5,s.spec.hullW*0.5);
+}
+return best;
+}
+// 驾驶包装: 只走 15d 的 drive(fwd,turn,dt) —— 绝不直接写 pos/yaw/vel (会绕过搁浅与浮态)。
+// ★ 舵向符号 (2026-09-20 红线 7 根因, naval-hull 独立诊断 + 本文件对齐复算确认):
+//   15d-naval.js:284 是 `yaw -= inTurn*turn*dt*(fwd<0?-1:1)` —— **turn=+1 是右转 (yaw 减小)**。
+//   旧实现喂 `+angDiff(yaw,want)`, 想要"增大 yaw"却给了正 turn ⇒ 舵反打, 越修越偏: 艇一路顶到硬搁浅线、
+//   两栖车朝外海开 (mode 永远停在 approach)。符号换算**只在本包装层做一次**, 全段其余地方一律只用 yaw。
+// ★2026-10-02 让路预折在本层做 (唯一接线点): 只折 fwd>0 的前进舵 —— 倒车脱困/撤退不归它管;
+//   目标在右舷就往左让 (lx≥0 ⇒ yaw−1.0), 镜像对称 ⇒ 两艇对开时自动一左一右错开;
+//   减速有 0.2 地板, 纪律①"艇永远在动" (防触发车组"驻守下船") 不被破坏。
+function navSteer(c,yaw,fwd,dt){
+if(typeof c.drive!=='function') return;
+if(fwd>0){
+const ob=navVesselAhead(c);
+if(ob){
+yaw+=(ob.lx>=0?-1:1)*NAV_AI.avoidTurn;
+if(ob.fz-((c.spec&&c.spec.hullL)||20)*0.5-ob.ol<NAV_AI.avoidSlow) fwd=Math.max(0.2,fwd*0.45);
+}
+}
+c.drive(clamp(fwd,-1,1),clamp(-angDiff(c.yaw,yaw)*1.6,-1,1),dt);
+}
+function navSteerTo(c,p,fwd,dt){ navSteer(c,Math.atan2(p.x-c.pos.x,p.z-c.pos.z),fwd,dt); }
+// 搁浅脱困 (§3.3 "艇只能倒车脱困"): state==='ground' 时只做倒车 + 左右摆舵找深水, 其余决策挂起;
+// 倒车推力倍率(0.6×)由 15d 的 drive 内部承担, 这里不碰位置。
+function navUnground(c,ai,dt){
+ai.groundT=(ai.groundT||0)+dt;
+if(typeof c.drive==='function') c.drive(-1,Math.sin(ai.groundT*1.7)*0.8,dt);
+}
+// ── 弹着规避传感器 (§5.1) ─────────────────────────────────────────────────────
+// 威胁度 = 在途炮弹/鱼雷的"水平最近接近距离"折算到 [0,1]; 0=无威胁, 1=正落在头上。
+// 用最近接近而不是"落点"是因为 AI 只能看到弹道线: 水平线性外推与炮击落点判定同档精度,
+// 且对平射/吊射都成立 (吊射的水平速度仍是朝我来的那一份)。
+function navShellThreat(c){
+let th=0;
+if(typeof shells!=='undefined'&&shells.length){
+for(const s of shells){
+if(!s||!s.pos||!s.vel||s.team===c.team) continue;
+const dx=c.pos.x-s.pos.x, dz=c.pos.z-s.pos.z;
+if(Math.abs(dx)>240||Math.abs(dz)>240) continue;
+const vh2=s.vel.x*s.vel.x+s.vel.z*s.vel.z;
+if(vh2<1) continue;
+const tca=(dx*s.vel.x+dz*s.vel.z)/vh2;                 // 最近接近时刻 (s)
+if(tca<0||tca>7) continue;
+const dc=Math.hypot(s.pos.x+s.vel.x*tca-c.pos.x,s.pos.z+s.vel.z*tca-c.pos.z);
+if(dc>NAV_AI.evadeR) continue;
+const k=1-dc/NAV_AI.evadeR;
+if(k>th) th=k;
+}
+}
+// 15d 的在途鱼雷表 (torpedoes, typeof 守卫): 对艇武器更该躲 —— 命中即灌满 flood (§2.1)
+if(typeof torpedoes!=='undefined'&&torpedoes.length){
+for(const t of torpedoes){
+if(!t||!t.pos||t.team===c.team) continue;
+const vx=(t.vel&&typeof t.vel.x==='number')?t.vel.x:((t.dir&&t.dir.x)||0);
+const vz=(t.vel&&typeof t.vel.z==='number')?t.vel.z:((t.dir&&t.dir.z)||0);
+const sp=Math.hypot(vx,vz);
+if(sp<1) continue;
+const dx=c.pos.x-t.pos.x, dz=c.pos.z-t.pos.z;
+if(Math.hypot(dx,dz)>150) continue;
+const tca=(dx*vx+dz*vz)/(sp*sp);
+if(tca<0||tca>8) continue;
+const dc=Math.hypot(t.pos.x+vx*tca-c.pos.x,t.pos.z+vz*tca-c.pos.z);
+if(dc>NAV_AI.evadeR) continue;
+const k=1-dc/NAV_AI.evadeR;
+if(k>th) th=k;
+}
+}
+return th;
+}
+// 规避基准航向: 垂直于最近来袭弹道 (横向脱离瞄准线), 两侧取"前方水深更大"的一侧; 无来袭弹时背离最近岸。
+function navEvadeYaw(c){
+let bvx=0,bvz=0,best=1e9;
+if(typeof shells!=='undefined'&&shells.length){
+for(const s of shells){
+if(!s||!s.pos||!s.vel||s.team===c.team) continue;
+const d=Math.hypot(s.pos.x-c.pos.x,s.pos.z-c.pos.z);
+if(d<best&&d<260){ best=d; bvx=s.vel.x; bvz=s.vel.z; }
+}
+}
+if(Math.hypot(bvx,bvz)>1){
+const a=Math.atan2(bvx,bvz), o1=a+HPI, o2=a-HPI;
+return navAheadDepth(c,o1)>navAheadDepth(c,o2)?o1:o2;
+}
+const sd=(typeof shoreDirAt==='function')?shoreDirAt(c.pos.x,c.pos.z):null;
+if(sd) return Math.atan2(-sd[0],-sd[1]);
+return c.yaw+Math.PI;
+}
+// ── 瞄准/开火工具 (固定炮位与载具共用) ────────────────────────────────────────
+function navVecErr(a,b){
+const dot=clamp((a.x*b.x+a.y*b.y+a.z*b.z),-1,1);
+return Math.acos(dot);
+}
+// 当前炮口/炮座指向: ① 15d 的 turretAimDir()/aimDir() 单源; ② 固定炮位与 ATGUNS 同构 ——
+// yaw 是 Group (相对 face 的偏转), pitch 是 Group (rotation.x 存负俯角); 两者都缺则视为已对准。
+function navAimDirOf(o){
+try{
+if(o&&typeof o.turretAimDir==='function'){ const d=o.turretAimDir(); if(d&&isFinite(d.x)) return d; }
+if(o&&typeof o.aimDir==='function'){ const d=o.aimDir(); if(d&&isFinite(d.x)) return d; }
+}catch(e){}
+let yaw=null;
+if(o&&o.yaw&&o.yaw.rotation) yaw=(o.face||0)+o.yaw.rotation.y;
+else if(o&&typeof o.yaw==='number') yaw=o.yaw;
+if(yaw===null) return null;
+let pit=0;
+if(o.pitch&&o.pitch.rotation) pit=-o.pitch.rotation.x;
+else if(typeof o.pitch==='number') pit=o.pitch;
+return V3(Math.sin(yaw)*Math.cos(pit),Math.sin(pit),Math.cos(yaw)*Math.cos(pit));
+}
+function navAimErr(o,dir){
+const a=navAimDirOf(o);
+if(!a) return 0;                                  // 缺接口 → 不因判定卡死开火
+return navVecErr(a,dir);
+}
+// 瞄准驱动 (固定炮位): 与 ATGUNS 的写法同构 (g.yaw.rotation.y=相对 face 的偏转, g.pitch.rotation.x=-俯角)
+function navSetAim(o,wantYaw,wantPit,dt,rate){
+if(o.yaw&&o.yaw.rotation) o.yaw.rotation.y=angleLerpTo(o.yaw.rotation.y,angDiff(o.face||0,wantYaw),rate*dt);
+else if(typeof o.yaw==='number') o.yaw=angleLerpTo(o.yaw,wantYaw,rate*dt);
+if(o.pitch&&o.pitch.rotation) o.pitch.rotation.x=dampF(o.pitch.rotation.x,-wantPit,rate*0.8,dt);
+else if(typeof o.pitch==='number') o.pitch=dampF(o.pitch,wantPit,rate*0.8,dt);
+}
+// 炮口原点单源 (需求⑥: "炮口朝向取 muzzles.main, 走 getWorldPosition"):
+//   优先 15d 的 navalMuzzleWorld(c,'main') —— 它自己就是"muzzles.main 锚点 (getWorldPosition) 优先,
+//   解析锚点兜底"; 15d 未落盘 (沙箱替身) 时退回艇体中心 +1.8m (旧口径, 与替身的 muzzle() 同量级)。
+// 为什么必须从炮口起算: 真炮塔换装后炮口随炮塔转 (muzzles.main 是 pitchG 的子件), 从艇体中心起算会
+//   在目标偏离艏向时给出系统性偏角 (24.4m 长的 PT 上, 艏炮与塔炮的炮口相差 ~6m)。
+function navGunOrigin(c){
+try{
+if(typeof navalMuzzleWorld==='function'){
+const m=navalMuzzleWorld(c,'main');
+if(m&&isFinite(m.x)&&isFinite(m.y)) return m;
+}
+}catch(e){}
+return {x:c.pos.x,y:(c.pos.y||0)+1.8,z:c.pos.z};
+}
+// 弹道提前量方向: 起点 = **炮口** (navGunOrigin), 目标点 + 弹道下坠补偿 (SHELL_G 与 updateShells 同一支重力常数)
+function navLeadDir(c,tx,ty,tz,spd){
+const m=navGunOrigin(c);
+const mx=m.x, my=m.y, mz=m.z;
+let dx=tx-mx, dy=ty-my, dz=tz-mz;
+const dh=Math.hypot(dx,dz)||1;
+const tof=dh/Math.max(spd,1);
+const g=(typeof SHELL_G==='number')?SHELL_G:0.5;
+dy+=0.5*g*tof*tof;
+const l=Math.hypot(dx,dy,dz)||1;
+return V3(dx/l,dy/l,dz/l);
+}
+// 目标速度向量: 15d 契约 vel=标量 + yaw=航向 (Tank 同义); 兼容 vel 为 {x,z} 向量的实现
+function navTgtVel(t){
+if(!t) return [0,0];
+if(t.vel&&typeof t.vel==='object') return [t.vel.x||0,t.vel.z||0];
+const v=Math.abs(typeof t.vel==='number'?t.vel:0);
+return [Math.sin(t.yaw||0)*v,Math.cos(t.yaw||0)*v];
+}
+// 岸上目标扫描 (§5.1 优先级): 反舰炮位 > 滩头工事 > 步兵集群。缓存 0.4s (每帧全扫 60 人表不值得)。
+function navScanShore(c){
+const team=c.team;
+// ① 反舰炮位 (15f): 唯一"专打船"的岸防 —— 不拔掉它, 艇就一直在挨打。
+// ★ 2026-09-20 修 (coastal-battery 实报的友军火力): batteryNear 第 4 参是**队别过滤**, 旧代码漏传 ⇒ 日军艇会把
+//   自家炮位当优先目标开火。炮位本身只读, 但索敌必须按队过滤 —— 与 navalNear/navalEnemyCraftNear 同一条纪律。
+let cand=null;
+if(typeof batteryNear==='function'){
+const b=batteryNear(c.pos.x,c.pos.z,NAV_AI.fireR,c.team);
+if(b&&b.alive!==false&&!(b.team!==undefined&&b.team===team)) cand=b;
+}
+if(!cand&&typeof BATTERIES!=='undefined'&&BATTERIES.length){
+let bd=1e9;
+for(const b of BATTERIES){
+if(!b||b.alive===false) continue;
+if(b.team!==undefined&&b.team===team) continue;                 // 自家炮位不是目标
+const d=Math.hypot(b.x-c.pos.x,b.z-c.pos.z);
+if(d<=NAV_AI.fireR&&d<bd){ bd=d; cand=b; }
+}
+}
+if(cand){
+const d=Math.hypot(cand.x-c.pos.x,cand.z-c.pos.z);
+const cy=(cand.y!==undefined?cand.y:heightAt(cand.x,cand.z))+1.2;
+if(navLOS(c.pos.x,c.pos.y+2.0,c.pos.z,cand.x,cy,cand.z,d)) return {kind:'battery',x:cand.x,z:cand.z,y:cy,obj:cand};
+}
+// ② 滩头工事 (17-emplacements 反坦克炮 / 05c 重机枪位 / 06 迫击炮位): 打掉滩头火力是登陆支援的本职
+// ★ 2026-09-21 修 (根因⑤: 双方艇都在打自己人的反坦克炮):
+//   旧代码把"没有 team 字段"读成"中立工事 ⇒ 可以打" —— 而 17-emplacements:34 压表**就是不带 team**,
+//   于是日军艇会去轰自己阵线里的 AT 炮。现在改成**归属必须可判定**: navFortTeam 给出 0/1 才继续,
+//   判不出来 (null) 一律跳过 —— 契约原话"无 team 字段的按中立工事处理, 但不能打自己人的; 若无法判定就跳过"。
+let best=null,bd=1e9;
+const consider=(o,wt)=>{
+if(!o||o.dead||o.alive===false) return;
+const ft=navFortTeam(o);
+if(ft===null) return;                                         // 归属不可判定 ⇒ 不索敌 (宁可不打, 不误伤)
+if(ft===team) return;                                         // 自家/本队可用的工事不是目标
+const d=Math.hypot(o.x-c.pos.x,o.z-c.pos.z);
+if(d>NAV_AI.fireR*0.85) return;
+if(navShoreD(o.x,o.z)>-2) return;                       // 只打岸上 (水面目标交给 hunt)
+const y=(o.y||heightAt(o.x,o.z))+0.9;
+if(!navLOS(c.pos.x,c.pos.y+2.0,c.pos.z,o.x,y,o.z,d)) return;
+const sc=d*wt;
+if(sc<bd){ bd=sc; best={kind:'fort',x:o.x,z:o.z,y:y,obj:o}; }
+};
+if(typeof ATGUNS!=='undefined') for(const g of ATGUNS) consider(g,1.0);
+if(typeof MG42S!=='undefined') for(const g of MG42S) consider(g,0.85);
+if(typeof MORTARS!=='undefined') for(const g of MORTARS) consider(g,1.15);
+if(best) return best;
+// ③ 步兵集群: 岸上 60m 内 ≥2 名敌方步兵的集群 (单兵不值得艇炮点名)
+for(const s of soldiers){
+if(!s.alive||s.team===team||s.onVehicle) continue;
+const d=Math.hypot(s.pos.x-c.pos.x,s.pos.z-c.pos.z);
+if(d>NAV_AI.fireR*0.8) continue;
+if(navShoreD(s.pos.x,s.pos.z)>-1) continue;
+let n=0;
+for(const s2 of soldiers){ if(s2.alive&&s2.team===team&&Math.hypot(s2.pos.x-s.pos.x,s2.pos.z-s.pos.z)<14) n++; }
+if(n<2) continue;
+const y=heightAt(s.pos.x,s.pos.z)+0.9;
+if(!navLOS(c.pos.x,c.pos.y+2.0,c.pos.z,s.pos.x,y,s.pos.z,d)) continue;
+if(d<bd){ bd=d; best={kind:'inf',x:s.pos.x,z:s.pos.z,y:y,obj:s}; }
+}
+return best;
+}
+// ── 鱼雷窗口判定 (§5.1 冻结口径) ───────────────────────────────────────────────
+// 三条同时成立 ⇒ 可发射:
+//   ① 目标舷角 ∈ [30°,90°]  (目标在舷侧 30~90°, 正横附近命中率最高; 正前/艉后不在窗口内);
+//   ② 距离 ∈ [120,600m]     (近于 120m 来不及转/引信来不及起爆, 远于 600m 提前量误差不可接受);
+//   ③ 提前量可解             (以鱼雷航速迭代求截击点: 两次 tof 收敛 / 截击点在 torpRange 内 / 所需转舵 ≤ torpSolveMax)。
+// ①② 用 torpEps 容差比较: 舷角与距离都是 atan2/hypot 现算值, 若拿裸浮点比,"正好 30.000°/600m"会随机被误拒。
+// 返回 {ok,aspect,dist,tof,aimYaw,side,why}; why 供探针打印"为什么不开火"的过滤表。
+function navTorpWindow(c,t){
+const sp=(c.spec&&c.spec.torpSpd)||0;
+const range=(c.spec&&c.spec.torpRange)||0;
+const dx=t.pos.x-c.pos.x, dz=t.pos.z-c.pos.z;
+const dist=Math.hypot(dx,dz);
+const brg=Math.atan2(dx,dz);
+const aspect=Math.abs(angDiff(c.yaw,brg));      // 目标舷角 = 目标方位与艏向的夹角
+const res={ok:false,aspect:aspect,dist:dist,tof:0,aimYaw:0,side:0,why:''};
+if(sp<=0||range<=0){ res.why='该型无鱼雷'; return res; }
+if(aspect<NAV_AI.torpAspectMin-NAV_AI.torpEps){ res.why='舷角过小(目标在艏向正前)'; return res; }
+if(aspect>NAV_AI.torpAspectMax+NAV_AI.torpEps){ res.why='舷角过大(目标在艉后)'; return res; }
+if(dist<NAV_AI.torpMin-NAV_AI.torpEps){ res.why='距离过近(<120m)'; return res; }
+if(dist>NAV_AI.torpMax+NAV_AI.torpEps){ res.why='距离过远(>600m)'; return res; }
+const tv=navTgtVel(t);
+let tof=dist/sp, ix=t.pos.x, iz=t.pos.z;
+for(let k=0;k<4;k++){
+ix=t.pos.x+tv[0]*tof; iz=t.pos.z+tv[1]*tof;
+const nt=Math.hypot(ix-c.pos.x,iz-c.pos.z)/sp;
+const done=Math.abs(nt-tof)<0.35;
+tof=nt;
+if(done) break;
+}
+res.tof=tof;
+const aimYaw=Math.atan2(ix-c.pos.x,iz-c.pos.z);
+res.aimYaw=aimYaw;
+res.side=angDiff(c.yaw,brg)>0?1:0;              // 冻结口径 (Lead §11.9④): 0=左舷 / 1=右舷
+if(Math.hypot(ix-c.pos.x,iz-c.pos.z)>range*0.95){ res.why='截击点超出鱼雷射程'; return res; }
+if(Math.abs(angDiff(c.yaw,aimYaw))>NAV_AI.torpSolveMax){ res.why='提前量解所需转舵过大'; return res; }
+res.ok=true; res.why='可发射';
+return res;
+}
+// 艇炮开火 (主炮/机炮对岸对艇双用, §2.1): 炮塔跟瞄 + 距离/瞄准门限 + 难度散布档 (DIFF_TABLE.spreadMul, 同源);
+// 弹药/冷却/特效/命中判定全部由 15d 的 fireMain/fireSecondary 管线承担, 本函数只管"该不该打、往哪打"。
+// ★ 2026-09-21 炮塔换装 (需求⑥⑦): 旧实现**从不转塔** —— 那是"艇艏固定炮座"年代的写法: 打谁就得把艇艏
+//   对准谁, AI 只能朝目标压上, 那一半正是"跑轰振荡"的成因。真炮塔 (15e 新模型 + 15d 360° 连续回转) 之后,
+//   转塔与航向解耦: 炮塔自己咬住目标, 艇可以沿岸平行跑。回转速率只从 spec.tRate 读 (不硬编码)。
+function navBoatShoot(c,ai,dt,tx,ty,tz,tol){
+const spec=c.spec||{}, main=spec.main||null, sec=spec.secondary||null;
+ai.fireT-=dt; ai.mgT-=dt;
+// ① 转塔 (世界坐标点 → 炮塔局部连续角; 15d 内部按 spec.tRate 限速, 无 ±π 跳变)。
+//    turretAimPoint = 三维瞄准 (x,z 回转 + y 俯仰); 老实现只有 turretAimAt(x,z) 时退到只回转。
+if(typeof c.turretAimPoint==='function') c.turretAimPoint(tx,ty,tz,dt);
+else if(typeof c.turretAimAt==='function') c.turretAimAt(tx,tz,dt);
+// ② 炮口起算的提前量方向 (muzzles.main → getWorldPosition)
+// 兜底值走 SHELL_SPD_NAVAL 单源 (2026-09-21B: 原字面量 115 会在提速时变成"只改了一半"的隐雷)
+const dir=navLeadDir(c,tx,ty,tz,main?(main.spd||SHELL_SPD_NAVAL):SHELL_SPD_NAVAL);
+const err=navAimErr(c,dir);
+const d=Math.hypot(tx-c.pos.x,tz-c.pos.z);
+const dm=DIFF_TABLE[SETTINGS.diff];
+const tol2=tol*(dm?dm.spreadMul:1);
+// ③ 回转速率门控 (需求⑦): 门限不写死, 由 spec.tRate 折算 —— "误差要在开火前摇内收敛" (对齐时间 = err/tRate)。
+//    塔快 ⇒ 同一容差下更早可开火; 塔慢 ⇒ 门控自动收紧, 不会在指向还没到位时空放 (旧代码的 tol 与塔无关)。
+const tRate=(typeof spec.tRate==='number'&&spec.tRate>0.3)?spec.tRate:1.9;
+const aligned=(err<=tol2)&&(err/tRate<=NAV_AI.aimLead);
+if(main&&typeof c.fireMain==='function'&&ai.fireT<=0&&aligned&&d<=NAV_AI.fireR){
+c.fireMain(dir);
+ai.fireT=Math.max(0.25,main.rof||1)*rand(1,1.3);
+return true;
+}
+if(sec&&typeof c.fireSecondary==='function'&&ai.mgT<=0&&err<=tol2+0.12&&d<=260){
+c.fireSecondary(dir);
+ai.mgT=Math.max(0.05,sec.rof||0.08)*rand(1,1.4);
+return true;
+}
+return false;
+}
+// ═══════════ ① boatAI —— 艇智能体 (advance/会师 → hunt → engage → evade) ═══════════
+// 相位优先级 (2026-09-21 全盘优化后): wreck/sinking(停) > ground(倒车脱困) > reefOut/inshore(离岸纪律)
+//   > evade(弹着规避) > hunt(敌艇可见就追) > engage(岸轰轮换) > advance(跨图会师推进, 默认)。
+// 用户裁定原文: "两者兼顾: 敌艇可见就追击, 否则轮换压制与巡逻会师"。三条硬纪律:
+//   ① 永远在动 (除搁浅/沉没, 速度恒 1) —— 艇不该停, 也避免触发车组"驻守 26s 下车";
+//   ② 一切转向先过 navSafeYaw (吃水+浅水余量): AI 绕开的正是 15d 判定会搁浅的水域;
+//   ③ 默认相位必须是**跨图推进**: 旧实现里 approach/patrol 都在出生湾附近打转, engage 又能在出生点满足,
+//      于是 4200 帧里 4199 帧在出生湾对着岸炮"跑轰" —— 这就是用户看到的"一局双方的船基本遇不到"。
+function boatAI(craft,dt){
+if(!craft) return;
+// ★ 帧戳幂等 (Lead 2026-09-20 硬裁定 §11.9②): 15d 的 NavalCraft.update 与 14-bots 兜底钩双跑 ⇒ 只有一次真决策。
+if(craft.__aiBoatTick===nowT) return;
+craft.__aiBoatTick=nowT;
+if(craft.alive===false||craft.aiDrive===false) return;
+const c=craft, ai=navAIS(c), spec=c.spec||{};
+const st=c.state||'run';
+if(st==='wreck'||st==='sinking'){ if(typeof c.drive==='function') c.drive(0,0,dt); return; }
+if(st==='ground'){ navUnground(c,ai,dt); return; }               // 搁浅 (§3.3): 只倒车脱困, 其余决策挂起
+// ★2026-09-26E (审计 19): 浅水带余量改读单源 NAVAL_CFG.shallowPad (旧版写死 0.55, 而 15d/01-audio
+// 都读 0.45 ⇒ AI 的"最小可航水深"比物理的擦礁带厚 0.1m, 判据与实况不同源)。
+const minDep=(spec.draft0||0.95)+((typeof NAVAL_CFG!=='undefined'&&NAVAL_CFG.shallowPad)||0.45)+NAV_AI.depthMargin;   // 最小可航水深 = 吃水 + 浅水带 + 余量 (逐值等于旧字面量 0.55, 但来历显式)
+// ❸ 反极限环看门狗 (先采样后决策): 20s 窗口内净位移 <38m ⇒ 判定"原地打转", 强制改道 12s (期间禁止岸轰)。
+navTrackPos(c,ai,dt);
+// ⓪ 离岸纪律 (先于一切战术): 艇误入礁盘平台/冲滩带 (离岸 <36m) 一律先向海外脱离, 不在此开火 ——
+//    §1.1 的剖面分工是"两栖车冲滩、艇停在礁盘外", AI 不该靠搁浅来实现它 (被打偏/进近过头都会到此)。
+//    反方向同理: 离岸 >260m 已被打散到远海 ⇒ 先收回通航环带 (走 ringMid 环带中段), 不在图缘外打转。
+const sd0=navShoreD(c.pos.x,c.pos.z);
+// ★2026-10-03 (纯海图死锁): 离岸纪律按"离岸距离"收拢/外推, 而 opensea 的岸线在 ±820 (可玩区 ±380)
+//   ⇒ sd0 恒 >400 > offshoreMax(260) ⇒ ⓪ 每帧命中, 艇整局困在 navBoatAdvance 一个相位里 ——
+//   追击/弹着规避/摆渡全部不可达 (实机"艇像没头苍蝇只会绕圈")。opensea 无岸可依, 整段跳过。
+if(CAMPAIGN.terr!=='opensea'){
+if(sd0<NAV_AI.reefIn){ ai.mode='reefOut'; navSteer(c,navSafeYaw(c,navSeawardYaw(c),minDep),1,dt); return; }
+if(sd0>NAV_AI.offshoreMax){
+// 收拢 = 回环带 + **继续会师**: 走推进相位的下一个航点, 而不是"沿自己所在方位原地回环带"。
+// 为什么: 被岸炮推远一次之后, 原地收拢要先横向跑回环带再重新赶路 —— 实测这一来一回吃掉 40s+ 的会师时间
+// (120s 档里美军艇被推到离岸 271m 再折回, 首次 <340m 从 31s 拖到 106s)。沿任务方位收拢是一箭双雕。
+ai.mode='inshore';
+ai.wp=null;
+navBoatAdvance(c,ai,dt,minDep);
+return;
+}
+}                                                      // ← opensea 跳过离岸纪律的收口 (见上 2026-10-03 注)
+// 岸轰轮换计时: 只要本轮还在走表就递减 (含被规避打断的帧) —— "一轮就是一, 轮长上限 engBout" 不因干扰而延长
+if(ai.engT>0) ai.engT-=dt;
+	// ① 弹着规避: 在途炮弹/鱼雷威胁, 或规避动作未到期 (记住规避前的相位 —— 含 engage, 规避结束要接着打)
+	// ★2026-10-03: 摆渡冲刺 (ferryTgt 已盖章) 期间**不规避** —— 副炮 480m 包络里弹着威胁常驻,
+	//   旧口径 evadeT 被逐帧回填 ⇒ 艇被"躲"钉死在 400m 外永远贴不上舷 (探针 T12 实测 34s 零收敛)。
+	//   摆渡是明确的突击意图: 冲刺段吃弹硬上, 与"步兵冲开阔地不因挨打就地卧倒到底"同一条口径。
+	const threat=navShellThreat(c);
+	if(c.ferryTgt){ ai.evadeT=Math.max(0,ai.evadeT-dt); }
+	else if(threat>0||ai.evadeT>0){
+	if(ai.mode!=='evade') ai.prev=ai.mode;
+	ai.mode='evade'; navBoatEvade(c,ai,dt,threat,minDep); return;
+	}
+	if(!c.ferryTgt&&ai.mode==='evade') ai.mode=ai.prev||'advance';
+// ② 追击对方小艇 (用户裁定"敌艇可见就追击"): 可追击 + 发现半径 + 通视 —— 隔着岛不算看见, 否则两条艇会各贴着
+//    本侧岸线互相"锁定", 回到老毛病 (绕岛不来)。贴脸 (≤120m) 不看通视; 搁浅弃艇不追 (见 navHuntable)。
+const enemy=navEnemyCraftNear(c,NAV_AI.huntR*(NIGHT_MODE?NIGHT_CFG.rangeMul:1)*WX_CFG.rangeMul); // 追击发现半径: 夜档×rangeMul ×天气 (天气设计 §5-8)
+if(enemy&&navHuntable(enemy)&&navVisible(c,enemy)){ ai.mode='hunt'; ai.prev='hunt'; navBoatHunt(c,ai,dt,enemy,minDep); return; }
+if(ai.mode==='hunt') ai.mode='advance';
+// ③ 对岸压制 (轮换制, 目标每 tgtT 重扫一次): 只在"有可判定归属的敌方岸上目标 + 冷却已过 + 不在改道期"时进入;
+//    进入后跑一轮"压制—脱离—换阵位" (navBoatEngage), 到时/失目标即退并进冷却 ⇒ 压制与推进**交替**, 不独占帧。
+ai.tgtT-=dt;
+if(ai.tgtT<=0){ ai.tgtT=NAV_AI.tgtT; ai.tgt=navScanShore(c); }
+if(ai.tgt&&ai.tgt.obj&&(ai.tgt.obj.alive===false||ai.tgt.obj.dead)) ai.tgt=null;   // 目标已毁 (炮位 alive=false / 工事 dead)
+if(ai.mode==='engage'){
+if(!ai.tgt||ai.engT<=0) navEngageExit(ai);                   // 一轮结束 → 进冷却, 落到下面走推进
+else { navBoatEngage(c,ai,dt,ai.tgt,minDep); return; }
+}
+if(ai.tgt&&nowT>=ai.engCd&&nowT>=ai.loopT){
+ai.mode='engage'; ai.prev='engage'; ai.engT=NAV_AI.engBout;
+ai.engN=(ai.engN||0)+1; ai.engPos=null; ai.engStance='fire'; ai.engHold=0; ai.engMoveT=0;
+navBoatEngage(c,ai,dt,ai.tgt,minDep); return;
+}
+// ③b 接舷摆渡 (★2026-10-03 纯海图, 夺点死锁破解): 同队巡逻环全等且同相位 ⇒ 舰间距离恒在 boardR 外
+//   (铁底湾 330m/珊瑚海 BB 464m), 甲板旗对 Bot 永远不可夺。摆渡 = 艇载着自己的车组贴到敌舰舷侧
+//   (capPushCraft 停在壳边), 15h capBotTick 在 boardR 圈内把他送上甲板; 空艇由重生认领链
+//   (spawn → pickIdleNaval) 自行补员, 冷却 ferryCdT 内不做下一轮。优先级在 hunt 之后:
+//   有敌艇可追先打仗, 打完仗才摆渡; 弹着规避照常能打断 (prev='ferry' 回得来)。
+if(CAMPAIGN.terr==='opensea'&&typeof capitalShips!=='undefined'&&capitalShips.length&&typeof capRectDist==='function'){
+const dr=c.crewBot||c.driverBot;
+if(c.ferryTgt){
+if(c.ferryTgt.state!=='run'||!dr||!dr.alive){ c.ferryTgt=null; }
+else{
+// 贴舷停泊位外扩 12m (★2026-10-03 5→12): capPushCraft 的 SAT 把艇顶在壳矩形外 10~12m 才放行,
+//   pad=5 的停泊位在排斥带**里面** ⇒ 艇永远到不了目标点, 只在圈外打转 (T12 红根因之二)。
+//   pad 取 SAT 均衡带上缘, 艇径直贴上舷, 停泊位落进 boardR=14 圈内交 capBotTick 下客。
+const tp=(typeof capNearestSurfPt==='function')?capNearestSurfPt(c,c.ferryTgt,12):{x:c.ferryTgt.pos.x,z:c.ferryTgt.pos.z};
+const d2=Math.hypot(tp.x-c.pos.x,tp.z-c.pos.z);
+const want=Math.atan2(tp.x-c.pos.x,tp.z-c.pos.z);
+// 直驭 (不过 navSafeYaw/navSteer 的避让): 摆渡的目标就是那条舰, 让路预折会跟进近互搏;
+//   贴舷的软接触由 capPushCraft 的 SAT 承担, 近距离收油保持并靠。
+if(typeof c.drive==='function') c.drive(d2>30?1:0.32,clamp(-angDiff(c.yaw,want)*1.6,-1,1),dt);
+ai.mode='ferry';
+return;
+}
+}
+if(dr&&(c.ferryCdT||0)<=nowT){
+const ft=navFerryTarget(c);
+if(ft) c.ferryTgt=ft;
+}
+}
+// ④ 跨图会师推进 (默认相位)
+ai.mode='advance'; ai.prev='advance';
+navBoatAdvance(c,ai,dt,minDep);
+}
+// 岸轰轮次收尾: 统一在这里进冷却 (只此一处 —— 退出原因不同但"轮换"语义相同)
+function navEngageExit(ai){
+ai.mode='advance'; ai.engT=0; ai.engPos=null; ai.engStance='fire';
+ai.engCd=nowT+rand(NAV_AI.engCd[0],NAV_AI.engCd[1]);
+}
+// 摆渡目标 (★2026-10-03 opensea 摆渡相位的选靶单源): 最近一艘"还有本方可夺甲板旗"的在航敌舰 ——
+// 瘫舰的旗不可夺 (capFlagActive 单源), 全旗到手/全瘫 ⇒ 返回 null, 摆渡相位自然退场回到会师推进。
+function navFerryTarget(c){
+if(typeof capFlagActive!=='function'||typeof capRectDist!=='function') return null;
+let best=null,bd=1e9;
+for(let i=0;i<capitalShips.length;i++){
+const s=capitalShips[i];
+if(s.team===c.team||s.state!=='run') continue;
+let has=false;
+for(const f of FLAGS){ if(f.ship===i&&f.owner!==c.team&&capFlagActive(f)){ has=true; break; } }
+if(!has) continue;
+const d=capRectDist(s,c.pos.x,c.pos.z);
+if(d<bd){ bd=d; best=s; }
+}
+return best;
+}
+// ❸ 反极限环看门狗: 每 2s 采一位, 保留 looppWin 秒; 窗口内**净位移** (不是路程) 低于 looppNeed ⇒ 原地打转。
+// 为什么用净位移而不是路程: "跑轰振荡"的艇每帧都在动 (速度不小), 路程很可观, 但它始终没离开那块水域 ——
+// 用户看到的就是"在出生点打转"。净位移才是这个现象的判据。
+function navTrackPos(c,ai,dt){
+ai.trkT=(ai.trkT||0)-dt;
+if(ai.trkT>0) return;
+ai.trkT=2;
+const trk=ai.trk||(ai.trk=[]);
+trk.push({t:nowT,x:c.pos.x,z:c.pos.z});
+while(trk.length&&nowT-trk[0].t>NAV_AI.looppWin) trk.shift();
+if(trk.length<3) return;
+let mx=0;
+for(const q of trk){ const d=Math.hypot(q.x-c.pos.x,q.z-c.pos.z); if(d>mx) mx=d; }
+if(mx<NAV_AI.looppNeed){
+ai.loopN=(ai.loopN||0)+1;
+ai.loopT=nowT+NAV_AI.looppBreak;          // 改道期: advance 相位照走, 但禁止进入 engage
+ai.wp=null; ai.engPos=null; ai.trk=[{t:nowT,x:c.pos.x,z:c.pos.z}];
+}
+}
+// 环带推进方向单源 (★ 这是"会师能成立"的关键一条, 别改成按当前位置判向):
+//   两个方位角都取**集结点常量** (sea.muster), 不取艇的当前位置 —— 位置会被岸炮打偏、被规避推歪,
+//   而 muster 是常量, 于是两条艇算出的方向永远稳定、且互为相反数 (angDiff 反对称) ⇒ 空间上同向绕岛。
+//   实测教训 (2026-09-21 首轮): 用艇当前位置的方位判向时, 美军艇在出生点被岸炮推歪 0.023rad (跨过了
+//   ±π 分界), 判出相反方向, 与日军艇走互补的两段弧 ⇒ 永远碰不到面。位置越接近"正南/正北"越危险。
+//   返回 0 表示"分不出方向" (两集结点同方位/数据缺失), 由调用方用 wing 兜底。
+function navAdvanceDir(team){
+const om=navMuster(team), em=navMuster(1-team);
+if(!om||!em) return 0;
+const d=angDiff(Math.atan2(om.x,om.z),Math.atan2(em.x,em.z));
+if(Math.abs(d)<1e-3) return 0;
+return d>0?1:-1;
+}
+// 跨图会师推进 (默认相位): 沿 sea.navRing 的**深水环带中段** (ringMid 6.4m ≈ 离岸 75m) 向敌方海域推进。
+// ★ 目标不是坐标而是**方位角**: 由 sea.muster[1-team] 相对图心现算 (navEnemyBearing), 航点由 navRingPt 现算 ——
+//   换图/改湾口/改集结点都不用动本函数 (不写死任何坐标, 与 15d 重生位同源)。
+// ★ 双方"同向绕环"的证明: 步进方向由 navAdvanceDir 从两个**集结点常量**算出 (见上), 两队互为相反数
+//   ⇒ 绕岛的空间方向一致, 各走半圈后在图上最远点相遇 (dev 自检 ⑨ 断言"首次 <340m 的时刻必须存在")。
+//   若改成"各自走最近的一侧", 两者会走互补的两段弧、恰好永远不碰面 —— 这正是必须同向的原因。
+// ★ 步进上限 ringAng: 一次拐 ≤31.5°, 弦切内缩 ≈8.6m < (75-43)m 的环带余量, 掉头弧 (~74m) 也不会蹭礁盘。
+// ★ 转向余量用 cruise (≥ringDep 3.4m): 推进相位不许切进环带内缘 (实测不设时在岬角斜切到离岸 44m/水深 3.48m)。
+function navBoatAdvance(c,ai,dt,minDep){
+const aTgt=navEnemyBearing(c.team);
+if(aTgt===null){                                             // 无 sea.muster (非环礁图/表缺失) 的兜底
+if(navLanes().length) navBoatApproach(c,ai,dt,minDep);       // 有航道表: 老进近路径 (与两栖车同一套)
+else navBoatPatrol(c,ai,dt,minDep);                          // 什么表都没有: 环带游弋, 至少不冲滩
+return;
+}
+// ★2026-10-04 (海战审计 F3 艇自投罗网): 纯海图 (terr:'opensea') 上 navRingPt 的"从 R=120 起扫首个达标
+//   深水点"**恒命中 R=120 图心圈** —— opensea 全域深水, 第一个采样点就达标。环带语义只对"图中有岛"的
+//   图成立 (navRingPt 本来就是找礁缘外的深水); 落到 opensea 上, "跨图会师推进"退化成"绕图心 120m 圈
+//   巡逻", 而这条圈整圈都在敌大舰副炮包络里 (铁底湾 BB 环内缘 107m < 120m) —— 艇整局对大舰零攻击
+//   绕圈送票。opensea 的会师就是**直奔敌方集结点**: 全域深水, 无礁盘纪律可违反, navSafeYaw 的水深
+//   探测照常兜底; 贴舷摆渡/追击/规避的优先级在 boatAI 里不变。
+if(CAMPAIGN.terr==='opensea'){
+const em=navMuster(1-c.team)||{x:0,z:0};
+ai.advYaw=Math.atan2(em.x-c.pos.x,em.z-c.pos.z);
+navSteer(c,navSafeYaw(c,ai.advYaw,minDep),1,dt);
+return;
+}
+const cruise=Math.max(minDep,NAV_AI.ringDep);
+const aMe=Math.atan2(c.pos.x,c.pos.z);
+if(!ai.wp||Math.hypot(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z)<NAV_AI.wpReach){
+let s=navAdvanceDir(c.team);
+if(!s) s=(ai.wing>=0?1:-1);
+ai.advS=s;
+ai.ang=aMe+ai.advS*NAV_AI.ringAng;
+ai.wp=navRingPt(ai.ang,NAV_AI.ringMid);
+}
+// 任务航向 (规避相位用它把"横向闪避"限制在任务 ±90° 内 —— 见 navBoatEvade)
+ai.advYaw=Math.atan2(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z);
+navSteer(c,navSafeYaw(c,ai.advYaw,cruise),1,dt);
+}
+// 可见性 (§5.1 "发现半径内 + 通视"): 与 Bot/坦克同一支 raycastWorld; 射线被岛体挡住 ⇒ 不算看见。
+// 为什么必须加: huntR=340m 而岛宽 ~500m, 不判通视的话两条艇会隔着岛互相"锁定"并各自贴着本侧岸线,
+// 永远碰不到面 (正是用户报的现象)。贴脸 (huntClose) 例外: 已经在眼前了, 不看通视。
+function navVisible(c,e){
+if(!e) return false;
+const d=navDist(c,e);
+if(d<=NAV_AI.huntClose) return true;
+return navLOS(c.pos.x,(c.pos.y||0)+2.4,c.pos.z,e.pos.x,(e.pos.y||0)+1.2,e.pos.z,d);
+}
+// 可追击判据 (2026-09-21 新增): 活着 + 未沉 + **不是"搁浅且无人"的弃艇**。
+// 为什么把弃艇排除在追击之外 (三条, 都不是为测试而设):
+//   ① 军事上: 搁浅且无人的艇动不了、也不开火, 不构成威胁; 主炮该留给真目标 (艇的主炮弹药不是无限的);
+//   ② 战术上: 追它必然把我方艇拖进礁盘 (⓪ 离岸纪律的正面冲突 —— 实测追踪路径要压到离岸 17m 的冲滩带);
+//   ③ 实测取证 (dev 红线4④): 静止弃艇会把 AI 艇从 340m 外吸到滩头, 1 秒内 12 发打爆它 ——
+//      而那条用例是**纯物理**用例 (倒车脱困), 试验艇没有车组、也没有 AI, 本就不该进入任何人的目标表。
+//   `manned` 是 15d 的冻结只读字段 (playerDriven||crewBot); 车组一旦回船, 该艇立刻恢复"可追击"。
+function navHuntable(e){
+if(!e||e.alive===false) return false;
+const st=e.state||'run';
+if(st==='sinking'||st==='wreck') return false;
+if(st==='ground'&&!e.manned&&!e.playerDriven&&!e.crewBot&&!e.driverBot) return false;
+return true;
+}
+// 沿岸切线航向: 垂直目标方位两侧取"前方水深更大"的一侧 (与 navEvadeYaw 同法; 只读 waterDepthAt)
+function navTangentYaw(c,bearing,side){
+const a=bearing+side*HPI, b=bearing-side*HPI;
+return navAheadDepth(c,a)>navAheadDepth(c,b)?a:b;
+}
+// 换阵位选点 (压制—脱离—换阵位 的"换阵位"): 目标侧后 engOff 方位、距离带内、**离岸 ≥ engOut(70m)** 的深水点。
+// 左右交替 (每次调用翻一次 engSide) ⇒ 连续两轮阵位在方位上错开 ≥2*engOff(≈0.8rad), 保证有真实航程。
+// 若选点落在礁盘/岸上 (罕见: 岬角内侧), 沿该方位向外推 —— 推到 70m 离岸为止。
+function navEngPos(c,ai,tgt){
+ai.engSide=-(ai.engSide||1);
+const ang=Math.atan2(c.pos.x-tgt.x,c.pos.z-tgt.z)+rand(NAV_AI.engOff[0],NAV_AI.engOff[1])*ai.engSide;
+const r=clamp(Math.hypot(c.pos.x-tgt.x,c.pos.z-tgt.z),NAV_AI.engRange[0],NAV_AI.engRange[1]);
+let x=tgt.x+Math.sin(ang)*r, z=tgt.z+Math.cos(ang)*r;
+for(let k=0;k<40&&navShoreD(x,z)<NAV_AI.engOut;k++){ x+=Math.sin(ang)*8; z+=Math.cos(ang)*8; }
+return {x,z};
+}
+// 进近 (★ 已不是艇的默认路径): 选湾 → 礁盘外进近点, 只作"有航道表但无 sea.muster"的兜底。
+// 两种航法: ① 同方位 (与图心方位夹角 ≤0.55 rad): 直插进近点;
+//   ② 不同方位 (远湾): 沿 sea.navRing 环岛绕行 —— **航点持久化**, 走到 45m 内才选下一个。
+//      为什么必须持久: 每帧贪心重算时, 被岸炮打散一次 (evade 会把艇推向海外) 之后, 方位差变了 ⇒ 目标点跟着漂,
+//      艇就沿切线越走越远 (实测远湾用例在 31s~>60s 之间随机, 就是这条抖动)。持久航点让绕行单调推进, 打完散还能回同一个点。
+function navBoatApproach(c,ai,dt,minDep){
+const L=navPickLane(c,ai);
+if(!L){ navSteerTo(c,{x:0,z:0},1,dt); return; }                 // 无航道表 (非环礁图): 至少朝图心方向走
+if(!ai.approach||ai.approachL!==L){ ai.approach=navReefOutPt(L); ai.approachL=L; ai.wp=null; }
+const ap=ai.approach;
+if(!ap){ navSteerTo(c,{x:0,z:0},1,dt); return; }
+ai.appT=(ai.appT||0)+dt;
+if(ai.appT>150){ ai.mode='patrol'; ai.wp=null; return; }        // 兜底: 2.5 分钟还没到就转巡逻 (不无限赶路)
+const d=Math.hypot(ap.x-c.pos.x,ap.z-c.pos.z);
+if(d<NAV_AI.approachR){ ai.mode='patrol'; ai.wp=null; ai.ang=Math.atan2(c.pos.x,c.pos.z)+ai.wing*0.4; return; }
+if(ai.wp&&Math.hypot(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z)<45) ai.wp=null;
+if(!ai.wp){
+const aMe=Math.atan2(c.pos.x,c.pos.z), aTgt=Math.atan2(ap.x,ap.z), da=angDiff(aMe,aTgt);
+ai.wp=(Math.abs(da)<=0.55)?{x:ap.x,z:ap.z}:navRingPt(aMe+clamp(da,-0.55,0.55));
+}
+ai.advYaw=Math.atan2(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z);
+navSteer(c,navSafeYaw(c,ai.advYaw,minDep),d<70?0.6:1,dt);
+}
+// 巡逻: 沿 sea.navRing (d=43..200) 环岛机动 —— 航点由 navRingPt 在方位角上现算 (兜底相位);
+// 转向余量与推进同档 (cruise = ≥ringDep): 兜底相位也不许切进礁缘
+// ★2026-10-04 (F3 同族): opensea 上 navRingPt 恒返回 R=120 图心圈 (见 navBoatAdvance 顶注) ——
+//   纯海图的巡逻改为**回守己方集结点** (在己方舰队近旁游弋): 既是合理的"基地艇"行为, 也让
+//   pickIdleNaval 的补员距离门 (重生 Bot 认领空艇) 真的够得着艇。
+function navBoatPatrol(c,ai,dt,minDep){
+const cruise=Math.max(minDep,NAV_AI.ringDep);
+if(CAMPAIGN.terr==='opensea'){
+const om=navMuster(c.team);
+if(om){
+const d=Math.hypot(om.x-c.pos.x,om.z-c.pos.z);
+if(d>90){ navSteer(c,navSafeYaw(c,Math.atan2(om.x-c.pos.x,om.z-c.pos.z),cruise),1,dt); return; }
+// 进圈: 绕己方集结点做慢速哨戒圈 (55m 半径, ~0.15 rad/s), 不叠在集结点上互相推挤
+ai.ang=(ai.ang||rand(0,TAU))+dt*0.15;
+const wx=om.x+Math.sin(ai.ang)*55, wz=om.z+Math.cos(ai.ang)*55;
+navSteer(c,navSafeYaw(c,Math.atan2(wx-c.pos.x,wz-c.pos.z),cruise),0.7,dt);
+return;
+}
+navBoatAdvance(c,ai,dt,minDep);                        // 无集结点表: 退化为会师推进 (至少有任务)
+return;
+}
+if(!ai.wp||Math.hypot(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z)<45){
+ai.ang=(ai.ang||rand(0,TAU))+ai.wing*NAV_AI.ringStep*rand(0.7,1.5);
+ai.wp=navRingPt(ai.ang,NAV_AI.ringMid);
+}
+ai.advYaw=Math.atan2(ai.wp.x-c.pos.x,ai.wp.z-c.pos.z);
+navSteer(c,navSafeYaw(c,ai.advYaw,cruise),1,dt);
+}
+// 对岸压制 (压制—脱离—换阵位): 旧实现是"艏向对准目标 ⇄ 离岸<standoff 就外转"的逐帧迟滞环 ——
+// 迟滞带只有 45~54m (9m 宽), 而艇的掉头弧 ~74m ⇒ 每次外转都冲上礁盘 (实测水深掉到 1.24m、速度掉 5.8m/s),
+// 再被 ⓪ 的 reefIn=36 推回海外 = 原地极限环 (用户原话"总是在出生点打转")。
+// 新实现把"迟滞比较"换成**两个离散阵位状态** + 事件式转换:
+//   'fire' 压制: 沿目标方位的**切线**跑 (炮塔 360° 自己咬住目标 —— 真炮塔换装后才成立的战术);
+//   'move' 换阵位: 朝 navEngPos 选的新阵位 (目标侧后、离岸 ≥70m) 全速开进, 路上照打。
+// 转换全靠事件 (到时/到点/离岸过近/目标出带), 不是逐帧比较 ⇒ 不可能逐帧翻转; 每次换阵位左右交替 ⇒
+// 航程有下界 (0.8rad@250m ≈ 200m), 从机械上排除"原地振荡"。
+function navBoatEngage(c,ai,dt,tgt,minDep){
+const sd=navShoreD(c.pos.x,c.pos.z);
+const d=Math.hypot(tgt.x-c.pos.x,tgt.z-c.pos.z);
+const ty=(tgt.y!==undefined?tgt.y:0.6);
+ai.engHold=(ai.engHold||0)+dt;
+ai.engMoveT=(ai.engMoveT||0)+dt;
+if(ai.engStance!=='move'&&(ai.engHold>NAV_AI.engHold||sd<NAV_AI.engOut||d>NAV_AI.engRange[1]||d<NAV_AI.engRange[0]*0.6)){
+ai.engStance='move'; ai.engMoveT=0; ai.engPos=navEngPos(c,ai,tgt);     // 脱离: 换一个阵位
+}
+if(ai.engStance==='move'){
+if(!ai.engPos) ai.engPos=navEngPos(c,ai,tgt);
+const toPos=Math.hypot(ai.engPos.x-c.pos.x,ai.engPos.z-c.pos.z);
+if(toPos<NAV_AI.engPosR||ai.engMoveT>NAV_AI.engMove){ ai.engStance='fire'; ai.engHold=0; }  // 到点 → 转压制
+else{
+ai.advYaw=Math.atan2(ai.engPos.x-c.pos.x,ai.engPos.z-c.pos.z);
+navSteer(c,navSafeYaw(c,ai.advYaw,minDep),1,dt);
+navBoatShoot(c,ai,dt,tgt.x,ty,tgt.z,0.30);                            // 走位途中照打 (炮塔与航向解耦)
+return;
+}
+}
+const bearing=Math.atan2(tgt.x-c.pos.x,tgt.z-c.pos.z);
+ai.advYaw=navTangentYaw(c,bearing,ai.engSide||1);                     // 任务航向 = 沿岸炮击航路
+navSteer(c,navSafeYaw(c,ai.advYaw,minDep),1,dt);
+navBoatShoot(c,ai,dt,tgt.x,ty,tgt.z,0.22);
+}
+// 弹着规避: 基准航向 = 垂直于最近来袭弹道 (横向脱离瞄准线), 叠加 ★ sin(nowT*0.8)*ampl 蛇形,
+// ampl = 0.55 + 威胁度*0.95 (受威胁越大摆幅越大, §5.1 原文口径)。
+// ★ 关键: 规避时长只在"有威胁"时回填, 其余按 dt 递减 —— 否则每帧 max(evadeT,1.1) 会让它永远 >0,
+//   艇就再也退不出 evade (实测: 被岸炮打两发后一路逃到离岸 1km 的外海)。
+// ★ 2026-09-21 "规避不脱离任务"的 A/B 结论 = **否决** (留证据, 别再试一遍):
+//   曾把规避航向限制在任务航向 ±90° 内 (理由是"纯横向脱离会把艇推到远海"), 实测反而更差:
+//     自由横向闪避: 首次 <340m 相遇 t=46.4s, 离湾位移 678m, evade 占 53% 帧;
+//     ±90° 限制后 : 首次 <340m 相遇 t=104.0s, 离湾位移 477m, evade 占 74% 帧。
+//   机理: 横向闪避能把艇**带出岸炮 420m 包络**; 限向之后它一边挨打一边留在包络里, evadeT 被反复回填,
+//   "躲"就变成主要相位、推进会师被拖慢。⇒ 保留自由的横向脱离 (spec §5.1 原口径)。
+function navBoatEvade(c,ai,dt,th,minDep){
+if(th>0) ai.evadeT=Math.min(4.5,Math.max(ai.evadeT,1.1+th*1.6));
+ai.evadeT-=dt;
+if(nowT>ai.awayYawT){ ai.awayYaw=navEvadeYaw(c); ai.awayYawT=nowT+1.2; }   // 基准航向每 1.2s 重取 (弹道变了就换向)
+const ampl=NAV_AI.evadeAmp0+th*NAV_AI.evadeAmpK;
+const yaw=ai.awayYaw+Math.sin(nowT*NAV_AI.evadeFreq)*ampl;
+navSteer(c,navSafeYaw(c,yaw,minDep),1,dt);
+}
+// 追击对方小艇: 鱼雷窗口成立 → 发射 (side 0=左舷/1=右舷, aimDir=截击方向), 并沿截击航向走保住舷角;
+// 窗口不成立 → 朝目标压上摆位。全程主炮/机炮对艇照打 (§2.1 主炮机炮双用)。
+function navBoatHunt(c,ai,dt,enemy,minDep){
+ai.torpT-=dt;
+const w=navTorpWindow(c,enemy);
+if(w.ok&&ai.torpT<=0&&typeof c.fireTorpedo==='function'&&c.torpAmmo!==0){
+c.fireTorpedo(w.side,V3(Math.sin(w.aimYaw),0,Math.cos(w.aimYaw)));
+ai.torpT=6.5;                                                   // 一舷齐射后 6.5s 再评估 (管数/再装填由 15d 管)
+}
+const want=w.ok?w.aimYaw:Math.atan2(enemy.pos.x-c.pos.x,enemy.pos.z-c.pos.z);
+ai.advYaw=want;                                                    // 任务航向 = 截击/压上方向 (规避相位用)
+navSteer(c,navSafeYaw(c,want,minDep),1,dt);
+navBoatShoot(c,ai,dt,enemy.pos.x,(enemy.pos.y!==undefined?enemy.pos.y:0)+1.0,enemy.pos.z,0.2);
+}
+// ═══════════ ② amphAI —— 两栖车智能体 (涉水路线 → 冲滩 → 上岸复用坦克陆战层) ═══════════
+function amphAI(craft,dt){
+if(!craft) return;
+// ★ 帧戳幂等 (Lead 2026-09-20 硬裁定 §11.9②): 与 boatAI 用各自独立字段, 艇/车互不压制。
+if(craft.__aiAmphTick===nowT) return;
+craft.__aiAmphTick=nowT;
+if(craft.alive===false||craft.aiDrive===false) return;
+const c=craft, ai=navAIS(c), spec=c.spec||{};
+const st=c.state||'run';
+if(st==='wreck'||st==='sinking'){ if(typeof c.drive==='function') c.drive(0,0,dt); return; }
+const wade=spec.wadeDepth||0.55;
+if(navDepth(c.pos.x,c.pos.z)>=wade){ ai.land=false; navAmphWater(c,ai,dt); return; }   // 浮航态 (§3.5)
+ai.land=true;
+navAmphLand(c,ai,dt);                                                                   // 履带态: 零改动复用坦克陆战层
+}
+// 涉水段: 沿"进近点 → (同侧切深航道口) → 冲滩点"三段航路推进。
+// 两栖车吃水 0.40m, 礁盘平台 1.22m 也是浮航态 (§1.1 剖面表) ⇒ 直穿礁盘可行, 不为了走航道绕远;
+// 冲滩点本身在陆上, 所以最后一站不做"躲陆"处理, 直冲上岸转履带态。
+function navAmphWater(c,ai,dt){
+if(!ai.route){
+const L=navPickLane(c,ai);
+ai.route=navAmphRoute(c,L,navBeachPt(c,L));
+ai.routeI=0;
+}
+if(!ai.route.length){ navSteerTo(c,{x:0,z:0},1,dt); return; }
+const lastI=ai.route.length-1;
+let wp=ai.route[ai.routeI];
+if(ai.routeI<lastI&&Math.hypot(wp.x-c.pos.x,wp.z-c.pos.z)<26) ai.routeI++;
+wp=ai.route[ai.routeI];
+const d=Math.hypot(wp.x-c.pos.x,wp.z-c.pos.z);
+if(ai.routeI>=lastI){ navSteerTo(c,wp,1,dt); return; }              // 末段=冲滩 (目标在陆上, 不躲)
+navSteer(c,navSafeYaw(c,Math.atan2(wp.x-c.pos.x,wp.z-c.pos.z),0.25),1,dt);
+}
+// 涉水路线 (§5.2): [择湾进近点(礁盘外, 20m)] + [同侧切深航道口 (≤80m 才插, 不绕远)] + [冲滩点]
+function navAmphRoute(c,L,beach){
+const route=[];
+if(!beach){ route.push({x:0,z:0}); return route; }
+if(L) route.push(navOffshorePt(L.x,L.z,20));
+const S=navSeaCfg();
+if(S&&S.channels&&S.channels.length){
+const ax=route.length?route[0].x:c.pos.x, az=route.length?route[0].z:c.pos.z;
+const mx=(ax+beach.x)/2, mz=(az+beach.z)/2;
+let best=null,bd=1e9;
+for(const ch of S.channels){
+const gz=((ch.z0!==undefined)?ch.z0:0)+40;
+if(mz>20&&gz<0) continue;                                   // 南湾航线不插北侧航道 (两侧海域不互通)
+if(mz<-20&&gz>0) continue;
+const d=Math.hypot(ch.x-mx,gz-mz);
+if(d<bd){ bd=d; best={x:ch.x,z:gz}; }
+}
+if(best&&bd<80) route.push(best);
+}
+route.push(beach);
+return route;
+}
+// ── 上岸后: 零改动复用 15-vehicles 的坦克陆战层 ──────────────────────────────
+// tankPerceive / tankCoverPoint / pickTankTactic 都按 `this` 取状态, 所以用**影分身** shim 承接它们的读写:
+//   · 原型挂 Tank.prototype —— pickTankTactic 内部会调 this.tankCoverPoint(eng), 原型不对就会 "not a function";
+//   · 活字段 (pos/yaw/team/hp/maxHp/vel/kind/def…) 用访问器接到载具上 (读到的是当帧真值);
+//   · 写操作 (scratch: tVehTgt/aiCover/aiOrder/aiFlankSide…) 一律落在 shim 自己的属性上 ——
+//     **不往载具对象挂任何 AI 字段** (冻结契约: 载具状态只读; 也避免与 15d 的字段命名撞车, Lead 已批准)。
+function navAmphShim(c){
+let s=_navShim.get(c);
+if(!s){
+const proto=(typeof Tank==='function'&&Tank.prototype)?Tank.prototype:Object.prototype;
+s=Object.create(proto);
+const live=['pos','yaw','team','hp','maxHp','vel','kind','name','turretYaw','turretPitch'];
+for(const k of live){
+Object.defineProperty(s,k,{
+get(){ return c[k]; },
+set(v){ Object.defineProperty(s,k,{value:v,writable:true,configurable:true,enumerable:true}); },  // 万一被写: 影子字段, 不回写载具
+configurable:true});
+}
+Object.defineProperty(s,'def',{get(){ return c.spec||{}; },configurable:true});   // tankCoverPoint/pickTankTactic 读 this.def.reload
+// scratch 初值: pickTankTactic 读 aiFlankSide 并参与加法 —— 不给初值会算出 NaN 航点
+s.tVehTgt=null; s.tLastPos=null; s.tLastSeenT=-99; s.tMemT=0; s.aiOrder=null; s.aiCover=null;
+s.aiReact=0; s.aiHaltT=0; s.aiRevT=0; s.aiTacticT=0; s.aiPerT=0; s.aiLeadT=0; s.aiLeadBias=0;
+s.aiFlankSide=1; s.cannonCd=0; s.aimReact=0; s.losOK=false;
+_navShim.set(c,s);
+}
+return s;
+}
+function navAmphLand(c,ai,dt){
+const T=(typeof tankAITune==='function')?tankAITune():{fireTol:0.06,fireR:200,spreadMul:1,vis:235};
+const sh=navAmphShim(c);
+// ① 感知层 (零改动复用): 敌车感知 —— 与坦克车长同一支视野距离/视锥/LOS/记忆
+if(typeof Tank==='function'&&Tank.prototype&&typeof Tank.prototype.tankPerceive==='function') Tank.prototype.tankPerceive.call(sh,dt);
+// ② 目标优先级: 敌车 (tankPerceive 选定) > 敌方水面载具 > 近处敌方步兵
+let tgt=(sh.tVehTgt&&sh.tVehTgt.alive)?sh.tVehTgt:null;
+if(!tgt){ const ec=navEnemyCraftNear(c,260); if(ec) tgt=ec; }
+if(!tgt){ const so=navEnemyInfNear(c,150); if(so) tgt=so; }
+if(!tgt){ ai.mode='advance'; navAmphAdvance(c,ai,dt); return; }
+ai.mode='combat';
+const ed=Math.hypot(tgt.pos.x-c.pos.x,tgt.pos.z-c.pos.z);
+// ③ 战术机动 (零改动复用): 敌车 → pickTankTactic (抢起伏掩体/侧翼/追残血); 换弹或半血 → tankCoverPoint 找 hull-down 位
+let wp=null;
+if(tgt.kind==='tank'&&typeof Tank==='function'&&Tank.prototype&&typeof Tank.prototype.pickTankTactic==='function'){
+wp=Tank.prototype.pickTankTactic.call(sh,tgt,ed);
+}
+if(!wp&&(ai.fireT>0.5||c.hp<c.maxHp*0.5)&&ed>50&&typeof Tank==='function'&&Tank.prototype&&typeof Tank.prototype.tankCoverPoint==='function'){
+wp=Tank.prototype.tankCoverPoint.call(sh,tgt);
+}
+if(wp&&(!isFinite(wp.x)||!isFinite(wp.z))) wp=null;                 // 复用的函数返回 NaN 就当作没有战术要求
+if(wp&&Math.hypot(wp.x-c.pos.x,wp.z-c.pos.z)>3) navLandSteer(c,ai,Math.atan2(wp.x-c.pos.x,wp.z-c.pos.z),dt);
+else navLandSteer(c,ai,Math.atan2(tgt.pos.x-c.pos.x,tgt.pos.z-c.pos.z),dt);
+navAmphShoot(c,ai,dt,tgt,T);
+}
+// 陆上火力: 主炮门槛/火力距离吃 tankAITune() (与坦克炮长同档), 提前量按 spec.main.spd + SHELL_G 下坠;
+// 瞄准走 15d 的 turretAimPoint(x,y,z) (回转+俯仰; 老实现只有 turretAimAt(x,z) 时退到只回转),
+// 是否对准读 turretAimDir() (不猜 turretYaw 的语义)。
+// ★ 2026-09-21 修 (红线7③ "上岸后主炮开火=0" 的直接根因): 旧实现**只转塔不抬炮** —— 炮口在 2.5m、
+//   目标(步兵)在 1.1m, 27m 上就是 −0.05rad 的固定俯仰误差, 而 tankAITune().fireTol 只有 0.07rad ⇒
+//   err 长期贴在门限上 (实测 0.061~0.076 vs tol 0.070), 70s 里只擦出 1 发、时序一偏就变 0 发。
+//   抬炮之后 err 只剩横向跟瞄残差 (≈0.01rad), 门限从"刀刃"变成正常余量。
+function navAmphShoot(c,ai,dt,tgt,T){
+ai.fireT-=dt; ai.mgT-=dt;
+const spec=c.spec||{}, main=spec.main||null;
+const tv=navTgtVel(tgt);
+const sp=(main&&main.spd)||SHELL_SPD_NAVAL;   // 兜底走单源 (2026-09-21B; 原字面量 115)
+const d0=Math.hypot(tgt.pos.x-c.pos.x,tgt.pos.z-c.pos.z);
+const tof=d0/sp;
+const px=tgt.pos.x+tv[0]*tof, pz=tgt.pos.z+tv[1]*tof;
+const ty=(tgt.pos.y!==undefined?tgt.pos.y:0)+1.1;
+if(typeof c.turretAimPoint==='function') c.turretAimPoint(px,ty,pz);
+else if(typeof c.turretAimAt==='function') c.turretAimAt(px,pz);
+const dir=navLeadDir(c,px,ty,pz,sp);
+const err=navAimErr(c,dir);
+const d=Math.hypot(px-c.pos.x,pz-c.pos.z);
+// 软目标 (步兵/工事/水面载具) 用放宽的指向门限: 37mm 榴弹打步兵不需要坦克级的 0.06~0.07rad 精度,
+// 而坦克对坦克仍吃 T.fireTol 原值 (硬目标打偏就是白给)。倍率 2.2 与"37mm 对步兵有效半径 ~5m@100m"同量级。
+// ★ 判据必须是 `kind!=='tank'` 而不是 `kind && kind!=='tank'`: 步兵 Bot **没有 kind 字段** (实测 undefined),
+//   写成前者会让"放宽门限"对步兵失效 —— 而步兵正是陆战层最常见的软目标。
+const soft=(tgt.kind!=='tank');
+const tol=soft?Math.max(T.fireTol,T.fireTol*2.2):T.fireTol;
+if(main&&typeof c.fireMain==='function'&&ai.fireT<=0&&err<tol&&d<=T.fireR){
+let clear=true;
+if(typeof raycastWorld==='function'){
+const chk=raycastWorld(V3(c.pos.x,(c.pos.y||0)+1.9,c.pos.z),dir,d*1.05);
+clear=!chk||chk.dist>d-3;
+}
+if(clear){ c.fireMain(dir); ai.fireT=Math.max(0.3,main.rof||1.4)*rand(1,1.2); return true; }
+ai.fireT=0.6;                                                    // 视线被挡: 短退避, 不空放
+return false;
+}
+if(typeof c.fireMG==='function'&&ai.mgT<=0&&tgt.kind!=='tank'&&err<0.1&&d<95){
+c.fireMG(dir); ai.mgT=0.12; return true;
+}
+return false;
+}
+// 近处敌方步兵 (上岸后的软目标, 与坦克 turretAI 同口径: 只算下车步兵, 观战者除外)
+function navEnemyInfNear(c,r){
+let best=null,bd=r;
+for(const s of combatants){
+if(!s.alive||s.team===c.team||s.onVehicle||s.spectator) continue;
+if(typeof chuteAirborne==='function'&&chuteAirborne(s)) continue; // 伞降目标不进两栖车候选 (2026-09-30 空对地平衡批)
+const d=Math.hypot(s.pos.x-c.pos.x,s.pos.z-c.pos.z);
+if(d<bd){ bd=d; best=s; }
+}
+return best;
+}
+// 无目标时推进: 朝最近的敌方/争夺中旗点开 (与 Bot.pickObjective 同语义, 共用 FLAGS); 无旗点则朝敌基地
+function navAmphAdvance(c,ai,dt){
+let best=null,bs=-1e9;
+if(typeof FLAGS!=='undefined') for(const f of FLAGS){
+let sc=-Math.hypot(f.x-c.pos.x,f.z-c.pos.z)*0.6;
+if(f.owner!==c.team) sc+=90;
+if(f.owner===c.team&&f.capTeam!==undefined&&f.capTeam!==-1&&f.capTeam!==c.team) sc+=140;
+sc+=rand(0,25);
+if(sc>bs){ bs=sc; best=f; }
+}
+let tx=null,tz=0;
+if(best){ tx=best.x+rand(-6,6); tz=best.z+rand(-6,6); }
+else if(typeof BASES!=='undefined'&&BASES.length){ tx=BASES[1-c.team].x; tz=BASES[1-c.team].z; }
+if(tx===null){ navLandSteer(c,ai,c.yaw,dt); return; }
+if(Math.hypot(tx-c.pos.x,tz-c.pos.z)<12){ navLandSteer(c,ai,c.yaw+HPI*0.5*ai.wing,dt); return; }   // 到场: 小范围机动等目标
+navLandSteer(c,ai,Math.atan2(tx-c.pos.x,tz-c.pos.z),dt);
+}
+// 陆上行驶: 朝目标直行 + 前方占用/陡坎/回深水的扇面绕行 (坡度物理由 15d 复用 Tank 的那套承担)
+function navLandSteer(c,ai,yaw,dt){
+if(typeof c.drive!=='function') return;
+let y=yaw;
+if(navLandBlocked(c,y)){
+let found=false;
+for(const da of [0.45,-0.45,0.9,-0.9,1.4,-1.4]){
+if(!navLandBlocked(c,y+da)){ y+=da; found=true; break; }
+}
+if(!found) y=yaw+HPI*ai.wing;                                     // 全被挡: 掉头找另一侧 (方向记忆, 不同帧抖动)
+}
+c.drive(1,clamp(-angDiff(c.yaw,y)*1.6,-1,1),dt);                  // 舵向符号同 navSteer (15d: turn=+1 右转)
+}
+function navLandBlocked(c,yaw){
+const sx=Math.sin(yaw), sz=Math.cos(yaw);
+const h0=(typeof heightAt==='function')?heightAt(c.pos.x,c.pos.z):0;
+for(const r of [6,14]){
+const x=c.pos.x+sx*r, z=c.pos.z+sz*r;
+if(typeof occBlocked==='function'&&occBlocked(x,z)) return true;
+if(typeof heightAt==='function'&&heightAt(x,z)-h0>1.6) return true;      // 爬不上去的坎
+if(navDepth(x,z)>1.2) return true;                                       // 别把车开回深水 (上岸后按陆战打)
+}
+return false;
+}
+// ═══════════ ③ 反舰炮位 AI —— 已移交 15f (2026-09-21A 裁定) ═══════════
+// 本文件**不再声明 batteryAI**。移交理由 (Lead 裁定, 方案 B):
+//   · 15f-battery.js:620 已声明同名 batteryAI, 且 15f 在脚本序里后加载 ⇒ 页面里跑的必然是它;
+//     两边同时存在 = "两个同名全局函数、页面跑 15f 的、沙箱测本文件的" ⇒ 一件事两支代码, 必须消除。
+//   · 那批的主题正是"岸防炮改为人为操控"(A#9「无人不开炮」+ batteryMountPlayer/batteryDismountPlayer
+//     + `get manned()`): AI 与操控同属一支才自洽 —— 3 参 batteryNear(x,z,r) 现在也被 15f 冻结为
+//     "可上炮(无人且存活)"语义, 与本文件无涉。
+// 本文件对炮位只保留**只读索敌/评分**两处 (均按队别过滤, 与占用无关):
+//   · navScanShore 的 ① 反舰炮位压制目标 —— 用 4 参 batteryNear(x,z,r,team)(= 半径内最近的存活敌对炮位);
+//   · navShoreDef 的择湾"岸防强度" —— 直接扫 BATTERIES 数组求和 (需要的是密度总和, 不是最近一门)。
+// ── 步兵反装甲对水面载具 (§5.4) ──────────────────────────────────────────────
+// 与打坦克**同档同管线**: 火箭筒 <65m 走同一支 fireRocket, 反坦克枪 <95m 走同一支 fireBullet,
+// 散布/节奏公式逐项照抄打坦克分支 (60/rpm*rand(1.2,1.8) 等)。目标来自 decide() 里 enemyTankNear() 之后
+// 追加的 navalNear() 扫描 —— enemyTankNear 函数体一行未动, 且坦克目标始终优先。
+function navInfATShip(b,craft){
+if(!b||!craft||craft.alive===false) return false;
+const d=Math.hypot(craft.pos.x-b.pos.x,craft.pos.z-b.pos.z);
+const cy=(craft.pos.y||0)+0.9;                                   // 艇体干舷中点 (命中圆柱由 15d 的 navalHitCyl 判定)
+const eye=b.eyePos();
+// ① 火箭筒 (与打坦克同一 LOS 门槛 50m / 同一 fireT 3.6s)
+if(b.slots&&b.slots[0]&&b.slots[0].def.rocket){
+const w2=b.slots[0];
+if(w2.mag<=0||b.fireT>0||b.reloadT>0||d>=65) return false;
+const dir2=V3(craft.pos.x-eye.x,cy-eye.y,craft.pos.z-eye.z).normalize();
+const chk=raycastWorld(eye,dir2,65);
+if(chk&&chk.dist<=50) return false;
+b.lastFiredT=nowT;
+fireRocket(b,eye,dir2,w2.def,V3(craft.pos.x,cy,craft.pos.z));
+w2.mag=0; b.mag=0; b.fireT=3.6;
+return true;
+}
+// ② 反坦克枪 (PTRD/博伊斯/九七式自动炮 —— 与打坦克同一支 fireBullet 与同一节奏公式)
+if(b.def&&b.def.atRifle&&b.mag>0&&b.fireT<=0&&b.reloadT<=0&&b.boltT<=0&&d<95){
+const dir2=V3(craft.pos.x-eye.x,cy-eye.y,craft.pos.z-eye.z).normalize();
+const chk=raycastWorld(eye,dir2,d);
+if(chk&&chk.dist<=d-3) return false;
+b.yaw=Math.atan2(craft.pos.x-b.pos.x,craft.pos.z-b.pos.z);
+const er2=0.012*DIFF_TABLE[SETTINGS.diff].spreadMul;
+dir2.x+=rand(-er2,er2); dir2.y+=rand(-er2,er2)*0.5; dir2.z+=rand(-er2,er2); dir2.normalize();
+const muzz=eye.clone().addScaledVector(dir2,0.9);
+b._src=b.def.name||'';                                          // 击杀来源: 当前武器名
+fireBullet(b,eye,dir2,b.def,muzz);
+b.mag--;
+b.mesh.armR.sh.userData.swing=0.15;
+b.fireT=60/b.def.rpm*rand(1.2,1.8);
+if(b.def.type==='bolt') b.boltT=b.def.boltT||1.2;
+if(b.mag<=0) b.reloadT=b.def.reload;
+b.prone=d>30;
+return true;
+}
+return false;
+}
+// 探针只读视图 (dev/_navalai-selfcheck.js 用): 返回本文件为该目标保存的 AI 私有状态 (相位/冷却/目标)。
+// 只读用途 —— 不改任何游戏数据; 用来核对相位推进、鱼雷/开火冷却与目标选择。
+function navalAIDebug(o){ return _navState.get(o)||null; }

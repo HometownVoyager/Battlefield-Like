@@ -1,3 +1,4 @@
 dev/*.log
+dev/out/
 node_modules/
 .zcode/

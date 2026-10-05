@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>钢铁前线 · UI 隐藏诊断 (双击打开 · 请整页截图发我)</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+body { margin:0; padding:14px 18px 40px; background:#0b0d0a; color:#e8e2cc;
+font-family:Consolas,"Microsoft YaHei",monospace; font-size:16px; line-height:1.55; }
+h1 { font-size:20px; color:#ffd77a; margin:0 0 2px; }
+h2 { font-size:16px; color:#d8c894; margin:14px 0 4px; border-bottom:1px solid rgba(200,180,130,.3); padding-bottom:3px; }
+table { border-collapse:collapse; }
+td,th { padding:2px 16px 2px 0; white-space:nowrap; }
+th { color:#a8a48c; font-weight:400; text-align:left; }
+#verdict { font-size:18px; padding:12px 14px; margin:10px 0; border-radius:5px; white-space:pre-wrap; font-weight:700; }
+#verdict.good { background:rgba(60,140,60,.22); border:1px solid #6c6; }
+#verdict.b { background:rgba(160,40,30,.28); border:1px solid #c66; }
+#verdict.w { background:rgba(150,120,30,.28); border:1px solid #ca6; }
+pre { white-space:pre-wrap; color:#bcb69c; font-size:14px; }
+small { color:#8a8570; font-size:13.5px; }
+button { font:inherit; padding:6px 14px; margin-top:6px; cursor:pointer; }
+</style>
+</head>
+<body class="inMenu">
+<!-- 与游戏首页同构: 同一份 css/style.css + 同一个 <body class="inMenu"> -->
+<div id="ui" style="position:fixed;inset:0;pointer-events:none">
+<div id="crosshair">+</div>
+<div id="minimapWrap"><canvas id="minimap" width="190" height="190"></canvas></div>
+<div id="topBar">顶栏</div>
+<div id="healthPanel"><span id="hpNum">100</span></div>
+<div id="ammoPanel">弹药</div>
+<div id="fps">60 FPS</div>
+</div>
+<div id="touchUI"><div class="tbtn" id="tFire">开火</div></div>
+<!-- 版本探针: 新版 CSS 专属规则, 判断浏览器吃的是哪一版样式表 -->
+<div id="menuArt" style="display:block"><div id="menuArtFac"><div class="facCard dim" id="verProbe"></div></div></div>
+
+<h1>钢铁前线 · UI 隐藏诊断</h1>
+<small>本页与游戏首页共用同一份 css/style.css 和同一个 <code>&lt;body class="inMenu"&gt;</code>。请把整页截图发我。</small>
+<div id="verdict">检测中…</div>
+<h2>① 关键元素实测</h2><table id="t1"></table>
+<h2>② 样式表版本</h2><pre id="t2">…</pre>
+<h2>③ 环境</h2><pre id="t3">…</pre>
+<h2>④ 错误</h2><pre id="t4">(无)</pre>
+<button onclick="document.body.classList.toggle('inMenu')">手动切换 body 的 inMenu 类 (上表 #ui 应在 none/block 之间跳)</button>
+
+<script>
+var L2=[], L3=[], L4=[];
+function el(id){ return document.getElementById(id); }
+function probe(sel){
+var list=document.querySelectorAll(sel);
+if(!list.length) return [sel+' (0 个)','—','—','—'];
+var e=list[0], cs=getComputedStyle(e), r=e.getBoundingClientRect();
+return [sel+(list.length>1?(' (共 '+list.length+' 个!)'):''), cs.display,
+Math.round(r.width)+'x'+Math.round(r.height), cs.visibility];
+}
+var sels=['#ui','#minimapWrap','#healthPanel','#ammoPanel','#topBar','#crosshair','#touchUI','#fps'];
+var html='<tr><th>元素</th><th>display</th><th>矩形</th><th>visibility</th></tr>';
+var uiRow=null;
+for(var i=0;i<sels.length;i++){
+var r=probe(sels[i]);
+if(sels[i]==='#ui') uiRow=r;
+html+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td></tr>';
+}
+el('t1').innerHTML=html;
+
+// ② 样式表版本探针
+var vpcs=getComputedStyle(el('verProbe')), macs=getComputedStyle(el('menuArt'));
+var newCss=(Math.abs(parseFloat(vpcs.opacity)-0.45)<0.01)||(vpcs.filter&&vpcs.filter!=='none')||macs.position==='absolute';
+L2.push('.facCard.dim opacity = '+vpcs.opacity+'   (新版 0.45 / 旧版 1)');
+L2.push('.facCard.dim filter  = '+vpcs.filter);
+L2.push('#menuArt position     = '+macs.position+'   (新版 absolute)');
+L2.push(newCss ? '→ 浏览器正在使用【新版】css/style.css' : '→ 浏览器用的是【旧版】样式表 (缓存)');
+
+// ③ 环境
+L3.push('地址: '+location.href);
+L3.push('协议: '+location.protocol+(location.protocol==='file:'?'  (file:// 双击直开)':''));
+L3.push('视口: '+innerWidth+'x'+innerHeight+' @DPR '+devicePixelRatio);
+L3.push('body.className = "'+document.body.className+'"   命中 body.inMenu: '+document.body.matches('body.inMenu'));
+L3.push('#ui 节点数 = '+document.querySelectorAll('#ui').length+'   (必须为 1; >1 = 页面内容被粘过两次, 多出来的那份不会被隐藏)');
+L3.push('.hidden 类生效 (浏览器确实在跑 CSS): '+(function(){var t=document.createElement('div');t.className='hidden';t.style.display='none';document.body.appendChild(t);var v=getComputedStyle(t).display==='none';t.parentNode.removeChild(t);return v?'是':'否 ← 异常';})());
+try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); L3.push('localStorage: 可写'); }
+catch(e){ L3.push('localStorage: 不可用 ('+e.name+')'); }
+
+// 判定
+var n=document.querySelectorAll('#ui').length;
+var ok=uiRow&&uiRow[1]==='none';
+var v=el('verdict');
+if(n>1){
+v.className='b';
+v.textContent='✗ 页面上有 '+n+' 个 #ui —— 内容被粘过两次或打开的是拼接副本。\n'
++'CSS 的 body.inMenu #ui 只能隐藏其中一个, 其余会一直显示。请用磁盘上原始的 index.html。';
+}else if(ok&&newCss){
+v.className='good';
+v.textContent='✓ 这份样式表 + 这个 body 类名: 战斗 HUD 被正确隐藏 (#ui = none, 矩形 0x0)。\n'
++'若游戏首页仍显示 HUD, 说明游戏页运行时 body 上的 inMenu 被摘掉了 —— 请把游戏首页连地址栏截图发我。';
+}else if(ok&&!newCss){
+v.className='w';
+v.textContent='! 隐藏规则本身没问题, 但浏览器吃的是【旧版 css/style.css】。\n请在游戏首页 Ctrl+F5 强制刷新, 再来截一次本页。';
+}else{
+v.className='b';
+v.textContent='✗ 这一版样式表里 #ui 竟然没被隐藏 (display='+(uiRow?uiRow[1]:'?')+'), 样式版本='+(newCss?'新':'旧')+'。\n请把本页 + 游戏首页一起截图发我。';
+}
+el('t2').textContent=L2.join('\n');
+el('t3').textContent=L3.join('\n');
+el('menuArt').parentNode.removeChild(el('menuArt'));
+</script>
+<script>
+window.onerror=function(m,s,l){ L4.push('JS 错误: '+m+'  @'+String(s||'').split('/').pop()+':'+l); document.getElementById('t4').textContent=L4.join('\n'); return false; };
+window.addEventListener('error',function(e){
+if(e.target&&e.target.tagName){ L4.push('资源加载失败: '+e.target.tagName+' '+(e.target.src||e.target.href||'')); document.getElementById('t4').textContent=L4.join('\n'); }
+},true);
+</script>
+</body>
+</html>

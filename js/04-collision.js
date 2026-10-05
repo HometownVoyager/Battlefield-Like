@@ -21,12 +21,20 @@ for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.cylCells[j*N+i].push(ci);
 });
 RGRID.stampB=new Int32Array(BOXES.length+96);
 RGRID.stampC=new Int32Array(CYLS.length+16);
+stampBLen=RGRID.stampB.length; stampCLen=RGRID.stampC.length; // 与去重戳同步 (见 raycastWorld 的按需扩容)
 }
+// 去重戳当前容量 (与 RGRID.stampB/stampC 同步; 见 raycastWorld 的按需扩容)
+let stampBLen=0, stampCLen=0;
 const _rcP=V3(), _rcN=V3();
 const _rcResult={dist:0,point:null,normal:null,kind:null}; // 共享结果槽 (2026-09-06 B6/P1-6): 全库 28 调用点均即时消费不长期持有
 function raycastWorld(o,dir,maxD){
 let best=maxD, bn=null, kind=null;
 if(RGRID.boxCells){
+// 去重戳容量按需扩容 (2026-09-26): buildSpatialIndex 只按"建索引当时的盒子数 +96"定容, 而
+// addBoxCollider 运行期还会持续追加 (工程兵建造/残骸/探针摆件) —— 越出容量的下标在 TypedArray 上
+// **静默读成 undefined**, 于是"本代已测过"的去重失效: 同一盒在其覆盖的每个栅格里被重复测试
+// (纯冗余, 结果不变 —— 命中判定本身幂等)。一次性补齐容量, 之后只剩一次长度比较。
+if(stampBLen<BOXES.length||stampCLen<CYLS.length){ RGRID.stampB=new Int32Array(BOXES.length+512); RGRID.stampC=new Int32Array(CYLS.length+128); stampBLen=RGRID.stampB.length; stampCLen=RGRID.stampC.length; }
 const {cell,N,off,boxCells,cylCells,stampB,stampC}=RGRID;
 const gen=++RGRID.gen;
 let ci=Math.floor((o.x+off)/cell), cj=Math.floor((o.z+off)/cell);
@@ -56,7 +64,9 @@ stampC[cy2]=gen;
 const r=rayCyl(o,dir,CYLS[cy2],best);
 if(r){ best=r.t; bn=r; kind='cyl'; }
 }
-} else if(ci<-1||cj<-1||ci>N||cj>N) break;
+// 2026-09-25 修: 上界应为 ci>=N/cj>=N —— 栅格是 0..N-1, 旧写 ci>N 会多走一格才退出
+// (被 guard<70 与内层 `ci>=0&&ci<N` 判断兜住, 只是白跑一轮 DDA; 与 occBlocked 的 `i>=OCC.N` 同口径对齐)
+} else if(ci<-1||cj<-1||ci>N-1||cj>N-1) break;
 if(tMaxX<tMaxZ){ t=tMaxX; tMaxX+=tDX; ci+=stepI; }
 else { t=tMaxZ; tMaxZ+=tDZ; cj+=stepJ; }
 }
@@ -165,11 +175,21 @@ const d=Math.sqrt(d2), push=(rr-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
 });
-const lim=MAP_SIZE/2+8;
+// 大舰舰体 (2026-09-30 阶段五 P4): 舷侧是硬墙 —— 水线以上的部分把步兵挡在外面 (水线以下不挡,
+//   游泳者可贴舰底通过; 也避免深水区把玩家夹在舰与礁之间卡死)。走 15h 的局部空间解算,
+//   不进全局 BOXES/OCC —— 理由同 standHeight 那一行 (舰在动)。
+if(typeof capPushBody==='function') capPushBody(pos,radius);
+// ★2026-09-26E (审计 28): 与 15d 同一支世界边缘单源 (旧值 MAP_SIZE/2+8 比网格边界只差 12m ⇒ 贴边即见断崖)
+const lim=(typeof WORLD_ACTOR_LIMIT==='number')?WORLD_ACTOR_LIMIT:(MAP_SIZE/2+8);
 pos.x=clamp(pos.x,-lim,lim); pos.z=clamp(pos.z,-lim,lim);
 }
 function standHeight(x,z,curY){
 let h=heightAt(x,z);
+// 大舰甲板 (2026-09-30 阶段五 P4): 甲板是**移动平台**, 不进 heightAt/BOXES/OCC (舰在动, 逐帧搬盒
+//   等于把寻路网格当筛子摇), 而是由 15h 在本行做一次 O(舰数≤4) 的局部矩形查询。语义与下面的盒顶面
+//   逐字同规 —— "够得着才抬脚": 在水里看 7m 高的甲板不算站上去 (capDeckY 内部按 CAPITAL_CFG.stepUp 夹),
+//   走出甲板矩形则返回 −1e9, 脚下自然变回海床 ⇒ 掉海 (与"走出崖缘"同一条物理路径)。
+if(typeof capDeckY==='function'){ const cd=capDeckY(x,z,curY); if(cd>h) h=cd; }
 eachBoxNear(x-0.07,z-0.07,x+0.07,z+0.07,b=>{
 if(b.dead) return;
 if(x>b.minX-0.05&&x<b.maxX+0.05&&z>b.minZ-0.05&&z<b.maxZ+0.05){

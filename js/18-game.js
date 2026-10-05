@@ -5,21 +5,67 @@
 'use strict';
 let nowT=0, matchOver=false, matchTime=15*60;
 let gamePaused=false, nowOff=0; // ESC 暂停: 主循环冻结+游戏时钟停止前进
+let menuHold=false; // 返回主界面冻结 (2026-09-16 本批): 与 gamePaused 同为"冻结主循环", 但语义是"人在主菜单" ——
+// 用于区分"暂停面板打开"与"菜单冻结", 恢复战斗时据此决定是否重新盖回暂停面板 (19-input 的 Esc 暂停只认 gamePaused)
+let matchRunning=false; // 战局存续期 (2026-09-16 本批): 开局置位, 结算清零。与 player.deployed 分工不同 ——
+// deployed 表示"玩家已落地参战"(兵种选择阶段为 false, 那是给 HUD/输入用的), matchRunning 表示"这一局还在";
+// 「返回战斗」按钮与返回二次确认都认 matchRunning, 否则兵种选择阶段返回主界面会被判成"没有战局"而丢掉入口。
 const tickets=[START_TICKETS,START_TICKETS];
 let nadeWarnT=0;
+// (2026-09-21 A#2 契约G) 第三人称动作计时口径 (姿势机在 20-player 的 playerAnimTick/updatePlayerAvatar 消费):
+// 常量放这里而不是 20-player —— 18-game 是 player 状态的家 (damage/releaseNade/doMeleeHit 都在本文件写这些计时),
+// 两边共用同一组数值, 不出现"动作时长在两个文件里各写一份"。
+const FIRE_ANIM_T=0.20;   // 开火后坐动作时长 s (纯观感量, 与武器射速 fireT/冷却判定**完全无关**)
+const FLINCH_ANIM_T=0.34; // 受击抽搐时长 s (与 Bot 的 flinchT 同一套 sin(t*40)*0.07)
+const NADE_ANIM_T=0.45;   // 手雷投掷动作时长 s (起手后摆 → 松手前甩)
+const MELEE_ANIM_T=0.42;  // 刺刀突进动作时长 s
 const player = {
 isPlayer:true, name:'你', team:0, cls:0,
 pos:V3(-118,1,0), vel:V3(), yaw:HPI, pitch:0,
 hp:100, alive:false, deployed:false, crouch:false, onGround:true,
 spectator:false, flying:false,
+specUsed:false, // 本局是否**在观战态下部署过** (判据 2026-09-27 收窄; 原 2026-09-16 记录批是"本局开过观战"):
+// 粘性标记 —— 观战免伤/不被索敌/弹药无限, 用它打出来的战绩不进历史记录 (详见 21-match recCommit)。
+// ★为什么从"开过观战"收窄到"部署过": 用户实报"选了一下观战模式再取消 ⇒ 结算照样判成观战局不予计量"。
+//   在兵种卡上点一下开关不等于观战过对局 (可能只是看一眼效果/误点, 随后就取消), 而旧版**开关一开**就盖章、
+//   关掉也不复位 ⇒ 整局白打。现在只有 23-deploy deployPlayer 里"真顶着观战态落进战场"那一下才盖章。
+//   粘性保留 (中途关掉观战不能把这一局洗成正常局): 那正是反作弊要挡的"开观战刷完再关"。
+specWant:null, // 待生效的观战意图 (2026-09-26H 观战批, 审计 #3/A3): 战斗中在兵种卡上开启观战只记意图,
+// 到**下一次部署** (23-deploy deployPlayer) 才落到 player.spectator —— 旧版二次点击当场生效,
+// 一个正在交战的活人可以在不阵亡的情况下瞬间变成"免伤+无限弹+可打双方"。null = 无待生效项。
+ffAll:false, // 无差别火力 (2026-09-17 观战扩展批): 仅"驾驶观战专属幽灵坦克"期间为 true ——
+// raySoldiers/命中载具时的敌我过滤失效, 主炮与同轴机枪对双方一律生效 (15c-specveh)。
+ffSpecSniper:false, // 观战连狙无差别火力 (2026-09-20 观战连狙批, 用户口径"只有观战连狙可打双方"):
+// 只在"观战者持/正在开火观战连狙(specsniper)"时为 true —— 20-player playerFireTick 每帧同步、playerShoot 开火瞬间落定;
+// 与 ffAll 是**两个独立标记**: 幽灵坦克主炮/同轴机枪/巡飞弹一律不读它, 因此其它武器行为保持现状。
+// 判定入口收在 13-combat coFfFire (步兵/载具/压制三处同源)。
 stamina:1, sprinting:false, ads:false, holdBreath:false,
+thirdPerson:false, // 步行第三人称开关 (2026-09-20 第三人称批, 键位 U): 只作用于步战相机分支 ——
+// 载具追尾/C 车长镜、巡飞弹 F 切换、跳伞追尾各有自己的视角, 本开关与它们互斥 (20-player thirdPersonOn);
+// 开镜(ADS)期间强制第一人称。弹道仍从角色眼位出发, 见 playerFireOrigin/playerAimDir。
 mouseDX:0, mouseDY:0, landDip:0, airT:0,
 slots:[], curSlot:0, curW:null, nadeCount:2,
 fireT:0, bloom:0, lastDmgT:-99, deathT:0,
 recoilPitch:0, recoilYaw:0,
-kills:0, deaths:0, score:0,
+kills:0, deaths:0, score:0, demol:0,   // demol: 摧毁的地图可破坏物组数 (2026-09-26 破坏得分批; 新对局由 22-hud resetPlayerForNewMatch 复位)
 nadeHeld:false, nadeFuse:0, nadeIsSmoke:false, smokeCount:1, onMG:null, resupplyCd:0,
-onVehicle:null, onAT:null, onAA:null, atNades:0, nadeIsAT:false, nadeIsIncin:false, incinCount:0, loiter:null, loiterView:0,
+onVehicle:null, onAT:null, onAA:null, onNaval:null, atNades:0, nadeIsAT:false, nadeIsIncin:false, incinCount:0, loiter:null, loiterView:0,
+// 大舰甲板座位 (2026-09-30 阶段五 P4): onCapital = 当前站在哪艘大舰的甲板上 (15h 的 capBoard/capSeatRelease 维护);
+//   capitalGun = 已接管的炮位 {ship,type:'main'|'sec'|'aa',idx} (null = 未接管; 2026-10-01b 分炮塔接管)。
+//   与 onVehicle/onNaval 构成**三座位互斥** (同一时刻至多一个非空),
+//   互斥的另一半在 20a-seats 的 navalBoard / 15c 的 specVehBoard 与 15h 的 capBoard, 三处都做显式双向清理。
+onCapital:null, capitalGun:null,
+// tvDX/tvDY: 操控巡飞弹 (TV 制导) 期间鼠标 movementX/Y 的**累计器** (2026-09-28 制导重做):
+//   19-input 只记账, 13-combat.updateLoiters 逐帧消费并清零 —— 制导的单源 (见那两处注释)。
+tvDX:0, tvDY:0,
+// 岸防炮座位 (2026-09-21 A#9 契约D): 与 onMG/onAT/onAA/onMortar 同族的"人在炮位上"字段 ——
+// 上/下炮的唯一入口分别是 batteryMountPlayer / batteryDismountPlayer (sea-hud, 15f-battery),
+// 这里只持有字段: 死亡链清空 (见 die), 全部分派/互斥清单见 20-player 的 updatePlayer/thirdPersonOn/updateInteractHint。
+onBattery:null,
+// 第三人称动作计时 (2026-09-21 A#2 契约G, 全部由本文件与 20-player 的 playerAnimTick 维护):
+//   fireAnimT 开火瞬间置满 (playerShoot)   reloadT 每帧按 VM 剩余时间派生 (不落这里, 见 playerAnimTick)
+//   nadeThrowT 手雷起手/松手各置一次        meleeT 刺刀起手/命中各置一次        flinchT 中弹瞬间置满
+fireAnimT:0, reloadT:0, nadeThrowT:0, meleeT:0, flinchT:0,
 suppressV:0, meleeCd:0,
 bandages:4, maxBandages:4, bandaging:0, bandResupCd:0, grabAction:null,
 eyeH:1.62,
@@ -28,11 +74,23 @@ suppress(a){ this.suppressV=Math.min(1,this.suppressV+a); },
 leanT:0,
 damage(amt,attacker,isHead){
 if(!this.alive||matchOver||this.spectator) return; // 观战: 完全免伤
+// 出生保护 (2026-09-28 阶段三 P1): 落地 0.5s 内**敌方来源**伤害免掉 (开火即解除, fireBullet 清账);
+// 摔落/溺水/严寒 (attacker=null) 与车毁链不在此列 —— 保护只防"落地被秒", 不该让人从坠机里活着走出来。
+if(this.protUntil&&nowT<this.protUntil&&attacker&&attacker.team!==this.team) return;
+// (2026-09-21 A#8 契约E) 伞降保护: 伞降中 (chute 且未落地) 受到的伤害 ×CHUTE_DEF.dmgMul —— 判定函数
+// chuteAirborne/chuteDamageMul 由 bots 写在 13-combat (全体单源)。typeof 守卫: 缺了它就是 ×1.0, 不报错。
+// 位置在"连杀减伤"之前: 两个倍率相乘, 与顺序无关, 但先乘能让下面的日志/后续逻辑都看到同一口径的 amt。
+if(typeof chuteDamageMul==='function') amt*=chuteDamageMul(this);
+// (2026-09-21 A#2 契约G) 受击抽搐: 每次**中弹**重置计时 (与 Bot 的 flinchT 同一套姿态口径)。
+// 只对"有来源的命中"或"单次 ≥2 伤害"抽搐 —— 严寒/激流/溺水这些**每帧小跳伤**不该让第三人称一直抖
+// (rapids 每帧 COLD_DMG*dt 级, 1 秒几十次重置会让躯干定格在抽搐姿态上)。
+if(attacker||amt>=2) this.flinchT=FLINCH_ANIM_T;
 // 连杀增益·减伤: 只吃敌方来源伤害 (摔落/严寒/激流等无主伤害与自伤不吃, 2026-09-11)
 if(this.streakBuff&&this.streakBuff.dmgCut>0&&attacker&&attacker!==this&&attacker.team!==this.team) amt*=1-this.streakBuff.dmgCut;
 this.hp-=amt;
 this.lastDmgT=nowT;
 if(this.bandaging>0){ this.bandaging=0; showScorePop('包扎被打断!'); }
+if(this.demolish){ this.demolish=null; if(this.isPlayer) showScorePop('拆除被打断!'); } // 读条回收: 受击打断 (2026-09-28 阶段三 P1)
 if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; showScorePop('使用被打断!'); } // 固定火力点前摇: 中弹打断
 AudioSys.hurt();
 dmgFlash=Math.min(1,dmgFlash+0.5);
@@ -59,12 +117,39 @@ if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀
 	if(this.onAT){ releaseEmpl(this.onAT,true); this.onAT=null; }
 	if(this.onAA){ releaseEmpl(this.onAA,true); this.onAA=null; }
 	if(this.onMortar){ releaseEmpl(this.onMortar,true); this.onMortar=null; }
+	// 岸防炮占位随死亡释放 (2026-09-21 A#9): 与上面四个阵位同规 —— 先让 owner 接口清占用/相机态, 再清字段。
+	// typeof 守卫: batteryDismountPlayer 由 sea-hud 写在 15f-battery, 缺了它就只清字段 (绝不能把玩家钉在炮位上)。
+	if(this.onBattery){ if(typeof batteryDismountPlayer==='function') batteryDismountPlayer(); this.onBattery=null; }
+	// 海战座位随死亡交还 (★2026-09-26E 审计 7): 与上面四个阵位/岸防炮同规 —— 旧版 die() 漏了 onNaval,
+	// 于是"艇上阵亡"时 craft.playerDriven 保持 true ⇒ 该艇在"死亡→再部署"期间不驱动、不还击 (变成漂着的空壳),
+	// #navalHud 与"鱼雷 ×N/[F] 鱼雷"还会在死亡镜头里冻结显示。旧版只靠 23-deploy:382 的再部署兜住。
+	// typeof 守卫: navalSeatRelease 由 20a-seats 提供, 缺了它就只清字段 (绝不能把人钉在艇上)。
+	if(this.onNaval){ if(typeof navalSeatRelease==='function') navalSeatRelease(); else this.onNaval=null; }
+	// 大舰甲板座位随死亡交还 (2026-09-30 阶段五 P4): 同一族 —— 不交还的话死亡镜头里仍算"站在甲板上",
+	//   复活部署后 player.onCapital 悬空, 下一帧的 capPlayerTick 会拿旧舰判"掉下甲板"而误清状态。
+	if(this.onCapital){ if(typeof capSeatRelease==='function') capSeatRelease(); this.onCapital=null; this.capitalGun=null; }
 	if(this.loiter){ loiterDetonate(this.loiter,this.loiter.pos.clone()); }
 		this.onVehicle=null;
 		this.nadeHeld=false;
+	// (2026-09-21 A#2 契约G) 动作计时随死亡清零: 死亡姿态由布娃娃/倒地接手, 不留开火后坐/换弹/投掷的残余
+	this.fireAnimT=0; this.reloadT=0; this.nadeThrowT=0; this.meleeT=0;
+	// (2026-09-21 A#8 契约E) 死亡必须彻底收伞 (空中阵亡): 置 false 后**同帧**摘模型, 不留"尸体挂着伞"
+	this.chute=false;
+	if(typeof playerChuteClear==='function') playerChuteClear();
 	// 死亡立刻收起狙击镜, 避免镜片遮罩残留
 	this.ads=false; this.holdBreath=false;
+	this.ffAll=false; // 无差别火力标记随死亡清除 (幽灵坦克驾驶中不会死: 观战免伤, 这里只是兜底)
+	this.ffSpecSniper=false; // 观战连狙标记同理 (2026-09-20): 死亡/再部署期间不得残留无差别火力
+	if(typeof specVehUnbind==='function') specVehUnbind(); // 幽灵坦克解绑驾驶权 (否则车还记着一个已死的驾驶员)
 	document.getElementById('scopeOv').style.display='none';
+// 交互提示/座位 HUD 随死亡一次收干净 (2026-09-25 修): #interact(F 提示行) 与 #clsTip(兵种提示) 只由
+// 20-player 的 updateInteractHint 维护, 而它只在活人分支被调用 ⇒ 死在坦克/机枪旁边时提示一直挂到
+// showDeploy 盖上为止 (准星在 22-hud 的死亡分支里是收掉的, 只有这两件漏)。这里复用同一个单源函数:
+// alive 已置 false, 它自然走到末尾的 elm.style.display='none' / tip 置空。
+// 同批收掉热量条: die() 直接 releaseEmpl 清座位, 绕过了 F 下车路径里的那些 DOM 收尾。
+if(typeof updateInteractHint==='function') updateInteractHint();
+{ const hw=document.getElementById('heatWrap'); if(hw) hw.style.display='none';
+  const mw=document.getElementById('mgHeatWrap'); if(mw) mw.style.display='none'; }
 document.exitPointerLock&&document.exitPointerLock();
 noteDeath(this.pos.x,this.pos.z);
 // 玩家布娃娃 + 2秒第三人称死亡镜头
@@ -79,12 +164,22 @@ setTimeout(()=>{ if(!this.alive) document.getElementById('blackOv').style.opacit
 setTimeout(()=>{ if(!matchOver&&!this.alive) showDeploy(true); },dly+700);
 },
 doMeleeHit(){
+// (2026-09-21 A#2 契约G) 刺刀命中瞬间: 动作计时置满 (姿势机据此做"枪前刺 + 上身突进")。
+// 起手那一刻由 20-player playerAnimTick 按 VM.state==='melee' 的边沿置一次, 这里是第二段 (命中/落空都算出手)。
+this.meleeT=MELEE_ANIM_T;
 const dir=camForward();
 const o=camera.position.clone();
+// 刺刀不吃"观战连狙无差别火力" (2026-09-20 观战连狙批): ffSpecSniper 的语义是"这把连狙的弹道对双方生效",
+// 拼刺刀是另一件事 —— 不摘标记的话, 观战者手里握着连狙贴队友按 V 会直接把友军捅死。同一帧内摘除并还原。
+const ff=player.ffSpecSniper; player.ffSpecSniper=false;
 const sr=raySoldiers(o,dir,2.6,player);
+player.ffSpecSniper=ff;
 if(sr){
 player._src='刺刀';
+// 近战命中反馈 (2026-09-30 批): 刺刀也是"攻击方式" —— 档='mg' 无框白X; 致命一击不补白 (die 链红档)
+if(typeof markHitCls==='function') markHitCls('mg');
 sr.sol.damage(110,player,false);
+if(sr.sol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('mg');
 AudioSys.click(500,0.5,0.09);
 addTrauma(0.15);
 } else {
@@ -93,32 +188,37 @@ if(wr){ impactFX(wr.point,wr.normal,wr.kind); AudioSys.click(1800,0.3,0.05); }
 }
 },
 	releaseNade(){
-	const dir=camForward();
-	const o=camera.position.clone().add(dir.clone().multiplyScalar(0.3));
-	if(this.nadeIsIncin){
-	player._src='燃烧弹';
-	const v=dir.multiplyScalar(13).add(V3(0,2.6,0)).add(this.vel.clone().multiplyScalar(0.4));
-	throwNade(this,o,v,1.6,false,false,true);
-	this.incinCount--;
-	this.nadeIsIncin=false;
-	} else if(this.nadeIsSmoke){
-	player._src='烟雾弹';
-	const v=dir.multiplyScalar(12).add(V3(0,2.4,0)).add(this.vel.clone().multiplyScalar(0.4));
-	throwNade(this,o,v,1.8,false,true);
-	this.smokeCount--;
-	this.nadeIsSmoke=false;
-	} else if(this.nadeIsAT){
-	player._src='反坦克雷';
-	const v=dir.multiplyScalar(12).add(V3(0,2.2,0)).add(this.vel.clone().multiplyScalar(0.4));
-	throwNade(this,o,v,1.6,true);
-	this.atNades--;
-	this.nadeIsAT=false;
-	} else {
-	player._src='手雷';
-	const v=dir.multiplyScalar(15).add(V3(0,2.4,0)).add(this.vel.clone().multiplyScalar(0.4));
-	throwNade(this,o,v,this.nadeFuse);
-	this.nadeCount--;
-	}
+	// (2026-09-21 A#2 契约G) 松手出手瞬间: 投掷动作计时置满 —— 姿势机从这里开始"前甩 follow-through"
+	// (起手后摆由 20-player playerAnimTick 按 VM.state==='nade' 的边沿置一次)。这里**不改**任何投掷弹道数值。
+	this.nadeThrowT=NADE_ANIM_T;
+	// 出手点/方向单源 (2026-09-30 批2): 右手出手点 + 朝准星命中点汇聚 —— 与 22-hud 预演逐字同源
+	// (旧版是 camera.position + camForward: 起点在相机轴线上 ⇒ 弹道投影成一条线, 见 20-player 该函数头注)。
+	const o=playerThrowOrigin();
+	const dir=playerThrowDir(o);
+if(this.nadeIsIncin){
+player._src='燃烧弹';
+const v=dir.multiplyScalar(NADE_THROW.incin.v).add(V3(0,NADE_THROW.incin.up,0)).add(this.vel.clone().multiplyScalar(0.4));
+throwNade(this,o,v,1.6,false,false,true);
+this.incinCount--;
+this.nadeIsIncin=false;
+} else if(this.nadeIsSmoke){
+player._src='烟雾弹';
+const v=dir.multiplyScalar(NADE_THROW.smoke.v).add(V3(0,NADE_THROW.smoke.up,0)).add(this.vel.clone().multiplyScalar(0.4));
+throwNade(this,o,v,1.8,false,true);
+this.smokeCount--;
+this.nadeIsSmoke=false;
+} else if(this.nadeIsAT){
+player._src='反坦克雷';
+const v=dir.multiplyScalar(NADE_THROW.at.v).add(V3(0,NADE_THROW.at.up,0)).add(this.vel.clone().multiplyScalar(0.4));
+throwNade(this,o,v,1.6,true);
+this.atNades--;
+this.nadeIsAT=false;
+} else {
+player._src='手雷';
+const v=dir.multiplyScalar(NADE_THROW.frag.v).add(V3(0,NADE_THROW.frag.up,0)).add(this.vel.clone().multiplyScalar(0.4));
+throwNade(this,o,v,this.nadeFuse);
+this.nadeCount--;
+}
 AudioSys.metalSlide(0.2,0.08,600,300);
 },
 finishReload(){

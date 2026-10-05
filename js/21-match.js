@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// 21-match.js —— 旗点占领/胜负/击杀播报
+// 21-match.js —— 旗点占领/胜负/击杀播报/结算/历史战绩记录
 // 源: Index.original.html 第 7818-7985 行
 // ─────────────────────────────────────────────
 'use strict';
@@ -23,15 +23,93 @@ const wipeT=[null,null]; // 各队倒计时剩余秒数, null=未进入 (仅归�
 function resetMatchState(){ // 对局态复位唯一入口 (2026-09-06 B7b/P2-14: 替代 22-hud startGame 的跨文件直写)
 wipeAnnounced[0]=false; wipeAnnounced[1]=false;
 wipeT[0]=null; wipeT[1]=null;
-killStreakN=0; killStreakT=-99; killStreakMax=0; player.streakBuff=null; // 连杀计数/增益/最大连杀随新对局复位 (2026-09-11/13)
+// 终局前奏哨兵复位 (2026-09-17 P0 修 — 用户实机"一局结束后按原配置开新游戏会等 1.5S 直接进入结算"):
+// 上局的 matchEndPending 若不清, 就地重开的新一局第一帧就命中 updateFlags 的"胜负已定倒计时"分支 ——
+// 上局在 1.5s 前奏里被"返回主界面→新游戏"打断时 matchEndT 还剩多少, 新局就在多久之后直接弹结算。
+matchEndPending=null; matchEndT=0;
+// 限时复位 (同日 P0 修, 同族缺陷): startMatch 只给 assault/demolition/clash/convoy 赋 matchTime, **conquest 分支不赋** ——
+// 征服图就地重开会沿用上一局的剩余时间 (上局超时打完则新局开局即超时 → 1.5s 后结算)。这里按战役口径兜底,
+// startMatch 里各模式分支随后照旧覆盖 (assault 18 分 / clash·conquest 战役 matchMin 或 15 分 / 劫道 16 分)。
+matchTime=(CAMPAIGN.matchMin||15)*60;
+killStreakN=0; killStreakT=-99; killStreakMax=0; killStreakRefills=0; player.streakBuff=null; // 连杀计数/增益/最大连杀/续杯数随新对局复位 (2026-09-11/13/16)
+initSpots(); // 强点运行态复位 (2026-09-13 草原库尔斯克改版): 归属回开局表, 占领进度清零
+}
+// ═════ 强点 (2026-09-13 草原库尔斯克改版): 无旗遭遇战的可争夺出生点 ═════
+// spawns 升级为强点: 占领获得该点出生权 (部署/重生/推进目标全线跟着战线走, 不涉兵力票);
+// 占领规则与旗同款: 圈内只有一方单位时计时, 双方在场=僵持, 计满归属翻转; team=-1=中立开局。
+// ★ 2026-09-21 WS3 岛礁工事批: 把"哪些点参与占领结算"从**看 mode**改成**看数据声明** ——
+//   旧口径 `GAMEMODE!=='clash'` 会让攻防图 (island, mode:'assault') 上 team:-1 的中立强点永不结算,
+//   "中立可占领"在岛上名存实亡 (进度条永远停在 0)。
+//   ⚠ 不能简单改成"SPOTS 非空就结算": 全库 12 张战役里只有 3 张图带 spawns ——
+//     baituan (demolition, 3 条 team:0 前出进攻营) 与 canyon (convoy, 7 条 team:0/1 伏击点/集结地)
+//     不是遭遇战, 它们的点是**己方固定出生点**(own 初值就是 0/1, 不是 -1); 放宽后它们会突然"开局就有归属、
+//     还可被敌方抢", spawnPtsOf (部署/重生/推进目标) 跟着战线走 ⇒ 实打实的跨图平衡副作用。
+//   最终口径 = 每个点在 initSpots 时打 `capturable` 标记 (数据声明):
+//     clash 图 → 全部点照旧可争夺 (逐字不变);
+//     非 clash 图 → 只有**显式中立开局点** (team:-1) 可争夺;
+//     非 clash 且没有 team:-1 的图 (baituan/canyon) → 全部点不可争夺 ⇒ 整段 return, 运行态与旧版逐字一致。
+//   等价性由 dev/verify-strongpoint.js 证明: ① 静态枚举 12 图新旧判据的唯一分歧 = island;
+//   ② steppe/baituan/canyon 三图跑**控制副本对照**的 SPOTS 快照 (长度+每项 own/cap/capTeam) 逐位一致。
+function initSpots(){
+SPOTS.length=0;
+for(const s of (CAMPAIGN.spawns||[])){
+SPOTS.push({x:s.x,z:s.z,name:s.name,r:s.r||11,own:(s.team===0||s.team===1)?s.team:-1,cap:0,capTeam:-1,gy:heightAt(s.x,s.z),present:[0,0],
+capturable:(GAMEMODE==='clash')||s.team===-1});
+}
+}
+function updateSpots(dt){
+if(!SPOTS.length) return;
+// 一个可争夺点都没有 ⇒ 与旧版 `GAMEMODE!=='clash'` 同款整段跳过 (baituan/canyon: 连 present 都不刷)
+let any=false; for(const s of SPOTS) if(s.capturable){ any=true; break; }
+if(!any) return;
+for(const s of SPOTS){
+if(!s.capturable) continue;   // 己方固定出生点: 不参与占领 (永不结算, 与改动前一致)
+let c0=0,c1=0;
+for(const c of combatants){
+if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入
+if(Math.hypot(c.pos.x-s.x,c.pos.z-s.z)<s.r&&Math.abs(c.pos.y-s.gy)<10){
+if(c.team===0)c0++; else c1++;
+}
+}
+for(const t of tanks){
+if(!t.alive) continue;
+if(Math.hypot(t.pos.x-s.x,t.pos.z-s.z)<s.r){
+if(t.team===0)c0++; else c1++;
+}
+}
+s.present=[c0,c1];
+let attacker=-1;
+if(c0>0&&c1===0) attacker=0;
+else if(c1>0&&c0===0) attacker=1;
+if(attacker<0||attacker===s.own){
+// 无人占领/僵持/已是己方: 进度回落
+if(s.cap>0){ s.cap-=dt*0.25; if(s.cap<=0){ s.cap=0; s.capTeam=-1; } }
+continue;
+}
+const n=attacker===0?c0:c1;
+const rate=(0.07+0.035*Math.min(n,3))*(s.own===-1?1.35:1); // 中立点占领更快 (同旗口径)
+if(s.capTeam!==attacker){
+s.cap-=rate*dt*1.6;
+if(s.cap<=0){ s.cap=0; s.capTeam=attacker; }
+}else{
+s.cap+=rate*dt;
+if(s.cap>=1){
+s.cap=0;
+const prev=s.own;
+s.own=attacker; s.capTeam=-1;
+addKillMsg(t('{0} 占领了强点「{1}」',t(TEAM_NAME[attacker]),s.name),attacker);
+if(prev!==-1&&prev!==attacker) addKillMsg(t('⚠ 强点「{0}」失守',s.name),prev);
+}
+}
+}
 }
 function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
-if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
+if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team&&(typeof capFlagActive!=='function'||capFlagActive(f))).length;
 return 0;
 }
 function fieldCount(team){ // 在场人数: 存活地面士兵(含坦克乘员/跳伞/未登机飞行员) + 存活玩家 (观战者不计)
 let n=0;
-for(const s of soldiers) if(s.alive&&s.team===team&&!(s.onVehicle&&s.pilotOf)) n++;
+for(const s of soldiers) if(s.alive&&s.team===team&&!s.capCrew&&!(s.onVehicle&&s.pilotOf)) n++;   // capCrew: 大舰炮手是编制件, 不算在场兵力 (2026-10-01c)
 if(player.alive&&player.team===team&&!player.spectator) n++;
 return n;
 }
@@ -44,12 +122,17 @@ addKillMsg(t('胜负已定 · {0} · {1} 秒后结算',winner===-1?t('平局'):(
 function updateFlags(dt){
 let owned=[0,0];
 for(const f of FLAGS){
+// 瘫舰旗点 (2026-10-01b 用户裁定"瘫舰=无阵营的陆地, 无法被占领"): 所在大舰瘫痪 ⇒ 本旗退出
+//   占领结算 (进度/争夺态清零; 旗面已由 15h cripple 就地转灰)。非海战图 capFlagActive 恒真/缺席时按真处理。
+const fActive=(typeof capFlagActive!=='function')?true:capFlagActive(f);
 // 占领规则: 任意旗点双方均可随时直接占领, 不再有顺序限制 (攻防模式防守方也可反夺)
 let c0=0,c1=0;
+if(fActive){
 for(const c of combatants){
 if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入占旗/阻占
-// 高度容差10m: 圈内二楼/塔上/坡下的单位也计入区域
-if(Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r&&Math.abs(c.pos.y-f.gy)<10){
+if(c.capCrew) continue;                                        // 大舰炮手不计占旗 (2026-10-01c): 编制站桩不算"在场兵力"
+// 高度容差: 见 00-config 的 FLAG_DY_TOL (2026-09-26E 审计 30: 旧值 10m 让桥下泳者能占桥面旗)
+if(Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r&&Math.abs(c.pos.y-f.gy)<FLAG_DY_TOL){
 if(c.team===0)c0++; else c1++;
 }
 }
@@ -59,6 +142,7 @@ if(Math.hypot(t.pos.x-f.x,t.pos.z-f.z)<f.r){
 if(t.team===0)c0++; else c1++;
 }
 }
+}else{ f.cap=0; f.capTeam=-1; f.present=[0,0]; }
 f.present=[c0,c1];
 let attacker=-1;
 if(c0>0&&c1===0) attacker=0;
@@ -77,7 +161,7 @@ f.owner=attacker; f.capTeam=-1;
 drawFlagTex(f);
 addKillMsg(t('{0} 占领了 {1} 点',t(TEAM_NAME[attacker]),f.id),attacker);
 for(const c of combatants){
-if(c.alive&&c.team===attacker&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
+if(c.alive&&c.team===attacker&&!c.capCrew&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
 c.score=(c.score||0)+SCORE_TABLE.flag;
 if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; } // caps: 结算占领数 (2026-09-13)
 }
@@ -85,7 +169,8 @@ if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.c
 	// 占满全部旗点 → 敌方兵力立即归零进入清场 (2026-09-04 用户指定: 攻防/征服任一方占满都生效 —
 	// 修复淞沪会战防守方(国军)占满全旗毫无反应的旧缺陷, 旧版只认进攻方)
 	if(GAMEMODE==='assault'||GAMEMODE==='conquest'){
-	if(FLAGS.every(ff=>ff.owner===attacker)){
+		// 瘫舰旗点不算"须占满"的份 (2026-10-01b): 无阵营陆地的旗永远灰色, 不能卡死占满全旗的胜负判定
+		if(FLAGS.every(ff=>ff.owner===attacker||(typeof capFlagActive==='function'&&!capFlagActive(ff)))){
 	if(tickets[1-attacker]>0){
 	tickets[1-attacker]=0;
 	wipeAnnounced[1-attacker]=true;
@@ -205,40 +290,145 @@ if(!matchOver){
 const END_SVG_WIN=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endWg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#c8963c"/></linearGradient></defs><g fill="none" stroke="url(#endWg)" stroke-width="2.6" stroke-linecap="round"><path d="M14 46 C10 34 14 20 26 13"/><path d="M50 46 C54 34 50 20 38 13"/><path d="M15 41 q-6 -1 -8 -6"/><path d="M13 33 q-6 -2 -7 -8"/><path d="M14 25 q-5 -3 -5 -9"/><path d="M18 18 q-4 -4 -3 -10"/><path d="M49 41 q6 -1 8 -6"/><path d="M51 33 q6 -2 7 -8"/><path d="M50 25 q5 -3 5 -9"/><path d="M46 18 q4 -4 3 -10"/></g><path d="M32 17 L34.7 24.28 L42.46 24.6 L36.37 29.42 L38.47 36.9 L32 32.6 L25.53 36.9 L27.63 29.42 L21.54 24.6 L29.3 24.28 Z" fill="url(#endWg)"/></svg>`;
 const END_SVG_LOSE=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endLg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d87a6a"/><stop offset="1" stop-color="#8a3428"/></linearGradient></defs><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="url(#endLg)" stroke-width="3.4" stroke-linejoin="round"/><path d="M32 11 L27 23 L34 29 L28 41 L33 54" fill="none" stroke="#38110b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const END_SVG_DRAW=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="#9fb6c9" stroke-width="3.2" stroke-linejoin="round"/><path d="M22 27 H42 M22 37 H42" stroke="#9fb6c9" stroke-width="3.2" stroke-linecap="round"/></svg>`;
+// ═════ 历史战绩记录 (2026-09-16 记录批): 结算全项判纪录 + 主菜单「战绩数据」数据源 ═════
+// 口径 (用户 2026-09-16 指示):
+//   ①结算页每一项战绩 (得分/击杀/阵亡/K·D/最大连杀/爆头/占领) 都判「新纪录」—— 越低越好的项 (阵亡数)
+//     按更小值判, 最佳文案随之翻转成"本图最少 N" (方向与格式登记在 00-config REC_STATS, 加项只改那张表);
+//   ②首战即立纪录: 该项此前没有记录时, 本局值直接成为纪录 (同样打新纪录徽章);
+//   ③观战模式照常计分 (结算页数值与平时一模一样), 但**本局不进历史记录** —— 结算页与数据面板都写明。
+// 判据 = 结算瞬间仍在观战 (player.spectator) **或** 本局在观战态下部署过 (player.specUsed 粘性标记)。
+// ★2026-09-27 收窄 (用户实报"选了一下观战模式再取消的情况判定为观战模式不予计量"): specUsed 的语义由
+// "本局开过观战"改为"本局**顶着观战态部署过**" (盖章点唯一: 23-deploy deployPlayer)。于是在兵种卡上点开
+// 又取消、或只在菜单里试一下开关, 都不再让整局白打; 而"开观战刷完再关掉"仍被拦在历史之外 (粘性不还原) ——
+// 那才是这条判据原本要挡的 (观战免伤·不被索敌·弹药无限, 用它刷出来的成绩不作数)。
+// 存档 sf_rec_<战役id> = JSON {v,plays,score,+REC_STATS 各项}; 缺项一律用 undefined 判定"无记录"
+// (0 是合法记录值 —— 一枪未发就阵亡的 0 杀照样是纪录)。
+function recLoad(id){ // 读本图记录 (旧键 sf_best_<id> 只读兼容); 存档损坏视为无记录, 不让它把结算页拖崩
+let rec=null;
+try{
+const raw=localStorage.getItem(REC_KEY_PRE+id);
+if(raw){ const o=JSON.parse(raw); if(o&&typeof o==='object'&&!Array.isArray(o)) rec=o; }
+}catch(e){ rec=null; }
+if(!rec){
+const legacy=parseInt(localStorage.getItem(REC_LEGACY_PRE+id)||'',10);
+if(Number.isFinite(legacy)&&legacy>0) rec={score:legacy,plays:1}; // 旧存档只有最高分: 它至少打满过 1 局, 其余项留空
+}
+return rec;
+}
+function recKnown(rec){ // 规范化: 只认表里登记的键, 值必须是有限数 (脏存档/旧版本多余字段一律丢弃)
+const out={v:REC_VER,plays:0};
+if(rec){
+out.plays=Math.max(0,Math.floor(Number(rec.plays)||0));
+if(Number.isFinite(rec.score)&&rec.score>=0) out.score=Math.round(rec.score);
+for(const st of REC_STATS){ const v=rec[st.key]; if(typeof v==='number'&&Number.isFinite(v)) out[st.key]=v; } // null/字符串一律不算记录
+}
+return out;
+}
+function recMatchValues(){ // 本局战绩取值 (单源: 结算页卡片与记录写入共用同一份)
+const kills=player.kills||0, deaths=player.deaths||0;
+return {score:Math.max(0,Math.round(player.score||0)), kills, deaths,
+ kd:deaths>0?kills/deaths:kills, // 无阵亡时记为该局击杀数 (与旧结算页显示 "12" 的口径一致, 且可直接比大小)
+ streak:killStreakMax||0, heads:player.headKills||0, caps:player.caps||0,
+ demol:player.demol||0}; // 摧毁数: 拆掉的地图可破坏物组数 (2026-09-26 破坏得分批)
+}
+function recBetter(st,v,best){ return best===undefined?true:(st.lower?v<best:v>best); } // 首战即纪录
+function recCommit(){ // 结算唯一入口: 判定 → (非观战才) 落盘 → 返回结算页所需的一切
+const vals=recMatchValues();
+const id=CAMPAIGN.id;
+const counted=!player.spectator&&!player.specUsed; // 观战不计入历史 (口径③)
+const prev=recKnown(recLoad(id));
+const best={}, isNew={};
+isNew.score=prev.score===undefined?true:vals.score>prev.score;
+best.score=isNew.score?vals.score:prev.score;
+for(const st of REC_STATS){
+const b=prev[st.key], n=recBetter(st,vals[st.key],b);
+isNew[st.key]=n; best[st.key]=n?vals[st.key]:b;
+}
+let plays=prev.plays;
+if(counted){
+plays=prev.plays+1;
+const rec=Object.assign({v:REC_VER,plays},best);
+try{ localStorage.setItem(REC_KEY_PRE+id,JSON.stringify(rec)); }catch(e){}
+}else{
+// 观战局: 历史原样不动 —— 结算页显示的是"存档里的最佳"(不是本局值), 且一律不打新纪录徽章
+for(const k in best) best[k]=prev[k];
+for(const k in isNew) isNew[k]=false;
+}
+return {id,counted,vals,best,isNew,plays};
+}
+function recBestText(st,v){ // 本图最佳文案 (st=null → 得分卡, 恒越高越好); v=undefined → 还没有记录
+if(v===undefined) return t('本图暂无记录');
+return st?t(st.lower?'本图最少 {0}':'本图最高 {0}',st.fmt(v)):t('本图最高 {0}',v);
+}
+function recStatCardsHTML(R){ // 结算页六张战绩卡: 本局值 + 本图最佳 + 新纪录徽章 (得分卡另有专属大卡)
+return REC_STATS.map(st=>{
+const isNew=!!R.isNew[st.key];
+return `<div class="statCard${isNew?' rec':''}"><div class="v">${st.fmt(R.vals[st.key])}</div>`
+ +`<div class="k">${t(st.label)}</div>`
+ +`<div class="b">${recBestText(st,R.best[st.key])}</div>`
+ +(isNew?`<div class="rec">${t('新纪录!')}</div>`:'')+`</div>`;
+}).join('');
+}
+function recPanelHTML(){ // 主菜单「战绩数据」面板内容: 各图历史最佳一表 (22-hud 每次打开面板重算)
+const cell=(st,v)=>Number.isFinite(v)?`<div class="recV">${st?st.fmt(v):String(v)}</div>`:'<div class="recV none">—</div>';
+let html='<div class="recRow head"><div class="recMap">'+t('地图')+'</div>'
+ +'<div class="recV">'+t('得分')+'</div>'
+ +REC_STATS.map(st=>`<div class="recV">${t(st.label)}${st.lower?' ↓':''}</div>`).join('')+'</div>';
+for(const c of CAMPAIGNS){
+const rec=recKnown(recLoad(c.id));
+const played=rec.plays>0;
+html+=`<div class="recRow${played?'':' empty'}"><div class="recMap">`
+ +`<span class="rmT">${t2(c.title)}</span>`
+ +`<span class="rmS">${t2(c.modeName)} · ${played?t2('已战 {0} 局',rec.plays):t2('未 征 战')}</span></div>`
+ +cell(null,rec.score)+REC_STATS.map(st=>cell(st,rec[st.key])).join('')+'</div>';
+}
+return html;
+}
 function endMatch(forceWinner){
 matchOver=true;
-// 对局结束: 环境+引擎声静音, 主循环冻结全部战斗/移动活动
-if(AudioSys.setAmbientMute) AudioSys.setAmbientMute(true);
+// 观战时停随战局结束收尾 (2026-09-27M 时停修复批, 审计 P1-4): specTimeFrozen 本身就要求 !matchOver ⇒
+// 结算起时停已自动失效; 这里显式复位的是**状态残留** (SPEC_TIME.paused), 免得"结算 → 返回主界面 →
+// 下一局"这条链上把上一局的暂停态带进新局 (换局路径另有 resetPlayerForNewMatch 的复位, 两处同源)。
+if(typeof specTimeReset==='function') specTimeReset();
+// 终局前奏哨兵就地消费 (2026-09-17 P0 修, 与 resetMatchState 同一族): 结算已落地, 哨兵留着就是"下一次开新局
+// 第一帧再判一次胜负"; 这里清掉让哨兵的生命周期严格等于"一次终局前奏"。
+matchEndPending=null; matchEndT=0;
+matchRunning=false; // 战局存续期结束: 菜单不再是「返回战斗」而是「进入战场」—— 这一局没有可回去的地方了 (2026-09-16 本批)
+// 结算页是"另一条路径"进入本函数 (返回主界面后按 Esc 继续): 暂停态必须就地复位, 否则暂停面板会叠在结算页上、
+// 且 Esc 继续会被 gamePaused 吃掉 (2026-09-16 本批)
+if(gamePaused){ gamePaused=false; if(AudioSys.setAmbientMute) AudioSys.setAmbientMute(false); }
+const pov=document.getElementById('pauseOv'); if(pov) pov.classList.add('hidden');
+menuHold=false; // 结算页接管冻结权: 主循环改由 matchOver 冻结 (人员已在主菜单时同理, 结算页直接盖上主菜单)
+// 对局结束: 一切声音立即停下并进入静默期 (2026-09-17 音效停止批) —— 旧版只 setAmbientMute(true) (仅压环境/
+// 引擎增益), 结算页上仍会响: 已排程的尾音、定时器里排队的远雷/环境枪声都照旧; 而 returnToMenu 里那句
+// setAmbientMute(false) 又把引擎增益还原成上一帧的音量, 于是主菜单里一直响着"结算时的战场音"(用户实报)。
+// stopAll = 闭合总闸 + 环境归零 + 停引擎 + 挂起全部发声入口; 回战局/开新局由 restoreAll 解除。
+if(AudioSys.stopAll) AudioSys.stopAll();
+else if(AudioSys.setAmbientMute) AudioSys.setAmbientMute(true);
 const winner=forceWinner!==undefined?forceWinner:(tickets[0]===tickets[1]?-1:(tickets[0]>tickets[1]?0:1));
+// 历史战绩落盘在"冻结那一刻"立即完成 (2026-09-16 记录批): 结算画面还要等 0.9s 才画出来,
+// 那段时间关页/返回/直接开新局都不该把这一局的记录丢掉 —— 故 recCommit 提到 setTimeout 之外, 画面只消费它的结果。
+const REC=recCommit();
 document.exitPointerLock&&document.exitPointerLock();
 setTimeout(()=>{
 document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
 const end=document.getElementById('end');
 end.classList.remove('hidden');
 document.body.classList.add('inMenu'); // 结算画面同菜单: 隐藏战斗 HUD
-// 结算改版 (2026-09-13): SVG 胜负图标 + 战绩卡 + 本图历史最高/新纪录 (sf_best_<战役id> 存档)
+if(typeof syncDeployHud==='function') syncDeployHud(); // 结算也收起了 .screen(含部署界面) ⇒ 摘掉 inDeploy (2026-09-20 第6条)
+// 结算改版 (2026-09-13) + 全项记录 (2026-09-16 记录批): SVG 胜负图标 + 本局得分卡 + 六张战绩卡,
+// 每一项都带本图历史最佳与「新纪录」徽章; 观战局照常显示本局数据, 但历史不动并明写"不计入历史记录"
 const win=winner===player.team, draw=winner===-1;
 document.getElementById('endIcon').innerHTML=draw?END_SVG_DRAW:(win?END_SVG_WIN:END_SVG_LOSE);
 const title=document.getElementById('endTitle');
 title.textContent=draw?t('平  局'):(win?t('胜  利'):t('战  败'));
 title.className=draw?'draw':(win?'win':'lose');
 document.getElementById('endSub').textContent=`${t(CAMPAIGN.title)} · ${t(CAMPAIGN.modeName)} · ${t(TEAM_FACTION[player.team].short)}`;
-const sc=Math.max(0,Math.round(player.score));
-const bestKey='sf_best_'+CAMPAIGN.id;
-const prev=parseInt(localStorage.getItem(bestKey)||'0',10)||0;
-const isNew=sc>prev;
-if(isNew) localStorage.setItem(bestKey,String(sc));
-document.getElementById('endScore').textContent=sc;
-document.getElementById('endBest').textContent=t('本图最高 {0}',Math.max(sc,prev));
-document.getElementById('endNewRec').classList.toggle('hidden',!isNew);
-const kd=player.deaths>0?(player.kills/player.deaths).toFixed(2):String(player.kills);
-document.getElementById('endGrid').innerHTML=
-`<div class="statCard"><div class="v">${player.kills}</div><div class="k">${t('击杀数')}</div></div>`+
-`<div class="statCard"><div class="v">${player.deaths}</div><div class="k">${t('阵亡数')}</div></div>`+
-`<div class="statCard"><div class="v">${kd}</div><div class="k">${t('K/D 比')}</div></div>`+
-`<div class="statCard"><div class="v">${killStreakMax}</div><div class="k">${t('最大连杀')}</div></div>`+
-`<div class="statCard"><div class="v">${player.headKills||0}</div><div class="k">${t('爆头数')}</div></div>`+
-`<div class="statCard"><div class="v">${player.caps||0}</div><div class="k">${t('占领点')}</div></div>`;
+document.getElementById('endScore').textContent=REC.vals.score;
+document.getElementById('endBest').textContent=recBestText(null,REC.best.score);
+document.getElementById('endNewRec').classList.toggle('hidden',!REC.isNew.score);
+document.getElementById('endSpecNote').classList.toggle('hidden',REC.counted); // 观战: 明确写出不计入历史
+document.getElementById('endGrid').innerHTML=recStatCardsHTML(REC);
 const mx=Math.max(1,tickets[0],tickets[1]);
 const bar=z=>`<div class="tRow"><div class="tName t${z}">${t(TEAM_NAME[z])}</div>`+
 `<div class="tBarWrap"><div class="tBar t${z}" style="width:${Math.max(0,Math.min(100,tickets[z]/mx*100))}%"></div></div>`+
@@ -290,20 +480,32 @@ scorePopT=setTimeout(()=>s.style.opacity=0,1400);
 }
 // —— 玩家击杀播报: 右下角得分列表 (每次击杀/摧毁独立成行) + 中下连杀横幅 + 连杀奖励 ——
 const MK_NAMES={2:'双杀',3:'三连杀',4:'四连杀',5:'五连杀',6:'六连杀',7:'七连杀',8:'八连杀',9:'九连杀'};
-const KILL_STREAK_WIN=5; // 连杀窗口: 距上次击杀超过该秒数则重新计数
-let killStreakN=0, killStreakT=-99, killStreakMax=0;
+const KILL_STREAK_WIN=5; // 连杀窗口: 距上次击杀超过该秒数则重新计数 (续杯判定共用这一个窗口, 2026-09-16)
+let killStreakN=0, killStreakT=-99, killStreakMax=0, killStreakRefills=0;
 // 连杀奖励 (2026-09-11): 档位表在 00-config STREAK_REWARDS —— 命中 3/6/9 杀时发放/升级增益
 // (player.streakBuff, 效果接线: 移速 20-player / 换弹 19-input / 减伤 18-game), 得分按当前档位 mul 结算。
+// 续杯 (2026-09-16 用户定案): 窗口内每多一次击杀即把当前档时长"续满", 次数不限 (详见 refillStreakBuff)。
 function streakTierOf(n){ // 当前连杀数命中的最高档 (未达 3 杀返回 null)
 let hit=null;
 for(const t of STREAK_REWARDS) if(n>=t.at) hit=t;
 return hit;
 }
 function grantStreakBuff(tier,lv){
-player.streakBuff={name:tier.name, lv, mul:tier.mul, speedMul:tier.speedMul, reloadMul:tier.reloadMul, dmgCut:tier.dmgCut, until:nowT+tier.dur};
+player.streakBuff={name:tier.name, lv, mul:tier.mul, speedMul:tier.speedMul, reloadMul:tier.reloadMul, dmgCut:tier.dmgCut, dur:tier.dur, until:nowT+tier.dur};
 showScorePop(t('连杀奖励 · {0} (得分×{1}, {2}s)',t(tier.name),tier.mul,tier.dur));
 AudioSys.click(660,0.22,0.05);
 setTimeout(()=>AudioSys.click(990,0.3,0.06),120);
+}
+// 续杯 (2026-09-16 用户定案): 连杀窗口内的击杀把当前档增益"续满"—— 3杀档回满 5s / 6杀档 6s / 9杀档 7s,
+// 次数不限 (连杀不断就一直续); 踩档那一杀走 grantStreakBuff (升级优先, 不重复续)。
+// 停火超窗口=断链 → 不再续, 增益自然到期; 阵亡 resetKillStreak 照旧清零。
+// buff.dur = 该档满值 (grant 时记入, 单一来源), refillT 供 22-hud 触发一次 0.45s 角标脉冲 (显示层唯一消费点)。
+function refillStreakBuff(){
+const b=player.streakBuff; if(!b) return;
+b.until=nowT+b.dur;
+b.refillT=nowT;
+killStreakRefills++;
+AudioSys.click(880,0.14,0.04); // 续杯音: 单声短促, 与升档双音 (660/990) 区分开
 }
 function showKillPop(label,score,mul){
 const box=el('killPops');
@@ -314,10 +516,56 @@ box.appendChild(d);
 while(box.children.length>5) box.firstChild.remove();
 setTimeout(()=>{ d.classList.add('out'); setTimeout(()=>d.remove(),500); },2600);
 }
-// 连杀结算唯一入口 (击杀/摧毁载具共用): 刷新计数 → 弹得分角标(按档位倍率) → 连杀横幅 → 命中 3/6/9 发放奖励。
-// 返回实得分数 (含连杀倍率), 调用方据此外加 player.score —— 记分单源不破坏 (verify-wipe T14)。
+// ═════ 地图可破坏物得分 (2026-09-26 破坏得分批) ═════
+// 单源: 00-config STRUCT_SCORE (分档/上限/初始血量阈值) + REC_STATS 的 demol 项 (结算卡与历史记录)。
+// 本段只做三件事: ①按组算分并落到**击毁者**账上 (玩家与 Bot 同口径, 与击杀记分一致);
+//   ②把**同一批**爆炸打出的多组摧毁合并成一条右下角得分角标 —— 一炮拆掉 6 面墙是
+//     "摧毁结构 ×6 +120", 而不是 6 条 "+20" (killPops 列表本身只保留 5 行, 逐组弹会把同一次爆炸挤爆);
+//   ③给玩家记 demol 计数 (结算战绩卡/历史记录)。
+// ★ 刻意**不走 registerKillScore**: 拆墙不算击杀 —— 不喂 3/6/9 连杀档位, 也不吃连杀倍率,
+//   否则"开坦克轰村子"就成了刷连杀/刷分的捷径 (这条边界写在 00-config STRUCT_SCORE 那段)。
+//   批的边界由 05-world 划: damageStructures 进出各调一次 structBatchBegin/End (一次爆炸 = 一批);
+//   不落在任何批里的单发摧毁 (炮位自毁链等直调 destroyStructure 的路径) 就地出角标。
+let _structOpen=0, _structAcc=null;
+function structBatchBegin(){ _structOpen++; }
+function structBatchEnd(){ if(_structOpen>0) _structOpen--; if(_structOpen===0) flushStructPop(); }
+function structScoreOf(g){
+if(typeof STRUCT_SCORE==='undefined'||!g) return 0;
+// 权重 = 初始血量 (05-world 在首次受损时缓存 g.hp0); 未登记的组 (直调路径/炮位胸墙) 按轻档
+const hp=(g.hp0>0)?g.hp0:Math.max(0,g.hp||0);
+const s=(typeof g.score==='number')?g.score:(hp>=STRUCT_SCORE.bigHp?STRUCT_SCORE.big:STRUCT_SCORE.light);
+return clamp(Math.round(s),0,STRUCT_SCORE.cap);
+}
+function flushStructPop(){
+const a=_structAcc; _structAcc=null;
+if(!a||a.n<=0||a.pts<=0) return;
+// 标签先经 t() 定型, showKillPop 内层那次 t() 对已译串是原样返回 (词典里没有英文键)
+const label=a.big?(a.n>1?t('摧毁大型结构 ×{0}',a.n):t('摧毁大型结构'))
+                :(a.n>1?t('摧毁结构 ×{0}',a.n):t('摧毁结构'));
+showKillPop(label,a.pts);
+}
+// 05-world.destroyStructure 的唯一回调 (非 silent 才调): 一组可破坏物被摧毁
+function awardStructScore(g,attacker){
+if(!attacker) return 0;            // 无主爆炸 (雷链/场景物二次爆炸) 不给任何人加分
+const pts=structScoreOf(g);
+if(pts<=0) return 0;
+attacker.score=(attacker.score||0)+pts;
+// 角标与 demol 计数只属于玩家: Bot 拆楼记 Bot 的账, 但不在玩家屏幕上弹一条得分行
+// (与击杀记分同口径: 15b/15c/16-aircraft 都是 `attacker.isPlayer ? registerKillScore : 直接加分`)
+if(attacker.isPlayer){
+player.demol=(player.demol||0)+1; // 破坏数 (结算战绩 demol)
+const big=pts>=STRUCT_SCORE.big;
+if(_structAcc){ _structAcc.n++; _structAcc.pts+=pts; if(big) _structAcc.big=true; }
+else _structAcc={n:1,pts,big};
+if(_structOpen===0) flushStructPop(); // 不在爆炸批里: 立即出角标 (批内的由 structBatchEnd 统一出)
+}
+return pts;
+}
+// 连杀结算唯一入口 (击杀/摧毁载具共用): 刷新计数 → 弹得分角标(按档位倍率) → 连杀横幅 → 命中 3/6/9 发放/升级奖励,
+// 窗口内未踩档的击杀则续杯。返回实得分数 (含连杀倍率), 调用方据此外加 player.score —— 记分单源不破坏 (verify-wipe T14)。
 function registerKillScore(label,base,countStreak){
 if(countStreak===false||matchOver){ showKillPop(label,base); return base; }
+const chained=killStreakN>0&&nowT-killStreakT<=KILL_STREAK_WIN; // 续杯判定: 本杀是否接在 5 秒窗口内 (必须在重置前取值)
 if(nowT-killStreakT>KILL_STREAK_WIN) killStreakN=0;
 killStreakN++; killStreakT=nowT;
 if(killStreakN>killStreakMax) killStreakMax=killStreakN; // 结算最大连杀 (2026-09-13)
@@ -333,42 +581,124 @@ void b.offsetWidth; // 强制重排以重播弹出动画 (同一爆炸连杀时�
 b.classList.add('show');
 AudioSys.click(600+Math.min(killStreakN,8)*110,0.3,0.05);
 }
-const tierHit=STREAK_REWARDS.find(t=>t.at===killStreakN); // 恰好踩中 3/6/9 档才发放 (同一条命每档一次)
+const tierHit=STREAK_REWARDS.find(t=>t.at===killStreakN); // 恰好踩中 3/6/9 档才发放/升级 (同一条命每档一次)
 if(tierHit) grantStreakBuff(tierHit,STREAK_REWARDS.indexOf(tierHit));
+else if(chained) refillStreakBuff(); // 续杯: 窗口内未踩档的击杀 (含 9 杀之后的 10/11…杀) 把当前档续满
 return got;
 }
-function resetKillStreak(){ killStreakN=0; player.streakBuff=null; }
+function resetKillStreak(){ killStreakN=0; player.streakBuff=null; killStreakRefills=0; } // 阵亡: 连杀计数/增益/续杯数一起清
 function onPlayerKill(victim,isHead){
 const got=registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 player.score+=got;
 if(isHead) player.headKills=(player.headKills||0)+1; // 爆头数: 结算卡 (2026-09-13)
 player.lifeKills=(player.lifeKills||0)+1;
-const hm=el('hitmark');
-hm.classList.add('kill');
-hm.style.opacity=1;
-setTimeout(()=>hm.style.opacity=0,320);
-AudioSys.hitmarkSnd(true);
+hmShow(_hitCls,true);
+// 车毁连带的多杀 (驾驶员 Bot die + 2 个名额 settleCrewSlotDeath) 会三连进这里: 0.25s 内的红档音
+// 合并为一响 (标记仍逐杀刷新), 否则击杀音三重叠置成噪音 (2026-09-28 D7 顺带)。
+const now=nowT;
+if(now-_lastKillSndT>=0.25){ _lastKillSndT=now; AudioSys.hitmarkSnd(true); }
 }
-function onPlayerHit(sol,isHead){
+let _lastKillSndT=-9;
+// ═══ 三档命中/击杀标识 (2026-09-30 批, 用户定案"同X加外框") ═══
+// _hitCls = 待结算弹种档: 'mg'(枪械/机炮·无框) / 'shell'(炮弹·火箭·高炮·鱼雷·琥珀括号) / 'explo'(手雷·航弹·爆炸·黄锯齿环)。
+// 各伤害结算点在 damage/takeDmg **之前**盖章 (markHitCls); 击杀红档经 die()→onPlayerKill 读到它 ⇒ 击杀标识与命中标识同档。
+let _hitCls='mg';
+function markHitCls(c){ _hitCls=(c==='shell'||c==='explo')?c:'mg'; }
+// 标记单源 hmShow: 写档位类 + kill 类 + 显隐计时 (红 320ms / 白 140ms, 槽仍是 hm._t —— D7 的"红白共槽"不变)。
+// 40ms 红档守卫: 刚出红档的**同一结算拍**内白档不降级 —— 一发炮弹"直击致死→溅射伤到旁人"、一颗航弹
+//   "溅射→叠爆"都是同帧同步连发两档, 旧口径白档会把红档盖回 (D7 病根的溅射版); 窗口取 0.04s (~2帧) 只盖
+//   同拍, 跨发不挡: 机枪 900rpm 弹间隔 67ms > 40ms, 击杀后下一发命中别人的白档照常出。
+function hmShow(cls,kill){
 const hm=el('hitmark');
-hm.classList.remove('kill');
+if(!kill&&nowT-(hm._killT||-9)<0.04) return;
+markHitCls(cls);
+hm.classList.remove('shell','explo','kill');
+if(_hitCls!=='mg') hm.classList.add(_hitCls);
+if(kill){ hm.classList.add('kill'); hm._killT=nowT; }
 hm.style.opacity=1;
 clearTimeout(hm._t);
-hm._t=setTimeout(()=>hm.style.opacity=0,140);
+hm._t=setTimeout(()=>hm.style.opacity=0,kill?320:140);
+}
+// 载具命中反馈 (2026-09-28 D7): 打坦克/卡车此前只有 20% 抽奖出声、无视觉标记 (13-combat 旧口),
+// 收敛为确定性 —— 白档标记与打步兵同一视觉语言, 音效 0.12s 节流 (机枪泼水不连成一片, 也不漏"打了没反馈")。
+// 2026-09-30: 接受可选弹种档 cls (缺省读 _hitCls); 击杀档不在这里: die 链 → onPlayerKill/onPlayerWreck (红档)。
+let _lastVehHitSndT=-9;
+function onPlayerHitVeh(cls){
+hmShow(cls,false);
+if(nowT-_lastVehHitSndT>=0.12){ _lastVehHitSndT=nowT; AudioSys.hitmarkSnd(false); }
+}
+function onPlayerHit(sol,isHead,cls){
+hmShow(cls,false);
 AudioSys.hitmarkSnd(false);
+}
+// 溅射/炮弹/高炮/鱼雷等"一发可能伤多个"的聚合白档: 音效 0.09s 节流 (一次爆炸只响一声, 标记照常点亮)。
+// 调用方负责只对"伤到敌对目标且目标还活着"调用 (致命一击走 die 链红档, 不在这里补白)。
+let _lastAnyHitSndT=-9;
+function onPlayerHitAny(cls){
+hmShow(cls,false);
+if(nowT-_lastAnyHitSndT>=0.09){ _lastAnyHitSndT=nowT; AudioSys.hitmarkSnd(false); }
+}
+// 载具/舰艇/卡车/战机/岸炮被玩家**击毁**的红档 (2026-09-30 批): 旧口径红档只从乘员 Bot.die 间接出现,
+// 空车击毁只有右下角得分角标、屏中没有任何击杀反馈。这里只出标记+音 (记分/播报仍由各 die() 自己的单源管,
+// 不走 onPlayerKill —— 那会把"击杀 100"与"摧毁坦克 300"双计)。
+function onPlayerWreck(){
+hmShow(_hitCls,true);
+const now=nowT;
+if(now-_lastKillSndT>=0.25){ _lastKillSndT=now; AudioSys.hitmarkSnd(true); }
 }
 function addDirHit(worldAng){
 const rel=worldAng-player.yaw+Math.PI;
+// 屏缘窄弧 (2026-09-28 D8 三稿 = 用户裁定: 战地式窄弧 + 中距≈150px): 弧带的半径/等宽/45° 角向遮罩
+// 全部由 CSS 画 (天生规整), 这里只写 rotate 指向来向 —— 一稿径向外推/二稿楔标均已废。
+// 渐隐: 1.0s 后开始 0.45s CSS 过渡淡出, 1.5s 移除; 同侧 (±0.6rad) 多源合并到既有弧上 (刷新角度+计时)。
 const d=document.createElement('div');
 d.className='dirHit';
-d.style.transform=`rotate(${-rel}rad)`;
+const put=ed=>{ d.style.transform=`rotate(${-ed}rad)`; };
+put(rel);
+d._wAng=worldAng; // 定格世界方位 (2026-09-29 用户裁定): 之后每帧只随玩家朝向重算 (updateDirHits), 不追踪攻击者走位
 el('dirHits').appendChild(d);
-setTimeout(()=>d.remove(),900);
+d._fade=setTimeout(()=>{ d.style.opacity=0; },1000);
+d._rm=setTimeout(()=>d.remove(),1500);
+// 同侧合并: 找既有同向弧 (差 <0.6rad), 把它的角度刷成最新、计时器全部续期, 然后丢掉本次新建的
+const others=[...el('dirHits').children].filter(x=>x!==d);
+for(const o of others){
+const m=/rotate\((-?[\d.]+)rad\)/.exec(o.style.transform||'');
+const oa=m?-parseFloat(m[1]):null;
+if(oa!==null&&Math.abs(angDiff(rel,oa))<0.6){
+o._wAng=d._wAng;
+o.style.transform=d.style.transform;
+o.style.opacity=0.9;
+clearTimeout(o._fade); clearTimeout(o._rm);
+o._fade=setTimeout(()=>{ o.style.opacity=0; },1000);
+o._rm=setTimeout(()=>o.remove(),1500);
+d.remove();
+return;
+}
+}
+}
+// 方向弧逐帧重算 (2026-09-29 用户裁定): 生成时已定格攻击者的世界方位 (_wAng), 这里每帧只按玩家
+// **当前朝向**重算屏上角度 —— 玩家转头时既有弧跟着滑动, 始终指向真实世界方位 (旧版入帧算一次写死,
+// 转多少都不动, 用户实报)。攻击者后来的走位不追踪 (定格口径); 弧常驻 ≤1.5s, 逐帧重写 transform 开销可忽略。
+// 调用点在 22-hud.updateHUD 逐帧段 (typeof 守卫同 21-match 惯例)。
+function updateDirHits(){
+const box=el('dirHits');
+for(const d of box.children){
+if(d._wAng===undefined) continue;
+d.style.transform=`rotate(${-(d._wAng-player.yaw+Math.PI)}rad)`;
+}
+}
+// 座驾受击的方向指示 (2026-09-28 D8): 玩家在载具/艇上时本体 player.damage 不经过 (伤的是载具),
+// 由 Tank/Plane/NavalCraft 三处 takeDmg 的 playerDriven 分支调本函数, 把来向转报给同一套屏缘弧。
+// 双保险判据: 座驾自己报 playerDriven + player 确实还在它上面 (车毁那一拍 onVehicle 已清, 不误报)。
+function addVehDmgDir(vessel,attacker){
+if(!attacker||!attacker.pos||!vessel||!vessel.playerDriven) return;
+if(player.onVehicle!==vessel&&player.onNaval!==vessel) return;
+addDirHit(Math.atan2(attacker.pos.x-player.pos.x,attacker.pos.z-player.pos.z));
 }
 function updateScoreboard(){
 const mk=(team,tb)=>{
 const rows=[];
-const list=combatants.filter(c=>c.team===team);
+const list=combatants.filter(c=>c.team===team&&!c.capCrew);   // 大舰炮手不上记分板 (编制件, 2026-10-01c)
 list.sort((a,b)=>(b.score||0)-(a.score||0));
 for(const c of list){
 rows.push(`<tr class="${c.isPlayer?'meRow':''}"><td>${c.isPlayer?'★ 你':c.name}</td><td>${c.kills||0}</td><td>${c.deaths||0}</td><td>${c.score||0}</td></tr>`);

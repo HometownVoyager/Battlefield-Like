@@ -1,0 +1,149 @@
+海战系统改造 · **改造前基线快照** (批次 20260920N / Naval)
+================================================================================
+生成者 : verifier (独立验证者, 只读 js/, 不写任何游戏代码)
+生成时间: 2026-09-20 20:26 (+08)   工作目录: D:\Artifact\Battlefield Like
+数据来源: Lead 亲自执行的 `node dev/run-all-verify.js --browser` (pid 7372, 20:18:57 起, 约 20:26 收尾)
+          raw 原文曾是 dev/_naval-baseline-raw.txt (UTF-16LE); **该文件 20:27 由 Lead 删除**
+          (删掉后 verify-text 的 ① 编码检查随即转绿, 见 §3.1), 正文内容已由本文件 §1/§6 完整保留。
+          verifier **没有另起第二份基线**, 只做了两件事:
+            (a) 把 raw 整理成本文件;
+            (b) 单独跑 `node dev/verify-layouts.js` 取完整 12 图指纹表 (raw 只留每个套件的末两行);
+                Lead 另存了一份 dev/_naval-baseline-layouts.txt —— 与本文件 §2 **12/12 行 fp 完全一致**
+                (两次独立采集互证, 可放心当零漂移基准)
+git    : c7a0e98 (工作树 dirty; 本批 Lead 已落 00-config/00b-i18n/24-main/index.html 数据地基)
+
+--------------------------------------------------------------------------------
+§1 总结论
+--------------------------------------------------------------------------------
+套件总数      : 20 个唯一套件 (17 沙箱 + 3 真浏览器)
+唯一套件结果  : **18/20 exit=0**, 2 个非零 —— 两个都已定位根因, 均非游戏回归 (见 §3)
+raw 计数      : `===== 合计: 21/26 次运行 exit=0 =====`
+                (26 = 20 唯一 + 2 个失败项各连跑 3 次的 6 次复核)
+失败项稳定性  : dev/verify-text.js     → 1/1/1  **稳定失败** (根因 §3.1, 非游戏代码问题)
+                dev/probe-menu-hud.js  → 0/0/0  **偶发** (被 verifier 20:23:5x 起的 :8000 服务器救回, §4)
+                ★ 20:27 复核: Lead 删掉 UTF-16 的 raw 日志后, verify-text 只剩 1 项失败 (3 个待落盘 js 文件),
+                  编码项 ① 已转绿 (143 个文件) —— 即基线里这条"稳定失败"里有一半是自污染, 见 §3.1
+布局指纹      : 12 张战役图全部 `PASS`, 指纹见 §2 (这是"零漂移"的唯一比对基准)
+浏览器阶段    : probe-deploy-hud 3/3、probe-menu-hud 10/10、probe-inmenu-watch 0 个未隐藏步骤 —— 全通过
+
+--------------------------------------------------------------------------------
+§2 12 图布局指纹 (零漂移基准)
+--------------------------------------------------------------------------------
+复现: `node dev/verify-layouts.js`   (与 raw 内 island 行一致: fp=282850 / PASS)
+  战役        地形        模式       destr  boxes cyls  nav foot props stairs regs trees ammo depot  fp      结果
+  normandy    rural       assault    44     6535  133   25  21   475   11    27   68    7    0      265480  PASS
+  stalingrad  stalingrad  conquest   53     4941  137   38  19   273   14    27   23    16   0      206080  PASS
+  berlin      berlin      assault    445    9165  388   141 84   676   43    99   70    8    0      403698  PASS
+  songhu      delta       assault    60     6324  170   45  16   329   2     22   54    7    0      253447  PASS
+  baituan     loess       demolition 85     8326  145   62  38   253   6     45   37    7    5      350223  PASS
+  burma       jungle      conquest   0      1585  196   9   7    395   4     13   150   6    0      75169   PASS
+  moscow      moscow      assault    592    13427 344   185 126  659   60    136  70    8    0      582776  PASS
+  hukawng     deepjungle  conquest   36     9843  1145  111 33   1588  14    41   866   9    0      464736  PASS
+  steppe      steppe      clash      21     2671  231   15  9    431   5     16   28    2    0      121873  PASS
+  woodline    woods       assault    20     5393  1495  26  21   2140  8     30   1097  9    0      307593  PASS
+  canyon      canyon      convoy     0      22    433   0   0    522   0     0    296   0    0      23848   PASS
+  island      island      assault    140    5439  480   55  15   2405  11    53   59    9    0      282850  PASS
+  末行: ALL LAYOUT CHECKS PASSED
+★ 零漂移判读: 前 11 张 (normandy..canyon) 的 fp 必须逐字节不变; island 的 fp 允许变化
+  (本批要给四岬加 4 门反舰炮位, 属**合法**布局变化), 但必须由 coastal-battery 说明
+  "变化量 = 新增 4 门炮位(含弹药箱/胸墙)", 不能拿 island 变化当挡住其他 11 图的挡箭牌。
+★ 措辞校正 (与设计定稿 §九.1 不一致, 待 Lead 裁定): 定稿写"其余 12 张图零行为变化",
+  但仓库现役战役 `grep "^{ id:'" js/00-config.js` = **12 张**(含 island) ⇒ "其余"应为 **11 张**。
+  (verify-layouts 的输出自称"13 图", 实为 12 行; 本文件一律按实测 12 行。)
+
+--------------------------------------------------------------------------------
+§3 两个非零套件的根因 (都带复现命令)
+--------------------------------------------------------------------------------
+3.1 dev/verify-text.js  exit=1  **稳定失败** (1/1/1)
+    复现: `node dev/verify-text.js`   (verifier 20:21 实跑, 原始输出 dev/out/_vt.txt)
+      ✗ ① 全仓文本文件编码合法 (UTF-8 无替换字符)  140 个文件 异常: dev\_naval-baseline-raw.txt (非法 UTF-8)
+      ✔ ② index.html 静态文案在词典里有键  (92 条)
+      ✗ ③ index.html 的 js 引用与 js/ 目录一一对应  39 个 script 多: 15d-naval.js,15e-navmodels.js,15f-battery.js
+      ✔ ③ 全部 js/css 引用同一版本戳  (20260920e)
+    根因 A (自污染, 非源码事故) —— **20:27 已消失**: raw 基线日志由 PowerShell 重定向/Tee 写出, 是 UTF-16LE;
+      verify-text 会扫 dev/ 下所有 .txt, 只豁免 dev/out/ ⇒ **基线日志本身把 ① 判失败**。
+      Lead 删除 raw 后 `node dev/verify-text.js` (20:28 复核) 输出:
+        ✔ ① 全仓文本文件编码合法 (UTF-8 无替换字符)  (143 个文件)
+        ✗ ③ index.html 的 js 引用与 js/ 目录一一对应  39 个 script 多: 15d-naval.js,15e-navmodels.js,15f-battery.js
+        ⇒ verify-text: 1 项失败
+      纪律: 基线/日志类产物落 dev/out/ (已豁免), 或显式写成 UTF-8 —— 否则会稳定误报源码编码事故。
+    根因 B (预期中的过渡态): index.html 已按定稿 §8 挂上 15d/15e/15f 三个 script, 但三个文件尚未落盘
+      (owners: naval-hull / naval-model / coastal-battery)。三文件落盘后 ③ 自动转绿。
+      ⇒ 改造后 verify-text 若仍非零, 必须按同一命令逐条复核, 不要笼统当成"海战回归"。
+3.2 dev/probe-menu-hud.js  exit=2  **环境失败** (沙箱实例)
+    原文: `[探针异常] 等待超时 (45000ms): !!window.__sfBooted  最近 console: []`
+    根因: 该实例跑在 20:23:2x, 当时 **:8000 没有静态服务器** (raw TCP 连接被拒), 页面根本没加载。
+    同套件的浏览器实例 (20:24 起) = 0 (10/10 通过), 连跑 3 次 = 0/0/0 ⇒ run-all 把它判为"偶发",
+    这正是稳定性判据把**环境抖动**吞掉的一例。处置见 §4。
+
+--------------------------------------------------------------------------------
+§4 基线有效性声明 (必须随基线一起看, 否则会误判)
+--------------------------------------------------------------------------------
+1. verifier 在 20:23:5x 起了一个本仓静态服务器 (内联 `node -e`, 未新增任何文件):
+      监听 127.0.0.1:8000, root=仓库根, Cache-Control:no-store, 后台 job id = pwsh-3
+   ⇒ 该时刻**之后**的浏览器套件 (probe-deploy-hud / probe-menu-hud(浏览器实例) / probe-inmenu-watch)
+     是在服务器就绪状态下通过的; 之前的 probe-menu-hud(沙箱实例) 是**无服务器**状态下的失败。
+2. 因此浏览器阶段是"混合状态": 唯一失败项已定位为缺服务器 (人为因素), 不涉及游戏代码。
+3. 交付前终验要求 (verifier 执行): 在 :8000 就绪的前提下重跑
+      `node dev/run-all-verify.js --browser`
+   期望 20/20 (verify-text 待三文件落盘后也应转绿); 若 verify-text 仍非零, 按 §3.1 复核。
+
+--------------------------------------------------------------------------------
+§5 基线时刻的 js/ 哈希清单 (36 个 .js; 比对零漂移前先核对这些没被人手改过)
+--------------------------------------------------------------------------------
+复现: `Get-ChildItem js -File -Filter *.js | ForEach-Object { "$($_.Name) $($_.Length) $((Get-FileHash $_.FullName -Algorithm MD5).Hash.Substring(0,8))" }`
+00-config.js 103661 c3645085   00b-i18n.js 36556 b243429b   01-audio.js 21720 177a8ac8
+02-scene.js 47346 ad82f5b3     03-terrain.js 61735 e1d5600f  04-collision.js 8651 50018ad9
+04b-fire.js 40089 cc1755b4     05-world.js 38950 12d227ca    05a-buildings.js 121774 3de3dc88
+05b-props.js 33798 71e93d90    05c-layouts.js 127420 8e08cad7 06-engineering.js 8265 c4e22db9
+07-nav.js 14492 9b0da177       08-effects.js 17863 e4ba46f3   09-weapons.js 20956 4e011bb6
+09a-defs.js 12219 c068e900     10-viewmodel.js 21148 e4c6964a 11-soldiers.js 7255 581381ef
+12-ragdolls.js 10999 d3fe0914  13-combat.js 24847 e7ddfe21   14-bots.js 92041 5c0fa17f
+15-vehicles.js 70006 30c84ca1  15b-trucks.js 7980 27467622   15c-specveh.js 14966 b8086b96
+16-aircraft.js 28165 46b7098f  17-emplacements.js 26670 e7d6545b 18-game.js 11055 2df25b12
+19-input.js 13968 21a36a49     20-player.js 52189 5f381a30   20a-seats.js 9366 ffc22cfb
+21-match.js 32148 a3bbc316     22-hud.js 68780 e3ac94d2     22a-menuart.js 30033 cf80869c
+23-deploy.js 26820 c3d4ccf1   23b-worldrestore.js 17623 d6f3f1a8  24-main.js 16868 02609137
+★ 本批新增待落盘: js/15d-naval.js (naval-hull) · js/15e-navmodels.js (naval-model) · js/15f-battery.js (coastal-battery)
+★ 与基线对比时不能只看文件大小: 15-vehicles/14-bots/13-combat/23-deploy 在本批都会被改动 (属预期写入域)。
+
+--------------------------------------------------------------------------------
+§6 逐套件 exit code (唯一套件视角; 复现: node dev/run-all-verify.js --browser)
+--------------------------------------------------------------------------------
+  0  dev/verify-boot.js          启动链: 全战役 LOAD
+  1  dev/verify-text.js          文本编码 + i18n 键闭环 + 版本戳        ← 根因 §3.1
+  0  dev/verify-layouts.js       布局指纹 (实为 12 图, 见 §2 校正)
+  0  dev/verify-worldrestore.js  世界还原快照
+  0  dev/verify-fire.js          植被燃烧/倒伏/碾压
+  0  dev/verify-firecap.js       火力点上限
+  0  dev/verify-sink.js          植被下沉
+  0  dev/verify-spec.js          观战/幽灵坦克
+  0  dev/verify-specthird.js     观战连狙 + 第三人称
+  0  dev/verify-tankai.js        坦克交战 AI + 互撞
+  0  dev/verify-vehmodels.js     坦克/飞机剪影规格
+  0  dev/verify-foliage.js       植被密度 + 遮蔽视野
+  0  dev/_audit-foliage-ref.js   植被遮蔽独立审计对照
+  0  dev/probe-bots.js           Bot 行为 (乱斗 + 1v1)
+  0  dev/probe-planes.js         AI 飞机不撞山
+  0  dev/probe-slope.js          坡度物理
+  2  dev/probe-menu-hud.js       (沙箱实例, 当时无服务器)                ← 根因 §3.2
+  --- 真浏览器 (需 127.0.0.1:8000 静态服务器) ---
+  0  dev/probe-deploy-hud.js     第6条: 部署界面隐藏 HUD
+  0  dev/probe-menu-hud.js       第6条: HUD 隐藏全路径回归
+  0  dev/probe-inmenu-watch.js   inMenu 时间线
+★ verifier 本批新接入: dev/verify-naval.js (海战 10 条红线; 未落盘的被测对象按 ⊘ 跳过, exit=0)
+  已追加到 dev/run-all-verify.js 的 SANDBOX 列表**末尾** ⇒ 接入后套件总数 20 → 21。
+  上表 "18/20" 是**接入前**基线口径, 比对时不要拿 21 当分母。
+  骨架期实测 (20:25): 1 通过 / 0 失败 / 9 跳过 / exit=0
+    ✓ 红线1 塔拉瓦 LOAD ok, 每队坦克 2/2, 全图飞机 4 (待 23-deploy 改 1), ATGUNS=10
+    ⊘ 红线2..10 均因被测文件未落盘而跳过 (闸门在 dev/verify-naval.js 的 probe() 里现算)
+
+--------------------------------------------------------------------------------
+§7 复现命令一览
+--------------------------------------------------------------------------------
+  node dev/run-all-verify.js --browser          # 全量 (浏览器阶段需先起 :8000 静态服务器)
+  node dev/verify-layouts.js                    # 12 图指纹 (与本文件 §2 逐字节比对)
+  node dev/verify-text.js                       # 文本/i18n/版本戳
+  node dev/verify-naval.js                      # 海战 10 条红线 (骨架期: 1 通过 / 9 跳过 / exit 0)
+  node dev/verify-naval.js --require-all        # 终验: 跳过也算失败 (交付前必须全绿)
+  node dev/probe-naval.js                       # 海战真浏览器链 (红线 8/10; 见该文件头)

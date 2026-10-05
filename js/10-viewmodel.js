@@ -5,7 +5,7 @@
 'use strict';
 const VM = {
 root:new THREE.Group(), sway:new THREE.Group(), inner:new THREE.Group(),
-gunParts:null, arms:null, nadeM:null, knifeM:null, bandageM:null, grabitemM:null, reloadRocket:null,
+	gunParts:null, arms:null, nadeM:null, nadeMs:null, nadeKind:null, knifeM:null, bandageM:null, grabitemM:null, reloadRocket:null,
 key:null, state:'idle', stateT:0, stateDur:0,
 recoilP:0, recoilV:0, kickZ:0, kickV:0,
 swayX:0, swayY:0, bobT:0, lastStepSide:1,
@@ -17,7 +17,8 @@ vmScene.add(VM.root); VM.root.add(VM.sway); VM.sway.add(VM.inner);
 const mat=new THREE.SpriteMaterial({map:PT.flash,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
 VM.muzzleFlash=new THREE.Sprite(mat); VM.muzzleFlash.scale.setScalar(0.16);
 VM.inner.add(VM.muzzleFlash);
-VM.muzzleLight=new THREE.PointLight(0xffc070,0,3);
+// 第一人称枪口灯: 夜档作用半径 ×flashRangeMul (昼夜设计 §3.3; 白天 3 逐位不变)
+VM.muzzleLight=new THREE.PointLight(0xffc070,0,NIGHT_MODE?3*NIGHT_CFG.flashRangeMul:3);
 VM.inner.add(VM.muzzleLight);
 }
 const HIP={ pos:V3(0.17,-0.185,-0.38), rot:V3(0.02,0.03,0) };
@@ -44,7 +45,11 @@ VM.gunParts=buildGunModel(key);
 VM.inner.add(VM.gunParts.gun);
 VM.arms=buildArms(team);
 VM.inner.add(VM.arms.L); VM.inner.add(VM.arms.R);
-VM.nadeM=buildNadeModel(team); VM.nadeM.visible=false; VM.inner.add(VM.nadeM);
+// 四弹种手上模型 (2026-09-30 批): 一件一件建好挂在 inner 上, 持雷时按弹种显隐 (vmNadeShow) ——
+// 旧版只建阵营档那一件 ⇒ 举烟雾弹/燃烧弹/反坦克雷出手前手里都是普通手雷 (用户报)。
+VM.nadeMs={};
+for(const k of NADE_KINDS){ const m=buildNadeMesh(k,team); m.visible=false; VM.inner.add(m); VM.nadeMs[k]=m; }
+VM.nadeKind=null; VM.nadeM=null;
 VM.knifeM=buildKnife(); VM.knifeM.visible=false; VM.inner.add(VM.knifeM);
 if(!VM.bandageM) VM.bandageM=buildBandage();
 VM.bandageM.visible=false; VM.inner.add(VM.bandageM);
@@ -84,20 +89,41 @@ bx(vmMats.gun,0.045,0.05,0.1, 0,0.075,0, g);
 bx(vmMats.gunL,0.024,0.024,0.026, 0,0.075,0.062, g);
 return g;
 }
+// 持枪手位 (2026-10-05 用户实报"左胳膊太靠右, 像右肩上长了两个胳膊"重摆):
+//   臂组枢轴在手腕、袖管向 +z (镜头方向) 延伸 0.25m —— rotY≈0 时左袖断口会悬停在画面中偏右,
+//   与右臂并排 = "双臂同肩"。左臂修法 = **手不动、袖摆左下**: rotY 拉到 -0.6~-1.0 让袖管斜向
+//   画面左下角 (断口出画或贴左缘), 而手心落点用 pivot 反算补偿 (皮肤段在 -z, Ry 负角会把手甩向
+//   +x, pivot.x 同量左移抵消), 支撑手仍贴在护木/握把原位。
 function positionHands(key){
 const d=WPN_DEFS[key];
 if(d.rocket){
 VM.arms.R.position.set(0.01,-0.09,0.16); VM.arms.R.rotation.set(0.35,0,0);
-VM.arms.L.position.set(-0.02,-0.1,-0.12); VM.arms.L.rotation.set(0.3,-0.05,0);
+VM.arms.L.position.set(-0.089,-0.099,-0.16); VM.arms.L.rotation.set(0.5,-0.95,0);
 } else if(d.pistol){
 VM.arms.R.position.set(0.015,-0.06,0.13); VM.arms.R.rotation.set(0.25,0,0);
-VM.arms.L.position.set(-0.03,-0.08,0.1); VM.arms.L.rotation.set(0.3,0.25,0);
+VM.arms.L.position.set(-0.103,-0.09,0.082); VM.arms.L.rotation.set(0.5,-0.6,0);
 } else {
 VM.arms.R.position.set(0.02,-0.07,0.2); VM.arms.R.rotation.set(0.32,0,0);
-VM.arms.L.position.set(-0.015,-0.075,-0.2); VM.arms.L.rotation.set(0.28,-0.1,0);
+VM.arms.L.position.set(-0.08,-0.075,-0.24); VM.arms.L.rotation.set(0.5,-1.0,0);
 }
 }
 function ss(t,a,b){ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); }
+// 当前持的是哪一种 (2026-09-30 批): 四弹种单源 —— 与 22-hud 预演取弹种、18-game releaseNade 分流同一判序
+// (at → smoke → incin → frag)。手上模型/预演弹道/出手实弹三者据此对齐, 不许各判一套。
+function vmNadeKind(){
+if(player.nadeIsAT) return 'at';
+if(player.nadeIsSmoke) return 'smoke';
+if(player.nadeIsIncin) return 'incin';
+return 'frag';
+}
+function vmNadeShow(kind){
+if(!VM.nadeMs) return null;
+for(const k in VM.nadeMs) VM.nadeMs[k].visible=false;
+const m=VM.nadeMs[kind]||VM.nadeMs.frag;
+VM.nadeKind=kind; VM.nadeM=m;
+if(m) m.visible=true;
+return m;
+}
 function pulse(t,a,b,c){ return t<b? ss(t,a,b) : 1-ss(t,b,c); }
 let vmSndFlags={};
 function vmResetSndFlags(){ vmSndFlags={}; } // owner 接口 (2026-09-06 B7b/P2-14: 06-engineering 跨文件写改经此)
@@ -179,21 +205,33 @@ if(nt>0.3) vmPlayOnce('meleeHit',()=>player.doMeleeHit());
 if(nt>=1){ VM.state='idle'; VM.knifeM.visible=false; g.gun.visible=true; VM.arms.L.visible=true; vmSndFlags={}; }
 }
 else if(VM.state==='nade'){
-VM.nadeM.visible=true; g.gun.visible=false;
-if(player.nadeHeld){
+// 弹种 → 手上模型 (2026-09-30 批): 进 'nade' 态与持雷期间弹种变了就换件。VM.nadeM 恒指向**当前展示**的
+// 那一件 —— 外部 (20-player 自爆清枪 / 本文件哨兵自愈) 只写 VM.nadeM.visible=false, 语义不变。
+const nk=vmNadeKind();
+if(VM.nadeKind!==nk) vmNadeShow(nk);
+const shown=VM.nadeM;
+shown.visible=true; g.gun.visible=false;
+// 哨兵态自愈 (★2026-09-26 修): "按住 G 持雷"是 stateDur=999 的哨兵态, 只由"松开 G" (19-input 置 0.55)
+// 推进。而**外部**摘掉 nadeHeld 的路径不少 (上坦克 20-player:197 / 上艇 / 上炮位 / 上迫击炮都会
+// player.nadeHeld=false), 它们一个都不复位 VM ⇒ 状态机卡死在 'nade' 上: nt=t/999 永不达 1,
+// 于是手中一直握着雷、枪一直收不回来、也开不了火, 直到 999 秒后凭空"扔"出去 (同型事故在
+// 19-input 的岸防炮门卫注释里已有先例: "下炮那一帧状态机复活 ⇒ 立刻扔出一颗活雷")。
+// 这里补一条兜底: 哨兵态下发现手里已经没有雷 ⇒ 直接回 idle, **不触发投掷** (没松键就不是投掷)。
+if(!player.nadeHeld&&VM.stateDur>10){ VM.state='idle'; shown.visible=false; g.gun.visible=true; vmSndFlags={}; }
+else if(player.nadeHeld){
 const k=ss(Math.min(t,0.3),0,0.3);
-VM.nadeM.position.set(0.14,-0.12+k*0.04,-0.3+k*0.05);
-VM.nadeM.rotation.set(0,0,0);
+shown.position.set(0.14,-0.12+k*0.04,-0.3+k*0.05);
+shown.rotation.set(0,0,0);
 handROverride={pos:V3(0.13,-0.15,-0.22),rot:V3(0.5,0,0)};
 handLOverride={pos:V3(-0.1,-0.2,-0.2),rot:V3(0.3,0,0)};
 } else {
 const k=nt;
 const back=pulse(k,0,0.3,0.55), fwd=ss(k,0.35,0.6);
-VM.nadeM.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.55);
-VM.nadeM.visible=k<0.55;
+shown.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.55);
+shown.visible=k<0.55;
 handROverride={pos:V3(0.13+back*0.08,-0.12+back*0.14-fwd*0.18,-0.18+back*0.2-fwd*0.35),rot:V3(0.5+back*1.2-fwd*2.2,0,0)};
 if(k>0.5) vmPlayOnce('nadeThrow',()=>player.releaseNade());
-if(nt>=1){ VM.state='idle'; g.gun.visible=true; VM.nadeM.visible=false; vmSndFlags={}; }
+if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; }
 }
 }
   else if(VM.state==='reload'){
@@ -370,9 +408,14 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       VM.reloadRocket&&(VM.reloadRocket.visible=false);
       const cyc=(VM.stateT*2.6)%1;
       const swing=cyc<0.45? ss(cyc,0.05,0.45) : 1-ss(cyc,0.45,0.72);
+      // ★2026-09-28 阶段三 P1 (用户实报"锤击时上臂绕手腕大幅甩动"): buildArms 臂组的枢轴在**手腕**
+      // (袖子段向 +z 后方延伸 0.25m), 旧 rot.x 到 -1.15 rad = 整条上臂绕拳头抡 —— 视觉即"转轴长在手上"。
+      // 修法 = 肩点补偿: 手臂只摆 ±0.6 rad, 位置按绕肩端 (local +0.25z) 旋转的几何逐帧补回 ⇒ 袖子端
+      // 定住、手腕走弧线, 真正的大幅抡击交给独立挂载的锤子本体 (rotation.x 加深到 -1.6 rad)。
+      const th=-0.2-swing*0.6;
       VM.hammerM.position.set(0.09,-0.16+swing*0.2,-0.22);
-      VM.hammerM.rotation.set(-0.35-swing*1.05,0.3,0.15);
-      handROverride={pos:V3(0.09,-0.17+swing*0.18,-0.14),rot:V3(-0.2-swing*0.95,0.15,0)};
+      VM.hammerM.rotation.set(-0.35-swing*1.25,0.3,0.15);
+      handROverride={pos:V3(0.09,-0.17+0.25*(Math.sin(th)-Math.sin(-0.2)),-0.14-0.25*(Math.cos(th)-Math.cos(-0.2))),rot:V3(th,0.15,0)};
       handLOverride={pos:V3(-0.06,-0.13,-0.2),rot:V3(0.35,0,0)};
       rx+=0.12; oy-=0.02;
       const ki=Math.floor(VM.stateT*2.6);
@@ -393,13 +436,18 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
         engBuildExec(player);
       }
     }
-    // 架枪锚定: 支点(护木前端)固定在世界中, 枪身始终指向准星方向,
-    // 转动视角时枪绕支点平移摆动; 机瞄时偏移消退, 照门准星自然对齐屏幕中心
+    // 架枪锚定: 支点(护木前端)固定在世界中, 枪身始终指向准星方向, 转动视角时枪绕支点平移摆动;
+    // 机瞄时偏移消退, 照门准星自然对齐屏幕中心。
+    // ★ 2026-09-26 B1 修: oz 的符号与原意相反。视模系里**前方 = -z** (HIP.pos 的 z=-0.38、枪口在负 z),
+    //   支点在"沿架设方向前 0.45m" ⇒ 视线转过 rel 后它在视模系的坐标为 (横向 -0.45·sin(rel), 前向 -0.45·cos(rel));
+    //   枪原点与支点相距恒为 0.45 (枪长不变) ⇒ 枪原点 = 支点 + 0.45·(朝观察者一侧)  ⇒  oz = +0.45·(1-cos(rel)),
+    //   即"转向越大, 枪越朝观察者退回"。旧写法 (cos(rel)-1)·0.45 是它的相反数: 一转头枪往前窜 (最大 0.28m),
+    //   与注释"绕支点摆动"方向相反 —— 架枪时左右扫视会看到枪身向外滑出去再滑回来。
     if(VM.braceBlend>0.01&&player.braceYaw!==undefined){
       const pin=VM.braceBlend*(1-VM.adsBlend);
       const rel=clamp(angDiff(player.braceYaw,player.yaw),-0.8,0.8);
       ox+=-Math.sin(rel)*0.45*pin;
-      oz+=(Math.cos(rel)-1)*0.45*pin;
+      oz+=(1-Math.cos(rel))*0.45*pin;
     }
     VM.root.position.set(px+ox,py+oy,pz+oz);
 VM.root.rotation.set(rx,ry,rz);

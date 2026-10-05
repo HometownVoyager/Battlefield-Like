@@ -16,7 +16,7 @@ class P3{ constructor(x=0,y=0,z=0){ this.x=x;this.y=y;this.z=z; }
 set(x,y,z){ this.x=x;this.y=y;this.z=z; return this; } }
 class Rot{ constructor(){ this.x=0;this.y=0;this.z=0; } set(x,y,z){ this.x=x;this.y=y;this.z=z; return this; } }
 class Obj3{
-constructor(){ this.position=new P3(); this.rotation=new Rot(); this.scale={x:1,y:1,z:1,set(){return this;},setScalar(){return this;}}; this.children=[]; this.parent=null; this.visible=true; }
+constructor(){ this.position=new P3(); this.rotation=new Rot(); this.scale={x:1,y:1,z:1,set(){return this;},setScalar(){return this;}}; this.children=[]; this.parent=null; this.visible=true; this.userData={}; }
 add(m){ this.children.push(m); m.parent=this; }
 traverse(fn){ fn(this); for(const c of this.children) if(c.traverse) c.traverse(fn); }
 }

@@ -1,0 +1,26 @@
+﻿normandy   rural        assault  destr=44
+  boxes=6535 cyls=133 nav=25 foot=21 props=475 stairs=11 regs=27 trees=68 ammo=7 depot=0 hedges=75  fp=265480  PASS
+stalingrad stalingrad   conquest destr=53
+  boxes=4941 cyls=137 nav=38 foot=19 props=273 stairs=14 regs=27 trees=23 ammo=16 depot=0 hedges=0  fp=206080  PASS
+berlin     berlin       assault  destr=445
+  boxes=9165 cyls=388 nav=141 foot=84 props=676 stairs=43 regs=99 trees=70 ammo=8 depot=0 hedges=0  fp=403698  PASS
+songhu     delta        assault  destr=60
+  boxes=6324 cyls=170 nav=45 foot=16 props=329 stairs=2 regs=22 trees=54 ammo=7 depot=0 hedges=0  fp=253447  PASS
+baituan    loess        demolition destr=85
+  boxes=8326 cyls=145 nav=62 foot=38 props=253 stairs=6 regs=45 trees=37 ammo=7 depot=5 hedges=0  fp=350223  PASS
+burma      jungle       conquest destr=0
+  boxes=1585 cyls=196 nav=9 foot=7 props=395 stairs=4 regs=13 trees=150 ammo=6 depot=0 hedges=0  fp=75169  PASS
+moscow     moscow       assault  destr=592
+  boxes=13427 cyls=344 nav=185 foot=126 props=659 stairs=60 regs=136 trees=70 ammo=8 depot=0 hedges=0  fp=582776  PASS
+hukawng    deepjungle   conquest destr=36
+  boxes=9843 cyls=1145 nav=111 foot=33 props=1588 stairs=14 regs=41 trees=866 ammo=9 depot=0 hedges=0  fp=464736  PASS
+steppe     steppe       clash    destr=21
+  boxes=2671 cyls=231 nav=15 foot=9 props=431 stairs=5 regs=16 trees=28 ammo=2 depot=0 hedges=0  fp=121873  PASS
+woodline   woods        assault  destr=20
+  boxes=5393 cyls=1495 nav=26 foot=21 props=2140 stairs=8 regs=30 trees=1097 ammo=9 depot=0 hedges=0  fp=307593  PASS
+canyon     canyon       convoy   destr=0
+  boxes=22 cyls=433 nav=0 foot=0 props=522 stairs=0 regs=0 trees=296 ammo=0 depot=0 hedges=0  fp=23848  PASS
+island     island       assault  destr=140
+  boxes=5439 cyls=480 nav=55 foot=15 props=2405 stairs=11 regs=53 trees=59 ammo=9 depot=0 hedges=0  fp=282850  PASS
+
+ALL LAYOUT CHECKS PASSED

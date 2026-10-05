@@ -8,6 +8,9 @@
 // DELTA/DELTA_CHANS 已在 00-config 定义 (RIVER 表旁); 此处只补 LOESS/ALPINE
 // 必须在 FLATS 初始化之前 (addFlat 调 rawHeight, rawHeight 读这些表 —— TDZ)
 const LOESS=CAMPAIGN.loess||null;
+// 山岭修正支 (dormant): 当前**无战役**写 CAMPAIGN.alpine (莫斯科是 terr:'urban' + theme:'alpine') ——
+// 本支全部是 if(ALPINE) 条件入口, 取 null 时零开销。2026-09-26 审计复核: 保留为山地图的扩展点
+// (删掉会连带 ridgeH/passes/雪线三处语义消失), 属休眠字段而非死字段。
 const ALPINE=CAMPAIGN.alpine||null;
 // 雾林守线语义 (2026-09-13 许特根改版): 北谷(卡尔小径)判定 —— rawHeight/色带/OCC 共用 (表本体在 config.wood)
 function woodRavineDist(x,z){
@@ -36,15 +39,66 @@ return m;
 const FLATS=[];
 {
 // 百团/许特根等大起伏图: 旗点平台必须取当地全高 (山顶/塬面旗点若取 0.55 会被削成盆地边缘悬崖)
-const fullH=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods';
+// 塔拉瓦环礁 (island): 旗点/基地平台同样取全高 —— 0.55 系数会把滩头旗点削到海平面以下 (淹没)
+const fullH=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods'||CAMPAIGN.terr==='island'||CAMPAIGN.terr==='opensea';  // opensea: P4 全海图 (旗/基地平台按海床原样, 不做 0.55 折减)
 const addFlat=(x,z,r,h)=>FLATS.push({x,z,r,h:h!==undefined?h:rawHeight(x,z)*0.55});
+// 出生平台的高度: 旧口径一律取 rawHeight*0.55 (即削掉当地高度的 45%) —— 平地上只是几厘米的微整形,
+//   但在山坡上就是一个坑: 断崖公路的 7 个伏击点 (terr 'mountain', 无旗点/无基地 ⇒ 没有任何后续平台覆盖)
+//   实测被削 2.87~5.66m, "居高临下打谷道"的伏击点成了坐进去就看不见公路的碗 (dev/_spawnflat-probe.js)。
+// 现口径: 削深上限 2m —— 平地/矮丘逐位不变 (旧口径削深本就 ≤2m: 百团 0.48 / 草原 0.50 / 其余 0),
+//   高地改为"当地高 −0.4m"的浅台 (仍是台地, 不是坑)。削深 = 0.45*rawHeight ⇒ 门限等价于 rawHeight>4.44m。
+const spawnFlatH=(x,z)=>{ const raw=rawHeight(x,z); return (raw*0.45>2)? raw-0.4 : raw*0.55; };
 // 大起伏图: 基地平台同样取全高 (山坡/塬面上的基地若取 0.55 系数会挖出盆地边缘悬崖)
 // 许特根 (woods): 基地/旗点取全高 (林间缓丘上 0.55 同样挖盆); 岭上村台地独立登记 (石屋群需整片平地)
 for(const b of CAMPAIGN.bases) addFlat(b.x,b.z,20,fullH?rawHeight(b.x,b.z):undefined);
 for(const f of CAMPAIGN.flags) addFlat(f.x,f.z,f.r+12,fullH?rawHeight(f.x,f.z):undefined);
 if(WOOD&&WOOD.village){ const V=WOOD.village; addFlat(V.x,V.z,V.r,rawHeight(V.x,V.z)); }
-for(const s of (CAMPAIGN.spawns||[])) addFlat(s.x,s.z,8);
+for(const s of (CAMPAIGN.spawns||[])) addFlat(s.x,s.z,8,spawnFlatH(s.x,s.z));
+// 草原库尔斯克改版 (2026-09-13): 车站(站房/站台/水塔群)/风车/农庄需整片平地 (全高, 同岭上村口径)
+if(STEPPE&&STEPPE.station){ const T=STEPPE.station; addFlat(T.x,T.z,26,rawHeight(T.x,T.z)); }
+if(STEPPE&&STEPPE.village){ const V2=STEPPE.village; addFlat(V2.x,V2.z,V2.r,rawHeight(V2.x,V2.z)); }
+if(STEPPE&&STEPPE.mill){ const M2=STEPPE.mill; addFlat(M2.x,M2.z,9,rawHeight(M2.x,M2.z)); }
 if(CAMPAIGN.terr==='rolling') addFlat(0,0,34);
+}
+// ── 建筑地基平台 PADS (2026-09-20 用户实机"斜坡上的建筑没有地板: 进门就是大凹坑、楼梯台阶失效") ──
+// FLATS 是"软"平台(整圆 smoothstep 收敛, 大平台上边缘只到 55%~), 适合村台/旗点这类大范围微整形;
+// 建筑要的是**定向矩形硬平台**: 足迹矩形(+0.9m 缓冲, 含墙外皮)内恒等于楼面高, 矩形之外 ramp 米裙坡回落地形。
+// 建筑于是"坐落"在水平地基上: 室内地面=楼面(无坑)、门槛零落差(门台阶自动不再生成)、楼梯梯脚落地。
+// 矩形(而非圆)是刻意的: 邻建的地基台面不会互相盖到对方足迹里 (圆台在楼距 16m 的街区会重叠打架 ——
+// 实机样本: 灯塔台面被 12m 外炮位平台的裙坡拉低 2.8m)。仲裁规则: **足迹内的台面权威**, 裙坡只作用于其外。
+// 登记时机=05-world `foundation()` 算楼面那一刻(带 hMax-hMin 门限, 平缓地形的建筑不登记);
+// 地形网格在世界布局之后由 `refreshTerrainMesh()` 重刷顶点 (网格在本文件载入期先按原地形建好)。
+const PADS=[];
+function addPad(x,z,ry,hw,hd,ramp,h){
+PADS.push({x,z,ry,hw,hd,ramp,h,cs:Math.cos(ry),sn:Math.sin(ry),reach2:(Math.hypot(hw,hd)+ramp+0.001)*(Math.hypot(hw,hd)+ramp+0.001)});
+HGRID.data=null; // 高度修正带清空场缓存失效 (新特征会改变邻近格的快路判定; 惰性重填, 开销可忽略)
+}
+// 平台修正: ①点在某个平台矩形内 ⇒ 该矩形高度(权威, 重叠时归最近的那个平台) —— 邻建裙坡不得越界;
+//          ②点在所有矩形之外 ⇒ 各平台裙坡按登记序平滑混合 (都在裙坡里就自然过渡, 无归属冲突)
+function padHeight(x,z,h){
+const n=PADS.length;
+if(!n) return h;
+let plat=null, platC=1e9;
+for(let k=0;k<n;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+if(Math.abs(lx)<=p.hw&&Math.abs(lz)<=p.hd){ const c=dx*dx+dz*dz; if(c<platC){ platC=c; plat=p; } }
+}
+if(plat) return plat.h;
+for(let k=0;k<n;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+if(ax<=0&&az<=0) continue;
+const d=Math.hypot(ax>0?ax:0,az>0?az:0);
+if(d>=p.ramp) continue;
+h=lerp(h,p.h,sstep(1-d/p.ramp));
+}
+return h;
 }
 // 博卡日农田田块表 (诺曼底): 色带/庄稼软遮蔽/断续树篱共用; 其他战役为空
 const RURAL_FIELDS=CAMPAIGN.fields||[];
@@ -136,6 +190,340 @@ const k=d<=w?1:clamp(1-(d-w)/5,0,1);
 if(k>m) m=k;
 }
 return m;
+}
+// ═══════════ 环礁/海域语义 (2026-09-18 塔拉瓦环礁批 / 09-18b 三面 / ★09-19 四面环海): 岸线距离场 + 剖面 + 航道 ═══════════
+// 单源纪律 (纲领 §4.3): 剖面/色带/OCC/布局/海面网格/HUD/水深层与隐蔽判定全部读下面这几支函数 ——
+// 严禁第二处再写一套海岸线坐标。
+// 南(北)岸位置: 折线线性插值 (x 单调递增), 返回该 x 处 0 等高线的 z
+function shoreZAt(x){
+  if(!SEA) return 1e9;
+  const P=SEA.shore;
+  if(x<=P[0][0]) return P[0][1];
+  for(let i=0;i<P.length-1;i++){
+    if(x<=P[i+1][0]){
+      const t=(x-P[i][0])/((P[i+1][0]-P[i][0])||1);
+      return P[i][1]+(P[i+1][1]-P[i][1])*t;
+    }
+  }
+  return P[P.length-1][1];
+}
+function northZAt(x){
+  if(!SEA||!SEA.north) return -1e9;
+  const P=SEA.north;
+  if(x<=P[0][0]) return P[0][1];
+  for(let i=0;i<P.length-1;i++){
+    if(x<=P[i+1][0]){
+      const t=(x-P[i][0])/((P[i+1][0]-P[i][0])||1);
+      return P[i][1]+(P[i+1][1]-P[i][1])*t;
+    }
+  }
+  return P[P.length-1][1];
+}
+// 西/东岸位置: 折线线性插值 (z 单调递增), 返回该 z 处 0 等高线的 x
+function coastXAt(P,z){
+  if(!P||!P.length) return 1e9;
+  if(z<=P[0][0]) return P[0][1];
+  for(let i=0;i<P.length-1;i++){
+    if(z<=P[i+1][0]){
+      const t=(z-P[i][0])/((P[i+1][0]-P[i][0])||1);
+      return P[i][1]+(P[i+1][1]-P[i][1])*t;
+    }
+  }
+  return P[P.length-1][1];
+}
+// 单支岸线的**有符号距离** (2026-09-19 四面环海): 折线跨度内 = 垂距; **越出端点 = 到该端点的欧氏距离**
+// (符号按"相对端点在同侧与否")。 P[i]=[t,v] 且 t 单调递增 (南/北岸 [x,z]; 西/东岸 [z,x]);
+// side=+1 表示海侧在 v 更大的一侧 (南岸 z / 东岸 x), side=-1 表示海侧在 v 更小的一侧 (北岸 z / 西岸 x)。
+// ★ 越界必须改用端点距离 —— 旧版越界后沿用"端点垂线", 图角 (±320,±320) 到最近岸线被算成 24m,
+//   剖面据此给出 1.28m 深的礁盘 ⇒ 用户实机"角落的海太浅了不合常理"的根因 (现图角 ≥12m 深海盆)。
+function coastDist(P,t,v,side){
+  const n=P.length;
+  if(n<2||t<=P[0][0]){ const dv=v-P[0][1]; return (side*dv>=0?1:-1)*Math.hypot(t-P[0][0],dv); }
+  if(t>=P[n-1][0]){ const dv=v-P[n-1][1]; return (side*dv>=0?1:-1)*Math.hypot(t-P[n-1][0],dv); }
+  for(let i=0;i<n-1;i++){
+    if(t<=P[i+1][0]){
+      const t0=P[i][0], t1=P[i+1][0];
+      const vc=P[i][1]+(P[i+1][1]-P[i][1])*((t-t0)/((t1-t0)||1));
+      return side*(v-vc);
+    }
+  }
+  return side*(v-P[n-1][1]);
+}
+// 到岸线距离场: >0 海侧 / <0 陆侧 —— 四面海岸 (南/北/西/东) 取最靠海的一支。
+// 陆侧: 取四者中最接近 0 的负值 (= 到最近岸的有符号距离); 海侧: 取所有正值的**最小** (= 到最近岸的距离)。
+// 这样"水面单源"在凹湾/岬角拐点处仍连续 (拐点处两支相等 → 折痕, 但不跳变)。
+function shoreDist(x,z){
+  if(!SEA) return 1e9;
+  const fs=coastDist(SEA.shore,x,z,1);                          // 南岸 (海侧 z 更大)
+  const fn=SEA.north?coastDist(SEA.north,x,z,-1):-1e9;          // 北岸 (海侧 z 更小)
+  const dw=SEA.west?coastDist(SEA.west,z,x,-1):-1e9;            // 西岸 (海侧 x 更小) —— P=[z,x] ⇒ t=z,v=x
+  const de=SEA.east?coastDist(SEA.east,z,x,1):-1e9;             // 东岸 (海侧 x 更大)
+  if(fs<=0&&fn<=0&&dw<=0&&de<=0){ let m=fs; if(fn>m)m=fn; if(dw>m)m=dw; if(de>m)m=de; return m; }
+  let best=1e18;
+  if(fs>0) best=fs;
+  if(fn>0&&fn<best) best=fn;
+  if(dw>0&&dw<best) best=dw;
+  if(de>0&&de<best) best=de;
+  return best;
+}
+// 登陆航道遮罩: 走廊核心=1, 边界 6m 渐灭 (礁盘/礁缘在此切深, 供日后登陆艇冲滩)。
+// z0 = 该航道所属海域的起点 (四面环海后必须限定: 同一条 x 竖带在北湾也是海, 不限定就会在北岸再切一道)
+function seaChannelMask(x,z){
+  if(!SEA||!SEA.channels) return 0;
+  let m=0;
+  for(const c of SEA.channels){
+    if(c.z0!==undefined&&z<c.z0) continue;
+    const d=Math.abs(x-c.x);
+    const k=d<=c.w?1:clamp(1-(d-c.w)/6,0,1);
+    if(k>m) m=k;
+  }
+  return m;
+}
+// 由"离岸距离 d"直接给出水深 (供 rawHeight/色带/OCC 复用同一次 d, 免重复求距离场)
+// 剖面数字账见 00-config CAMPAIGN.sea 注释 (冲滩 1:18 / 礁盘平台 / 礁缘 1:3.3 陡坎 / 外坡 / 深海盆地),
+// 航道内礁盘段切深到 2.45m
+function seaDepthOfD(x,z,d){
+  const S=SEA;
+  // 无离岸剖面表的全海图 (P4 opensea): 岸线放在可玩区之外, 剖面五段 (冲滩/礁盘/礁缘/外坡/海盆)
+  // 在整张图里都不会被走到 —— 直接给**均匀海盆深**, 与 rawHeight 的 opensea 支同源同值。
+  // (地形色带/海深/OCC 水障三处都读本函数; 不走这一条会在载入期就 TypeError。)
+  if(!S||!S.shelf) return (S&&S.deep)?S.deep:26;
+  const A=S.shelf.d*S.shelf.rate;
+  const B=A+(S.reef.d1-S.reef.d0)*S.reef.rate;
+  const C=B+(S.edge.d1-S.edge.d0)*S.edge.rate;
+  const D=C+(S.slope.d1-S.slope.d0)*S.slope.rate;
+  let dep;
+  if(d<=S.shelf.d) dep=d*S.shelf.rate;
+  else if(d<=S.reef.d1) dep=A+(d-S.reef.d0)*S.reef.rate;
+  else if(d<=S.edge.d1) dep=B+(d-S.edge.d0)*S.edge.rate;
+  else if(d<=S.slope.d1) dep=C+(d-S.slope.d0)*S.slope.rate;
+  else dep=D+(d-S.basin.d0)*S.basin.rate;
+  const cm=seaChannelMask(x,z);
+  if(cm>0){
+    const ramp=sstep(clamp((d-5)/10,0,1)); // 冲滩段(d<5)保留自然缓坡, d≥15 全深
+    dep=lerp(dep,Math.max(dep,2.45),cm*ramp);
+  }
+  return dep;
+}
+// 水深 (海侧为正; 陆侧/无海=0)
+function seaDepthAt(x,z){
+  if(!SEA) return 0;
+  const d=shoreDist(x,z);
+  return d>0?seaDepthOfD(x,z,d):0;
+}
+// 陆上剖面 (u = 入陆距离): 干沙滩 → 沙丘脊(第一道防线) → 背坡台地 → 内陆缓丘+抬升 → 岬角/珊瑚岭 → 跑道台地
+function seaLandH(x,z,u){
+  const S=SEA;
+  const hSand=S.sand.u*S.sand.rate;                                  // 0.777
+  const hRidge=hSand+(S.ridge.u1-S.ridge.u0)*S.ridge.rate;           // 2.297
+  const hBench=hRidge+(S.bench.u1-S.bench.u0)*S.bench.rate;          // 2.537
+  let h;
+  if(u<=S.sand.u) h=u*S.sand.rate;
+  else if(u<=S.ridge.u1) h=hSand+(u-S.ridge.u0)*S.ridge.rate;
+  else if(u<=S.bench.u1) h=hRidge+(u-S.bench.u0)*S.bench.rate;
+  else{
+    const H=S.hill;
+    const hill=H.a*Math.sin(x*0.0125+0.7)*Math.cos(z*0.0115-0.4)
+    +H.b*Math.sin(x*0.031-1.1)*Math.sin(z*0.028+0.6)
+    +H.c*Math.sin(x*0.09+2.2)*Math.cos(z*0.083+1.1);
+    // 出背坡台地后缓缓起丘: (bias+hill) 乘 0→1 渐入量 → u=34 处与台地连续,
+    // 且 g→1 后 h ≥ hBench+bias-4.4 > 0 (陆上永远不会掉到海平面以下)
+    const g=sstep(clamp((u-S.bench.u1)/30,0,1));
+    h=hBench+(H.bias+hill)*g+S.uplift.h*sstep(clamp((u-S.uplift.u0)/S.uplift.span,0,1));
+  }
+  // 岬角岩台 (灯塔岬/岸炮岬): 圆顶抬升 —— 两翼制高
+  if(S.heads) for(const hd of S.heads){
+    const dd=Math.hypot(x-hd.x,z-hd.z);
+    if(dd<hd.r) h+=hd.h*sstep(1-dd/hd.r);
+  }
+  // 纵深珊瑚岭 (日军指挥所高地)
+  if(S.knoll){
+    const dd=Math.hypot(x-S.knoll.x,z-S.knoll.z);
+    if(dd<S.knoll.r) h+=S.knoll.h*sstep(1-dd/S.knoll.r);
+  }
+  // 机场跑道台地: 矩形内平整到台面高, 20m 过渡 (中线会战枢纽的地形基础)
+  const rd=rectDist(x,z,S.runway.x0,S.runway.z0,S.runway.x1,S.runway.z1);
+  if(rd<20) h=lerp(h,S.runway.h,sstep(clamp(1-rd/20,0,1)));
+  return h;
+}
+// ── 水面单源: waterYAt (海=SEA.level; 河道/支流/鱼塘=05c 渲染时登记的采样表) ──
+// 新载具批 (LVT/登陆艇) 直接读这三支: 水面高度 / 水深 / 是否在海域
+// ★2026-09-26E (审计 22/24 修复): 查询表从"离散圆 + 窗口取最大"改成"条带段 + 沿段插值" ——
+//   ① 旧版按 `hypot(x-s.x,z-s.z) ≤ s.hw+1.2` 判"在水里", 而 05c 沿河心线每 ≈12m 才登记一个采样点:
+//      淞沪汊港 hw=3.23 ⇒ 查询半径 4.43m < 半间距 6.08m ⇒ **相邻采样点之间必然有一段"没有水面"**
+//      (实测沿汊港心线 27% 为干、最长连续干段 3.3m; 1.5m 网格普查可见水面 29.7% 被判干地)。
+//   ② 旧版在 3×3 格窗口里取 s.wy 的**最大值**, 而渲染网格是相邻采样点之间的**线性插值**:
+//      只要沿程水位有落差 (徒涉滩/深谷水面下沉), 物理水位就会取到上游那份高值
+//      (实测胡康 184/3623 点高出 3m 以上、最大 6.14m ⇒ 玩家浮在可见水面之上 4.8m)。
+//   现在登记的是与渲染网格**同拓扑**的条带段 (相邻采样点成段, 段内线性插值 + 法向半宽 hw),
+//   查询只做一次"投影到段 → 取插值水位", 与肉眼所见逐点同源; 段覆盖整段 ⇒ 不再有采样间隙。
+const WATER_SURF=[];              // {x,z,wy,hw} 采样点 (鱼塘圆盘也在其中; 供探针/统计)
+const WATER_SEGS=[];              // {ax,az,bx,bz,awy,bwy,reach} 条带段 (reach=hw+WATER_PAD)
+const WATER_DISCS=[];             // {x,z,wy,reach} 圆盘水面 (鱼塘/藕塘)
+const WATER_CELLS=new Map();      // 12m 格 → {s:[段下标],d:[圆盘下标]} (按覆盖登记, 查询只查本格)
+const WATER_CELL=12, WATER_PAD=1.2;
+function _wReg(cx,cz,key,idx){
+  const k=cx+','+cz;
+  let a=WATER_CELLS.get(k); if(!a){ a={s:null,d:null}; WATER_CELLS.set(k,a); }
+  if(key==='s'){ if(!a.s) a.s=[]; a.s.push(idx); }
+  else{ if(!a.d) a.d=[]; a.d.push(idx); }
+}
+// 按"该水面的影响范围"登记到所有被覆盖的格 —— 查询点落在哪一格, 影响它的段/盘必然已登记在该格里
+// (点 p 在段 S 的影响范围内 ⇒ p 所在格与 S 的影响盒相交 ⇒ 该格已被登记; 故只查本格即完备)
+function _wRegBox(x0,z0,x1,z1,key,idx){
+  const c0=Math.floor(x0/WATER_CELL), c1=Math.floor(x1/WATER_CELL);
+  const r0=Math.floor(z0/WATER_CELL), r1=Math.floor(z1/WATER_CELL);
+  for(let cx=c0;cx<=c1;cx++)for(let cz=r0;cz<=r1;cz++) _wReg(cx,cz,key,idx);
+}
+// 条带登记 (05c _waterStrip 调): 采样点 + 相邻点成段 —— 与渲染四边形逐段同拓扑
+function waterSurfRegStrip(samples,hw){
+  const reach=hw+WATER_PAD;
+  for(let i=0;i<samples.length;i++){
+    const s=samples[i];
+    WATER_SURF.push({x:s.x,z:s.z,wy:s.wy,hw});
+    if(samples.length===1){ // 单点条带: 无相邻点可成段, 退化成圆盘
+      const di=WATER_DISCS.length;
+      WATER_DISCS.push({x:s.x,z:s.z,wy:s.wy,reach});
+      _wRegBox(s.x-reach,s.z-reach,s.x+reach,s.z+reach,'d',di);
+      continue;
+    }
+    if(i===0) continue;
+    const a=samples[i-1];
+    const si=WATER_SEGS.length;
+    WATER_SEGS.push({ax:a.x,az:a.z,bx:s.x,bz:s.z,awy:a.wy,bwy:s.wy,hw,reach});
+    _wRegBox(Math.min(a.x,s.x)-reach,Math.min(a.z,s.z)-reach,Math.max(a.x,s.x)+reach,Math.max(a.z,s.z)+reach,'s',si);
+  }
+}
+// 圆盘登记 (鱼塘/藕塘): 半径 r 的圆水面
+function waterSurfReg(x,z,wy,r){
+  WATER_SURF.push({x,z,wy,hw:r});
+  const reach=(r||0)+WATER_PAD;
+  const di=WATER_DISCS.length;
+  WATER_DISCS.push({x,z,wy,reach});
+  _wRegBox(x-reach,z-reach,x+reach,z+reach,'d',di);
+}
+function waterSampleY(x,z){
+  if(!WATER_SEGS.length&&!WATER_DISCS.length) return -1e9; // 无水体的战役 (绝大多数图): 直接短路, 零开销
+  const a=WATER_CELLS.get(Math.floor(x/WATER_CELL)+','+Math.floor(z/WATER_CELL));
+  if(!a) return -1e9;
+  let best=-1e9, eBest=-1e9, ePerp=1e9;
+  if(a.s){
+    for(let n=0;n<a.s.length;n++){
+      const s=WATER_SEGS[a.s[n]];
+      const dx=s.bx-s.ax, dz=s.bz-s.az, L2=dx*dx+dz*dz;
+      const L=Math.sqrt(L2)||1;
+      const tRaw=L2>1e-9?((x-s.ax)*dx+(z-s.az)*dz)/L2:0;
+      const t=tRaw<0?0:(tRaw>1?1:tRaw);
+      const lat=Math.hypot(x-(s.ax+dx*t),z-(s.az+dz*t));   // 到"线段"(含端帽) 的距离
+      // ★2026-09-26E (审计 24 第二层): 端帽的**轴向溢出**只给 WATER_PAD 的容差, 不给整条 hw ——
+      //   旧版把投影截断到 [0,1] 后仍按 hw+1.2 收点 ⇒ 段端外 hw+1.2 米 (胡康 25.9m!) 都算"段内",
+      //   于是徒涉滩那份高水位顺着河道下游外溢 26m (实测 6.14m 偏差)。现在收点是"条带矩形 ⊕ 1.2m 圆角":
+      //   横向超界 lateral-hw 与轴向越界 axial 合成一个距离, 只有 ≤WATER_PAD 才收。
+      const axial=L*Math.max(0,-tRaw,tRaw-1);
+      const lateral=Math.sqrt(Math.max(0,lat*lat-axial*axial));
+      const over=Math.max(0,lateral-s.hw);
+      const eff=Math.hypot(over,axial);
+      if(eff>WATER_PAD) continue;
+      const wy=s.awy+(s.bwy-s.awy)*t;
+      if(eff<=0){ if(wy>best) best=wy; }                   // 条带内: 取高者 (跨河带时浮在高的那份)
+      else if(eff<ePerp){ ePerp=eff; eBest=wy; }           // 岸线/端帽容差带: 取最近的那份, 免出硬边
+    }
+  }
+  if(a.d){
+    for(let n=0;n<a.d.length;n++){
+      const d=WATER_DISCS[a.d[n]];
+      const perp=Math.hypot(x-d.x,z-d.z);
+      if(perp>d.reach) continue;
+      if(perp<=d.reach-WATER_PAD){ if(d.wy>best) best=d.wy; }
+      else if(perp<ePerp){ ePerp=perp; eBest=d.wy; }
+    }
+  }
+  return best>-1e8?best:eBest;
+}
+// 水面高度 (无水体 = -1e9): 海 + 河道/支流/鱼塘 (取高者)
+function waterYAt(x,z){
+  let wy=-1e9;
+  if(SEA&&shoreDist(x,z)>0) wy=SEA.level;
+  const s=waterSampleY(x,z);
+  if(s>wy) wy=s;
+  return wy;
+}
+// 水深 (水面 - 真实水底; noBridge=true 取河床/海床, 不把桥面/栈桥面当水底)
+function waterDepthAt(x,z){
+  const wy=waterYAt(x,z);
+  if(wy<=-1e8) return -1e9;
+  return wy-heightAt(x,z,true);
+}
+function inSea(x,z){ return !!SEA&&shoreDist(x,z)>0; }
+function inDeepWater(x,z){ return waterDepthAt(x,z)>SWIM_DEPTH; }
+// 是否落在**任一水体**之下 (河/支流汊港/鱼塘/冰面/海 通用, ★2026-09-26 新增, P2-18):
+// 旧版布景的排除门只有 inRiverChannel —— 而它要求 RIVER.d>2 (只认"深谷激流"那一档), 于是:
+//   滇缅/莫斯科 (d 未定义=浅河/冰河)、淞沪的 delta 汊港与鱼塘、胡康的徒涉滩心全部漏网:
+//   实测能通过树门的**水下格** (dev/_vegwater-probe.js 2m 网格) 滇缅 646 / 莫斯科冰面 594 / 胡康 147 /
+//   淞沪 230 —— 树直接长在河里/冰面上。判据只读 03-terrain 的水面单源 (waterYAt) 与河床高
+//   (heightAt(...,noBridge=true)), 不另写一套水面算术。
+function inWaterBody(x,z){
+const wy=waterYAt(x,z);
+return wy>-1e8&&heightAt(x,z,true)<wy-0.05;
+}
+// 最近岸方向 (落水自救/Bot 游向岸; 河道与海面通用): 16 方向×2 半径采样, 取水最浅者。
+// ★2026-09-26E (审计 25 修复): 旧版直接对 waterDepthAt 的返回值取 min, 而"无水"用的是哨兵 -1e9 ⇒
+//   16 个方向里只要有**任意一个**探针落在陆上, bd 立刻变成 -1e9 并被 `bd<-1e8` 判成"无数据"返回 null。
+//   语义上 -1e9 本应是"最浅、最想去"的方向, 却与"无数据"共用同一个哨兵 ⇒
+//   自救方向只在"四面全是水"(开阔海面) 时才存在, 近岸/河道整段失效 (实测胡康河道 z=0 逐点全部 null,
+//   河心 Bot 因此原地打摆 180 帧)。现在把"无水"显式折算成"比任何有水方向都浅"的取值, 与"无数据"彻底分开。
+function shoreDirAt(x,z){
+  let bd=1e9, bx=0, bz=0;
+  for(let i=0;i<16;i++){
+    const a=i*TAU/16, dx=Math.sin(a), dz=Math.cos(a);
+    const d1=waterDepthAt(x+dx*7,z+dz*7), d2=waterDepthAt(x+dx*16,z+dz*16);
+    let s=Math.min(d1,d2);
+    if(s<=-1e8) s=-1e5;   // 探针落在陆上 = 那个方向就是岸 (最浅), 不再与"无数据"混用哨兵
+    if(s<bd){ bd=s; bx=dx; bz=dz; }
+  }
+  return [bx,bz];
+}
+// ── 水体状态机 (玩家/Bot 共用单源; 纲领第 2 条一视同仁) ──
+// 口径 (2026-09-18 定案, 修"浮在水面却被判成涉水"的抖动):
+//   ① 脚在水面之上 (wl≤0.02, 如站在栈桥面/桥面/船里/干沙滩) → dry, 不看脚下水有多深;
+//   ② 否则按**水深**分层: ≤WADE_DEPTH 湿沙浅水 / ≤SWIM_DEPTH 涉水(踏海床站立, 可开火) / >SWIM_DEPTH 游泳。
+// 用"水深"而非"脚底高差"是刻意的: 游泳浮力把脚托在水面下 1.32m, 恰落在涉水带内 ——
+// 若按脚底高差判, 浮态会瞬间被判成"涉水"→ 落回重力 → 又转游泳, 形成逐帧抖动 (Bot 侧同理)。
+function waterStateAt(x,y,z){
+  const wy=waterYAt(x,z);
+  _WST.wy=wy;
+  if(wy<=-1e8){ _WST.wl=-1e9; _WST.depth=-1e9; _WST.state='dry'; return _WST; }
+  const wl=wy-y;
+  const depth=wy-heightAt(x,z,true);
+  _WST.wl=wl; _WST.depth=depth;
+  _WST.state=(wl<=0.02)?'dry':(depth<=WADE_DEPTH?'wet':(depth<=SWIM_DEPTH?'wade':'swim'));
+  return _WST;
+}
+const _WST={wy:-1e9,wl:-1e9,depth:-1e9,state:'dry'};
+// 头部没入深度 (正=头在水面下): 憋气消耗与"潜水隐蔽"共用同一口径
+function headDepthAt(x,y,z){ const wy=waterYAt(x,z); return wy<=-1e8?-1e9:wy-(y+1.45); }
+// 潜水隐蔽判定 (子弹/视线层用): 头部没入 >UW_HIDE_DEPTH 即被水面遮蔽
+function uwHiddenAt(x,y,z){ return headDepthAt(x,y,z)>UW_HIDE_DEPTH; }
+// 弹道入水距离 (2026-09-18, 13-combat fireBullet 用): 返回"弹道在水下走完 UW_BULLET_RUN 米"的那一点到起点的距离;
+// 未入水返回 Infinity。海面按绝对海平面解析求解 (廉价), 河道/支流/鱼塘按起终点水面高取高者近似
+// (水面沿河缓变; 这是每发子弹一次的开销, 不做逐点采样以免自动武器打满 CPU)。
+function waterEntryDist(o,dir,maxD){
+if(dir.y>=-1e-4) return Infinity;
+let entry=Infinity;
+if(SEA){
+const tt=(o.y-SEA.level)/(-dir.y);
+if(tt>0&&tt<maxD){
+const ex=o.x+dir.x*tt, ez=o.z+dir.z*tt;
+if(inSea(ex,ez)) entry=tt;
+}
+}
+const span=Math.min(maxD,140);
+const wy=Math.max(waterYAt(o.x,o.z),waterYAt(o.x+dir.x*span,o.z+dir.z*span));
+if(wy>-1e8){
+const tt=(o.y-wy)/(-dir.y);
+if(tt>0&&tt<maxD&&tt<entry) entry=tt;
+}
+return entry===Infinity?Infinity:entry+UW_BULLET_RUN;
 }
 function rawHeight(x,z){
 switch(CAMPAIGN.terr){
@@ -293,6 +681,27 @@ else dep=(D2-5.2)*(1-sstep((gd-TE)/(W2.w-TE)));
 dep*=1-0.88*woodRampMask(x,z);
 return base-dep*(1+0.06*Math.sin(x*0.012+2)); // 沿谷缓倾 (谷势感)
 }
+case 'island':{
+// 塔拉瓦环礁 (2026-09-18 / 09-18b 三面 / ★09-19 四面环海): 海床(负高度)与陆上剖面共用同一支距离场 ——
+// 岸线即 0 等高线, 南=登陆洋面 / 西·东·北=三个海湾, 陆地是**居中的孤岛** (四湾四岬)。
+// 剖面数字账见 00-config CAMPAIGN.sea
+// (冲滩 1:18 / 礁盘 1.22~1.28m 涉水带 / 礁缘 1:3.3 / 沙丘脊 1:5.3 第一道防线 / 跑道台地 7.6m);
+// 陆上口径: u=入陆距离 (取到最近一支海岸的距离), 海侧: d=离岸距离
+if(!SEA) return 0;
+const d=shoreDist(x,z);
+if(d>0) return -seaDepthOfD(x,z,d);
+return seaLandH(x,z,-d);
+}
+case 'opensea':{
+// 全海图 (2026-09-30 阶段五 P4 · 纯海战): 无陆地 —— 全图一个起伏很小的深海盆, 大舰的立足地。
+//   实现口径: 战役表的四条岸线 (南/北/西/东) 放在**可玩区之外** (±820), 于是
+//   shoreDist 在整个可玩区恒为正 ⇒ 水面单源 (waterYAt / waterStateAt / 游潜 / 弹道入水 /
+//   HUD 海带 / 水下遮蔽) 全部自动生效 —— 一行都不用另写, 也不必新造一套"海面"概念。
+//   本 case 只负责**海床**: 给一点平缓起伏 (纯平面在潜水与水下能见里像一块贴图)。
+const D=(SEA&&SEA.deep)?SEA.deep:26;
+const n=Math.sin(x*0.017)*Math.cos(z*0.013)*2.4+Math.sin((x+z)*0.009)*1.6;
+return -(D+n);
+}
 case 'mountain':{
 // 断崖公路 · 伏击山谷: 谷底走廊随公路蜿蜒(rd<5 低平), 两侧 25° 左右山坡渐起
 // (rd5~21 上叠 ~9m × 沿谷起伏 0.45~1.55), 山肩上缘再拔 ~7m (rd21~32),
@@ -363,6 +772,10 @@ h-=1.3*sstep(k);
 	}
 	// 支流汊港 (淞沪 delta.channels): 浅切, 不进激流语义 (rawHeight 已含, 此处仅 HGRID 带外快路需要)
 	// 注: rawHeight 内已下切; 此处不重复叠加
+	// ── 建筑地基平台 (2026-09-20): 排在"壕沟/河道"下切**之后** —— 建筑不会长在河沟里(选址已避), 但
+	//    壕沟不参与建筑选址, 战壕横穿地基会把楼面重新切成壕沟(实测: 塔拉瓦两处椰木掩体室内 1.3m 沟);
+	//    地基是"施工完成面", 压在天然下切之上。桥面抬升仍在其后(桥面优先)。
+	h=padHeight(x,z,h);
 	// 大桥桥面: 桥矩形区域内地面抬升至桥面高度 (两岸衔接, 步兵/车辆直接通行)
 	// noBridge: 采样真实河床/地面 (水面高度计算用, 避免把桥面当河床)
 	if(!noBridge&&BRIDGES.length){
@@ -384,6 +797,20 @@ const cx=iI*HGRID.res-HGRID.off+HGRID.res/2, cz=jJ*HGRID.res-HGRID.off+HGRID.res
 const PAD=2.2; // 格半对角≈2.12 + 余量
 let m=1e9;
 for(let k=0;k<FLATS.length;k++){ const f=FLATS[k]; const dd=Math.hypot(cx-f.x,cz-f.z)-f.r; if(dd<m) m=dd; }
+// 建筑地基平台 (同 FLATS 支): 平台矩形外廓 + ramp 之外才可走快路 (旧写法用已废弃的 r1 字段 ⇒ NaN ⇒ 平台被快路吃掉)
+// ★2026-09-26 修 (等价探针实测): 旧版这里沿用 padHeight 的 `dx²+dz²>p.reach2 ⇒ continue` 提前跳过 ——
+//   但 padHeight 是**逐点**判定, hgridClear 只能拿**格心**去代表整格。reach2 是"矩形外接圆 + ramp"的半径,
+//   格心落在圆外、而格内某点仍在裙坡带里的情形确实存在 (矩形角落方向: 到矩形与到中心的距离不是一回事) ——
+//   那一格因此丢掉整个平台项, 快路把带裙坡的地形当成裸地形 (柏林实测差 2.5e-4m)。
+//   去掉这个提前跳过即可 (PADS 条目数十量级, 且本函数惰性缓存、每格只算一次); 其余判据与 padHeight 逐条对齐。
+for(let k=0;k<PADS.length;k++){
+const p=PADS[k];
+const dx=cx-p.x, dz=cz-p.z;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+const dd=(ax<=0&&az<=0)?-1:Math.hypot(ax>0?ax:0,az>0?az:0)-p.ramp;
+if(dd<m) m=dd;
+}
 if(METRO){ const dd=metroClear(cx,cz); if(dd<m) m=dd; }
 if(RURAL_FIELDS.length&&!CITY){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; } // !CITY 门控同 heightAt 下沉项
 for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
@@ -449,7 +876,22 @@ const dd=segDist(cx,cz,R[k][0],R[k][1],R[k+1][0],R[k+1][1])-70;
 if(dd<m) m=dd;
 }
 }
-if(BRIDGES.length) m=-1; // 桥面抬升带 (noBridge 双语义共存): 恒走精修
+// 桥面抬升带 (noBridge 双语义共存): 与 PADS 同口径按**桥矩形到格心的距离**记账, 而不是一刀切。
+// ★2026-09-26 性能批修: 旧版这一行是 `if(BRIDGES.length) m=-1;` —— 只要图上有桥, 全图每一格都被判"带内",
+//   heightAt 的 HGRID 快路在胡康/淞沪/塔拉瓦(栈桥)/断崖(铁路桥) 四张图上命中率恒为 0
+//   (实测 12~14µs/次 vs 快路 1.7µs/次, 而 heightAt 是射线/寻路/布娃娃/坦克的全库热点)。
+//   语义上本来就是错的: heightAt 的桥面支只在**桥矩形内**生效 (onBridge 的 |ax|<len/2 && |pv|<w/2),
+//   矩形外逐位等于不带桥的结果 ⇒ 带外格可以安全走快路。这里按矩形外距离记账, 与 PADS 支同一套算法
+//   (轴系变换 + 外廓距离), 桥矩形 → 格心距离 < PAD 的格才判带内、走精修。
+//   两种 noBridge 取值也随之自动正确: 带外格两义同值 (rawHeight), 带内格照旧走精修分支。
+for(let k=0;k<BRIDGES.length;k++){
+const B=BRIDGES[k];
+const dx=cx-B.x, dz=cz-B.z;
+const ax=Math.abs(dx*Math.sin(B.yaw)+dz*Math.cos(B.yaw))-B.len/2;
+const pv=Math.abs(dx*Math.cos(B.yaw)-dz*Math.sin(B.yaw))-B.w/2;
+const dd=(ax<=0&&pv<=0)?-1:Math.hypot(ax>0?ax:0,pv>0?pv:0);
+if(dd<m) m=dd;
+}
 const clear=m-PAD;
 d[idx]=clear;
 return clear;
@@ -460,6 +902,8 @@ const _bridgeDeckY=new Map();
 function bridgeDeckY(B){
 const b=B||BRIDGE;
 if(!b) return 0;
+// 栈桥 (kind='pier', 2026-09-18): 桥面是固定海拔的固定构件 (不随两岸地形起伏) —— 直接给绝对高度
+if(b.deckY!==undefined) return b.deckY;
 if(!_bridgeDeckY.has(b)){
 const dx=Math.sin(b.yaw), dz=Math.cos(b.yaw);
 const e=b.len/2+3;
@@ -481,6 +925,58 @@ hit=(hit===false)?dy:Math.max(hit,dy);
 }
 }
 return hit;
+}
+// ══════════════════════════════════════════════════════════════════════════════
+// 桥面下埋 (2026-09-21 海战图 7 项优化 · 第 5 项: 栈桥显示 BUG + 全库"图层打架")
+// 根因 (已核, 不重复诊断): heightAt 在桥矩形内把地形抬到 deckY (本文件 :678-681), 而桥面**结构盒的顶面
+//   也正好是 deckY** (栈桥 05a pierTrestle :1850 / 通用桥 05c buildBridge :828 / 巨桥 05a grandBridge :1296 /
+//   石桥 05a stoneBridge :1188) ⇒ 两块**独立三角化的不透明面**在位相同一 Y 共面 → z-fighting 麻点。
+//   相机 near=0.08 / far=900 (02-scene:17, ≈1:11250) 没有任何深度精度预算: 24bit 深度分辨率
+//   ≈ z²/(near·2²⁴) ⇒ 50m≈1.9mm / 100m≈7.5mm / 200m≈3.0cm / 300m≈6.7cm —— "位相同一 Y"的面在任何距离都必闪。
+// 口径: **绝不动 heightAt 的物理/可站立值** (步兵/坦克/Bot 建筑避让/水态/onBridge/bridgeDeckY 全依赖它),
+//   只把**地形渲染网格的顶点高度**退到桥面之下 ⇒ 走桥照旧走 heightAt=deckY, 看得见的沙脊不再与木桥面抢同一个像素。
+// 下埋量按"到桥矩形**内**边缘的距离"渐变: 边缘 0.04 → 内区 0.10 (SINK_FADE 内走 sstep):
+//   · 为什么不是 0.10 一刀切: 桥缘那一格的地形面比桥面低得越多, 桥缘"露出的沙边"越厚; 0.04m ≈ 木面板厚的
+//     1/8, 远处不可辨, 同时 0.04 已比 100m 处深度分辨率 (7.5mm) 大 5 倍 ⇒ 彻底脱离闪点区。
+//   · 为什么不会在桥缘留下垂直台阶: 下埋是**连续函数**、在矩形外恒为 0, 且在边缘保留 0.04 余量 (不是收到 0,
+//     否则边缘那一列顶点又会回到 deckY 与桥面共面); 地形网格 ~2.77m 一格, 桥缘那一格本来就是
+//     "桥面平台→天然地形"的陡降 (与下埋前逐字相同, 只是整体低 4cm) —— 没有新增台阶, 也没有新暴露面。
+//   · 为什么不再埋更深 (例如桥面盒厚 0.32 以上): 桥下礁盘/河床的地形面**同时是海面网格的剔除判据**
+//     (05c buildSeaMesh 按 heightAt 剔三角, 桥下海面已被剔空) —— 下埋超过桥面盒厚度会露出"海面破洞"。
+//   · 与海面 3cm 几何埋入 (05c:1957 `SEA.level-0.03` + depthWrite:false, 注释原文"消除 z-fighting 麻点")
+//     的分工: 海面是**大面积半透明贴片**, 靠 depthWrite:false 退出深度竞争 + renderOrder 排后, 3cm 几何埋入
+//     只负责让水线不在陆地上"切一刀"; 桥面/铺装/浪花是**写深度的面片**, 靠 05-world `depthOffset` 的
+//     polygonOffset 档位在深度测试里分先后。二者不互相替代: 大面积半透明 → 几何埋入+depthWrite:false;
+//     小块写深度面片 → polygonOffset。
+// 生效点 (两处, 缺一不可): ① 本文件载入期地形网格构建 (:900 写 Y); ② refreshTerrainMesh (:1123, 建筑地基
+//   平台/岸防炮位登记后重刷地形顶点时会用 heightAt 覆盖回去 ⇒ 必须同源, 否则桥面又被拉回共面)。
+const BRIDGE_SINK_EDGE=0.04;   // 桥矩形边缘 (到内缘距离 0) 的下埋量
+const BRIDGE_SINK_MID=0.10;    // 矩形内区 (到内缘距离 ≥ BRIDGE_SINK_FADE) 的下埋量
+const BRIDGE_SINK_FADE=1.6;    // 边缘→内区的渐变宽度 (m)
+// 该点应下埋的量 (0 = 不下埋)。h 传入时**只在"该点高度确实由本桥抬升提供"时才下埋** (h≈deckY):
+// 天然地形高于桥面的点 (若日后有桥落在高地上) 不许被挖凹 —— heightAt 不抬升时其值也不会等于 deckY, 自动豁免。
+function bridgeDeckSinkAt(x,z,h){
+let s=0;
+const checkH=(h!==undefined);
+for(let k=0;k<BRIDGES.length;k++){
+const B=BRIDGES[k];
+const lx=x-B.x, lz=z-B.z;
+// 轴系与 onBridge 逐字一致: ax=沿桥轴 (对应 B.len), pv=垂直桥向 (对应 B.w)
+const ax=lx*Math.sin(B.yaw)+lz*Math.cos(B.yaw);
+const pv=lx*Math.cos(B.yaw)-lz*Math.sin(B.yaw);
+const dA=B.len/2-Math.abs(ax), dV=B.w/2-Math.abs(pv);
+if(dA<=0||dV<=0) continue;                 // 矩形外: 不下埋
+if(checkH&&Math.abs(h-bridgeDeckY(B))>1e-3) continue;
+const v=BRIDGE_SINK_EDGE+(BRIDGE_SINK_MID-BRIDGE_SINK_EDGE)*sstep(Math.min(1,Math.min(dA,dV)/BRIDGE_SINK_FADE));
+if(v>s) s=v;
+}
+return s;
+}
+// 地形网格写入高度 = heightAt − 桥面下埋。**只给地形网格顶点用**; 物理/可站立/寻路/水态一律仍走 heightAt。
+function terrainRenderY(x,z){
+const h=heightAt(x,z);
+if(!BRIDGES.length) return h;
+return h-bridgeDeckSinkAt(x,z,h);
 }
 // 徒涉滩强度场 (0..1, 1=滩心): RIVER.ford={x,z,r} 滩心全效, r..r+9 平滑过渡到 0
 // 消费: heightAt 下切缩放 / inRiverChannel 激流豁免 / inShallowChannel 涉水减速 (2026-09-12 胡康巨桥改版)
@@ -541,11 +1037,18 @@ if(d<bd){ bd=d; const dx=P[i+1][0]-P[i][0], dz=P[i+1][1]-P[i][1], l=Math.hypot(d
 }
 return dir;
 }
-// 各战役的战壕布局 (需在地形网格生成前注册)
+// 各战役的战壕布局 (需在地形网格生成前注册)。
+// 两种写法: ① `{rel:[岸名,a1,d1,a2,d2]}` —— 岸名取 'shore'|'north'|'west'|'east', a=沿岸坐标 (x 或 z),
+// d=**入陆距离**(m>0 向陆); ② 绝对折线 [x1,z1,x2,z2] (岛内/非环海战役)。
+// 展开走 00-config `trenchLine` 单源 (与 22a 沙盘共读; 岸线算术只写一处, 纲领 §4.3)
 const TRENCHES=[];
-for(const t of (CAMPAIGN.trench||[])) TRENCHES.push({x1:t[0],z1:t[1],x2:t[2],z2:t[3]});
+for(const t of (CAMPAIGN.trench||[])){
+const L2=(typeof trenchLine==='function')?trenchLine(t):null;
+if(L2) TRENCHES.push({x1:L2[0],z1:L2[1],x2:L2[2],z2:L2[3]});
+}
 // 正弦路纵线 (2026-09-06 B7a/P2-12: 地形判定/电线杆/小地图/部署图四处共读, 改公式只动这里)
-function sineRoadZ(x){ return 3*Math.sin(x*0.02); }
+// 波形常量在 00-config SINE_ROAD 单源 (22a-menuart 沙盘自算同一波形, 免依赖本文件加载序)
+function sineRoadZ(x){ return SINE_ROAD.amp*Math.sin(x*SINE_ROAD.freq); }
 function roadDist(x,z){
 let d=CAMPAIGN.sineRoad?Math.abs(z - sineRoadZ(x)):1e9;
 for(const r of CAMPAIGN.roads){
@@ -558,6 +1061,7 @@ const abx=bx-ax,abz=bz-az;
 const t=clamp(((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz),0,1);
 return Math.hypot(px-(ax+abx*t), pz-(az+abz*t));
 }
+let GROUND_GEO=null; // 地形网格几何 (建筑地基平台登记后重刷, 见 refreshTerrainMesh)
 {
 // 顶点密度 ~2.77m/格 (320 地图=130 段; 800 地图≈304 段保持分辨率)
 const seg=Math.max(64,Math.round((MAP_SIZE+40)/2.76));
@@ -567,7 +1071,8 @@ const pos=geo.attributes.position;
 const cols=new Float32Array(pos.count*3);
 for(let i=0;i<pos.count;i++){
 const x=pos.getX(i),z=pos.getZ(i);
-pos.setY(i, heightAt(x,z));
+// 桥面下埋: 桥矩形内地形渲染面退到桥面之下 (heightAt 物理值不变; 见 terrainRenderY 头注释)
+pos.setY(i, terrainRenderY(x,z));
 const rd=roadDist(x,z);
 let r=1,g=1,b=1;
 if(rd<5){ const t=1-rd/5; r=lerp(1,1.16,t); g=lerp(1,0.94,t); b=lerp(1,0.72,t); }
@@ -679,6 +1184,57 @@ const m2=0.5+0.5*Math.sin(x*0.055+Math.sin(z*0.043)*1.7)*Math.cos(z*0.061+1.2);
 r=lerp(r,0.82,0.22*m2); g=lerp(g,0.74,0.18*m2); b=lerp(b,0.6,0.16*m2);
 }
 }
+// 塔拉瓦环礁色带 (2026-09-18 / 09-18b 复调"太亮·绿色太少"): 海床分带 (碎波白沫→湿沙→冲滩浅沙→
+// 珊瑚礁盘斑驳→礁缘褐→深海床青灰) + 陆上 (白珊瑚沙滩→沙丘脊→草沙过渡→椰林草甸→密林地被) +
+// 岬角岩台/珊瑚岭/珊瑚跑道。水下与陆上都是**乘法**调制 (底图 TEX.island = 中性斑驳 + 珊瑚碎屑),
+// 土路/战壕的人工色带优先 (只叠 25% 地貌色, 不被草绿吃掉)。
+// 复调要点 (用户实机): ① 白珊瑚沙不再过曝 (峰 1.42→1.30) ② 绿带整体前移 (u=20 起就转草甸,
+// 不是等 34m 才绿) ③ 内陆按低频噪声在草甸/密林地被之间斑驳 —— "绿地毯"而不是"沙滩撒树"。
+// opensea (P4 全海图): 复用同一支色带 —— 岸线在可玩区之外 ⇒ d 恒为 400m 级 ⇒ 恒走"外坡→深海床"那一档,
+//   全图自动是深青灰海床 (不需要第二套配色)。
+if((CAMPAIGN.terr==='island'||CAMPAIGN.terr==='opensea')&&SEA){
+const d=shoreDist(x,z);
+let ir=1,ig=1,ib=1;
+if(d>0){
+const dep=seaDepthOfD(x,z,d);
+if(d<1.6){ ir=1.18; ig=1.20; ib=1.16; }                       // 碎波白沫线 (岸线一眼可读)
+else if(d<6){ ir=0.66; ig=0.64; ib=0.58; }                    // 湿沙
+else if(d<22){ const k=sstep(clamp((d-6)/16,0,1)); ir=lerp(0.96,0.80,k); ig=lerp(0.94,0.80,k); ib=lerp(0.80,0.68,k); } // 冲滩水下沙滩 (见底)
+else if(d<36){ const m2=0.5+0.5*Math.sin(x*0.09)*Math.cos(z*0.085); ir=lerp(0.30,0.55,m2); ig=lerp(0.55,0.80,m2); ib=lerp(0.35,0.50,m2); } // 珊瑚礁盘 (斑驳)
+else if(d<43){ ir=0.28; ig=0.34; ib=0.30; }                   // 礁缘珊瑚褐
+else { const k=clamp((dep-3.4)/6,0,1); ir=lerp(0.26,0.13,k); ig=lerp(0.32,0.19,k); ib=lerp(0.34,0.26,k); } // 外坡→深海床
+}else{
+const u=-d;
+if(u<1.6){ ir=1.30; ig=1.30; ib=1.24; }                       // 岸边干沙高光 (与碎波带衔接)
+else if(u<14){ ir=1.12; ig=1.08; ib=1.02; }                   // 白珊瑚沙滩
+else if(u<20){ const k=sstep(clamp((u-14)/6,0,1)); ir=lerp(0.90,0.60,k); ig=lerp(0.86,0.72,k); ib=lerp(0.74,0.52,k); } // 沙丘脊→草沙过渡
+else if(u<34){ const k=sstep(clamp((u-20)/14,0,1)); ir=lerp(0.60,0.24,k); ig=lerp(0.72,0.50,k); ib=lerp(0.52,0.24,k); } // 背坡台地: 转入椰林草甸
+else{
+// 内陆: 椰林草甸 ⇄ 密林地被 低频斑驳 (u 越深越绿越暗), 夹少量干草斑 (n2)
+const n1=0.5+0.5*Math.sin(x*0.021+0.6)*Math.cos(z*0.019-1.1);
+const n2=0.5+0.5*Math.sin(x*0.058-1.4)*Math.sin(z*0.052+0.9);
+const deep=sstep(clamp((u-34)/70,0,1));
+ir=lerp(0.24,0.11,n1)*(1-0.22*deep)*(1+0.18*n2);
+ig=lerp(0.50,0.32,n1)*(1-0.14*deep);
+ib=lerp(0.24,0.12,n1)*(1-0.20*deep);
+}
+}
+if(SEA.heads) for(const hd of SEA.heads){
+const dd=Math.hypot(x-hd.x,z-hd.z);
+if(dd<hd.r*0.86){ const k=sstep(clamp(1-dd/(hd.r*0.86),0,1))*0.8; ir=lerp(ir,0.74,k); ig=lerp(ig,0.76,k); ib=lerp(ib,0.68,k); }
+}
+if(SEA.knoll){
+const dd=Math.hypot(x-SEA.knoll.x,z-SEA.knoll.z);
+if(dd<SEA.knoll.r*0.9){ const k=sstep(clamp(1-dd/(SEA.knoll.r*0.9),0,1))*0.7; ir=lerp(ir,0.60,k); ig=lerp(ig,0.72,k); ib=lerp(ib,0.48,k); }
+}
+{
+const rd2=rectDist(x,z,SEA.runway.x0,SEA.runway.z0,SEA.runway.x1,SEA.runway.z1);
+if(rd2<3){ const m3=0.5+0.5*Math.sin(x*0.13+z*0.07); ir=lerp(1.14,1.06,m3); ig=lerp(1.12,1.04,m3); ib=lerp(1.00,0.96,m3); }
+else if(rd2<20){ const k=sstep(clamp(1-(rd2-3)/17,0,1)); ir=lerp(ir,1.10,k); ig=lerp(ig,1.08,k); ib=lerp(ib,0.98,k); }
+}
+if(rd<5||td<3.2){ r*=lerp(1,ir,0.25); g*=lerp(1,ig,0.25); b*=lerp(1,ib,0.25); }
+else { r*=ir; g*=ig; b*=ib; }
+}
 // 莫斯科雪岭分带: 雪线以上裸岩灰白 / 雪线附近松林深绿 / 山麓雪覆浅灰
 if(CAMPAIGN.terr==='alpine'&&ALPINE){
 const hy=pos.getY(i);
@@ -717,6 +1273,36 @@ geo.computeVertexNormals();
 const ground=new THREE.Mesh(geo, MAT.grass);
 ground.receiveShadow=true;
 scene.add(ground);
+GROUND_GEO=geo;
+}
+// ── 地形网格重刷 (2026-09-20 建筑地基平台): 网格在本文件载入期先按"无建筑"地形建好,
+//    而建筑地基平台 PADS 是世界布局期登记的 ⇒ 布局结束后把平台影响圈内的顶点高度重算一遍。
+//    只改 Y (顶点色带读的是 x/z 语义距离与登记时的 hy, 平台不改语义分区; 局部色调差异可接受),
+//    重算后统一 computeVertexNormals 让平台/裙坡的光照正确。返回改动的顶点数 (供沙箱断言)。
+function refreshTerrainMesh(){
+if(!GROUND_GEO) return 0;
+if(!PADS.length) return 0;
+const pos=GROUND_GEO.attributes.position;
+let n=0;
+for(let i=0;i<pos.count;i++){
+const x=pos.getX(i), z=pos.getZ(i);
+let near=false;
+for(let k=0;k<PADS.length;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+if(ax<=0&&az<=0){ near=true; break; }
+if(Math.hypot(ax>0?ax:0,az>0?az:0)<p.ramp+3){ near=true; break; }
+}
+if(!near) continue;
+// 与载入期网格构建同源 (terrainRenderY): 只用 heightAt 会把桥面下埋的顶点又拉回 deckY ⇒ 栈桥共面复发
+const y=terrainRenderY(x,z);
+if(Math.abs(y-pos.getY(i))>1e-6){ pos.setY(i,y); n++; }
+}
+if(n){ pos.needsUpdate=true; GROUND_GEO.computeVertexNormals(); }
+return n;
 }
 const BOXES=[];
 const CYLS=[];
@@ -790,11 +1376,145 @@ const px=o.x+dir.x*t, pz=o.z+dir.z*t;
 const nx=(px-c.x)/c.r, nz=(pz-c.z)/c.r;
 return { t, nx, ny:0, nz };
 }
-const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null };
+const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null, dirty:null, pend:null, _bA:null, _bB:null };
+// buildOccupancy 之外的**直接写** OCC.data 的登记入口 (registerDynCollider / killDynCollider /
+// 05-world killOne / 04b-fire occMarkFire 四处)。必要性: 差分的基线是"上一次重建出来的网格",
+// 而这些路径会直接改活体网格 —— 下一次重建按同一批表算出来的结果与改动后的活体逐格一致,
+// 差分自然为空, 但**导航烘的还是更早那一份** ⇒ 必须把"被直接写过的范围"另行补进脏矩形。
+// 超集无害 (多算几格), 漏登记才会留下陈旧寻路格。
+function occTouch(x0,z0,x1,z1){
+const {res,N,off}=OCC;
+if(!N||!OCC.data) return;
+const i0=clamp(Math.floor((x0+off)/res),0,N-1), i1=clamp(Math.ceil((x1+off)/res),0,N-1);
+const j0=clamp(Math.floor((z0+off)/res),0,N-1), j1=clamp(Math.ceil((z1+off)/res),0,N-1);
+const p=OCC.pend||(OCC.pend={i0:1e9,j0:1e9,i1:-1,j1:-1});
+if(i0<p.i0)p.i0=i0; if(j0<p.j0)p.j0=j0; if(i1>p.i1)p.i1=i1; if(j1>p.j1)p.j1=j1;
+}
+// ── 占用网格差分 → 脏矩形 (2026-09-26 性能批) ──
+// 事实: OCC.data **就是** NAV 网格的全部输入 (open/边烘焙的唯一判据是 occBlocked)。
+// 于是"本次重建相对上次改了哪些格"可以用一次逐格比对拿到, 而且这个判据是**充分的**:
+// 差分为空 ⇒ 导航输入逐格未变 ⇒ 重烘焙可以整段跳过 (证明式跳过, 不是估计)。
+// 旧版每次都全图重烘焙 (640 图 52 万次 occBlocked + 全图分量, 实测 128~143ms),
+// 而真实改动集清一色是局部的 (烧一格火/塌一堵墙/碾一段铁丝网/造一件工事)。
+// 比对成本 463k 次字节比较 ≈ 1ms, 换掉的是两个数量级的重建。
+function occDiffRect(prev,cur,N){
+if(!prev||prev.length!==cur.length) return {i0:0,j0:0,i1:N-1,j1:N-1};
+let r0=-1,r1=-1,c0=N,c1=-1;
+for(let j=0;j<N;j++){
+const base=j*N;
+let hit=false;
+for(let i=0;i<N;i++){
+if(prev[base+i]!==cur[base+i]){ if(i<c0)c0=i; if(i>c1)c1=i; hit=true; }
+}
+if(hit){ if(r0<0)r0=j; r1=j; }
+}
+if(r0<0) return null; // 逐格一致: 导航输入未变
+return {i0:c0,j0:r0,i1:c1,j1:r1};
+}
+// ── 静态地貌层缓存 (2026-09-26 性能批) ──
+// 河道深谷带/深水海面/断崖岩脊/雪岭陡坡这四支"逐格全场扫描"的判据只读地图**静态几何**
+// (河道折线/离岸距离场/高度场/公路距离场), 一局之内恒定, 而旧版把它放在每次 buildOccupancy 里重算 ——
+// 实测逐格 inRiverChannel (胡康 463k 格) 1044ms / seaDepthAt 501ms / heightAt+roadDist 689ms / 4×heightAt 165ms。
+// 现改为惰性算一次存成字节场 (0=无 1=阻挡 2=水障), 之后每次重建只做一次"读掩码→写占用"的紧循环。
+// 顺序/取值逐条对齐旧版: 四支按原顺序叠加, 后写覆盖先写 (唯一取值冲突是"水障 2 被 1 覆盖"的假想重叠, 原顺序亦然)。
+let OCC_GEO=null, OCC_GEON=-1;
+function buildOccGeo(){
+const {res,N,off}=OCC;
+const g=new Uint8Array(N*N);
+// 深谷河道: 整段标记为占用格, Bot/坦克寻路只能走大桥
+if(RIVER&&RIVER.d>2){
+for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+const x=i*res-off, z=j*res-off;
+if(inRiverChannel(x,z)) g[j*N+i]=1;
+}
+}
+// 海域/深水 (2026-09-18 塔拉瓦): 水深 >SWIM_DEPTH 的格记 **2=水障** ——
+// 寻路 (Bot/坦克) 默认绕开, 但游泳态可穿过 (occBlocked(x,z,ignoreWater)) —— 落水者游得回岸;
+// 礁盘(1.22~1.28m)/冲滩浅水 不记占用 = 涉水可通行 (史实"涉水上岸"的通道); 栈桥面豁免。
+if(SEA){
+for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+const x=i*res-off, z=j*res-off;
+if(seaDepthAt(x,z)>SWIM_DEPTH&&onBridge(x,z)===false) g[j*N+i]=2;
+}
+}
+// 断崖公路: 山肩以上陡面(高度>15m 且远离公路>20m)记占用格 —— Bot/坦克可上坡抢占伏击点,
+// 但不会翻上最顶的岩脊; 玩家不受限可任意翻爬
+if(CAMPAIGN.id==='canyon'){
+for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+const x=i*res-off, z=j*res-off;
+if(heightAt(x,z)>15&&roadDist(x,z)>20) g[j*N+i]=1;
+}
+}
+// 莫斯科雪岭: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— Bot/坦克寻路阻断,
+// 随后按公路/旗圈/基地/战壕走廊强制打通 (垭口-公路-旗点平台保持可达)
+if(CAMPAIGN.id==='moscow'){
+const step=4, th=0.95;
+for(let j=4;j<N-4;j+=step)for(let i=4;i<N-4;i+=step){
+const x=i-off, z=j-off;
+const hx=Math.abs(heightAt(x+step,z)-heightAt(x-step,z))/(2*step);
+const hz=Math.abs(heightAt(x,z+step)-heightAt(x,z-step))/(2*step);
+if(Math.max(hx,hz)>th){
+// 标记采样点周围 8×8 (厚墙) —— 寻路节点间隔 5m, 只查节点不查线段, 薄墙会被跨跳过
+for(let k=-2;k<=5;k++)for(let l=-2;l<=5;l++){
+const jj=j+l, ii=i+k;
+if(jj>=0&&jj<N&&ii>=0&&ii<N) g[jj*N+ii]=1;
+}
+}
+}
+}
+OCC_GEO=g; OCC_GEON=N;
+return g;
+}
+// ── 沟壁/谷壁厚墙掩码 (2026-09-26 性能批, 同静态地貌层口径) ──
+// 百团沟壁与雾林谷壁的 4m 步进全场扫描 (逐点 gullyDist/woodRavineDist 求折线距离 + 4×4 厚墙写) 同样只读
+// 静态几何 —— 惰性算一次存掩码, 之后每次重建只做一次"读掩码→写占用"。百团 122ms → ~1ms, 雾林 30ms → ~1ms。
+// 掩码内容与旧版逐格一致 (含 4m 步进与 4×4 厚墙的越界保护); 块内的走廊/道路/旗圈/基地**打通**仍留在原处
+// live 执行 —— 它们必须在校验通过之后压过动态标记 (箱体/圆柱/铁丝网/火格), 顺序不能省。
+let WALLMASK_BAITUAN=null, WALLMASK_WOODLINE=null;
+function buildWallMask(kind){
+const {res,N,off}=OCC;
+const m=new Uint8Array(N*N);
+if(kind==='baituan'){
+const W=LOESS.w||14, GB=LOESS.bottom||3;
+for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
+const x=i*res-off, z=j*res-off;
+const gd=gullyDist(x,z);
+if(gd<=GB||gd>=W) continue;       // 沟底留白 (渗透路线) / 带外
+// 沟壁带: 4×4 厚墙标记 (寻路节点间隔 5m, 薄墙会被跨跳) —— 步进采样, 带≥9m 宽足够覆盖
+for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
+const jj=j+l2, ii=i+k2;
+if(jj<N&&ii<N) m[jj*N+ii]=1;
+}
+}
+}else{
+const W2=WOOD.ravine, GB=W2.bottom||5;
+for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
+const x=i*res-off, z=j*res-off;
+const gd=woodRavineDist(x,z);
+if(gd<=GB||gd>=W2.w) continue;   // 谷底留白 (泥径可走) / 带外
+for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
+const jj=j+l2, ii=i+k2;
+if(jj<N&&ii<N) m[jj*N+ii]=1;
+}
+}
+}
+return m;
+}
+function wallMask(kind){
+const sz=OCC.N*OCC.N;
+if(kind==='baituan') return (WALLMASK_BAITUAN&&WALLMASK_BAITUAN.length===sz)?WALLMASK_BAITUAN:(WALLMASK_BAITUAN=buildWallMask('baituan'));
+return (WALLMASK_WOODLINE&&WALLMASK_WOODLINE.length===sz)?WALLMASK_WOODLINE:(WALLMASK_WOODLINE=buildWallMask('woodline'));
+}
 function buildOccupancy(){
 OCC.N=Math.ceil((MAP_SIZE+40)/OCC.res)+1;
 const {res,N,off}=OCC;
-const d=new Uint8Array(N*N);
+// 双缓冲 (2026-09-26): 旧版每次 new 一块 463KB 再零填 ⇒ 每次重建一次大对象分配 + GC。
+// 改为两块轮换 (活体 + 待建), 建完最后一步才发布 —— 期间 OCC.data 仍指旧块, 供差分使用。
+const sz=N*N;
+if(!OCC._bA||OCC._bA.length!==sz){ OCC._bA=new Uint8Array(sz); OCC._bB=new Uint8Array(sz); OCC.data=null; }
+const prev=OCC.data;
+const d=(prev===OCC._bA)?OCC._bB:OCC._bA;
+d.fill(0);
 const pad=0.6;
 const mark=(x0,z0,x1,z1,test)=>{
 const i0=clamp(Math.floor((x0+off)/res),0,N-1), i1=clamp(Math.ceil((x1+off)/res),0,N-1);
@@ -827,40 +1547,22 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 }
 	// 铁丝网: 标记为占用格, 让Bot寻路尽量绕开 (物理上仍可通行, 误入会减速受伤)
 	for(const w of wires){
+	if(!w.alive) continue;   // 已被坦克碾平 (15-vehicles 只置 alive=false 不删条目 —— 条目要留给 23b 的重开复位)
 	const rr=Math.max(0.6,w.r*0.85);
 	mark(w.x-rr,w.z-rr,w.x+rr,w.z+rr,(x,z)=>((x-w.x)*(x-w.x)+(z-w.z)*(z-w.z))<=rr*rr);
 	}
-	// 深谷河道: 整段标记为占用格, Bot/坦克寻路只能走大桥
-	if(RIVER&&RIVER.d>2){
-	for(let j=0;j<N;j++)for(let i=0;i<N;i++){
-	const x=i*res-off, z=j*res-off;
-	if(inRiverChannel(x,z)) d[j*N+i]=1;
+	// ── 静态地貌层叠加 (河道深谷带/深水海面/断崖岩脊/雪岭陡坡, 见 buildOccGeo) ──
+	// 语义与旧版的四支逐格扫描逐条一致, 位置不变 (仍在校验通过之后、道路/旗圈/基地打通之前):
+	// 掩码算一次存起来, 这里只做"读掩码→写占用"。语句范围与旧版 if 链相同 (无静态层的图整段跳过)。
+	if((RIVER&&RIVER.d>2)||SEA||CAMPAIGN.id==='canyon'||CAMPAIGN.id==='moscow'){
+	const g=(OCC_GEO&&OCC_GEON===N)?OCC_GEO:buildOccGeo();
+	const L=d.length;
+	for(let k=0;k<L;k++){ const v=g[k]; if(v) d[k]=v; }
 	}
-	}
-	// 断崖公路: 山肩以上陡面(高度>15m 且远离公路>20m)记占用格 —— Bot/坦克可上坡抢占伏击点,
-	// 但不会翻上最顶的岩脊; 玩家不受限可任意翻爬
-	if(CAMPAIGN.id==='canyon'){
-	for(let j=0;j<N;j++)for(let i=0;i<N;i++){
-	const x=i*res-off, z=j*res-off;
-	if(heightAt(x,z)>15&&roadDist(x,z)>20) d[j*N+i]=1;
-	}
-	}
-	// 莫斯科雪岭: 陡坡(局部坡度>45°, 4m 采样)记占用格 —— Bot/坦克寻路阻断,
-	// 随后按公路/旗圈/基地/战壕走廊强制打通 (垭口-公路-旗点平台保持可达)
+	// 莫斯科: 垭口走廊强制打通 (passes 语义表) + 道路/战壕/旗圈/基地走廊打通 ——
+	// ★作用域与旧版逐字一致: 这一支旧版就挂在 `if(CAMPAIGN.id==='moscow')` 内 (陡坡带必须靠走廊打通,
+	//   否则整张雪岭图会被坡度占用格封成孤岛), 只有莫斯科走它; 移位时不得外泄到其他战役。
 	if(CAMPAIGN.id==='moscow'){
-	const step=4, th=0.95;
-	for(let j=4;j<N-4;j+=step)for(let i=4;i<N-4;i+=step){
-	const x=i-off, z=j-off;
-	const hx=Math.abs(heightAt(x+step,z)-heightAt(x-step,z))/(2*step);
-	const hz=Math.abs(heightAt(x,z+step)-heightAt(x,z-step))/(2*step);
-	if(Math.max(hx,hz)>th){
-	// 标记采样点周围 8×8 (厚墙) —— 寻路节点间隔 5m, 只查节点不查线段, 薄墙会被跨跳过
-	for(let k=-2;k<=5;k++)for(let l=-2;l<=5;l++){
-	const jj=j+l, ii=i+k;
-	if(jj>=0&&jj<N&&ii>=0&&ii<N) d[jj*N+ii]=1;
-	}
-	}
-	}
 	const clear=(x,z,r)=>{
 	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
 	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
@@ -886,7 +1588,6 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	// 沟底(gd<bottom)留白=可通行 (坡道网络+渡口把沟底变成渗透路线, 与坡度物理同口径);
 	// 坡道走廊/渡台/铁路桥桥位/道路/旗圈/基地逐级打通
 	if(CAMPAIGN.id==='baituan'&&LOESS){
-	const W=LOESS.w||14, GB=LOESS.bottom||3;
 	const clear=(x,z,r)=>{
 	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
 	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
@@ -899,16 +1600,7 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	const l=Math.hypot(x1-x0,z1-z0)||1;
 	for(let u=0;u<=1;u+=2.5/l) clear(x0+(x1-x0)*u, z0+(z1-z0)*u, r);
 	};
-	for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
-	const x=i*res-off, z=j*res-off;
-	const gd=gullyDist(x,z);
-	if(gd<=GB||gd>=W) continue;       // 沟底留白 (渗透路线) / 带外
-	// 沟壁带: 4×4 厚墙标记 (寻路节点间隔 5m, 薄墙会被跨跳) —— 步进采样, 带≥9m 宽足够覆盖
-	for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
-	const jj=j+l2, ii=i+k2;
-	if(jj<N&&ii<N) d[jj*N+ii]=1;
-	}
-	}
+{const mk=wallMask('baituan'); for(let k=0;k<mk.length;k++){ if(mk[k]) d[k]=1; }}
 	// 坡道走廊 (半宽+3 渐灭) —— Bot 过沟的合法通道
 	for(const r2 of (LOESS.ramps||[])) clearCorr(r2.x0,r2.z0,r2.x1,r2.z1,(r2.w||9)+3);
 	// 渡台 (沟底库旗点立足台)
@@ -930,7 +1622,7 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	// 雾林守线北谷 (2026-09-13 许特根改版): 谷壁带(bottom..w)记占用 —— Bot 不攀湿滑谷壁,
 	// 过谷走堑口 (车辆堑口=主防火道纵穿, 步兵堑口×2); 谷底留白=泥径渗透路线 (卡尔小径拉锯)
 	if(CAMPAIGN.id==='woodline'&&WOOD&&WOOD.ravine){
-	const W2=WOOD.ravine, GB=W2.bottom||5;
+	const W2=WOOD.ravine;
 	const clear=(x,z,r)=>{
 	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
 	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
@@ -943,15 +1635,7 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	const l=Math.hypot(x1-x0,z1-z0)||1;
 	for(let u=0;u<=1;u+=2.5/l) clear(x0+(x1-x0)*u, z0+(z1-z0)*u, r);
 	};
-	for(let j=0;j<N;j+=4)for(let i=0;i<N;i+=4){
-	const x=i*res-off, z=j*res-off;
-	const gd=woodRavineDist(x,z);
-	if(gd<=GB||gd>=W2.w) continue;   // 谷底留白 (泥径可走) / 带外
-	for(let k2=0;k2<4;k2++)for(let l2=0;l2<4;l2++){
-	const jj=j+l2, ii=i+k2;
-	if(jj<N&&ii<N) d[jj*N+ii]=1;
-	}
-	}
+{const mk=wallMask('woodline'); for(let k=0;k<mk.length;k++){ if(mk[k]) d[k]=1; }}
 	for(const r2 of (W2.ramps||[])) clearCorr(r2.x0,r2.z0,r2.x1,r2.z1,(r2.w||5)+4);
 	for(const r of CAMPAIGN.roads){
 	const l=Math.hypot(r[2]-r[0],r[3]-r[1])||1;
@@ -968,14 +1652,34 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	mark(fx-1.4,fz-1.4,fx+1.4,fz+1.4,null);
 	}
 	}
+	// 发布新网格 + 记录"本次相对上次改了哪些格" (见 occDiffRect: 差分为空 ⇒ 导航输入未变)
+	// 两份来源取并集: ①与上次重建网格的逐格差分 ②期间被直接写过的范围 (见 occTouch)
+	// ★累积而非覆盖: 脏矩形一直累到**下一次 NAV.refresh 消费**为止 (OCC.dirtyClear)。理由:
+	//   差分基线是"上一次重建出来的网格", 若两次重建之间没有 NAV.refresh (世界构建期的
+	//   buildOccupancy 就是这种调用), 第二次重建的差分相对的是第一次的产物 —— 覆盖式写入会把
+	//   "第一次相对已烘焙状态的改动"丢掉 (两次重建结果相同时差分恒为空 ⇒ 导航永远停在旧状态)。
+	//   取并集后: 只有 NAV.refresh 会清账, 中间无论重建几次, 改动集都不会漏。
 	OCC.data=d;
+{
+const dv=occDiffRect(prev,d,N), pd=OCC.pend, ac=OCC.dirty;
+OCC.pend=null;
+let r=null;
+for(const q of [ac,dv,pd]){
+if(!q) continue;
+r=r?{i0:Math.min(r.i0,q.i0),j0:Math.min(r.j0,q.j0),i1:Math.max(r.i1,q.i1),j1:Math.max(r.j1,q.j1)}:{i0:q.i0,j0:q.j0,i1:q.i1,j1:q.j1};
 }
+OCC.dirty=r;
+}
+}
+// NAV 消费脏矩形后清账 (07-nav.refresh 末尾调用; 唯一的清账点)
+function occDirtyClear(){ OCC.dirty=null; }
 function registerDynCollider(cx,cy,cz,w,h,d){
 const b=addBoxCollider(cx,cy,cz,w,h,d); // RGRID 增量注册已由 addBoxCollider 统一处理
 if(OCC.data){
 const i0=clamp(Math.floor((b.minX-0.6+OCC.off)/OCC.res),0,OCC.N-1),i1=clamp(Math.ceil((b.maxX+0.6+OCC.off)/OCC.res),0,OCC.N-1);
 const j0=clamp(Math.floor((b.minZ-0.6+OCC.off)/OCC.res),0,OCC.N-1),j1=clamp(Math.ceil((b.maxZ+0.6+OCC.off)/OCC.res),0,OCC.N-1);
 for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=1;
+occTouch(b.minX-0.6,b.minZ-0.6,b.maxX+0.6,b.maxZ+0.6);
 }
 return b;
 }
@@ -985,11 +1689,15 @@ if(OCC.data){
 const i0=clamp(Math.floor((b.minX-0.7+OCC.off)/OCC.res),0,OCC.N-1),i1=clamp(Math.ceil((b.maxX+0.7+OCC.off)/OCC.res),0,OCC.N-1);
 const j0=clamp(Math.floor((b.minZ-0.7+OCC.off)/OCC.res),0,OCC.N-1),j1=clamp(Math.ceil((b.maxZ+0.7+OCC.off)/OCC.res),0,OCC.N-1);
 for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=0;
+occTouch(b.minX-0.7,b.minZ-0.7,b.maxX+0.7,b.maxZ+0.7);
 }
 b.minX=99999; b.minY=99999; b.minZ=99999; b.maxX=99999.1; b.maxY=99999.1; b.maxZ=99999.1;
 }
-function occBlocked(x,z){
+function occBlocked(x,z,ignoreWater){
 const i=Math.round((x+OCC.off)/OCC.res), j=Math.round((z+OCC.off)/OCC.res);
 if(i<0||j<0||i>=OCC.N||j>=OCC.N) return true;
-return OCC.data[j*OCC.N+i]===1;
+const v=OCC.data[j*OCC.N+i];
+if(v===0) return false;
+if(v===2) return !ignoreWater; // 2=水障 (深水): 游泳态 (ignoreWater) 放行, 寻路默认阻挡
+return true;
 }
