@@ -102,6 +102,25 @@ if(n<bn||(n===bn&&d<bd)){ best=p; bn=n; bd=d; }
 }
 return best;
 }
+// 出生朝向单源 (2026-10-06 生成平衡批): 返回"面朝最近存活敌人"的 yaw —— 玩家部署 (23-deploy) 与 Bot
+// spawn() 共用。旧版玩家出生面朝世界原点 (atan2(-x,-z))、Bot 出生根本不设 yaw (沿用上一命的旧朝向),
+// 两条路都会背对着敌人落地, 用户实报"一生成就是背对着敌人, 容易被秒杀"。
+// 本作 forward=(sin yaw, cos yaw) 约定 ⇒ 朝向 (dx,dz) 即 yaw=atan2(dx,dz)。
+// includePlayer: Bot 选敌要把玩家也算进来 (玩家是独立单例, 不在 soldiers 里); 玩家自己选敌只看 soldiers。
+// 无存活敌人时返回 null, 调用方保留旧朝向逻辑 (玩家=面朝原点; Bot=不覆盖)。
+function spawnYawAt(x,z,team,includePlayer){
+let bx=0,bz=0,bd=Infinity;
+for(const s of soldiers){
+if(!s||!s.alive||s.team===team) continue;
+const d=(s.pos.x-x)*(s.pos.x-x)+(s.pos.z-z)*(s.pos.z-z);
+if(d<bd){ bd=d; bx=s.pos.x; bz=s.pos.z; }
+}
+if(includePlayer&&typeof player!=='undefined'&&player.alive&&player.team!==team){
+const d=(player.pos.x-x)*(player.pos.x-x)+(player.pos.z-z)*(player.pos.z-z);
+if(d<bd){ bd=d; bx=player.pos.x; bz=player.pos.z; }
+}
+return bd<Infinity?Math.atan2(bx-x,bz-z):null;
+}
 class Bot {
 constructor(team,cls,name){
 this.team=team; this.name=name;
@@ -200,6 +219,8 @@ if(typeof capSnapToDeck==='function'){ const sn=capSnapToDeck(this.pos.x,this.po
 // 于是分在左/中/右出发区的同一批人不会又汇到同一条路、同一个点上 (用户口径"开局分散推进")。
 this.laneDx=lp.laneDx; this.laneDz=lp.laneDz;
 this.pos.y=(typeof capSpawnGroundY==='function')?capSpawnGroundY(this.pos.x,this.pos.z,10):standHeight(this.pos.x,this.pos.z,10);  // P4: 甲板出生不设登步门 (15h capSpawnGroundY)
+const _sy=(typeof spawnYawAt==='function')?spawnYawAt(this.pos.x,this.pos.z,this.team,true):null;
+if(_sy!==null) this.yaw=_sy; // 出生面朝最近敌人 (2026-10-06 生成平衡批: 旧版沿用上一命朝向, 常背敌落地; 上车则由车组逻辑接管)
 this.hp=100; this.alive=true; this.crouch=false; this.prone=false;
 this.ragdolled=false;
 this.mag=this.def.mag; this.reloadT=0; this.suppression=0;
@@ -421,7 +442,7 @@ if(!this.target&&!attacker.isCrew&&!attacker.onVehicle&&!(chuteAirborne(attacker
 this.target=attacker;
 this.lastSeenPos.copy(attacker.pos);
 this.lastSeenT=nowT-1.2;
-this.reactT=DIFF_TABLE[SETTINGS.diff].react*rand(0.5,1);
+this.reactT=(attacker.isPlayer?DIFF_TABLE[SETTINGS.diff].pReact:DIFF_TABLE[SETTINGS.diff].react)*rand(0.5,1); // 还击反应对玩家拆列 (2026-10-06 难度批)
 }
 }
 if(this.hp<=0) this.die(attacker,isHead);
@@ -568,6 +589,7 @@ const d=Math.hypot(dx,dz);
 // 夜档补亮 (N2, 昼夜设计 §4.2/§4.3): 照明半径内目标 viewD ×flareLitView; 被探照灯照中 ×searchView
 // 且无视 FOV 门。nightLitMul 单源在 08-effects (白天恒 1, 判定逐位不变)。
 let vD=viewD;
+if(e===player) vD*=diff.pVis; // 对玩家视距拆列 (2026-10-06 难度批): 只收"发现玩家"的距离, Bot 互瞥不变
 if(NIGHT_MODE){
 vD*=nightLitMul(e.pos.x,e.pos.y,e.pos.z);
 this._eSearchLit=!!(e._searchLitT&&nowT-e._searchLitT<0.6);
@@ -601,10 +623,11 @@ if(d<bestD){ best=e; bestD=d; }
 if(best){
 if(this.target!==best||nowT-this.lastSeenT>2){
 if(this.target!==best){
-this.reactT=DIFF_TABLE[SETTINGS.diff].react*rand(0.7,1.4);
+const _pT=(best===player); // 反应/甩枪对玩家拆列 (2026-10-06 难度批): 互殴维持 react/spreadMul
+this.reactT=(_pT?diff.pReact:diff.react)*rand(0.7,1.4);
 // 拟人"甩枪": 换目标瞬间带初始偏差, 随后收敛
-this.aimErrX=rand(-1,1)*0.055*DIFF_TABLE[SETTINGS.diff].spreadMul;
-this.aimErrY=rand(-0.6,0.6)*0.04*DIFF_TABLE[SETTINGS.diff].spreadMul;
+this.aimErrX=rand(-1,1)*0.055*(_pT?diff.pSpread:diff.spreadMul);
+this.aimErrY=rand(-0.6,0.6)*0.04*(_pT?diff.pSpread:diff.spreadMul);
 }
 this.target=best;
 }
@@ -1963,8 +1986,9 @@ this.pinEmpl(g.crew?g.crew.x:g.x, g.crew?g.crew.z:(g.z-AA_CREW_DIST), dt); // 20
 const pl=aaSpreadTarget(this.team,this,g.x,g.z); // 7d-甲: 分摊账本 (旧 enemyPlaneAlive 齐射第一架绝迹)
 // 7b-乙 反应窗 (AA_DIFF.react): 换目标/新目标进距后不即刻开火 —— 旧版无反应门, 新目标当帧就泼弹。
 // 专用 aaReactT, 不与步兵 reactT 混账 (离炮位后枪械反应不该吃高炮的账); 瞄准跟踪照常, 只封扳机。
+const _plP=!!(pl&&pl.playerDriven); // 目标是玩家驾驶的机 (2026-10-06 难度批: 高炮对玩家反应/散布放宽, AI 互射不变)
 if(pl){
-if(pl!==this._aaTgt){ this._aaTgt=pl; this.aaReactT=Math.max(this.aaReactT||0,AA_DIFF[SETTINGS.diff].react); }
+if(pl!==this._aaTgt){ this._aaTgt=pl; this.aaReactT=Math.max(this.aaReactT||0,AA_DIFF[SETTINGS.diff].react*(_plP?1.3:1)); }
 if(this.aaReactT>0) this.aaReactT-=dt;
 }
 if(pl){
@@ -1972,7 +1996,8 @@ const lead=pl.pos.clone();
 const dist=lead.distanceTo(V3(g.x,g.y,g.z));
 const tof=dist/FLAK_SPD; // 7d-乙: 高炮弹速单源 FLAK_SPD (旧借 SHELL_SPD, 四联 20mm 定稿后独立)
 // 7b-甲: 瞄准点随机散布按难度分档 (AA_DIFF 单源; 旧写死 ±25/±8 = 老兵档等效, 对机伤害倍率走 Plane.takeDmg 的 DIFF_TABLE.dmgMul)
-const aj=AA_DIFF[SETTINGS.diff].jit, ajY=aj*0.32;
+// ★2026-10-06 难度批: 目标是玩家驾驶的机时散布 ×1.4 (只削对玩家)。
+const aj=AA_DIFF[SETTINGS.diff].jit*(_plP?1.4:1), ajY=aj*0.32;
 lead.x+=Math.sin(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-aj,aj);
 lead.z+=Math.cos(pl.yaw)*Math.cos(pl.pitch)*pl.speed*tof*0.5+rand(-aj,aj);
 lead.y+=Math.sin(pl.pitch)*pl.speed*tof*0.5+rand(-ajY,ajY);
@@ -2156,10 +2181,13 @@ else this.mag--;
 const useDef=def2||this.def;
 this._src=(useDef&&useDef.name)||''; // 击杀来源: 当前武器名 (含自选手枪/固定点武器)
 const diff=DIFF_TABLE[SETTINGS.diff];
+const tgtIsP=!!(this.target&&this.target.isPlayer);
 const eye=this.eyePos();
 const dir=aimP.sub(eye).normalize();
 const dHor=Math.hypot(aimP.x-this.pos.x,aimP.z-this.pos.z);
-let err=(1.7-this.aimSettle)*diff.spreadMul*(1+this.suppression*1.0)*(this.crouch?0.75:1)*0.016;
+// 散布难度列拆分 (2026-10-06 难度批): 瞄玩家用 pSpread, 互殴维持 spreadMul (tgtIsP 以当前目标分流;
+// shootAtPos 无目标时走互殴列, 与旧口径逐位一致)。
+let err=(1.7-this.aimSettle)*(tgtIsP?diff.pSpread:diff.spreadMul)*(1+this.suppression*1.0)*(this.crouch?0.75:1)*0.016;
 err*=1+clamp((tSpd||0)/5,0,1.2)*0.85;
 if(def2) err*=1.3;
 if(this.prone) err*=0.55;

@@ -604,7 +604,86 @@ const m=s00.match(new RegExp('\\n'+k+'\\s*:\\s*\\{[^\\n]*\\}'));
 return m?m[0]:null;
 }
 
+// ═════ T9 雨雪顶面终结 (2026-10-06 用户实机反馈"有房顶的室内也漏雨雪") ═════
+//   高空净空相机 + 注入合成件 (水平顶面/竖墙/无网格纯碰撞体/已毁板) 各一件:
+//   ① scanRainCovers 只收"带网格的水平面板"; ② 顶面投影下方 35s 推演无粒子头部 (室内不漏雨/雪);
+//   ③ 投影外粒子照旧自由落到盒底 (顶外行为零回归); ④ 顶面标 dead (killBox 口径) → 重扫摘除,
+//   同样推演投影下方出现粒子 (塌了漏雨)。雨 (LineSegments 头端判据) 与雪 (Points) 双路径。
+function t9(){
+console.log('T9 雨雪顶面终结: 只收水平带网格面 / 室内不漏 / 塌顶漏雨 / 顶外零回归');
+const INJ=`camera.position.set(40,40,40);
+const roof={minX:34,maxX:46,minY:48.4,maxY:49.0,minZ:34,maxZ:46,mesh:{}};
+const wall={minX:60,maxX:61,minY:32,maxY:52,minZ:60,maxZ:61,mesh:{}};
+const nocol={minX:-10,maxX:-2,minY:48.4,maxY:49.0,minZ:-10,maxZ:-2};
+const deadSlab={minX:-10,maxX:-2,minY:48.4,maxY:49.0,minZ:20,maxZ:32,mesh:{},dead:true};
+BOXES.push(roof,wall,nocol,deadSlab);
+rainCoverT=0; updateWeather(0.016);`;
+const r=VM(boot({store:{sf_campaign:'0',sf_weather:'rain'}}),`(()=>{try{
+${INJ}
+const inCovers=RAIN_COVERS.indexOf(roof)>=0;
+const rejects=RAIN_COVERS.indexOf(wall)<0&&RAIN_COVERS.indexOf(nocol)<0&&RAIN_COVERS.indexOf(deadSlab)<0;
+const under=(wx,wy,wz)=>wy<roof.maxY&&wx>=roof.minX&&wx<=roof.maxX&&wz>=roof.minZ&&wz<=roof.maxZ;
+let leakDry=0, outsideLow=0;
+for(let i=0;i<700;i++){ updateWeather(0.05);
+const px=precipObj.position.x,py=precipObj.position.y,pz=precipObj.position.z;
+const arr=precipObj.geometry.attributes.position.array;
+for(let f=0;f<arr.length;f+=6){   // 每段 6 浮点, 头端在 [f..f+2]
+const wy=arr[f+1]+py, wx=arr[f]+px, wz=arr[f+2]+pz;
+if(under(wx,wy,wz)) leakDry++;
+if(wy<roof.minY&&(wx<roof.minX||wx>roof.maxX||wz<roof.minZ||wz>roof.maxZ)) outsideLow++;
+}}
+roof.dead=true; rainCoverT=0; updateWeather(0.016);
+const gone=RAIN_COVERS.indexOf(roof)<0;
+let leakWet=0;
+for(let i=0;i<700;i++){ updateWeather(0.05);
+const px=precipObj.position.x,py=precipObj.position.y,pz=precipObj.position.z;
+const arr=precipObj.geometry.attributes.position.array;
+for(let f=0;f<arr.length;f+=6){
+const wy=arr[f+1]+py, wx=arr[f]+px, wz=arr[f+2]+pz;
+if(under(wx,wy,wz)) leakWet++;
+}}
+return {inCovers,rejects,dryOK:leakDry===0,outOK:outsideLow>0,gone,wetOK:leakWet>0,leakDry,leakWet};
+}catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`);
+if(typeof r==='string'){ exc('T9雨',r); }
+else{
+ok(r.inCovers,'T9雨 顶面收编: 水平带网格面板进 RAIN_COVERS');
+ok(r.rejects,'T9雨 拒收: 竖墙(厚薄比)/无网格纯碰撞体/已毁板 都不收');
+ok(r.dryOK,'T9雨 顶面投影下方 35s 内无粒子头部 (室内不漏雨, 拒收样本 '+r.leakDry+')');
+ok(r.outOK,'T9雨 顶面投影外粒子照旧自由落到盒底 (顶外行为零回归)');
+ok(r.gone,'T9雨 顶面 dead (killBox 口径) → 重扫后摘除');
+ok(r.wetOK,'T9雨 塌顶后同样推演投影下方出现粒子 (塌了漏雨, 样本 '+r.leakWet+')');
+}
+const rs=VM(boot({store:{sf_campaign:'1',sf_weather:'rain'}}),`(()=>{try{
+${INJ}
+const under=(wx,wy,wz)=>wy<roof.maxY&&wx>=roof.minX&&wx<=roof.maxX&&wz>=roof.minZ&&wz<=roof.maxZ;
+let leakDry=0;
+for(let i=0;i<700;i++){ updateWeather(0.05);
+const px=precipObj.position.x,py=precipObj.position.y,pz=precipObj.position.z;
+const arr=precipObj.geometry.attributes.position.array;
+for(let f=0;f<arr.length;f+=3){   // 雪点: 每 3 浮点一个
+const wy=arr[f+1]+py, wx=arr[f]+px, wz=arr[f+2]+pz;
+if(under(wx,wy,wz)) leakDry++;
+}}
+roof.dead=true; rainCoverT=0; updateWeather(0.016);
+let leakWet=0;
+for(let i=0;i<700;i++){ updateWeather(0.05);
+const px=precipObj.position.x,py=precipObj.position.y,pz=precipObj.position.z;
+const arr=precipObj.geometry.attributes.position.array;
+for(let f=0;f<arr.length;f+=3){
+const wy=arr[f+1]+py, wx=arr[f]+px, wz=arr[f+2]+pz;
+if(under(wx,wy,wz)) leakWet++;
+}}
+return {eff:WEATHER_EFF,dryOK:leakDry===0,wetOK:leakWet>0};
+}catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`);
+if(typeof rs==='string'){ exc('T9雪',rs); }
+else{
+ok(rs.eff==='snowMid','T9雪 雪图映射档生效 (斯大林格勒 rain→snowMid)');
+ok(rs.dryOK,'T9雪 顶面投影下方 35s 内无雪点 (室内不漏雪)');
+ok(rs.wetOK,'T9雪 塌顶后投影下方出现雪点 (塌了漏雪)');
+}
+}
+
 console.log('═══ verify-weather 天气系统批沙箱 ═══');
-t1t2(); t3(); t4(); t5(); t6(); t7(); t8();
+t1t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9();
 console.log('═══ 结果: '+PASS+' 过 / '+FAILS+' 挂 ═══');
 process.exit(FAILS?1:0);

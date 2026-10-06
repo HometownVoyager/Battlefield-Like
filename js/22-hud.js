@@ -894,7 +894,8 @@ hudSlowT=0.1;
 	let wipeLine='';
 	for(const z of [0,1]){
 	if(tickets[z]<=0){
-	const gl=flagsLostOf(1-z);
+	// 同归零局旗权条件豁免 (2026-10-06, 与 21-match 清场判定同口径): 对方也归零时不再要求占满全旗
+	const gl=(tickets[1-z]<=0)?0:flagsLostOf(1-z);
 	wipeLine+=`<div style="font-size:11px;color:#ff9c8a">${t('⚠ {0} 兵力归零 · {1} 需{2}消灭其场上残兵(剩 {3} 人)方可获胜{4}',t(TEAM_NAME[z]),t(TEAM_NAME[1-z]),gl>0?t('占满全部旗点(余 {0} 点)+',gl):'',fieldCount(z),wipeT[z]!==null?`<b style="color:#ffe08a">${t(' · ⏳ 最后一人清场倒计时 {0} 秒',Math.ceil(wipeT[z]))}</b>`:'')}</div>`;
 	}
 	}

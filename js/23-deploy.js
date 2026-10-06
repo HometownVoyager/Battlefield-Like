@@ -408,7 +408,7 @@ p.pos.y=(typeof capSpawnGroundY==='function')?capSpawnGroundY(p.pos.x,p.pos.z,10
 // (20-player tryInteract ③ → specVehSummon: 就位在脚下并直接上车), 这里一行也不做。
 p.vel.set(0,0,0);
 p.hp=100; p.alive=true; p.deployed=true; p.crouch=false; p.prone=false; p.chute=false;
-p.protUntil=nowT+SPAWN_PROT; // 出生保护 (2026-09-28 阶段三 P1): 落地 0.5s 免伤 (与 Bot spawn() 同一口径), 开火即解除
+p.protUntil=nowT+SPAWN_PROT; // 出生保护 (2026-09-28 阶段三 P1; 2026-10-06 升 2s): 落地免伤 (与 Bot spawn() 同一口径), 开火即解除
 p.demolish=null; // 上一局的拆除读条不跨命 (updateDemolish 的 alive 闸之外再加一道部署复位)
 // A#8 契约 §7: 所有 player.chute=false 的写入点必须**同帧**收伞 —— 旧写法只在下一帧的 else 分支里摘,
 // 于是部署那一帧伞还挂在头顶 (typeof 守卫: 只加载部分脚本的沙箱没有 20-player, 不该因此报错)。
@@ -418,7 +418,14 @@ p.stamina=1; p.suppressV=0; p.bloom=0;
 // 是 15d-naval 的弃船 (crewOut) —— 潜水溺死后这条命带着 diveD(最多 4m) 进下一局: 一入水就被拽到
 // 水面下 (4+1.32)m、泳速长期吃 ×0.85、呼吸条显示空条。与 stamina/hp 同段清, 口径即"新命=新身体"。
 p.diveD=0; p.oxy=1; p._drownAcc=0; p.headDepth=-1;
-p.yaw=Math.atan2(-sx,-sz); p.pitch=0;
+// 出生朝向 (2026-10-06 生成平衡批): 面朝最近存活敌人 (spawnYawAt 单源, 与 Bot spawn 同一款);
+// 旧版 atan2(-sx,-sz) 是"面朝世界原点" —— 与敌人的方位毫无关系, 用户实报"一生成就是背对着敌人"。
+// 朝向从**实际落点** (p.pos, 已过甲板吸附) 起算; 无存活敌人时保留旧逻辑兜底。
+// 载具出生 (下面 vehSpawn 分支) 会按车体朝向覆盖, 不受此处影响。
+{
+const _sy=(typeof spawnYawAt==='function')?spawnYawAt(p.pos.x,p.pos.z,p.team,false):null;
+p.yaw=(_sy!==null)?_sy:Math.atan2(-sx,-sz); p.pitch=0;
+}
 const wkeys=playerClassWeapons(p.team,p.cls);
 const gear=clsGear(p.cls,p.team);
 p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEFS[k].reserve}));

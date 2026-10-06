@@ -12,9 +12,12 @@ const MATCH_END_DELAY=1.5;
 // 胜利需同时满足两条件 (2026-09-05 用户指定: 坦克不再计入胜利条件, 敌方坦克存活与否不影响清场):
 // ①攻防/征服须本队占满全部旗点 (无旗模式忽略) ②敌方场上残兵被全歼
 // (地面步兵+坦克乘员+玩家; 在机飞行员不计——否则清场永远差一架打不下的敌机, 跳伞/落地后计入);
-// 双方同时归零时以场上残余为准 (先被清空者负, 同帧清空=平局); 清场期间超时照常结算 (票多者胜)。
-// 最后一人兜底: 归零方场上仅剩最后 1 人 且 对方已占满全部旗点(无旗模式忽略, 2026-09-05 加门槛) 时
-// 启动 30 秒清场倒计时, 到时限仍存活 → 直接判对方胜 (防躲藏拖到超时)。
+// 双方同归零 (2026-10-06 用户实机反馈+裁定): 旗权条件豁免 (双方都封重生, 占满全旗已无人能完成=死局),
+//   以场上残余为准 —— 先被清空者负, 同帧清空=平局; 清场期间超时照常结算 (票多者胜)。
+// 最后一人兜底: 归零方场上仅剩最后 1 人 且 对方已占满全部旗点(无旗模式忽略, 2026-09-05 加门槛; 双方同归零时豁免) 时
+// 启动 30 秒清场倒计时, 到时限仍存活 → 直接判对方胜 (防躲藏拖到超时);
+//   1v1 对齐 (2026-10-06 用户裁定): 双方都只剩最后 1 人时, 后启动者把双方倒计时都重置为 30s
+//   (先剩1人的一方不再"先跑完先输"), 双双存活到点=平局, 单侧到点仍判对方胜。
 // 无头模拟实测: 沙箱/纯Bot局里敌机常驻高空, 若把飞行员计入清场会导致只能靠超时兜底
 // (2026-09-04 经用户裁定口径, 如需"击落敌机才清场"可翻转)。
 const wipeAnnounced=[false,false];
@@ -215,12 +218,16 @@ if(!matchOver){
 	return;
 	}
 	// 清场判定: 兵力归零方封重生, 对方须 占满全旗(攻防/征服)+歼灭场上全部残兵 才判胜 (2026-09-05: 坦克不再计入);
-	// 双方同时归零时以场上残余为准 (先被清空者负, 同帧清空=平局); 清场期间超时照常结算
+	// 双方同归零时旗权条件豁免 (2026-10-06 用户实机反馈"双方0剩余无法结束战局": 两边都封重生了,
+	// 没人有票力去完成占满全旗, 再要求它=死局), 以场上残余为准: 先被清空者负, 同帧清空=平局
 	const z0=tickets[0]<=0, z1=tickets[1]<=0;
-	if(z0&&!wipeAnnounced[0]){ wipeAnnounced[0]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),flagsLostOf(1)>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1); }
-	if(z1&&!wipeAnnounced[1]){ wipeAnnounced[1]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),flagsLostOf(0)>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0); }
+	if(z0&&!wipeAnnounced[0]){ wipeAnnounced[0]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),(z1?0:flagsLostOf(1))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1); }
+	if(z1&&!wipeAnnounced[1]){ wipeAnnounced[1]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),(z0?0:flagsLostOf(0))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0); }
 	if(z0&&z1){
-	if(fieldCount(0)===0&&fieldCount(1)===0){ requestEnd(-1); return; }
+	const f0=fieldCount(0), f1=fieldCount(1);
+	if(f0===0&&f1===0){ requestEnd(-1); return; }
+	if(f0===0){ requestEnd(1); return; }
+	if(f1===0){ requestEnd(0); return; }
 	}else if(z0){
 	if(fieldCount(0)===0&&flagsLostOf(1)===0){ requestEnd(1); return; }
 	}else if(z1){
@@ -228,15 +235,30 @@ if(!matchOver){
 	}
 	// 最后一人清场倒计时 (2026-09-04 用户指定; 2026-09-05 加触发门槛: 须对方已占满全部旗点[无旗模式忽略]才启动,
 	// 旗权未占满时对方须先完成占旗; 倒计时期间旗权被翻回 → 倒计时复位, 重新占满后从 30s 重来)
+	// 2026-10-06 同归零豁免+对齐 (用户裁定): 双方都归零时旗权门槛豁免 (同上, 已无意义);
+	//   双方同处最后1人 (1v1) 时后启动者把双方计时都重置为 30s —— 先剩1人的一方不再"先跑完先输",
+	//   对齐后双方同帧到点 ⇒ 平局 (单侧到点仍判对方胜, 旧口径不变)。
+	//   启动/对齐与扣减拆成两段: 对齐若发生在扣减之后, 会被本帧扣减弄出 1 帧错位 (先到点方被误判负)。
 	for(let zt=0;zt<2;zt++){
-	if(tickets[zt]<=0&&fieldCount(zt)===1&&flagsLostOf(1-zt)===0){
+	if(tickets[zt]<=0&&fieldCount(zt)===1&&((z0&&z1)||flagsLostOf(1-zt)===0)){
 	if(wipeT[zt]===null){
 	wipeT[zt]=WIPE_GRACE;
+	if(wipeT[1-zt]!==null){
+	wipeT[1-zt]=WIPE_GRACE;
+	addKillMsg(t('⚖ 双方均仅剩最后 1 人 · 倒计时对齐为 {0} 秒 · 双双存活到时限即平局',WIPE_GRACE));
+	}
 	addKillMsg(t('⚠ {0} 场上仅剩最后 1 人 · {1} 秒清场倒计时 · 到时限未被歼灭则直接判负',t(TEAM_NAME[zt]),WIPE_GRACE),1-zt);
 	}
-	wipeT[zt]-=dt;
-	if(wipeT[zt]<=0){ addKillMsg(t('⏳ 清场倒计时结束 · {0} 最后一人仍存活 · {1} 获胜',t(TEAM_NAME[zt]),t(TEAM_NAME[1-zt])),1-zt); requestEnd(1-zt); return; }
 	}else wipeT[zt]=null;
+	}
+	for(let zt=0;zt<2;zt++){ if(wipeT[zt]!==null) wipeT[zt]-=dt; }
+	// 到点判定移出累计循环 (2026-10-06): 双方同帧到点=平局 —— 对齐后本就同帧, 此处兜住一切巧合同帧
+	for(let zt=0;zt<2;zt++){
+	if(wipeT[zt]!==null&&wipeT[zt]<=0){
+	if(wipeT[1-zt]!==null&&wipeT[1-zt]<=0){ addKillMsg(t('⏳ 双方清场倒计时同时到点 · 双方最后一人均存活 · 平局')); requestEnd(-1); }
+	else{ addKillMsg(t('⏳ 清场倒计时结束 · {0} 最后一人仍存活 · {1} 获胜',t(TEAM_NAME[zt]),t(TEAM_NAME[1-zt])),1-zt); requestEnd(1-zt); }
+	return;
+	}
 	}
 	// 破袭模式: 检测补给库摧毁
 	if(GAMEMODE==='demolition'){

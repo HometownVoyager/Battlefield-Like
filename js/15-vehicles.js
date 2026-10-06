@@ -1049,7 +1049,8 @@ this.tLastPos.copy(best.pos); this.tLastSeenT=nowT;
 this.tMemT=Math.max(this.tMemT||0,T.mem);
 if(isNew){
 // 交战决策: 反应延迟 (车长发现→口令→炮长就位) + 首次发现停车观察; 新兵最慢, 精英最快
-this.aiReact=T.react*rand(0.85,1.25);
+// ★2026-10-06 难度批 (标准档): 目标是**玩家驾驶**的车时反应 ×1.3 —— 只削坦克对玩家, 车组互殴不变。
+this.aiReact=T.react*(best.playerDriven?1.3:1)*rand(0.85,1.25);
 this.aiHaltT=T.halt*rand(0.85,1.2);
 this.aiRevT=T.rev*rand(0.8,1.3);
 this.aiTacticT=0; this.aiOrder=null; this.aiCover=null;
@@ -1313,7 +1314,8 @@ if(best!==this.tTarget){
 // 并行取长者 ⇒ 实测 ≈3.7/2.1/1.7s); 步兵目标仍走车长反应档 (主炮已不对步兵开火, 同轴机枪的压制节奏
 // 由 aiReact 的 3.2× 削弱表达)。旧实现两处都是 DIFF_TABLE.react 原值 ⇒ 全档最快 1.4s 就开炮。
 // 抖动窗 ±4~6% (0.96~1.06): 保证最坏一次抽签也不跌破契约下限 (精英 1.70×0.96=1.632 > 1.6s)。
-this.aimReact=(best.kind==='tank')?T.fireDelay*rand(0.96,1.06):DIFF_TABLE[SETTINGS.diff].react*rand(1.4,2.6)+0.35;
+// ★2026-10-06 难度批 (标准档): 目标是玩家驾驶的车时首炮前摇 ×1.3 (只削对玩家, 车组互殴不变)。
+this.aimReact=(best.kind==='tank')?T.fireDelay*(best.playerDriven?1.3:1)*rand(0.96,1.06):DIFF_TABLE[SETTINGS.diff].react*rand(1.4,2.6)+0.35;
 this.losOK=false;
 }
 this.tTarget=best; this.tDist=bd;
@@ -1396,7 +1398,8 @@ else if(this.isAI){
 // 主炮散布按难度分档 (2026-09-20 I1 用户: "不能太超雄"): DIFF_TABLE.spreadMul (新兵1.7/老兵1.0/精英0.6)
 // × 坦克系数 (TANK_AI.spreadK) —— 旧实现对所有难度恒 0.011 rad, 远距离"百发百中"是超雄主因之一.
 // 玩家路径 (isAI=false) 不变: 玩家自己瞄准, 不吃 AI 散布.
-const err=0.011*tankAITune().spreadMul;
+// ★2026-10-06 难度批 (标准档): 目标是玩家驾驶的车时散布 ×1.3 (主炮只对载具开火, tTarget 即目标)。
+const err=0.011*tankAITune().spreadMul*(this.tTarget&&this.tTarget.playerDriven?1.3:1);
 dir.x+=rand(-err,err); dir.y+=rand(-err,err)*0.6; dir.z+=rand(-err,err); dir.normalize();
 }
 const origin=this.muzzle.clone();
@@ -1669,7 +1672,9 @@ if(typeof markHitCls==='function') markHitCls('shell');
 const _fbP=s.owner&&s.owner.isPlayer;
 if(hitTank){ hitTank.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380):rand(260,330)),s.owner,true); if(_fbP&&hitTank.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
 if(hitTruck){ hitTruck.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380):rand(260,330)),s.owner); if(_fbP&&hitTruck.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
-if(hitSol){ hitSol.damage(260,s.owner,false); if(_fbP&&hitSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
+// ★2026-10-06 难度批 (标准档): 炮弹/火箭直击步兵对**玩家** 260→180 —— 旧值无难度乘区、无衰减,
+//   被坦克炮/火箭筒蹭到即近殁, 是"总被秒杀"的又一主诉源; Bot 步兵维持 260 (互殴烈度不变)。
+if(hitSol){ hitSol.damage(hitSol.isPlayer?180:260,s.owner,false); if(_fbP&&hitSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
 explosionFXSmall(p);
 AudioSys.explosion(p.distanceTo(camera.position)*1.6);
 // 爆炸半径分档 (2026-09-29 用户裁定"火箭筒爆炸范围仍太小, 再加大"): 火箭弹 9→12 —— 只认 s.rocket

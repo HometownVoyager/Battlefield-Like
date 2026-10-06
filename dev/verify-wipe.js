@@ -836,8 +836,96 @@ ok(/streakBuff\.refillT/.test(hud)&&/'\s*refill'/.test(hud),'T15 22-hud 读 refi
 ok(/#streakBuff\.refill\s*\{/.test(css)&&/@keyframes sbRefill/.test(css),'T15 CSS 提供 #streakBuff.refill + @keyframes sbRefill 脉冲');
 }
 
+// T16: 同归零旗权豁免 (2026-10-06 用户实机反馈"双方0剩余无法结束战局") —— 双方都归零后,
+//      一方残兵被清空 → 对方立即判胜, 不再要求"占满全部旗点" (旧版此处无出口=死局);
+//      同帧清空=平局 (T3 既有口径不受影响)。
+function t16(){
+console.log('T16 同归零: 一方清空→对方立即胜, 旗权豁免 (淞沪 征服)');
+const ctx=boot(3);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+tickets[0]=0; tickets[1]=0;
+// 队0全清; 队1仅留1人 (挪远角), 其余全清
+var keep=null;
+for(const s of soldiers){ if(!s.alive) continue;
+if(s.team===0) s.die(null,false);
+else if(!keep){ keep=s; s.pos.set(-140,0,-140); } else s.die(null,false); }
+for(const t of tanks){ if(t.alive) t.die(null); }
+// 旗权保持开局混合归属 (不占满) → 证明旗权条件在同归零局被豁免
+updateFlags(0.05);
+return {p:matchEndPending,w:__m.reason&&__m.reason.w,keepAlive:keep&&keep.alive,f0:fieldCount(0),f1:fieldCount(1)};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T16 '+(err||'')); return; }
+ok(err.f0===0&&err.f1===1,'T16 场面: 队0清空/队1剩1人 (实测 '+err.f0+'/'+err.f1+')');
+ok(err.p===1&&err.w===1,'T16 同归零+一方清空 → 对方立即判胜, 旗权未占满也放行 (旧版死局)');
+}
+
+// T17: 1v1 倒计时对齐 (2026-10-06 用户裁定) —— 同归零局双方都只剩1人时, 后启动者把双方计时
+//      都重置为 30s (先剩1人的一方不再"先跑完先输"); 同归零局旗权门槛豁免 (未占满也启动)。
+function t17(){
+console.log('T17 1v1 倒计时对齐+同归零门槛豁免 (淞沪 征服)');
+const ctx=boot(3);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+tickets[0]=0; tickets[1]=0;
+// 队0留1人, 队1留2人 (挪远角), 其余全清; 旗权不占满 → 靠同归零豁免启动
+var keep0=null,k1a=null,k1b=null;
+for(const s of soldiers){ if(!s.alive) continue;
+if(s.team===0){ if(!keep0){ keep0=s; s.pos.set(-140,0,-140); } else s.die(null,false); }
+else { if(!k1a){ k1a=s; s.pos.set(140,0,140); } else if(!k1b){ k1b=s; s.pos.set(140,0,140); } else s.die(null,false); } }
+for(const t of tanks){ if(t.alive) t.die(null); }
+updateFlags(0.05);
+const wA=wipeT[0];                       // 队0仅1人 → 倒计时启动 (旗权未占满, 靠豁免)
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);   // 快进2秒, 队0计时已跑掉一截
+const wRun=wipeT[0];
+k1b.die(null,false);                     // 队1也只剩1人 → 队1倒计时启动 + 双方对齐回30
+updateFlags(0.05);
+const w0=wipeT[0], w1=wipeT[1];
+const aligned=(__m.msgs||[]).some(m=>m.indexOf('对齐')>=0);
+return {wA,wRun,w0,w1,aligned,f1:fieldCount(1)};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T17 '+(err||'')); return; }
+ok(err.wA>29&&err.wA<=30,'T17 同归零+队0仅1人 → 倒计时启动, 旗权未占满被豁免 (实测 '+err.wA+')');
+ok(err.wRun<29.7,'T17 队0倒计时先跑 (2秒后剩 '+err.wRun.toFixed(2)+'s)');
+ok(err.f1===1,'T17 队1清到仅剩1人');
+ok(err.w0>29&&err.w1>29,'T17 队1进倒数时双方都被重置回30s (实测 '+err.w0.toFixed(2)+'/'+err.w1.toFixed(2)+') — 先剩1人的一方不再吃亏');
+ok(err.aligned,'T17 对齐播报已发出');
+}
+
+// T18: 对齐后双双到点=平局 —— 1v1 各自倒计时同步走完 30 秒, 双方最后1人均存活 → 平局结算。
+function t18(){
+console.log('T18 1v1 双双到点→平局 (淞沪 征服)');
+const ctx=boot(3);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+tickets[0]=0; tickets[1]=0;
+var keep0=null,k1=null;
+for(const s of soldiers){ if(!s.alive) continue;
+if(s.team===0){ if(!keep0){ keep0=s; s.pos.set(-140,0,-140); } else s.die(null,false); }
+else { if(!k1){ k1=s; s.pos.set(140,0,140); } else s.die(null,false); } }
+for(const t of tanks){ if(t.alive) t.die(null); }
+// 快进 35 秒 (30s 倒计时 + 1.5s 终局前奏), 双方都躲着不动
+for(let i=0;i<700&&!matchOver;i++) updateFlags(0.05);
+return {over:matchOver,w:__m.winner,a0:keep0.alive,a1:k1.alive,
+draw:(__m.msgs||[]).some(m=>m.indexOf('同时到点')>=0)};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T18 '+(err||'')); return; }
+ok(err.over===true&&err.w===-1,'T18 双方最后1人均存活到期 → 平局结算 (winner=-1)');
+ok(err.a0===true&&err.a1===true,'T18 结算时双方最后1人均还活着 (正是对齐兜底场景)');
+ok(err.draw===true,'T18 同帧到点播报已发出');
+}
+
 // ── 入口 ──
 console.log('== 清场胜利规则沙箱 ==');
-t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15();
+t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15(); t16(); t17(); t18();
 console.log(`== 结果: ${PASS.length} 通过 / ${FAILS} 失败 ==`);
 process.exit(FAILS?1:0);

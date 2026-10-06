@@ -471,7 +471,7 @@ ok(inp.indexOf("if(e.code==='KeyT'){")>=0&&inp.indexOf('specTeleportToLoiter();'
 	&&inp.indexOf('观战模式 · 不指挥小队')>=0&&inp.indexOf('}else squadOrderMove();')>=0,
 	'T8 19-input: T 键观战态只保留弃弹传送 (非控弹与 Y 键改为提示, 非观战仍走原小队指令)');
 ok(inputWired(inp),'T8 19-input: C 键车长镜同时认 tank 与 ghost');
-ok(pl.indexOf('if(p.flying){ specFlightMove(p,dt); playerFireTick(dt,true);')>=0,'T8 20-player: 观战飞行分支接入开火单源');
+ok(pl.indexOf('if(p.flying){ p.stamina=1; specFlightMove(p,dt); playerFireTick(dt,true);')>=0,'T8 20-player: 观战飞行分支接入开火单源 (锚随 2026-10-06 体能批: 飞行分支补观战恒满 p.stamina=1, 语义不变)');
 ok(pl.indexOf('function playerFireTick(dt,canFire)')>=0&&pl.indexOf('playerFireTick(dt,!p.sprinting&&p.bandaging<=0&&!p.swim)')>=0,'T8 20-player: 开火单源同时被地面分支复用 (2026-09-18 追加游泳闸门 !p.swim)');
 // 2026-09-21 A#4 契约C 改判 (Lead 核可): 语义统一为 **F = 在当前位置召唤并直接上车** (一句文案),
 //   旧的"4.5m 内才进车 / 两义文案"已被本批有意推翻 ⇒ 判据换成新语义, 但仍然守住"F 键真的能召唤并上车":

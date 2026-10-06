@@ -37,6 +37,13 @@ function mkChuteForBot(){ return mkChute(0.78); }
 function playerChuteClear(){
 if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
 }
+// 体能回体单源 (2026-10-06 体能批): "距上次耗体 1s 后按 0.16/s 恢复" 的唯一实现 ——
+// 主步行链 (updatePlayer 体积分支) 与**早退分支** (巡飞弹 TV 制导 / 载具 / 固定火力点 / 海战 / 大舰炮位) 共用。
+// 旧版早退分支在体能结算之前就 return, 体能整个冻结 (不耗也不回), 用户实报"操控巡飞弹/固定火力点时不回体"。
+// 座位态 ads 已在 mount* 强制 false ⇒ holdBreath 不可能激活, 座位上天然只会走恢复; 观战仍是恒满原则 (2026-09-02 用户指定)。
+function stamRegenTick(pp,dt,nowT){
+if(nowT-(pp.stamUseT||0)>1) pp.stamina=Math.min(1,pp.stamina+dt*0.16);
+}
 // 固定火力点使用前摇 (2026-09-02 用户指定): 按F后需原地操作 EM_CAST_DUR 秒才上机, 移动/再按F/受伤取消
 function mountMG(mg){
 player.onMG=mg; mg.user=player;
@@ -100,6 +107,74 @@ if(typeof showScorePop==='function') showScorePop('座驾被毁 · 观战者安�
 return true;
 }
 
+// 准星锁定交互目标 (2026-10-06 交互批, 用户裁定"有效距离内准星对准 F 交互物时, F 暂时锁定到它"):
+// 解决"补给箱和迫击炮/机枪摆在一起, 按下去的却不是想要的那个"的挑选问题。单源函数 ——
+// tryInteract (执行) 与 updateInteractHint (提示) 共用本结果, 提示与执行结构上不可能再脱节。
+// 判据三重: ① 在该类交互物的**执行半径**内 (数值与执行段同款) ② 可用性判据与执行段同款
+// (存活/占用/冷却/敌我/资源门) ③ 屏幕中心射线夹角最小者, 且到目标的视线不被墙体遮挡
+// (raycastWorld, 容差 0.8m —— 目标自身的碰撞盒前缘不算遮挡)。角度阈值随目标半尺寸/距离放宽:
+// lim = atan2(half, dist)+3.2°, 即"准星大体落在目标身上"就算对准。
+// 返回 {kind,obj} 或 null。座位/甲板/跳帮/前摇层 (tryInteract ①~⑥) **不参与锁定** —— 那些层是
+// "自身状态操作" (下炮/下车/取消), 没有挑选歧义; 观战层同理 (幽灵坦克召唤无对象可选)。
+function xcInteractLock(){
+const p=player;
+if(!p.alive||p.loiter) return null;
+if(p.onVehicle||p.onNaval||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.capitalGun||p.useCast||p.spectator) return null;
+const eye=camera.position, fwd=camForward();
+if(!fwd||fwd.lengthSq()<0.1) return null;
+const cand=[];
+const push=(kind,obj,x,y,z,half)=>{
+const dx=x-eye.x, dy=y-eye.y, dz=z-eye.z;
+const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+if(d<0.4) return;                                        // 贴脸退化
+const dot=(dx*fwd.x+dy*fwd.y+dz*fwd.z)/d;
+if(dot<0.5) return;                                      // >60° 之外早退 (不可能是"对准")
+const ang=Math.acos(Math.min(1,dot));
+if(ang<=Math.atan2(half,d)+0.055) cand.push({kind,obj,ang,d,x,y,z});
+};
+// ── 各类候选: 判据与 tryInteract 执行段逐款同源 ──
+for(const m of MORTARS){ if(m.alive&&empReady(m)&&Math.hypot(m.x-p.pos.x,m.z-p.pos.z)<2.8) push('mortar',m,m.x,heightAt(m.x,m.z)+0.55,m.z,0.85); }
+for(const tk of tanks){ if(tk.alive&&tk.team===p.team&&Math.hypot(tk.pos.x-p.pos.x,tk.pos.z-p.pos.z)<4.5) push('tank',tk,tk.pos.x,tk.pos.y+0.9,tk.pos.z,1.6); }
+{
+const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
+if(nc) push('naval',nc,nc.pos.x,nc.pos.y+0.9,nc.pos.z,1.8);
+}
+{
+const cs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
+if(cs) push('capital',cs,cs.pos.x,cs.pos.y+2,cs.pos.z,3.5);
+}
+{
+const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
+if(pp) push('plane',pp,pp.pos.x,pp.pos.y+1,pp.pos.z,2.2);
+}
+for(const mg of MG42S){ if(empReady(mg)&&empInReach(mg,p.pos.x,p.pos.y,p.pos.z,2.6)) push('mg',mg,mg.x,heightAt(mg.x,mg.z)+0.6,mg.z,0.9); }
+for(const g of ATGUNS){ if(empReady(g)&&empInReach(g,p.pos.x,p.pos.y,p.pos.z,3)) push('at',g,g.x,heightAt(g.x,g.z)+0.9,g.z,1.3); }
+for(const g of AAGUNS){ if(empReady(g)&&empInReach(g,p.pos.x,p.pos.y,p.pos.z,3)) push('aa',g,g.x,heightAt(g.x,g.z)+1.1,g.z,1.4); }
+{
+const b=(typeof batteryNear==='function')?batteryNear(p.pos.x,p.pos.z,3):null;
+if(b) push('battery',b,b.x,heightAt(b.x,b.z)+1.0,b.z,1.5);
+}
+if(p.resupplyCd<=0){
+for(const ac of AMMO_CRATES){ if(Math.hypot(ac.x-p.pos.x,ac.z-p.pos.z)<2.6) push('ammo',ac,ac.x,ac.y+0.35,ac.z,0.75); }
+if(GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===p.team){
+for(const tr of trucks){ if(tr.alive&&!tr.escaped&&Math.hypot(tr.pos.x-p.pos.x,tr.pos.z-p.pos.z)<3.6&&Math.abs(tr.pos.y-p.pos.y)<3) push('truck',tr,tr.pos.x,tr.pos.y+1,tr.pos.z,2); }
+}
+if(p.team===0){
+for(const sp of SUPPLY_POINTS){ if(Math.hypot(sp.x-p.pos.x,sp.z-p.pos.z)<2.8) push('supply',sp,sp.x,heightAt(sp.x,sp.z)+0.5,sp.z,0.8); }
+}
+}
+if(p.bandResupCd<=0&&p.bandages<p.maxBandages){
+for(const c of MED_CRATES){ if(c.team===p.team&&c.uses>0&&Math.hypot(c.x-p.pos.x,c.z-p.pos.z)<2.6) push('medcrate',c,c.x,heightAt(c.x,c.z)+0.4,c.z,0.6); }
+}
+if(!cand.length) return null;
+cand.sort((a,b)=>a.ang-b.ang);
+const c0=cand[0];                                        // 只对"最对准者"做遮挡射线 (性能+语义一致)
+const dir=V3(c0.x-eye.x,c0.y-eye.y,c0.z-eye.z);
+const dist=dir.length(); dir.normalize();
+const hit=raycastWorld(eye,dir,Math.max(0.1,dist-0.8));
+if(hit&&hit.dist<dist-0.8) return null;                  // 中间隔墙/大石 ⇒ 不锁定 (执行段也够不着)
+return {kind:c0.kind,obj:c0.obj};
+}
 // ★2026-09-22 重做 (用户实报"观战模式下 F 的鱼雷/下车与召唤幽灵坦克严重冲突"): 本函数改成
 //   **语义优先级栈** —— 一个 F 键, 同一时刻只有一条语义生效, 按玩家**当前所处状态**从高到低判:
 //     ① 幽灵坦克上   → F = 下车 (收车)
@@ -260,8 +335,11 @@ player.useCast=null;
 showScorePop('使用已取消');
 return;
 }
+// 准星锁定 (2026-10-06 交互批): 地面栈开算前先问一次"准星对准了谁" —— 有锁定时, 锁定类直接用
+// 锁定对象、其余类全部让位 (xc 派生判据在 xcInteractLock 内与执行段同款); 无锁定时逐位走旧栈。
+const xc=xcInteractLock();
 {
-const m2=MORTARS.find(m=>m.alive&&empReady(m)&&Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8);
+const m2=xc?(xc.kind==='mortar'?xc.obj:null):MORTARS.find(m=>m.alive&&empReady(m)&&Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8);
 if(m2){
 m2.user=player; // 前摇占位: 一门炮同一时刻只允许一个操作者(玩家/Bot同规)
 player.useCast={kind:'mortar',g:m2,t:0,dur:EM_CAST_DUR};
@@ -270,7 +348,8 @@ showScorePop('操作迫击炮…保持不动 (移动取消)');
 return;
 }
 }
-for(const t of tanks){
+if(!xc||xc.kind==='tank') for(const t of tanks){
+if(xc&&xc.obj!==t) continue;
 if(!t.alive||t.team!==player.team) continue;
 if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<4.5){
 if(t.crewBot){ t.crewBot.dismountVehicle(false); showScorePop('你接管了坦克'); }
@@ -286,22 +365,29 @@ return;
 // 海战载具 (2026-09-20N 海战批): 走到艇边按 F 上艇 —— 陆上 4.5m / 水上游泳贴近 2.5m (用户裁定①,
 // 半径单源在 20a-seats navalBoardRadius)。车组交还与座位初始化全在 navalBoard 里 (与部署界面选艇同一条路径)。
 {
+if(!xc||xc.kind==='naval'){
 const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
-if(nc&&navalBoard(nc)) return;
+if(nc&&(!xc||xc.obj===nc)&&navalBoard(nc)) return;
+}
 }
 // 大舰登舰 (2026-09-30 阶段五 P4, 15h-capital): 游泳/涉水贴近舷侧按 F 上甲板 —— 半径 CAPITAL_CFG.boardR
 // (大舰吃水 6m, 只能从水面侧靠)。排在艇之后: 艇更近就先上艇 (艇是"摆渡到舰边"的自然工具)。
 {
+if(!xc||xc.kind==='capital'){
 const cs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
-if(cs&&typeof capBoard==='function'&&capBoard(cs)) return;
+if(cs&&(!xc||xc.obj===cs)&&typeof capBoard==='function'&&capBoard(cs)) return;
+}
 }
 // 航母甲板上的舰载机 (P4 2026-09-30): 走到停放中的飞机旁按 F 登机 —— 上机后 Space = 一键弹射起飞。
 // 排在登舰之后: 站在舰上时优先"上舰", 飞机只是舰上的家具之一 (要先登舰才够得着)。
 {
+if(!xc||xc.kind==='plane'){
 const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
-if(pp&&typeof capBoardPlane==='function'&&capBoardPlane(pp)) return;
+if(pp&&(!xc||xc.obj===pp)&&typeof capBoardPlane==='function'&&capBoardPlane(pp)) return;
 }
-for(const mg of MG42S){
+}
+if(!xc||xc.kind==='mg') for(const mg of MG42S){
+if(xc&&xc.obj!==mg) continue;
 if(!empReady(mg)) continue;
 if(empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)){
 mg.user=player;
@@ -311,7 +397,8 @@ showScorePop('操作机枪…保持不动 (移动取消)');
 return;
 }
 }
-for(const g of ATGUNS){
+if(!xc||xc.kind==='at') for(const g of ATGUNS){
+if(xc&&xc.obj!==g) continue;
 if(!empReady(g)) continue;
 if(empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 g.user=player;
@@ -321,7 +408,8 @@ showScorePop('操作反坦克炮…保持不动 (移动取消)');
 return;
 }
 }
-for(const g of AAGUNS){
+if(!xc||xc.kind==='aa') for(const g of AAGUNS){
+if(xc&&xc.obj!==g) continue;
 if(!empReady(g)) continue;
 if(empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
 g.user=player;
@@ -334,11 +422,14 @@ return;
 // 岸防炮上炮 (2026-09-21 A#9 契约D): 与上艇/上炮同一处交互链, 半径 3m (与反坦克炮/防空炮同档)。
 // 只用契约冻结的三个函数名 (batteryNear/batteryMountPlayer): 15f-battery 由 sea-hud 拥有, 函数缺失时静默跳过。
 {
+if(!xc||xc.kind==='battery'){
 const b=(typeof batteryNear==='function')?batteryNear(player.pos.x,player.pos.z,3):null;
-if(b&&typeof batteryMountPlayer==='function'&&batteryMountPlayer(b)) return;
+if(b&&(!xc||xc.obj===b)&&typeof batteryMountPlayer==='function'&&batteryMountPlayer(b)) return;
+}
 }
 if(player.resupplyCd<=0){
-for(const ac of AMMO_CRATES){
+if(!xc||xc.kind==='ammo') for(const ac of AMMO_CRATES){
+if(xc&&xc.obj!==ac) continue;
 if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
 player.grabAction={kind:'ammo',crate:ac};
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
@@ -347,8 +438,9 @@ return;
 }
 }
 // 劫道模式: 护运玩家唯一的补给=存活运输车 (贴车 3.6m 内全补给)
-if(GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===player.team){
+if((!xc||xc.kind==='truck')&&GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===player.team){
 for(const t of trucks){
+if(xc&&xc.obj!==t) continue;
 if(!t.alive||t.escaped) continue;
 if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<3.6&&Math.abs(t.pos.y-player.pos.y)<3){
 player.grabAction={kind:'truck',crate:t};
@@ -359,8 +451,9 @@ return;
 }
 }
 // 劫道方临时补给点 (限时失效): team0 玩家专用
-if(player.team===0){
+if((!xc||xc.kind==='supply')&&player.team===0){
 for(const sp of SUPPLY_POINTS){
+if(xc&&xc.obj!==sp) continue;
 if(Math.hypot(sp.x-player.pos.x,sp.z-player.pos.z)<2.8){
 player.grabAction={kind:'supply',crate:sp};
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
@@ -371,7 +464,8 @@ return;
 }
 }
 if(player.bandResupCd<=0&&player.bandages<player.maxBandages){
-for(const c of MED_CRATES){
+if(!xc||xc.kind==='medcrate') for(const c of MED_CRATES){
+if(xc&&xc.obj!==c) continue;
 if(c.team!==player.team||c.uses<=0) continue;
 if(Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.6){
 player.grabAction={kind:'medcrate',crate:c};
@@ -504,7 +598,7 @@ if(mouseDown&&!p._ltClick){ p._ltClick=true; if(p.loiter) loiterDetonate(p.loite
 if(!mouseDown) p._ltClick=false;
 if(!mouse2Down) p._ltRClick=false;
 // 观战飞行中引导巡飞弹: 本体保持飞行机动 (视角同时舵控TV弹), 无重力
-if(p.spectator&&p.flying){ specFlightMove(p,dt); updateInteractHint(); return; }
+if(p.spectator&&p.flying){ p.stamina=1; specFlightMove(p,dt); updateInteractHint(); return; }
 p.vel.x=dampF(p.vel.x,0,8,dt);
 p.vel.z=dampF(p.vel.z,0,8,dt);
 p.vel.y-=13*dt;
@@ -533,6 +627,7 @@ if(!playerChuteMesh){ playerChuteMesh=mkChute(); scene.add(playerChuteMesh); }
 playerChuteMesh.position.set(p.pos.x,p.pos.y+3.8,p.pos.z);
 playerChuteMesh.rotation.set(Math.sin(nowT*0.7)*0.12,0,Math.cos(nowT*0.6)*0.08);
 } else if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
+stamRegenTick(p,dt,nowT); // TV 制导中本体照常回体 (2026-10-06 体能批: 旧版此分支体能冻结)
 updateInteractHint();
 return;
 }
@@ -560,23 +655,24 @@ const rel=clamp(angDiff(p.braceYaw,p.yaw),-0.72,0.72);
 p.yaw=p.braceYaw+rel;
 p.pitch=clamp(p.pitch,-0.5,0.42);
 }
-if(p.onVehicle){ if(p.onVehicle.kind==='plane') updatePlayerPlane(dt); else updatePlayerTank(dt); return; }
-if(p.onAT){ updatePlayerAT(dt); return; }
-if(p.onAA){ updatePlayerAA(dt); return; }
-if(p.onMG){ updatePlayerMG(dt); return; }
+if(p.onVehicle){ if(p.onVehicle.kind==='plane') updatePlayerPlane(dt); else updatePlayerTank(dt); stamRegenTick(p,dt,nowT); return; }
+if(p.onAT){ updatePlayerAT(dt); stamRegenTick(p,dt,nowT); return; }
+if(p.onAA){ updatePlayerAA(dt); stamRegenTick(p,dt,nowT); return; }
+if(p.onMG){ updatePlayerMG(dt); stamRegenTick(p,dt,nowT); return; }
 // 岸防炮座位 (2026-09-21 A#9 契约D): 与载具/固定火力同为**唯一分派点**上的一支 —— updatePlayerBattery 由
 // sea-hud 写在 20a-seats; typeof 守卫 (模块缺失时静默跳过, 不报错)。
-if(p.onBattery){ if(typeof updatePlayerBattery==='function') updatePlayerBattery(dt); return; }
-if(p.onMortar){ updatePlayerMortar(dt); return; }
+if(p.onBattery){ if(typeof updatePlayerBattery==='function') updatePlayerBattery(dt); stamRegenTick(p,dt,nowT); return; }
+if(p.onMortar){ updatePlayerMortar(dt); stamRegenTick(p,dt,nowT); return; }
 // 海战舰船 (2026-09-20N 海战批): 座位在主循环里的**唯一分派点**, 与载具/固定火力同位 (实现在 20a-seats)。
 // 座位字段是 p.onNaval 而不是 p.onVehicle (定稿 §11.6) —— 见 20a-seats 文件头的三条理由。
-if(p.onNaval){ updatePlayerNaval(dt); return; }
+if(p.onNaval){ updatePlayerNaval(dt); stamRegenTick(p,dt,nowT); return; }
 // 大舰炮位接管 (2026-10-01b, 15h-capital): 座位分派点上的又一支 —— 炮位上**不动/不开步兵枪**,
 // 视角仍由 19-input 采集, 座圈回转/开火在 updateCapital → capGunTick 消费 (与 AI 同一数据流)。
 // 站位由 capGunTick 钉在炮位锚点 (舰在动, 锚点跟着动), 这里只做炮位侧的常规收账与提示。
 if(p.capitalGun){
 if(p.nadeHeld) p.nadeHeld=false;                       // 上炮前举着的雷就地收回 (与上固定炮位同规)
 if(p.ads) p.ads=false;
+stamRegenTick(p,dt,nowT);
 if(typeof updateInteractHint==='function') updateInteractHint();
 return;
 }
@@ -591,7 +687,7 @@ p.bandages=p.maxBandages;
 }
 // 观战飞行 (悬停/气动): 飞行机动 + **左键照常开火** (2026-09-17 观战扩展批, 用户补充指定);
 // 引导巡飞弹时左键仍是"手动引爆"(上面那段, 优先级更高), 故此处只在未控弹时接管
-if(p.flying){ specFlightMove(p,dt); playerFireTick(dt,true); updateInteractHint(); return; }
+if(p.flying){ p.stamina=1; specFlightMove(p,dt); playerFireTick(dt,true); updateInteractHint(); return; }
 }
 const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
 const str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
@@ -639,11 +735,14 @@ if(!p.sprinting&&!p.prone&&p.onGround&&!p.braced){ leanTgt=(keys.KeyQ?-1:0)+(key
 p.leanT=dampF(p.leanT,leanTgt,10,dt);
 if(p.spectator) p.stamina=1; // 观战: 无限体力 —— 冲刺/屏息/跳跃均不消耗 (2026-09-02 用户指定)
 else if(p.sprinting){ p.stamina=Math.max(0,p.stamina-dt*0.22/STAM_SPRINT_MUL); p.stamUseT=nowT; }
-else if(p.holdBreath){ p.stamina=Math.max(0,p.stamina-dt*0.3); p.stamUseT=nowT; }
+// 屏息耗速 0.3→0.12/s (2026-10-06 体能批, 用户裁定"只降耗"): 旧值 0.3 是冲刺的 3.4 倍 —— 按住 Shift
+//   冲刺时一旦开镜(右键)会自动激活屏息, 满条 3.3s 耗光, 用户实报"跑步开枪体能异常加快"。0.12 ≈ 冲刺 1.36 倍,
+//   保留"屏息是有限资源"的设计但不再惩罚性的贵; 激活逻辑 (Shift+开镜) 维持原样不动。
+else if(p.holdBreath){ p.stamina=Math.max(0,p.stamina-dt*0.12); p.stamUseT=nowT; }
 // 大海致命化 (2026-10-01c 用户设想"上浮会迅速耗尽体力条"): 纯海战图 (terr:'opensea') 游泳**只耗不回**,
 //   满条 ~7.7s 耗尽 —— 比冲刺 (0.088/s) 更费力气; 耗尽后由下面游泳分支强制下沉接溺水链。陆战图游泳零变化。
 else if(swimming&&CAMPAIGN.terr==='opensea'){ p.stamina=Math.max(0,p.stamina-dt*CAPITAL_CFG.seaSwimDrain); p.stamUseT=nowT; }
-else if(nowT-(p.stamUseT||0)>1) p.stamina=Math.min(1,p.stamina+dt*0.16);
+else stamRegenTick(p,dt,nowT); // 回体单源 (1s 冷却窗 + 0.16/s), 与座位/巡飞弹早退分支共用
 const seaExhausted=swimming&&CAMPAIGN.terr==='opensea'&&p.stamina<=0.001;
 if(p.holdBreath&&p.stamina<=0.02) p.holdBreath=false;
 let speed=p.prone?1.15:p.crouch?2.2:(p.sprinting?6.4:4.3);
@@ -1047,8 +1146,12 @@ if(player.onBattery){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离�
 // 而 tryInteract 的 mortar-near 在它们**之前** ⇒ 站在"已架设迫击炮 + 本方坦克/舰艇"之间时, 提示写
 // "F 进入 PT 艇"、按下却是"操作迫击炮" (触发条件窄, 但属"三处逐级同序"里的真实错序)。
 // 这里把它提到 tanks 之前 (与 tryInteract 同一位置), 其余次序一律不动。
-for(const m of MORTARS){
-if(!m.alive||m.user) continue;
+// 准星锁定 (2026-10-06 交互批): 与 tryInteract 同一单源 xcInteractLock —— 锁定时只显示锁定物,
+// 无锁定时逐位走旧栈; 顺带把机枪/迫击炮等判据补齐到执行段同款 (empReady)。
+const xc=xcInteractLock();
+if(!xc||xc.kind==='mortar') for(const m of MORTARS){
+if(xc&&xc.obj!==m) continue;
+if(!m.alive||!empReady(m)) continue; // ★empReady 单源补齐 (旧版漏 cdLock: 重建冷却期提示"可用"按 F 却无响应)
 if(Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8){
 elm.style.display='block';
 elm.innerHTML=(m.owner===player)?t2('<b>F</b> 使用迫击炮 · <b>B</b> 回收'):t2('<b>F</b> 使用迫击炮');
@@ -1056,51 +1159,61 @@ return;
 }
 }
 for(const t of tanks){
+if(xc&&xc.kind!=='tank') break;
+if(xc&&xc.obj!==t) continue;
 if(t.alive&&t.team===player.team&&Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<4.5){
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> {0} {1}',t2(t.crewBot?'接管':'进入'),t2(t.name)); return;
 }
 }
 // 海战载具 (2026-09-20N 海战批): 走到艇边按 F 上艇 (陆上 4.5m / 水上游泳贴近 2.5m, 用户裁定①)
 {
+if(!xc||xc.kind==='naval'){
 const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
-if(nc){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> {0} {1}',t2((nc.crewBot||nc.driverBot)?'接管':'进入'),t2(nc.name)); return; }
+if(nc&&(!xc||xc.obj===nc)){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> {0} {1}',t2((nc.crewBot||nc.driverBot)?'接管':'进入'),t2(nc.name)); return; }
 }
-for(const mg of MG42S){
-if(!mg.user&&empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)){
+}
+if(!xc||xc.kind==='mg') for(const mg of MG42S){
+if(xc&&xc.obj!==mg) continue;
+if(!empReady(mg)||!empInReach(mg,player.pos.x,player.pos.y,player.pos.z,2.6)) continue; // ★empReady 补齐 (同上)
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用 {0}',t2((mg.def&&mg.def.name)||'重机枪')); return;
 }
-}
-for(const g of ATGUNS){
-if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
+if(!xc||xc.kind==='at') for(const g of ATGUNS){
+if(xc&&xc.obj!==g) continue;
+if(!empReady(g)||!empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)) continue; // ★empReady 补齐
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用反坦克炮'); return;
 }
-}
-for(const g of AAGUNS){
-if(!g.user&&empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)){
+if(!xc||xc.kind==='aa') for(const g of AAGUNS){
+if(xc&&xc.obj!==g) continue;
+if(!empReady(g)||!empInReach(g,player.pos.x,player.pos.y,player.pos.z,3)) continue; // ★empReady 补齐
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 使用防空炮'); return;
 }
-}
 // 岸防炮上炮提示 (2026-09-21 A#9 契约D): 半径/存活/占用判定全在 batteryNear 里 (单源), 这里只出文案
-if(typeof batteryNear==='function'&&batteryNear(player.pos.x,player.pos.z,3)){
-elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 操作岸防炮'); return;
+{
+if(!xc||xc.kind==='battery'){
+const b=(typeof batteryNear==='function')?batteryNear(player.pos.x,player.pos.z,3):null;
+if(b&&(!xc||xc.obj===b)){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 操作岸防炮'); return; }
+}
 }
 if(player.resupplyCd<=0){
-for(const ac of AMMO_CRATES){
+if(!xc||xc.kind==='ammo') for(const ac of AMMO_CRATES){
+if(xc&&xc.obj!==ac) continue;
 if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 补充弹药'); return;
 }
 }
 // 劫道模式: 护运玩家只能贴车补给
-if(GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===player.team){
+if((!xc||xc.kind==='truck')&&GAMEMODE==='convoy'&&CAMPAIGN.convoy.escortTeam===player.team){
 for(const t of trucks){
+if(xc&&xc.obj!==t) continue;
 if(!t.alive||t.escaped) continue;
 if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<3.6){
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 从运输车补充补给'); return;
 }
 }
 }
-if(player.team===0){
+if((!xc||xc.kind==='supply')&&player.team===0){
 for(const sp of SUPPLY_POINTS){
+if(xc&&xc.obj!==sp) continue;
 if(Math.hypot(sp.x-player.pos.x,sp.z-player.pos.z)<2.8){
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 从临时补给点补充补给'); return;
 }
@@ -1108,7 +1221,8 @@ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 从临时补给点补充�
 }
 }
 if(player.bandResupCd<=0&&player.bandages<player.maxBandages){
-for(const c of MED_CRATES){
+if(!xc||xc.kind==='medcrate') for(const c of MED_CRATES){
+if(xc&&xc.obj!==c) continue;
 if(c.team!==player.team||c.uses<=0) continue;
 if(Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.6){
 elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 拿取绷带'); return;

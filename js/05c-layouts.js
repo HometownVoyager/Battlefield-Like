@@ -2611,6 +2611,28 @@ propTake(x,z,1.1);
 	AMMO_CRATES.push(deck?{x,z,y:g0,ship:deckIdx,mesh:m,lid}:{x,z,y:g0});
 return true;
 }
+// 弹药箱"贴掩体"评分 (2026-10-06 生成平衡批): 用户实报"补给箱露天乱摆, 附近有敌人时拿补给即被秒"。
+// 主掩体分 = 距最近建筑足迹边缘的距离 (1.7m 甜区: 墙体替箱子挡弹线, 又不堵门窗通行); 次选沙袋/箱桶/
+// 树干等既有道具 (PROPS, 1.3m 甜区, 权重略低)。距离用 freeSpot/propFree 的 margin 参数二分近似 ——
+// 两者都是"距遮挡 < margin 即 false"的判据, 恰好可以反演距离。纯查询: 不登记占位、不消耗随机数。
+function crateCoverScore(x,z){
+let s=0;
+{
+let lo=0.5,hi=9;
+if(!freeSpot(x,z,hi)){                    // 9m 外无墙 ⇒ 露天, 建筑分记 0
+for(let i=0;i<9;i++){ const mid=(lo+hi)*0.5; if(freeSpot(x,z,mid)) lo=mid; else hi=mid; }
+s=Math.max(0,1-Math.abs(lo-1.7)/2.8);
+}
+}
+{
+let lo=0.9,hi=6;
+if(!propFree(x,z,hi)){
+for(let i=0;i<8;i++){ const mid=(lo+hi)*0.5; if(propFree(x,z,mid)) lo=mid; else hi=mid; }
+s=Math.max(s,0.75*Math.max(0,1-Math.abs(lo-1.3)/2.2));
+}
+}
+return s;
+}
 // 弹药箱: 每个旗点与基地附近 (通用, 避让建筑足迹); 大桥旗点固定放在桥面上, 避免落进河谷
 FLAGS.forEach(f=>{
 // 甲板旗点 (P4 全海图): 弹药箱落在**甲板面**上 (capDeckWorldY 载入期解析, 此刻大舰还没生成) ——
@@ -2633,10 +2655,24 @@ if(!okD) ammoCrate(f.x+3,f.z,true,capDeckWorldY(f.ship),f.ship);
 }
 else if(BRIDGE&&onBridge(f.x,f.z,4)){ const p=bridgePt(-4,1.4); if(!ammoCrate(p[0],p[1])) ammoCrate(p[0],p[1],true); } // 桥缘沙袋半径内会被互斥挡住, 兜底强放
 else{
-let ok=false;
+let ok=false, ox=0, oz=0;
 for(let t=0;t<32&&!ok;t++){
 const px=f.x+wr(-10,10), pz=f.z+wr(-10,10); // 巷战大屋(14×17)足迹可覆盖整个±8盘面, 需更大搜索圈
-if(freeSpot(px,pz,0.5)) ok=ammoCrate(px,pz); // 必须在建筑足迹外(门窗通行区)
+// ★2026-10-06 生成平衡批: 旧版"首个净位即落箱"天然偏向露天随机点。现在随机采样段的**判定谓词与
+//   早退时机照旧** (freeSpot+propFree, wr() 消耗逐位一致 ⇒ 全局布景随机流零漂移), 但记下首个净位后
+//   先不落箱 —— 由下面确定性环扫做"贴墙/贴掩体"优选, 分数显著更高才换位。
+if(freeSpot(px,pz,0.5)&&propFree(px,pz,1.1)){ ok=true; ox=px; oz=pz; }
+}
+if(ok){
+let bs=crateCoverScore(ox,oz), bx=ox, bz=oz;
+for(let a=0;a<24;a++){
+const ang=(a%8)*TAU/8, rr=1.5+Math.floor(a/8)*2.4; // 1.5/3.9/6.3m 三圈 × 8 方位
+const cx2=f.x+Math.sin(ang)*rr, cz2=f.z+Math.cos(ang)*rr;
+if(!freeSpot(cx2,cz2,0.5)||!propFree(cx2,cz2,1.1)) continue;
+const s2=crateCoverScore(cx2,cz2);
+if(s2>bs+0.3){ bs=s2; bx=cx2; bz=cz2; } // 显著更优才挪 (不为挪几厘米折腾既有布局)
+}
+ok=ammoCrate(bx,bz);
 }
 // 兜底: 方向环扫描(不消耗随机数), 只在 freeSpot 通过处强放——绕过道具互斥但不绕过建筑
 if(!ok)for(let a=0;a<48;a++){

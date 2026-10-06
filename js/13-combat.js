@@ -263,7 +263,9 @@ endD=sr.t;
 const hitP=V3(origin.x+dir.x*sr.t,origin.y+dir.y*sr.t,origin.z+dir.z*sr.t);
 bloodFX(hitP);
 let dmg=def.dmg*(sr.head?def.headMul:1);
-if(!shooter.isPlayer) dmg*=DIFF_TABLE[SETTINGS.diff].dmgMul;
+// 难度乘数 (2026-10-06 难度批拆列): Bot 对玩家用 pDmg (新列), Bot 对 Bot 维持 dmgMul (互殴烈度不变,
+// 用户裁定"只削 Bot 对玩家"); 玩家射手不乘任何难度列 (原口径)。
+if(!shooter.isPlayer) dmg*=sr.sol.isPlayer?DIFF_TABLE[SETTINGS.diff].pDmg:DIFF_TABLE[SETTINGS.diff].dmgMul;
 // 伤害随距离衰减 —— 武器表单源 (2026-09-28 阶段三 P1): fallS 米起线性衰减, fallE 米到地板 fallF;
 // 缺省回落 = 旧全局曲线 (40 米起 / 220 米到 0.45)。玩家与 Bot 共用 fireBullet ⇒ 生态位自动同步 Bot。
 // 分档口径见 09a-defs 头注: 栓动 70/260/0.8 (远距几乎不衰减) > 半自动 45/220/0.6 > STG44 38/180/0.5 >
@@ -277,7 +279,10 @@ dmg*=lerp(1,_ff,clamp((sr.t-_fb)/Math.max(1,_fe-_fb),0,1));
 // "自己远距爆头也秒不死", 裁定保护只朝玩家单向 (Bot 永远爆头秒不死玩家, 玩家爆头照杀);
 // Bot 互射仍封顶 (战场消耗节奏维持 j 批口径)。距离衰减另有单源 (fallS/fallE/fallF):
 // 镜栓动 90/300/0.85 ⇒ 300m 爆头 204 照样秒, 普通栓动 70/260/0.8 ⇒ 全程爆头 156+ 也照杀 —— 衰减不是拦路者。
-if(sr.head&&!def.scoped&&!shooter.isPlayer&&dmg>HEAD_CAP) dmg=HEAD_CAP;
+// ★2026-10-06 难度批 (标准档, 用户裁定): 镜枪豁免对**玩家**关闭 —— 旧式 `!def.scoped` 豁免给了 Bot
+//   狙击手对玩家 240 一枪必杀的权限 (镜狙爆头), 是"精英=总被秒杀"的主诉源头。现在 Bot 射手对玩家的
+//   爆头一律封顶 95 (两枪才死); Bot 镜狙打 Bot 仍不限 (互殴烈度不变)。
+if(sr.head&&!shooter.isPlayer&&dmg>HEAD_CAP&&(!def.scoped||sr.sol.isPlayer)) dmg=HEAD_CAP;
 sr.sol.damage(dmg,shooter,sr.head);
 // 命中反馈 (2026-09-28 D7): 致命一击**不再补白档** —— damage() 内部 hp<=0 已走 die()→onPlayerKill(红档),
 // 旧版这里无条件 onPlayerHit 会**在同一帧把红档盖回白档**, 表现即"击中有表示、击杀却没有" (用户实报)。

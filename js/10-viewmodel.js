@@ -94,18 +94,19 @@ return g;
 //   与右臂并排 = "双臂同肩"。左臂修法 = **手不动、袖摆左下**: rotY 拉到 -0.6~-1.0 让袖管斜向
 //   画面左下角 (断口出画或贴左缘), 而手心落点用 pivot 反算补偿 (皮肤段在 -z, Ry 负角会把手甩向
 //   +x, pivot.x 同量左移抵消), 支撑手仍贴在护木/握把原位。
-function positionHands(key){
-const d=WPN_DEFS[key];
-if(d.rocket){
-VM.arms.R.position.set(0.01,-0.09,0.16); VM.arms.R.rotation.set(0.35,0,0);
-VM.arms.L.position.set(-0.089,-0.099,-0.16); VM.arms.L.rotation.set(0.5,-0.95,0);
-} else if(d.pistol){
-VM.arms.R.position.set(0.015,-0.06,0.13); VM.arms.R.rotation.set(0.25,0,0);
-VM.arms.L.position.set(-0.103,-0.09,0.082); VM.arms.L.rotation.set(0.5,-0.6,0);
-} else {
-VM.arms.R.position.set(0.02,-0.07,0.2); VM.arms.R.rotation.set(0.32,0,0);
-VM.arms.L.position.set(-0.08,-0.075,-0.24); VM.arms.L.rotation.set(0.5,-1.0,0);
+// 默认握位单源 (2026-10-05 五裁定): 换弹收尾要把手**精确**放回默认握位 (否则松 override 那一帧手弹跳),
+//   因此默认握位不能再只存在于 positionHands 的字面量里 —— 这里出数据, positionHands 只做应用。
+//   side: 0=右手 1=左手。
+function vmHandDefault(key,side){
+const d=WPN_DEFS[key]||{};
+if(d.rocket) return side? {pos:V3(-0.089,-0.099,-0.16),rot:V3(0.5,-0.95,0)} : {pos:V3(0.01,-0.09,0.16),rot:V3(0.35,0,0)};
+if(d.pistol) return side? {pos:V3(-0.103,-0.09,0.082),rot:V3(0.5,-0.6,0)} : {pos:V3(0.015,-0.06,0.13),rot:V3(0.25,0,0)};
+return side? {pos:V3(-0.08,-0.075,-0.24),rot:V3(0.5,-1.0,0)} : {pos:V3(0.02,-0.07,0.2),rot:V3(0.32,0,0)};
 }
+function positionHands(key){
+const L=vmHandDefault(key,1), R=vmHandDefault(key,0);
+VM.arms.L.position.copy(L.pos); VM.arms.L.rotation.set(L.rot.x,L.rot.y,L.rot.z);
+VM.arms.R.position.copy(R.pos); VM.arms.R.rotation.set(R.rot.x,R.rot.y,R.rot.z);
 }
 function ss(t,a,b){ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); }
 // 当前持的是哪一种 (2026-09-30 批): 四弹种单源 —— 与 22-hud 预演取弹种、18-game releaseNade 分流同一判序
@@ -125,9 +126,143 @@ if(m) m.visible=true;
 return m;
 }
 function pulse(t,a,b,c){ return t<b? ss(t,a,b) : 1-ss(t,b,c); }
+// 关键帧插值 (2026-10-05 四裁定): 换弹的夹/手路径改锚点表驱动 —— [k,x,y,z,rz] 五元组, 段内
+// smoothstep, 终点后保持末锚。多层嵌套 lerp (首版) 已证明写不干净, 废。
+function kfPose(kf,k){
+if(k<=kf[0][0]){ const a=kf[0]; return {x:a[1],y:a[2],z:a[3],rz:a[4]}; }
+for(let i=0;i<kf.length-1;i++){ const a=kf[i],b=kf[i+1];
+if(k<=b[0]){ const t=ss(k,a[0],b[0]);
+return {x:lerp(a[1],b[1],t),y:lerp(a[2],b[2],t),z:lerp(a[3],b[3],t),rz:lerp(a[4],b[4],t)}; } }
+const a=kf[kf.length-1]; return {x:a[1],y:a[2],z:a[3],rz:a[4]};
+}
+// 换弹手部姿态 (2026-10-05 五裁定): 掌位 (cam = 道具位 + 抓握偏移) → 中途位 (mid) → 默认握位的两段收束,
+//   腕位一律由掌位反解 —— **换弹里手的位置不再手调**。两段收束是必须的: 受弹口 (机匣正上方) 与默认握位
+//   (枪托握把) 之间直线回程会犁过枪托跟实拍 (旧版实测 2.1cm 穿模)。
+//   b0=出手段 (默认握位→抓握位), b1/b2=收手段 (→mid→默认)。
+function vmHoldPose(cam,mid,rotA,rotM,b0,b1,b2,key,side){
+const def=vmHandDefault(key,side), dp=vmPalmOf(def.pos,def.rot);
+const px=lerp(lerp(cam.x,mid.x,b1),dp.x,b2), py=lerp(lerp(cam.y,mid.y,b1),dp.y,b2), pz=lerp(lerp(cam.z,mid.z,b1),dp.z,b2);
+const rx=lerp(lerp(rotA.x,rotM.x,b1),def.rot.x,b2), ry=lerp(lerp(rotA.y,rotM.y,b1),def.rot.y,b2), rz=lerp(lerp(rotA.z,rotM.z,b1),def.rot.z,b2);
+const qx=lerp(dp.x,px,b0), qy=lerp(dp.y,py,b0), qz=lerp(dp.z,pz,b0);
+const sx=lerp(def.rot.x,rx,b0), sy=lerp(def.rot.y,ry,b0), sz=lerp(def.rot.z,rz,b0);
+return {pos:vmWristFor(qx,qy,qz,sx,sy,sz), rot:V3(sx,sy,sz)};
+}
 let vmSndFlags={};
 function vmResetSndFlags(){ vmSndFlags={}; } // owner 接口 (2026-09-06 B7b/P2-14: 06-engineering 跨文件写改经此)
 function vmPlayOnce(id,fn){ if(!vmSndFlags[id]){ vmSndFlags[id]=true; fn(); } }
+// ── 换弹: 道具搬运的几何单源 (2026-10-05 五裁定 "空间逻辑"重做) ──────────────────────
+// 上一版把"网格相交计数 = 0"当验收目标, 结果三条空间逻辑全错, 实机判"桥夹/漏夹把弹往顶上一怼、
+// 手不捏夹、然后弹夹消失" (与最老版无差别):
+//   ① 手不捏夹: 夹的路径与手的 override 位各自手调, 掌 (臂组局部 (0,0,-0.09) 的皮肤段) 落点与夹差
+//      2-4cm —— 出图实证"拳悬在夹旁 20cm"。**本版不许再手调腕位**: 只给"掌位 = 道具位 + 抓握偏移",
+//      腕位由 vmWristFor 反解 (掌心点里程 VM_PALM_L 与 buildArms 同源)。
+//   ② 压入被机匣吞掉: 落位取 p0.y-0.026, 而夹半高 0.0275 ⇒ 夹顶只剩 1.5mm 在机匣盖外 —— 视觉上
+//      "夹一沉进枪就没了"。**本版落位从模型量**: vmPortPlan 找"道具足迹正下方最高实体面" = 受弹口面,
+//      夹坐上去 = 底面沉口面下 5mm 即止 (设计内融合), 整夹仍可见。
+//   ③ 镜狙挡道: 镜管/镜座压在受弹口正上方 (kar98zf 管底 0.064 vs 口面 0.050), 全高夹插不进 ⇒ 旧版
+//      让它横着从镜管右侧塞进来。**本版改为"落位后退到挡道件之后"** (史实上桥夹正是压在后桥上),
+//      挡道件 (管/座/表尺) 的 z 末沿 + 夹半深 = 落位 z。
+// 另附一条: 道具的**显/隐只发生在携行位** (腰侧弹袋 = 画面外), 枪身上不许凭空出现/消失 (旧版顶置弹匣
+// 在枪上方 18cm 处原地隐、下置弹匣在枪内隐) —— 换匣的"旧匣拿走/新匣拿来"由这条撑起。
+const VM_PALM_L=0.09;                 // 掌心点里程 (buildArms 皮肤段中心 local (0,0,-0.09)); 改手模必同步
+const VM_BAG=[V3(0.205,-0.150,0.20), V3(-0.235,-0.135,0.16)]; // 携行位 [右手侧, 左手侧] (画面外, 弹袋向)
+function vmRotXyzV(x,y,z,rx,ry,rz){   // three 默认 XYZ 欧拉序: R = Rx·Ry·Rz
+const cx=Math.cos(rx),sx=Math.sin(rx),cy=Math.cos(ry),sy=Math.sin(ry),cz=Math.cos(rz),sz=Math.sin(rz);
+const ax=x*cz-y*sz, ay=x*sz+y*cz, az=z;
+const bx=ax*cy+az*sy, bz=-ax*sy+az*cy;
+return {x:bx, y:ay*cx-bz*sx, z:ay*sx+bz*cx};
+}
+function vmWristFor(px,py,pz,rx,ry,rz){  // 腕位 = 掌位 - R·(0,0,-VM_PALM_L)  (掌位 → 腕位反解)
+const o=vmRotXyzV(0,0,-VM_PALM_L,rx,ry,rz);
+return V3(px-o.x,py-o.y,pz-o.z);
+}
+function vmPalmOf(pos,rot){              // 腕位 → 掌位 (默认握位的掌点, 供收尾融回)
+const o=vmRotXyzV(0,0,-VM_PALM_L,rot.x,rot.y,rot.z);
+return {x:pos.x+o.x, y:pos.y+o.y, z:pos.z+o.z};
+}
+// ★2026-10-05 六裁定 (抓握偏移): 实机"弹夹穿模卡在右手腕上"的病根 = 掌位偏移量照抄了"手贴住道具"的
+//   直觉 (夹 + (0.008,-0.022,-0.038)) —— 拳盒半深 0.05 已越过夹半深 0.03, 夹后半截被拳吞掉、前半截被
+//   一袖之隔的袖管顶出 ⇒ 夹像"卡在手腕上"。抓握偏移改成**拳在道具下后方** (拳面贴道具背面 4mm),
+//   整只道具露在拳前上方。抓握在根姿态定型后统一解算 (拳姿态随枪的俯仰/滚转)。
+let vmHandGun=null;                       // 本帧待解算的抓握 {c, off, grip, mid, midRot, b0, b1, b2, side}
+// 受弹口面 + 落位 (从模型量; 返回 {portY, seatZ, hx, hy, hz})
+//   portY = 道具 x/z 足迹正下方最高实体面 (机匣盖/机匣/枪身, 各枪不同: mosin 枪身 0.0205 ~ garand 0.0525);
+//   seatZ = 若"口面之上"有挡道件 (狙击镜管/镜座/表尺) 与道具的 z 足迹相交 ⇒ 落位后退到它之后, 否则用 p0.z。
+function vmPortPlan(g,prop){
+if(prop.userData.portPlan) return prop.userData.portPlan;   // 与枪姿态无关 ⇒ 每件只量一次 (vmEquip 重建即失效)
+const p0=prop.userData.p0, gp=prop.geometry.parameters||{};
+const hx=(gp.width!==undefined?gp.width:(gp.radiusTop||0.04))/2||0.01;
+const hy=(gp.height!==undefined?gp.height:0.05)/2;
+const hz=(gp.depth!==undefined?gp.depth:(gp.radiusTop||0.04))/2||0.01;
+const M=new THREE.Matrix4(), V=new THREE.Vector3(), B=new THREE.Box3();
+const xs=hx+0.008;                                 // x 净空带宽 = 半宽 + 8mm (道具实际路径会左右偏一点;
+const hits=[];
+g.gun.traverse(n=>{
+if(!n.isMesh||n===prop||n===g.clip||n===g.mag||n===g.reloadRocket) return;
+const chain=[];
+for(let a=n;a&&a!==g.gun;a=a.parent){ if(a===g.boltHandle||a===g.reloadRocket) return; chain.push(a); } // 拉机柄/装填道具让开; **枪栓本体要算** (mosin 桥夹就压在栓体上, mosin 枪身顶 0.0205 而栓顶 0.041)
+const b=n.geometry.boundingBox||(n.geometry.computeBoundingBox(),n.geometry.boundingBox);
+if(!b) return;
+M.identity();                                      // G 局部 ← 零件: 走**局部矩阵链** (matrixWorld 供渲染期更新,
+for(let i=chain.length-1;i>=0;i--){ chain[i].updateMatrix(); M.multiply(chain[i].matrix); } // 换弹里拿到的是上一帧的) —— 这样零件自带旋转 (横置镜管 rot.x=HPI) 也量得准
+B.makeEmpty();
+for(let i=0;i<8;i++){ V.set(i&1?b.max.x:b.min.x, i&2?b.max.y:b.min.y, i&4?b.max.z:b.min.z).applyMatrix4(M); B.expandByPoint(V); }
+if(B.max.x<=p0.x-xs||B.min.x>=p0.x+xs) return;                  // x 带外 ⇒ 不管 (侧置镜/表尺不约束落位)
+if(B.min.z>=p0.z+0.22||B.max.z<=p0.z-0.22) return;              // z 离落位太远 ⇒ 不管
+hits.push({x0:B.min.x, x1:B.max.x, y0:B.min.y, y1:B.max.y, z0:B.min.z, z1:B.max.z});
+});
+// 承托面 = 顶面不高于"造型静止位 +2cm"的最高实体面 (在道具足迹正下方); 高于它的算**挡道件**
+//   (狙击镜管/镜座压在口上方, 顶置弹仓的枪上还有提把/表尺), 不能把镜管顶当成"口面"
+//   (kar98zf 会算成 0.106 而非机匣盖 0.050)。落位被挡道件向后挤开之后, 承托面按**落位处**重取
+//   (mosinpu 桥夹退到镜座之后就压在抽回的枪栓上: 栓顶 0.041 ≫ 枪身顶 0.0205)。
+const cap=p0.y+0.02;
+const hitsX=[]; for(const h of hits) if(!(h.x1<=p0.x-xs||h.x0>=p0.x+xs)) hitsX.push(h);
+const supportAt=z=>{ let t=-1e9;
+for(const h of hitsX){ if(h.z1<=z-hz||h.z0>=z+hz) continue; if(h.y1<=cap&&h.y1>t) t=h.y1; }
+return t; };
+let portY=supportAt(p0.z);
+if(portY<-1e8) portY=p0.y;                  // 兜底 (模型没量到承托面: 用造型静止位)
+let seatZ=p0.z, bz=-1e9;                    // 挡道件: 落位必须退到**所有**压在口上方的件之后
+for(const h of hitsX){
+if(h.y0<portY+0.004) continue;            // 没高出受弹口面 ⇒ 不是挡道件
+if(h.z1>bz) bz=h.z1;
+}
+if(bz>-1e8) seatZ=Math.max(p0.z, bz+hz+0.002);
+if(seatZ!==p0.z){ const p2=supportAt(seatZ); if(p2>portY) portY=p2; }
+// 腹面 (2026-10-05 用户四裁定·镜狙"从枪身下方往上塞"): 道具足迹下**最低底面** = 枪身腹 (枪托底/机匣底),
+//   供自下而上的塞入用 —— 只取 min y0 (侧旁的枪栓/挂环底面高, 不会把腹面抬高); 顶面仍走 portY。
+const bellyAt=z=>{ let b=1e9; for(const h of hitsX){ if(h.z1<=z-hz||h.z0>=z+hz) continue; if(h.y0<b) b=h.y0; } return b; };
+let bellyY=bellyAt(p0.z); if(bellyY>1e8) bellyY=p0.y-0.055;   // 兜底: 量不到胎就用造型静止位下 5.5cm
+return prop.userData.portPlan={portY:portY, seatZ:seatZ, hx:hx, hy:hy, hz:hz, bellyY:bellyY};
+}
+// 弹匣/弹盘/漏斗 换匣搬运 (2026-10-05 五裁定): s=+1 下置弹仓 (下拉抽匣/下方上推), s=-1 顶置 (上提/下压)。
+//   时间轴: 抽/提出 (0.08-0.30) → 带到携行位 (0.30-0.44, 画面外, 到此隐) → 新匣自携行位返场 (0.50 同点显)
+//   → 送到匣口外 (0.62) → 推入入榫 (0.74 回到模型静止位)。返回当前匣位供持匣手跟随。
+function vmMagCarry(g,k,s,side){
+const mg=g.mag, p0=mg.userData.p0, r0=mg.userData.r0;
+const gp=mg.geometry.parameters||{}, hy=(gp.height!==undefined?gp.height:0.12)/2;
+const hz=(gp.depth!==undefined?gp.depth:(gp.radiusTop||0.03))/2;
+const out=Math.max(hy,hz)*0.55+0.035;               // 出榫行程: 匣底脱出手能绕过的量 (扁平大件按半径算)
+const hs=side?-1:1;                                 // 手侧 (右手 +x / 左手 -x): 抽出/推入时向手侧让开
+const dir=-s;                                       // 出榫方向 (+1 上 / -1 下)
+const bag=VM_BAG[side];
+const KF=[
+[0.08, p0.x, p0.y, p0.z, 0],
+[0.30, p0.x+hs*0.05, p0.y+dir*out, p0.z+0.02, -dir*0.18],
+[0.38, p0.x+hs*0.07, p0.y+dir*(out+0.03), p0.z+0.03, -dir*0.35], // 先沿出榫方向离枪 (上/下 + 向手侧)…
+[0.46, bag.x, bag.y+dir*0.03, bag.z, -dir*0.5],                  // …再转携行位 (袋), 到此隐
+[0.52, bag.x, bag.y+dir*0.03, bag.z, -dir*0.4],                  // 新匣自携行位同点返场
+[0.56, p0.x+hs*0.075, p0.y+dir*(out+0.065), p0.z+0.05, -dir*0.3],// 先举到匣口斜上方 (免得直线回程犁过枪托)
+[0.62, p0.x+hs*0.025, p0.y+dir*(out+0.02), p0.z+0.015, -dir*0.15],
+[0.74, p0.x, p0.y, p0.z, 0],
+];
+const c=kfPose(KF,k);
+const vis=(k>0.06&&k<0.46)||k>0.52;
+mg.visible=vis;
+mg.position.set(c.x,c.y,c.z);
+mg.rotation.set(r0.x,r0.y,r0.z+c.rz);
+return c;
+}
 function updateViewModel(dt,player){
 const d=WPN_DEFS[VM.key]||{};
 const w=player.curW;
@@ -188,7 +323,8 @@ rx+=VM.recoilP; oz+=VM.kickZ;
 const g=VM.gunParts;
 let handLOverride=null, handROverride=null;
 if(g.bolt&&!g.boltHandle) g.bolt.position.z=g.bolt.userData.z0??(g.bolt.userData.z0=g.bolt.position.z);
-if(g.mag){ g.mag.userData.p0??(g.mag.userData.p0=g.mag.position.clone()); }
+if(g.mag){ g.mag.userData.p0??(g.mag.userData.p0=g.mag.position.clone()); g.mag.userData.r0??(g.mag.userData.r0=g.mag.rotation.clone()); }
+if(g.clip){ g.clip.userData.p0??(g.clip.userData.p0=g.clip.position.clone()); g.clip.userData.r0??(g.clip.userData.r0=g.clip.rotation.clone()); }
 if(VM.state==='draw'){
 const k=1-ss(nt,0,1);
 oy-=k*0.25; rx+=k*0.9; rz+=k*0.3;
@@ -266,49 +402,160 @@ if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags=
         handROverride={pos:V3(0.05,-0.04-pat*0.05,-0.1),rot:V3(-0.2-pat*0.5,0,0)};
       }
     } else if(d.enbloc){
-if(g.bolt){ g.bolt.position.z=(g.bolt.userData.z0)+pulse(k,0.05,0.2,0.85)*0.08; }
-vmPlayOnce('r1',()=>{});
-if(k>0.1) vmPlayOnce('r2',()=>AudioSys.metalSlide(0.25,0.09,1000,1800));
-if(g.clip){
-g.clip.visible=k>0.25&&k<0.62;
-const ins=ss(k,0.3,0.6);
-g.clip.position.set(0,0.05+(1-ins)*0.1,-0.04);
-}
-if(k>0.28&&k<0.62) handROverride={pos:V3(0.03,0.02+(1-ss(k,0.3,0.6))*0.1,-0.03),rot:V3(-0.5,0,0)};
+// ── M1 加兰德漏夹 (2026-10-05 六裁定 = 拳位改下后方 + 真受弹口) ──────────────────
+// 实机第二批判 "弹夹穿模卡在右手腕上 + 从步枪枪机正上方硬塞入", 两条都是空间逻辑:
+//   ① 拳位: 旧偏移 (夹+(0.008,-0.022,-0.038)) 把拳**套在夹外**: 拳盒 (半深 0.05) 越过夹 (半深 0.03)
+//      ⇒ 夹后半在拳里、前半顶着袖管 ⇒ "卡在手腕上"。本版拳在夹**下后方**, 拳面贴夹背 4mm。
+//   ② 机匣顶是实心板 ⇒ 夹怎么落位都是"穿"机匣顶。本版机匣开**真受弹口** (见 09-weapons garand 支),
+//      夹是**沉进口里**的: 压入段夹底进口 3cm, 拳底压到口沿即止 (拳不进枪, 夹不入拳)。
+// 史实链: 取夹 → 举到口上 → 压进仓 3cm → 手撤离 ("加兰德拇指") → 枪栓复进把夹推到底。
+const openK=ss(k,0.05,0.18), closeK=ss(k,0.66,0.78);
+if(g.bolt) g.bolt.position.z=(g.bolt.userData.z0??-0.02)+(openK-closeK)*0.08;
+if(k>0.08) vmPlayOnce('r2',()=>AudioSys.metalSlide(0.25,0.09,1000,1800));
 if(k>0.58) vmPlayOnce('r3',()=>AudioSys.click(1500,0.3,0.04));
-if(k>0.8) vmPlayOnce('r4',()=>AudioSys.metalSlide(0.3,0.07,1400,900));
-} else if(d.type==='bolt'){
-const bo=pulse(k,0.05,0.22,0.78);
-if(g.boltHandle) g.boltHandle.rotation.z=bo*-1.1;
-if(g.bolt) g.bolt.position.z=(g.bolt.userData.z0??0.05)+pulse(k,0.12,0.3,0.72)*0.09;
+if(k>0.72) vmPlayOnce('r4',()=>AudioSys.metalSlide(0.3,0.07,1400,900));
+const roll=pulse(k,0.05,0.2,0.74);
+rz+=roll*0.20; ry+=roll*0.03;   // 枪往镜头一侧滚: 把受弹口面转向观察者 (旧版滚反了, 口面背对镜头)
+if(g.clip){
+const pl=vmPortPlan(g,g.clip);
+const hy=pl.hy, hz=pl.hz, rim=pl.portY, sz=pl.seatZ;
+const pressY=rim+hy-0.030;    // 压入: 夹底沉进口内 3cm (拳底正好压到口沿)
+const homeY=rim-hy-0.028;     // 枪栓复进推到底: 夹顶没到仓底之下 (整夹进枪 ⇒ 就地隐形)
+const KF=[
+[0.10, 0.205,-0.150, 0.200,-0.85],             // 携行位 (袋): 夹在手里, 自画面右下入画
+[0.30, 0.095, rim+0.100, sz+0.055,-0.42],      // 举到枪右前上方 (清过机匣/表尺)
+[0.44, 0.014, rim+hy+0.034, sz+0.030,-0.14],   // 收到受弹口斜上方对正 (夹底离口沿 3.4cm)
+[0.50, 0.000, rim+hy+0.014, sz+0.006,-0.06],   // 落到口沿正上方 (x 先收回中: 夹比仓口只窄 6mm)
+[0.60, 0.000, pressY, sz,-0.03],               // **压入**: 夹底沉进口内 3cm
+[0.66, 0.000, pressY-0.004, sz,-0.03],         // 最后按一下 (卖力)
+[0.84, 0.000, homeY, sz, 0],                   // 枪栓复进把夹推到底 (整夹进枪)
+];
+const c=kfPose(KF,k);
+g.clip.visible=k>0.12&&k<0.84;
+g.clip.position.set(c.x,c.y,c.z); g.clip.rotation.set(0,0,c.rz);
+const pr=ss(k,0.50,0.62);
+oy-=pr*0.012; rx+=pr*0.018;
+// 抓握 (枪系): 拳在夹的**下后方** —— 拳面贴夹背 4mm 设计内融合, 夹整只露在拳前上方; 拳底到口沿即止。
+vmHandGun={c:c, off:[0.010,-0.016,hz+0.046], grip:[0.30,0.30,0],
+mid:{x:0.155,y:-0.045,z:0.075}, midRot:{x:-0.10,y:0.25,z:0},
+b0:1, b1:ss(k,0.58,0.72), b2:ss(k,0.78,0.92), side:0};
+}
+    } else if(d.type==='bolt'){
+// ── 栓动桥夹 (2026-10-05 五裁定 = 空间逻辑重做) ─────────────────────────────────
+// 史实链: 手自弹袋取夹 → 举到受弹口**上方** → 夹压进仓 (弹入匣) → 空夹捏在手里撤走 → 关栓。
+// 改前病: 落位 p0.y-0.026 (夹顶只剩 1.5mm 在机匣盖外, 一压就"消失") + 腕位手调 (手不捏夹) +
+// 夹悬在口上滑过不进仓 (上一版为刷"0 穿模"而设)。本版落位/落位 z 由 vmPortPlan 从模型量
+// (镜狙自动退到镜管之后 = 机匣后桥, 史实上桥夹正是压在那里), 空夹"提起→撇向右下→携行位才隐"。
+const openK=ss(k,0.05,0.2), closeK=ss(k,0.7,0.84);
+if(g.boltHandle) g.boltHandle.rotation.z=(openK-closeK)*-1.1;
+if(g.bolt) g.bolt.position.z=(g.bolt.userData.z0??0.05)+(openK-closeK)*0.09;
 if(k>0.08) vmPlayOnce('r1',()=>AudioSys.metalSlide(0.22,0.1,800,1500));
-if(d.scoped){
-// 狙击枪: 瞄准镜挡住机匣顶部, 装填时枪身内翻让机匣口转向右上方, 弹夹从右侧斜插, 不穿过镜体
-const roll=pulse(k,0.04,0.22,0.86);
-rz+=roll*0.62; ry-=roll*0.12; rx+=roll*0.06; ox+=roll*0.018;
+if(k>0.58) vmPlayOnce('r2',()=>AudioSys.click(1300,0.28,0.04));
+if(k>0.72) vmPlayOnce('r3',()=>AudioSys.metalSlide(0.25,0.09,1500,800));
+const scoped=!!d.scoped;
+// 滚转 + 俯仰 (俯仰才是"看得见机匣盖口面"的来源, 滚转只是转屏面)。镜狙 2026-10-05 四裁定后改走
+//   "从枪身下方往上塞" (见下), 不再需要把受弹口摆向镜头 —— 滚转收成轻微侧倾 (不得再大幅翻滚),
+//   顺手把枪身腹面侧给镜头; 非镜枪仍自上压入, 滚转维持原量。
+const roll=pulse(k,0.06,0.2,0.86);
+rz-=roll*(scoped?0.32:0.3); ry+=roll*0.05; rx+=roll*0.03; ox-=roll*(scoped?0.008:0.006);
 if(g.clip){
-g.clip.visible=k>0.28&&k<0.66;
-const ins=ss(k,0.32,0.6);
-g.clip.position.set(lerp(0.078,0.028,ins),lerp(0.0,0.048,ins),lerp(0.055,0.005,ins));
-g.clip.rotation.set(0,0,lerp(-1.15,-0.3,ins));
-}
-if(k>0.3&&k<0.68) handROverride={pos:V3((g.clip?g.clip.position.x:0.05)+0.022,(g.clip?g.clip.position.y:0.04)-0.052,(g.clip?g.clip.position.z:0.02)+0.075),rot:V3(-0.55,0,-0.3)};
+const pl=vmPortPlan(g,g.clip);
+if(scoped){
+// ── 镜狙: 从枪身下方往上塞 (2026-10-05 用户四裁定) ─────────────────────────────────
+// 镜管横压在受弹口正上方 (kar98zf 管底 0.064 vs 口面 0.050), 桥夹自上压不进 —— 史实狙击型也多为
+//   单发装填; 用户裁定: 不走上面, 改"自枪身下方往上塞": 夹自画面右下 (弹袋) 沿枪身右下缘上升 →
+//   收到弹仓口正下方 → 贴着腹面**上顶**: 夹顶先进枪身、依枪体自遮挡逐步没入 (不是瞬移消失), 整只
+//   没入即隐形; 拳**在夹正下方**顶夹底上推, 到腹面即停 (指节不进枪身)。此路彻底绕开镜管与
+//   "从正上方硬塞"的观感。腹面/没入深度从模型量 (vmPortPlan.bellyY)。
+const hy=pl.hy, belly=pl.bellyY, ez=g.clip.userData.p0.z-0.12;   // 受弹位置 = 机匣稍前的**弹仓口**
+// (夹的造型静止位在机匣后桥; 后桥正下方离镜头太近、它在画面里的投影正好落在画面下缘之下 —— 出图
+//  实证整段动作在画外。前移 12cm 到弹仓位置: 既合弹匣该待的地方, 又因离镜头更远而抬进画面。)
+const touchY=belly-hy;             // 上顶起点: 夹顶贴到枪身腹面 (弹仓口)
+const inY=belly+0.030;             // 上顶终点: 夹底沉到腹面内侧 2.5mm ⇒ 整只被枪体遮住
+const KF=[
+[0.12, 0.205,-0.150, 0.200,-0.55],              // 携行位 (画面右下·弹袋)
+[0.32, 0.120,-0.135, 0.060,-0.30],              // 沿枪身右下缘上升到腹下外侧
+[0.46, 0.030, touchY-0.032, ez+0.014,-0.10],    // 收到弹仓口正下方 (夹顶离腹面 3.2cm)
+[0.54, 0.002, touchY, ez,-0.03],                // 贴到枪身腹面 (弹仓口)
+[0.58, 0.001, touchY+0.006, ez,-0.03],          // 顶紧 (卖力一下: 夹顶已进仓口)
+[0.70, 0.000, inY, ez, 0],                      // **上顶进枪身** (整只没入)
+];
+const c=kfPose(KF,k);
+g.clip.visible=k>0.14&&k<0.70;
+g.clip.position.set(c.x,c.y,c.z); g.clip.rotation.set(0,0,c.rz);
+// 抬枪 (2026-10-05 出图实证): 枪身腹面在画面下缘之下, 不抬枪则"手+夹自画面下方上来"整段在画外
+//   (只有夹顶一条黄边擦到下缘)。换弹期把枪整体抬起 (同包扎态"整体抬高到视野中部"的手法), 收尾
+//   自己落回 —— 根姿态抬升把枪/双臂一起带走, 左握把手不会脱手; 夹的枪系坐标不受影响。
+const lift=ss(k,0.14,0.34)-ss(k,0.72,0.90);
+oy+=lift*0.070;
+const pr=ss(k,0.54,0.70);
+oy-=pr*0.012; rx+=pr*0.018;     // 上顶到位那一下的抵肩反馈
+if(k>0.66) vmPlayOnce('r2b',()=>AudioSys.click(1500,0.3,0.04));
+// 抓握: 拳在夹**正下方** (掌面朝上贴夹底 4mm) —— 夹升过腹面后拳停在腹面下 (指节不进枪身)。
+vmHandGun={c:{x:c.x, y:Math.min(c.y, belly+hy), z:c.z}, off:[0.012,-(hy+0.030),pl.hz*0.45], grip:[0.18,0.28,0],
+mid:{x:0.135,y:-0.075,z:0.060}, midRot:{x:0.10,y:0.30,z:0},
+b0:1, b1:ss(k,0.70,0.83), b2:ss(k,0.83,0.96), side:0};
 } else {
-if(g.clip){
-g.clip.visible=k>0.3&&k<0.62;
-const ins=ss(k,0.34,0.58);
-g.clip.position.set(0,0.05+(1-ins)*0.09,0.0);
+const seatY=pl.portY+pl.hy-0.005, hoverY=pl.portY+pl.hy+0.032, sz=pl.seatZ;
+const KF=[
+[0.10, 0.205,-0.150, 0.20,-0.9],                // 携行位 (袋): 夹已在手中
+[0.30, 0.105, pl.portY+0.105, sz+0.055,-0.42],  // 举到枪右前上方 (高出受弹口, 清过机匣)
+[0.44, 0.014, hoverY, sz+0.012,-0.16],          // 移到受弹口正上方
+[0.57,-0.006, seatY, sz,-0.08],                 // **压入口**: 底面沉进口面 5mm (略偏左: 让开枪栓本体)
+[0.67,-0.006, seatY-0.008, sz,-0.08],           // 压到底 (再沉 8mm)
+[0.78, 0.055, pl.portY+pl.hy+0.045, sz+0.015,-0.34], // 空夹提起 (仍捏在手里)
+[0.90, 0.205,-0.150, 0.20,-0.85],               // 撇向右下, 到携行位出画 ⇒ 隐形
+];
+const c=kfPose(KF,k);
+g.clip.visible=k>0.12&&k<0.90;
+g.clip.position.set(c.x,c.y,c.z); g.clip.rotation.set(0,0,c.rz);
+const pr=ss(k,0.52,0.62);
+oy-=pr*0.012; rx+=pr*0.018;
+// 抓握 (枪系, 2026-10-05 六裁定同加兰德): 拳在夹的下后方, 拳面贴夹背 4mm —— 夹整只露在拳前上方;
+// 0.78 起撤手 (提起→托颈上方→握把, 两段)。抓握偏移见 vmHandGun 单源 (拳在夹下后方)。
+vmHandGun={c:c, off:[0.010,-0.016,pl.hz+0.046], grip:[0.30,0.30,0],
+mid:{x:0.145,y:-0.030,z:0.085}, midRot:{x:-0.10,y:0.25,z:0},
+b0:1, b1:ss(k,0.78,0.88), b2:ss(k,0.88,0.97), side:0};
 }
-if(k>0.32&&k<0.64) handROverride={pos:V3(0.03,0.04+(1-ss(k,0.34,0.58))*0.09,0.02),rot:V3(-0.5,0,0)};
+    } else if(g.mag){
+// 无桥夹的顶置弹仓 (博斯/PTRD 反坦克枪等): 上提出匣 → 新匣自上方压入 (走 vmMagCarry 搬运单源)
+const c=vmMagCarry(g,k,-1,0);
+const gp0=g.mag.geometry.parameters||{}, mhz=(gp0.depth!==undefined?gp0.depth:(gp0.radiusTop||0.03))/2;
+vmHandGun={c:c, off:[0.026,-0.010,mhz+0.046], grip:[0.30,0.30,0],
+mid:{x:0.06,y:0.12,z:0.13}, midRot:{x:-0.24,y:0.34,z:0},
+b0:ss(k,0.03,0.14), b1:ss(k,0.76,0.88), b2:ss(k,0.88,0.97), side:0};
+if(k>0.62) vmPlayOnce('r3',()=>AudioSys.click(1400,0.3,0.05));
 }
-if(k>0.56) vmPlayOnce('r2',()=>AudioSys.click(1300,0.28,0.04));
-if(k>0.78) vmPlayOnce('r3',()=>AudioSys.metalSlide(0.25,0.09,1500,800));
 } else {
-const p0=g.mag?g.mag.userData.p0:null;
+// 弹匣类 (2026-10-05 用户二次裁定分流):
+//   手枪/冲锋枪/卡宾 (d.vmLegacy) = **完全回调旧版**快速换匣: 下拉 0.18 → 短隐 → 自下方推入,
+//   左手固定辅位。首版"携匣大回环"(出匣 0.42/入榫 0.5, 弹匣甩出一根枪长) 实机判浮夸, 整体撤销;
+//   驳壳枪桥夹压弹动画连带回撤 (弹夹排道具件一并删)。
+//   机枪/反坦克枪 (topmag/pan/hopper/atr) 与 BAR 等下置弹仓保留重做后的物理路径 (顶置上抛上压 /
+//   下置下拉下推, 走 vmMagCarry 单源): 旧版"顶置弹匣沉进机匣再从枪身里升回来"是用户立项要修的
+//   反物理, 不随本轮回调。
+const mp0=g.mag?g.mag.userData.p0:null;
+if(d.vmLegacy){
+const p0=mp0;
 const out=pulse(k,0.08,0.3,0.34), inn=ss(k,0.42,0.66);
 if(g.mag&&p0){
 g.mag.position.set(p0.x, p0.y-out*0.18-(1-inn)*(k>0.36?0.18:0), p0.z+out*0.03);
 g.mag.visible=!(k>0.34&&k<0.4);
+}
+if(k>0.06&&k<0.7) handLOverride={pos:V3(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13),rot:V3(0.5,0,0)};
+else if(k>=0.7&&k<0.97) handLOverride={pos:V3(0.02,-0.02,-0.05),rot:V3(0.3,0,0)};
+} else if(g.mag&&mp0){
+// 机枪/反坦克枪/弹盘/漏斗/BAR (非 vmLegacy): 走 vmMagCarry 搬运单源 —— 提/抽出榫 → 带到携行位
+// (画面外, 到此隐) → 新匣自携行位返场 → 送到匣口外 → 推入入榫。旧版把"显/隐"做在枪身上
+// (顶置匣在枪上方 18cm 处原地隐、下置匣在枪体内隐) ⇒ 观感"弹匣飞出去凭空没了"。
+const top=(d.wg==='topmag'||d.wg==='pan'||d.wg==='hopper'||d.wg==='atr');
+const s=top?-1:1, side=top?0:1;   // 顶置 = 右手上提 / 下置 = 左手下拉 (与旧批同一手序, 免得又换观感)
+const c=vmMagCarry(g,k,s,side);
+const gp=g.mag.geometry.parameters||{}, mhz=(gp.depth!==undefined?gp.depth:(gp.radiusTop||0.03))/2;
+vmHandGun={c:c, off:[side? -0.026:0.026, -0.010, mhz+0.046], grip:[0.30, side?-0.30:0.30, 0],
+mid:(top? {x:0.150,y:-0.020,z:0.080} : {x:-0.14,y:-0.10,z:-0.22}),
+midRot:(top? {x:-0.24,y:0.34,z:0} : {x:0.50,y:-0.72,z:0}),
+b0:ss(k,0.03,0.16), b1:ss(k,0.76,0.88), b2:ss(k,0.88,0.97), side:side};
 }
 if(k>0.1) vmPlayOnce('r1',()=>AudioSys.click(900,0.22,0.04));
 if(k>0.3) vmPlayOnce('r2',()=>AudioSys.metalSlide(0.15,0.08,600,300));
@@ -319,10 +566,14 @@ if(g.bolt) g.bolt.position.z=(g.bolt.userData.z0??0)+ch*0.07;
 if(g.slide) g.slide.position.z=-0.02+ch*0.055;
 vmPlayOnce('r4',()=>AudioSys.metalSlide(0.3,0.1,1200,700));
 }
-if(k>0.06&&k<0.7) handLOverride={pos:V3(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13),rot:V3(0.5,0,0)};
-else if(k>=0.7&&k<0.97) handLOverride={pos:V3(0.02,-0.02,-0.05),rot:V3(0.3,0,0)};
 }
-if(nt>=1){ VM.state='idle'; vmSndFlags={}; player.finishReload(); }
+// 收尾还原 (2026-10-05): 弹匣/弹夹在换弹里被搬走, 归位前先物归原位 —— 旧版靠曲线末端恰好
+// 回到原点"碰巧"不穿帮, 显式还原后加塞新动作才不会把枪留在缺匣状态。
+if(nt>=1){
+if(g.mag&&g.mag.userData.p0){ g.mag.position.copy(g.mag.userData.p0); if(g.mag.userData.r0) g.mag.rotation.copy(g.mag.userData.r0); g.mag.visible=true; }
+if(g.clip&&g.clip.userData.p0){ g.clip.position.copy(g.clip.userData.p0); if(g.clip.userData.r0) g.clip.rotation.copy(g.clip.userData.r0); g.clip.visible=false; }
+VM.state='idle'; vmSndFlags={}; player.finishReload();
+}
 }
 else if(VM.state==='bolt'){
 const k=nt;
@@ -451,6 +702,15 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
     }
     VM.root.position.set(px+ox,py+oy,pz+oz);
 VM.root.rotation.set(rx,ry,rz);
+// 抓握解算 (2026-10-05 六裁定): 到根姿态定型之后才解算 —— 拳姿态 = 根姿态 + 枪系抓握偏角 (随枪的
+//   俯仰/滚转一起走)。掌位 = 道具位 + 枪系抓握偏移, **同空间直取** (道具与手都是 inner 的子件: 枪组
+//   在 inner 里没有自身变换, 枪局部 = 手部覆盖的同一坐标系, 别再叠根位移)。
+if(vmHandGun){
+const hg=vmHandGun; vmHandGun=null;
+const hp=vmHoldPose({x:hg.c.x+hg.off[0], y:hg.c.y+hg.off[1], z:hg.c.z+hg.off[2]},
+hg.mid, V3(rx+hg.grip[0], ry+hg.grip[1], rz+hg.grip[2]), hg.midRot, hg.b0,hg.b1,hg.b2, VM.key, hg.side);
+if(hg.side) handLOverride=hp; else handROverride=hp;
+}
 positionHands(VM.key);
 if(handLOverride){ VM.arms.L.position.copy(handLOverride.pos); VM.arms.L.rotation.set(handLOverride.rot.x,handLOverride.rot.y,handLOverride.rot.z); }
 if(handROverride){ VM.arms.R.position.copy(handROverride.pos); VM.arms.R.rotation.set(handROverride.rot.x,handROverride.rot.y,handROverride.rot.z); }

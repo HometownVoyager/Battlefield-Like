@@ -509,7 +509,8 @@ if(this.state!=='dive'&&this.state!=='dogfight'){
 const ep=pickDogTarget(this);
 if(ep&&this.pos.y-gh0>PLANE_AI.joinAGL&&ep.pos.distanceTo(this.pos)<240*PLANE_DIFF[SETTINGS.diff].eng&&Math.random()<0.9){
 this.state='dogfight'; this.dogTgt=ep;
-this.fireT=Math.max(this.fireT,PLANE_DIFF[SETTINGS.diff].react);
+// 反应窗对玩家驾驶的机 ×1.5 (2026-10-06 难度批标准档: 只削对玩家, AI 互咬不变)
+this.fireT=Math.max(this.fireT,PLANE_DIFF[SETTINGS.diff].react*(ep.playerDriven?1.5:1));
 }
 }
 if(this.state==='dogfight'){
@@ -533,8 +534,9 @@ if(aim.y<floorY) aim.y=floorY;
 // 统一 lead 追击 (planeLeadAim 单源) + steerToward 原语; 开火窗口=机头对准提前点且进距。
 // 速度目标随距离连续过渡 (旧 d>90 一档从 spd[1] 跳到中值 = 速度指令台阶, 顺带抹平)。
 const dy=steerToward(this,aim,lerp(this.def.spd[0],this.def.spd[1],clamp((d-60)/80,0,1)),1,[-0.6,0.6]);
-if(this.fireT<=0&&Math.abs(dy)<0.12&&d<160*PLANE_DIFF[SETTINGS.diff].eng){
-this.fireT=this.def.rof*PLANE_DIFF[SETTINGS.diff].rof;
+// 开火门/射速对玩家驾驶的机放宽 (2026-10-06 难度批标准档): 进入距 ×0.85、射速 ×1.15 —— 只削对玩家。
+if(this.fireT<=0&&Math.abs(dy)<0.12&&d<160*PLANE_DIFF[SETTINGS.diff].eng*(ep.playerDriven?0.85:1)){
+this.fireT=this.def.rof*PLANE_DIFF[SETTINGS.diff].rof*(ep.playerDriven?1.15:1);
 this.fireMGBurst(this.crewBot||this.crew,1);
 if(Math.random()<0.12) AudioSys.gunshot('smg',this.pos.distanceTo(camera.position),0);
 }
@@ -609,10 +611,13 @@ else {
 const capT=(tgt.kind==='capital');
 const aimY=tgt.pos.y+(capT?tgt.spec.deckY+1.2:2);
 const PD=PLANE_DIFF[SETTINGS.diff];
+// 对玩家放宽 (2026-10-06 难度批标准档): 目标是玩家本人 (步行扫射) 或玩家驾驶的车时, 扫射进入距 ×0.8、
+// 射速 ×1.15 —— 航弹投放带不单列 (面杀伤, 且有掩体减免), 只削机炮扫射的点名压力。
+const _pTg=(tgt===player)||!!tgt.playerDriven;
 const dy=steerToward(this,V3(tgt.pos.x,aimY,tgt.pos.z),this.def.spd[1],1,[-0.55,0.1]);
 const dh=Math.hypot(tgt.pos.x-this.pos.x,tgt.pos.z-this.pos.z);
-if(!capT&&this.fireT<=0&&dh<110*PD.sg&&Math.abs(dy)<0.22&&this.pos.y>12){
-this.fireT=this.def.rof*PD.rof; // 7b-甲: 对地扫射同接射速档 (大舰不扫射 —— 机炮无用, 只投弹)
+if(!capT&&this.fireT<=0&&dh<110*PD.sg*(_pTg?0.8:1)&&Math.abs(dy)<0.22&&this.pos.y>12){
+this.fireT=this.def.rof*PD.rof*(_pTg?1.15:1); // 7b-甲: 对地扫射同接射速档 (大舰不扫射 —— 机炮无用, 只投弹)
 this.fireMGBurst(this.crewBot||this.crew,1.2);
 }
 if(this.bombs>0&&this.bombCd<=0&&Math.abs(dy)<0.3){
@@ -776,7 +781,8 @@ takeDmg(amt,attacker){
 if(!this.alive) return;
 // 观战者座驾免伤 (2026-09-26H 观战批): 判据单源 specRide (13-combat), 与坦克/舰艇同一条口径。
 if(typeof specRide==='function'&&specRide(this)) return;
-if(attacker&&!attacker.isPlayer) amt*=DIFF_TABLE[SETTINGS.diff].dmgMul; // 7b-甲: Bot→飞机伤害接难度表 (旧全档同值; 高炮/AI 机直检/航弹单点收口在这里)
+// ★2026-10-06 难度批: Bot→**玩家座机**的伤害改吃 pDmg 列 (0.6/0.8/0.9), AI 互咬维持 dmgMul (烈度不变)。
+if(attacker&&!attacker.isPlayer) amt*=(this.playerDriven?DIFF_TABLE[SETTINGS.diff].pDmg:DIFF_TABLE[SETTINGS.diff].dmgMul); // 7b-甲: Bot→飞机伤害接难度表 (旧全档同值; 高炮/AI 机直检/航弹单点收口在这里)
 this.hp-=amt;
 this.lastHitBy=attacker;
 if(this.playerDriven){ dmgFlash=Math.min(1,dmgFlash+0.3); addTrauma(0.2); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)

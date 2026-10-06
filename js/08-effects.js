@@ -238,6 +238,24 @@ return false;
 }
 // ===== 天气系统: 雨/雪/阴天/雷暴 =====
 let precipObj=null, lightningT=rand(6,14), stormFlash=0;
+// ── 雨雪顶面终结 (2026-10-06 用户实机反馈"有房顶的室内也漏雨雪") ──
+// 粒子盒原本只认盒底(夹水面)一个终结面, 屋顶/桥面全穿透。现从 BOXES 筛"带可见网格的水平面板"
+// (厚度≤1.5m + 最小边≥0.8m + 投影面积≥1.6㎡; addBoxCollider 纯碰撞体无网格不算, 沙袋墙类竖薄件被
+// 最小边挡掉), 粒子头部进入其水平投影且低于其顶面 ⇒ 原地回收(x/z 重随机 + 回盒顶, 与落地/落水同款
+// 视觉: 雨到顶即消失, 且不产生"卡在屋顶上方"的粒子单向迁移)。屋顶被炸塌=killBox 置 dead ⇒ 自动漏雨;
+// 23b 世界还原复活同批盒对象 ⇒ 自动恢复遮挡。每 1s 重扫一次 BOXES, 不挂破坏/还原系统任何钩子。
+// 已知边界: 大舰甲板走 15g 独立碰撞(不在 BOXES), 舰面仍穿 —— 与本批之前行为一致, 需要时另批接。
+const RAIN_COVERS=[]; let rainCoverT=0;
+const _wxCovers=[];   // 本帧短名单: 与相机粒子盒时空相交的顶面 (热路径复用数组)
+function scanRainCovers(){
+RAIN_COVERS.length=0;
+for(let i=0;i<BOXES.length;i++){ const b=BOXES[i];
+if(b.dead||!b.mesh) continue;
+const dy=b.maxY-b.minY, dx=b.maxX-b.minX, dz=b.maxZ-b.minZ;
+if(dy>1.5||dx<0.8||dz<0.8||dx*dz<1.6) continue;
+RAIN_COVERS.push(b);
+}
+}
 function initWeather(){
 // 粒子建池参数收编进 WX_CFG (天气设计 §5-3): 种类 precip / 粒数 precipN —— 雨盒 460/720 与雪池 620/370/900 全为既有校准值。
 if(WX_CFG.precip==='rain'){
@@ -280,6 +298,20 @@ const pwy=waterYAt(camera.position.x,camera.position.z);
 if(pwy>-1e8&&pcy<pwy-0.5) pcy=pwy-0.5;
 }
 precipObj.position.set(camera.position.x,pcy,camera.position.z);
+// 顶面短名单 (每帧): 只留"顶面高于盒底"(粒子才可能落到它下面/上面) 且水平投影搭上粒子盒的顶面;
+//   盒顶之上的高顶面要保留 —— 大桥/高架下方整片遮蔽本来就是"干的" (物理正确)。
+rainCoverT-=dt;
+if(rainCoverT<=0){ rainCoverT=1; scanRainCovers(); }
+_wxCovers.length=0;
+if(RAIN_COVERS.length){
+const pwx=precipObj.position.x, pwy=precipObj.position.y, pwz=precipObj.position.z;
+for(let k=0;k<RAIN_COVERS.length;k++){ const b=RAIN_COVERS[k];
+if(b.dead) continue;                       // 塌顶当帧即漏 (不等 1s 重扫账)
+if(b.maxY<=pwy) continue;
+if(b.maxX<pwx-26||b.minX>pwx+26||b.maxZ<pwz-26||b.minZ>pwz+26) continue;
+_wxCovers.push(b);
+}
+}
 const pos=precipObj.geometry.attributes.position;
 const arr=pos.array; // 2026-09-06 B6/P3-10: 直写数组替代逐顶点 getter/setter (粒子量大, 纯热路径)
 if(WX_CFG.precip==='snow'){
@@ -288,6 +320,15 @@ const i3=i*3;
 let y=arr[i3+1]-dt*WX_CFG.precipFall;   // 落速收编 WX_CFG (细雪/中雪 3.2 = 原校准值; 暴风雪 5.5)
 let x=arr[i3]+Math.sin(nowT*1.4+i*0.7)*dt*0.9;   // 横向漂移各雪档同规 (吹雪漂移=二期候选, 天气设计 §8⑤)
 if(y<0){ y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); }
+else if(_wxCovers.length){
+// ★顶面终结: 世界坐标落进某水平顶面投影且低于其顶面 ⇒ 原地回收 (室内不漏雨雪)
+const wx=x+precipObj.position.x, wz=arr[i3+2]+precipObj.position.z, wy=y+precipObj.position.y;
+for(let k=0;k<_wxCovers.length;k++){ const b=_wxCovers[k];
+if(wy<b.maxY&&wx>=b.minX&&wx<=b.maxX&&wz>=b.minZ&&wz<=b.maxZ){
+y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); break;
+}
+}
+}
 arr[i3+1]=y; arr[i3]=x;
 }
 } else {
@@ -300,6 +341,18 @@ y+=26;
 const nx=rand(-24,24),nz=rand(-24,24);
 arr[i3]=nx; arr[i3+2]=nz;
 arr[i3+3]=nx; arr[i3+5]=nz;
+}else if(_wxCovers.length){
+// ★顶面终结 (判头部端点): 雨丝落到屋顶/桥面即回收, 双端随尾部统一重写
+const wx=arr[i3]+precipObj.position.x, wz=arr[i3+2]+precipObj.position.z, wy=y+precipObj.position.y;
+for(let k=0;k<_wxCovers.length;k++){ const b=_wxCovers[k];
+if(wy<b.maxY&&wx>=b.minX&&wx<=b.maxX&&wz>=b.minZ&&wz<=b.maxZ){
+y+=26;
+const nx=rand(-24,24),nz=rand(-24,24);
+arr[i3]=nx; arr[i3+2]=nz;
+arr[i3+3]=nx; arr[i3+5]=nz;
+break;
+}
+}
 }
 arr[i3+1]=y; arr[i3+4]=y-0.7;
 }

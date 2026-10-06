@@ -36,6 +36,13 @@ function patch(sandbox){
 	}
 	sandbox.AudioContext=ACStub;
 	if(sandbox.window){ sandbox.window.AudioContext=ACStub; sandbox.window.webkitAudioContext=ACStub; }
+	// ── Euler 桩缺 copy/clone → 10-viewmodel 换弹收尾要记弹匣/弹夹的静止旋转 (rotation.clone) ──
+	//    (2026-10-05 补: 缺这一个方法 = "桩不足"被报成 updateViewModel 抛错)
+	const _Eu=sandbox.THREE.Euler;
+	if(_Eu&&_Eu.prototype){
+		if(!_Eu.prototype.copy) _Eu.prototype.copy=function(e){ this.x=e.x; this.y=e.y; this.z=e.z; if(e.order) this.order=e.order; return this; };
+		if(!_Eu.prototype.clone) _Eu.prototype.clone=function(){ const e=new _Eu(); e.x=this.x; e.y=this.y; e.z=this.z; e.order=this.order; return e; };
+	}
 	// ── InstancedMesh 桩缺 instanceMatrix.array → 08-effects 的 queueSink 会读 undefined ──
 	const _IM=sandbox.THREE.InstancedMesh;
 	if(_IM){

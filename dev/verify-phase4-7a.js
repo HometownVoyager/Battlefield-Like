@@ -37,8 +37,8 @@ ok(cfg.indexOf('const AA_DIFF=[')>=0&&/jit:45,/.test(cfg)&&/jit:25,/.test(cfg)&&
 ok(bots.indexOf('AA_DIFF[SETTINGS.diff].jit')>=0&&bots.indexOf('rand(-25,25)')<0,'S7b 14-bots 高炮散布接 AA_DIFF, 旧写死 rand(-25,25) 绝迹');
 ok(cfg.indexOf('const PLANE_DIFF=[')>=0&&/eng:0\.70,/.test(cfg)&&/eng:1\.25,/.test(cfg),'S8 PLANE_DIFF 单源 (00-config): AI 机接战距离/射速三档 (新兵软/精英狠)');
 ok((air.match(/PLANE_DIFF\[SETTINGS\.diff\]/g)||[]).length>=4,'S8b 16-aircraft 消费 PLANE_DIFF ≥4 处 (缠斗进入 + 对空开火门限 + 对空/对地射速)');
-ok(air.indexOf('if(attacker&&!attacker.isPlayer) amt*=DIFF_TABLE[SETTINGS.diff].dmgMul;')>=0
-&&air.indexOf('if(attacker&&!attacker.isPlayer) amt*=DIFF_TABLE[SETTINGS.diff].dmgMul;')<air.indexOf('this.hp-=amt;'),'S9 Plane.takeDmg 接 DIFF_TABLE.dmgMul (Bot→飞机伤害单点收口, 玩家源不乘)');
+ok(air.indexOf('if(attacker&&!attacker.isPlayer) amt*=(this.playerDriven?DIFF_TABLE[SETTINGS.diff].pDmg:DIFF_TABLE[SETTINGS.diff].dmgMul);')>=0
+&&air.indexOf('if(attacker&&!attacker.isPlayer) amt*=(this.playerDriven?DIFF_TABLE[SETTINGS.diff].pDmg:DIFF_TABLE[SETTINGS.diff].dmgMul);')<air.indexOf('this.hp-=amt;'),'S9 Plane.takeDmg 接 DIFF_TABLE (Bot→飞机伤害单点收口, 玩家源不乘) (锚随 2026-10-06 难度批拆列: 玩家座机吃 pDmg / AI 互咬维持 dmgMul, 语义不变)');
 ok(cfg.indexOf('spd:[26,51]')>=0&&cfg.indexOf('spd:[33,66]')<0&&(cfg.match(/spd:\[/g)||[]).length===12,'S10 12 机型 spd 全线 -20% (P-51 [32,64]→[26,51]; 零式 [33,66] 绝迹)');
 ok(/birthSpeed:35,/.test(cfg)&&/diveGain:21,/.test(cfg)&&/patrolSpd:38,/.test(cfg)&&/spdFloor:11,/.test(cfg),'S10b PLANE_FLIGHT 四常量同步 -20% (birthSpeed 35 / diveGain 21 / patrolSpd 38 / spdFloor 11)');
 

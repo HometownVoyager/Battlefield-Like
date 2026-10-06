@@ -583,7 +583,22 @@ if(d<22) crowd+=1-Math.exp(-d/4.5);
 for(const c of combatants){ if(c.alive&&c.team===team) crowdAt(c.pos.x,c.pos.z); }
 for(const p of SPAWN_CLAIMS) crowdAt(p.x,p.z);
 const cl=Math.min(spawnClearance(px,pz,team),26);
-const sc=cl*2.4-crowd*0.85-distC*0.3-rand(0,2.0);
+// 敌情/死亡热度软惩罚 (2026-10-06 生成平衡批): 旧版这条评分**完全不看敌人** —— 玩家部署路径直接调本函数,
+//   旗点被围时照样往敌人脸上落人, 落地/拿补给即被秒 (用户实报)。现在两条路径单源共享:
+//   <16m 重罚 / <30m 中罚 / 45m 内按敌兵数扣 + 死亡热度 (25s 内死过人的地方回避), 数值与 pickSpawnFor
+//   的 lane 层惩罚同款 (16/280、30/100、45/16、24m/32) —— Bot 路径 lane 层粗判 + 落点层精判两级叠加,
+//   软惩罚不设硬门 (整圈都被围时相对排序仍会挑最不坏的一个, 不会拒绝出生)。
+let eNear=1e9,eCnt=0;
+for(const c of combatants){
+if(!c.alive||c.team===team) continue;
+const d=Math.hypot(c.pos.x-px,c.pos.z-pz);
+if(d<eNear) eNear=d;
+if(d<45) eCnt++;
+}
+const ePen=(eNear<16)?280:((eNear<30)?100:0);
+let dHeat=0;
+for(const h of DEATH_HEAT){ if(nowT-h.t<25&&Math.hypot(h.x-px,h.z-pz)<24) dHeat++; }
+const sc=cl*2.4-crowd*0.85-distC*0.3-ePen-eCnt*16-dHeat*32-rand(0,2.0);
 if(sc>bs){ bs=sc; b={x:px,z:pz}; bc=cl; }
 }
 if(b&&bc>9&&ring>0) break; // 已经有像样的间距就不必再往外找

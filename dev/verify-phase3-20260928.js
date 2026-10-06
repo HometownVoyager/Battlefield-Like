@@ -345,7 +345,7 @@ ok(r9.hpScoped===260,'B9e 狙击镜枪不受封顶 (kar98zf 96×2.5=240, 500→'
 // S2 追加改动源码断言 (第二轮: 出生保护/爆头封顶/读条回收)
 {
 const cfg=read('js/00-config.js'), cb=read('js/13-combat.js'), eg=read('js/06-engineering.js'), dp=read('js/23-deploy.js'), bots=read('js/14-bots.js'), gm=read('js/18-game.js'), inp=read('js/19-input.js'), mn=read('js/24-main.js');
-ok(/let SPAWN_PROT=0\.5/.test(cfg)&&/const HEAD_CAP=95/.test(cfg),'S2a 单源常量: SPAWN_PROT=0.5 + HEAD_CAP=95 (00-config)');
+ok(/let SPAWN_PROT=2\.0/.test(cfg)&&/const HEAD_CAP=95/.test(cfg),'S2a 单源常量: SPAWN_PROT=2.0 + HEAD_CAP=95 (00-config) (锚随 2026-10-06 生成平衡批: 0.5→2s 用户裁定, 开火清账不变)');
 ok(strip(cb).includes('shooter.protUntil=0')&&strip(cb).includes('!shooter.isPlayer&&dmg>HEAD_CAP'),'S2b fireBullet: 开火清保护 + 爆头封顶接线 (k: 只认 Bot 射手)');
 ok(strip(dp).includes('p.protUntil=nowT+SPAWN_PROT'),'S2c deployPlayer 落地盖章');
 ok(strip(bots).includes('this.protUntil=nowT+SPAWN_PROT')&&strip(bots).includes('rand(-0.15,0.1)'),'S2d Bot: spawn() 盖章 + 瞄准偏置 rand(-0.15,0.1)');

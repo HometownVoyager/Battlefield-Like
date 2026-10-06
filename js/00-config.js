@@ -92,10 +92,11 @@ const FLAG_DY_TOL=6;
 // 与 quality/sens/vol 同规: 本文件只读存档, UI 写入在 22-hud, **改档即时生效** (fire time 读, 不需 reload);
 // 强度/锥角/目标集合的单源在 13-combat 的 AIM_PROFILES (本文件只有档位这一个数)。
 const SETTINGS = { team:0, diff:1, quality:1, sens:1.0, vol:0.8, aim:1 };
-// ★2026-09-28 阶段三 P1 (用户裁定"极其短暂"): 出生保护秒数 —— 玩家 deployPlayer / Bot spawn() 落地盖章
-//   protUntil=nowT+SPAWN_PROT, 期间免伤 (两个伤害入口各一道闸), **开火立即解除** (fireBullet 单源清账,
-//   不存在无敌输出窗口)。let 而非 const: 沙箱探针可置 0 整批豁免 (B 系探针的取证口径)。
-let SPAWN_PROT=0.5;
+// ★2026-09-28 阶段三 P1 (用户裁定"极其短暂") / ★2026-10-06 生成平衡批 (用户裁定"软惩罚+保护延长",
+//   0.5→2s): 出生保护秒数 —— 玩家 deployPlayer / Bot spawn() 落地盖章 protUntil=nowT+SPAWN_PROT,
+//   期间免伤 (两个伤害入口各一道闸), **开火立即解除** (fireBullet 单源清账, 不存在无敌输出窗口)。
+//   0.5s 实机体感"刚落地就被点名", 2s 与"落地环视一周"的时间尺度匹配; 玩家/Bot 同享 (对称公平)。
+let SPAWN_PROT=2.0;
 // ★2026-09-28 阶段三 P1 (用户实报"被 Kar98k/STG44 秒" + 排查令; 同日 k 追补收窄): 非镜枪**Bot 射手**
 //   的爆头伤害封顶 —— 满血目标被 Bot 爆头必存活 (95, 留 5 血), "一枪爆头"保留给狙击镜枪 (scoped:true)
 //   与**玩家射手** (用户实报"自己远距爆头也秒不死", 裁定保护只朝玩家单向: Bot 爆头永远秒不死玩家,
@@ -118,10 +119,16 @@ SETTINGS.team=clamp(parseInt(localStorage.getItem('sf_team')||'0')||0,0,1);
   if(_vs!==null){ const n=parseInt(_vs,10); if(isFinite(n)) SETTINGS.vol=clamp(n/100,0,1); }
   // 瞄准吸附档位 (sf_aim): 0 是合法值 (关) ⇒ 同样用 null 判"没存过", 缺省 1 (轻度)
   const _am=localStorage.getItem('sf_aim'); if(_am!==null){ const n=parseInt(_am,10); if(n===0||n===1||n===2) SETTINGS.aim=n; } }
+// ★2026-10-06 难度批 (用户裁定"标准档 + 只削 Bot 对玩家"): 原四列 (react/spreadMul/dmgMul/visMul) 保持
+//   "Bot 互殴消耗"语义逐位不变 (战场烈度/观感不降); 新增 p* 四列**只作用于 Bot 对玩家**:
+//   pReact=Bot 面向玩家的反应窗(秒) / pSpread=Bot 瞄玩家的散布乘数 / pDmg=Bot 枪弹对玩家的伤害乘数 /
+//   pVis=Bot 发现玩家的视距乘数。标准档目标: 精英对玩家≈旧老兵档 (0.5s/×1.05/×0.9), 老兵落在旧
+//   新兵~旧老兵之间, 新兵比旧版再友好 ~15%。接线点: fireBullet (pDmg) / perceive (pVis·pReact·pSpread) /
+//   damage 还击 (pReact) / aimShot (pSpread) —— 全部按 target.isPlayer 分流, Bot 互射零变化。
 const DIFF_TABLE = [
-{ react:0.85, spreadMul:1.7, dmgMul:0.7, visMul:0.8, name:'新兵' },
-{ react:0.5,  spreadMul:1.0, dmgMul:1.0, visMul:1.0, name:'老兵' },
-{ react:0.28, spreadMul:0.6, dmgMul:1.25, visMul:1.25, name:'精英' },
+{ react:0.85, spreadMul:1.7, dmgMul:0.7, visMul:0.8, pReact:1.0,  pSpread:2.0,  pDmg:0.6, pVis:0.72, name:'新兵' },
+{ react:0.5,  spreadMul:1.0, dmgMul:1.0, visMul:1.0, pReact:0.68, pSpread:1.25, pDmg:0.8, pVis:0.85, name:'老兵' },
+{ react:0.28, spreadMul:0.6, dmgMul:1.25, visMul:1.25, pReact:0.5,  pSpread:1.05, pDmg:0.9, pVis:0.95, name:'精英' },
 ];
 // ===================== 战役 / 阵营 / 环境主题 =====================
 // 每个战役: 独立地形结构(terr) + 独立布局(layout) + 专属玩法(mode) + 旗点/基地/道路/战壕

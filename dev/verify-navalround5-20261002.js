@@ -99,7 +99,7 @@ srcHas('js/05c-layouts.js','const capBaseCrate','锚 基地弹药箱走 baseCrat
 srcHas('js/05c-layouts.js','const poleH=f.poleH||7','锚 低旗杆高单源 (05c, 缺省 7=旧几何)');
 srcHas('js/15h-capital.js','f.poleH?f.poleH-0.75:6.25','锚 capitalFlagTick 旗面挂边随 poleH (15h)');
 srcCount('js/20-player.js',"grabAction={kind:'ammo',crate:ac}",2,'锚 F 分派: 补弹语义甲板层+通用层各一处');
-srcCount('js/20-player.js','capNearestParkedPlane()',3,'锚 F 分派: 登机语义 甲板分支+甲板提示+登舰段 各一处');
+srcCount('js/20-player.js','capNearestParkedPlane()',4,'锚 F 分派: 登机语义 甲板分支+甲板提示+登舰段+准星锁扫描段 各一处 (3→4: 2026-10-06 交互批 xcInteractLock 加入同一单源判据, 语义不变)');
 srcHas('js/20-player.js',"canJump?t2('<b>F</b> 跳海'):t2('走到舷缘再按 F 跳海')",'锚 提示层甲板段与分派同账');
 
 // ══════ T1: 甲板弹药箱几何三查 (coral 实跑: 05c 真落位 → 舰局部判据) ══════
