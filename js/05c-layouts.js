@@ -837,11 +837,11 @@ crater(-12,14,2.0); crater(18,26,1.8);
 // -- 原始密林 (胡康河谷) : 640 大图巨桥改版 (2026-09-12) —— 主题=大龙河大桥 (grandBridge, buildWorld 分派),
 //    本函数布两岸旗点营地/村寨/桥头工事/徒涉滩渡口/基地加建, 植被范围随 MAP_SIZE --
 // 大龙河大桥: 桥面高度由 heightAt 的 BRIDGES 矩形提供, 结构=grandBridge (木排架 buildBridge 保留为通用后备)
-// bridgePt(u,v): 桥局部坐标转世界 (u=沿桥轴向(sin,cos), v=垂直桥向(cos,-sin))
-function bridgePt(u,v){
-const B=BRIDGE;
+// bridgePt(u,v): 桥局部坐标转世界 (u=沿桥轴向(sin,cos), v=垂直桥向(cos,-sin)); bridgePtOf(B,..) 指定桥
+function bridgePtOf(B,u,v){
 return [B.x+u*Math.sin(B.yaw)+v*Math.cos(B.yaw), B.z+u*Math.cos(B.yaw)-v*Math.sin(B.yaw)];
 }
+function bridgePt(u,v){ return bridgePtOf(BRIDGE,u,v); }
 function buildBridge(B){
 const dy=bridgeDeckY();
 // 桥面 (厚板; 长度放 d 轴随 yaw 走向, 含碰撞体供子弹/弹片命中; 顶面低于站立面0.5不进占用格)
@@ -1369,26 +1369,7 @@ if(freeSpot(b.x+sgn*18,b.z+8,1.5)) hedgehog(b.x+sgn*18,b.z+8);
 }
 // -- 断崖公路劫道 (canyon): 伏击山谷 —— 谷底走廊, 两侧山坡中高处为伏击带,
 //    无基地、无固定火力点、无建筑: 纯自然坡体掩体 (乱石/枯树/倒木/沙袋窝) --
-// ── 全海图 (2026-09-30 阶段五 P4) ──
-// 海上没有陆地可以建设: 本布局只做两件事 —— ① 在两侧集结点附近投几组航道浮标 (给玩家和小艇一个
-// 距离/方位参照, 空海面没有参照物会完全失去速度感) ② 无。剩下的海面渲染/浪花由 buildWorld 的
-// 通用 SEA 分支接管 (buildSeaMesh/buildSeaFoam 与塔拉瓦同一支, 一行没动)。
-// 破袭模式的补给库/桥/战壕/植被 一律不适用 (前者由 mode 决定, 后三者的数据表是空的)。
-function layoutOpensea(){
-const mu=(SEA&&SEA.muster)||[];
-for(const m of mu){
-// 浮标阵: 集结点前方 40~150m 三排, 每排 5 枚 (与 05b 的 BUOYS 同一条渲染/浪涌链)
-for(let k=0;k<3;k++) for(let i=0;i<5;i++){
-const d=40+k*46;
-const lat=(i-2)*26;
-const x=m.x+Math.sin(m.face)*d+Math.cos(m.face)*lat;
-const z=m.z+Math.cos(m.face)*d-Math.sin(m.face)*lat;
-if(typeof buoy==='function') buoy(x,z);
-}
-}
-// 甲板补给不在这里放: 通用弹药箱循环 (下面 ammoCrate) 已经按 f.onDeck 取甲板高 —— 海图的补给
-//   走同一条链, 不另开一套 (单源)。
-}
+// (2026-11-10: layoutOpensea 全海图布局随珊瑚海/铁底湾下架摘除, 原文见 archive/naval-coral-ironbottom-20261110/)
 function layoutCanyon(){
 // 伏击缓台的乱石掩护体 (局部函数, 仅本战役使用; 摆放全走种子流保证确定性)
 const boulder=(x,z,r)=>{
@@ -2029,12 +2010,12 @@ SUPPLY_POINTS.length=0;
 const MG42S=[];
 // 各阵营架设重机枪 (对应历史型号/射速/威力) —— 必须在 buildWorld() 之前初始化 (布局可调 mg42)
 const FACTION_MG={
-us: { name:'M1919A4 勃朗宁重机枪', rpm:520, dmg:29, heatPS:0.011, style:'air' },
-ger:{ name:'MG42 通用机枪',        rpm:1100,dmg:25, heatPS:0.014, style:'mg42' },
-sov:{ name:'马克沁 M1910 重机枪',  rpm:560, dmg:29, heatPS:0.006, style:'water' },
-kmt:{ name:'二四式重机枪',         rpm:480, dmg:30, heatPS:0.006, style:'water' },
-cpc:{ name:'二四式重机枪(缴获)',   rpm:460, dmg:30, heatPS:0.006, style:'water' },
-jp: { name:'九二式重机枪',         rpm:440, dmg:32, heatPS:0.009, style:'92' },
+us: { name:'M1919A4 勃朗宁重机枪', rpm:520, dmg:21, heatPS:0.011, style:'air' },
+ger:{ name:'MG42 通用机枪',        rpm:1100,dmg:18, heatPS:0.014, style:'mg42' },
+sov:{ name:'马克沁 M1910 重机枪',  rpm:560, dmg:21, heatPS:0.006, style:'water' },
+kmt:{ name:'二四式重机枪',         rpm:480, dmg:22, heatPS:0.006, style:'water' },
+cpc:{ name:'二四式重机枪(缴获)',   rpm:460, dmg:22, heatPS:0.006, style:'water' },
+jp: { name:'九二式重机枪',         rpm:440, dmg:23, heatPS:0.009, style:'92' },
 };
 // 活树/倒树记录已由 tree() 直接登记进 04b-fire 的 TREE_LIVE (旧 TREES/fTrees 表废弃)
 // 山地大图(treeQ 主题)树木数量随画质缩放: 低 60% / 中 85% / 高 100% (与草丛按画质缩放同思路, 保低配帧率)
@@ -2097,6 +2078,8 @@ keep.push(a,b2,c);
 geo.setIndex(keep);
 }
 }
+geo.computeVertexNormals();
+if(geo.computeBoundingSphere) geo.computeBoundingSphere();
 const map=_prepSeaTex(_cloneSeaTex(TEX.water),(MAP_SIZE+40)/18,(MAP_SIZE+40)/18);
 const mat=new THREE.MeshLambertMaterial({map:map||undefined,vertexColors:true,transparent:true,opacity:0.80,side:THREE.DoubleSide,depthWrite:false});
 const m=new THREE.Mesh(geo,mat);
@@ -2171,7 +2154,187 @@ const sm=SEA_MESH&&SEA_MESH.material&&SEA_MESH.material.map;
 if(sm&&sm.offset){ sm.offset.x=(seaClock*0.006)%1; sm.offset.y=(seaClock*0.004)%1; }
 if(BUOYS.length) updateBuoys(dt);
 }
+// ══ 随机战场 · 建造阶段 (2026-10-06 设计定稿 §2.2): 00c 数据 → 05a/05b 素材复用落位 ══
+// 数据阶段 (路网/地块/旗点) 在 00c-procgen; 本段只做 kind→生成器映射、掩体审计、NAV 放行。
+// 全部生成器复用既有 05a/05b (零新模型); 落位走 placeAt 统一互斥 (足迹/道具/坡度/落水)。
+// 随机一律 wr() —— procgen 图上已被 00c 播种 (PG_WR_SEED), 同种子同布局。
+// 足迹回避 (2026-10-07b): procgen 是首个"算法道具×算法建筑"图 —— 集市/掩体/旗圈家具/路旁树的
+// 落点可能撞进 placeAt 登记的 B_FOOT 足迹 (其他图为手调坐标不暴露)。propFree 只查道具互斥不查建筑,
+// 这里给 procgen 的算法道具统一加 footprint 门 (只对 procgen 生效, 其余图零指纹漂移)。
+function footFree(x,z,r){
+for(const f of B_FOOT){ if(x>f.x0-r&&x<f.x1+r&&z>f.z0-r&&z<f.z1+r) return false; }
+return true;
+}
+function layoutProcgen(){
+if(typeof PGDATA==='undefined'||!PGDATA) return;
+const D=PGDATA, CN=(CAMPAIGN.theme==='china');
+const BLD={
+ house:(x,z,ry)=>cnHouse(x,z,ry,7,6),
+ house2:(x,z,ry)=>cnHouse(x,z,ry,9,7),
+ cabin:(x,z,ry)=>logCabin(x,z,ry),
+ twostory:(x,z,ry)=>twoStoryHouse(x,z,ry,wr(0,1)<0.5?MAT.brick:MAT.plaster),
+ barn:(x,z,ry)=>buildBarn(x,z,ry),
+ factory:(x,z,ry)=>silkFactory(x,z,ry),
+ church:(x,z,ry)=>buildChurch(x,z,ry),
+ tower:(x,z,ry)=>watchtower(x,z,ry),
+ mill:(x,z,ry)=>windmill(x,z,ry) };
+// 1) 建筑: placeAt 8 次抖动重试, 失败弃置 (地块本沿路带状生成, 弃置率≈0; 弃置不留空洞足迹)
+// noWater: 水乡图 8 次抖动 (±2.5m) 可能把滨河地块推进河/塘 (canTake 只保证**中心**离水 ≥0.5m)
+for(const L of D.lots){
+ const p=placeAt(L.x,L.z,L.ry,L.w,L.d,{maxDh:1.7,noWater:true});
+ if(p&&BLD[L.kind]) BLD[L.kind](p.x,p.z,p.ry);
+}
+// 1.2) 铁路货线 (镇集): 枕木+双轨沿货线折线铺设 (纯视觉不占位, 0.08m 可碾过; 与百团/柏林同款 railLine)
+if(D.rail&&D.rail.length>1){
+ for(let i=0;i<D.rail.length-1;i++) railLine(D.rail[i][0],D.rail[i][1],D.rail[i+1][0],D.rail[i+1][1]);
+}
+// 1.4) 水乡桥头工事: 每座石桥两岸桥头各一段沙袋 (桥面轴向退 ±(len/2+2.5), 沿河向错位两节)
+// —— 桥=咽喉的掩体感 (桥面/桥堍防守位); footFree 门避开临河地块足迹
+if(D.river&&D.river.bridges){
+ for(const b of D.river.bridges){
+  const px=Math.sin(b.yaw),pz=Math.cos(b.yaw);           // 桥面轴向 (跨河法向)
+  const rx=-pz, rz=px;                                   // 沿河向 (桥宽向)
+  for(const sd of [1,-1]){
+   const cx=b.x+px*(b.len/2+3.0)*sd, cz=b.z+pz*(b.len/2+3.0)*sd;
+   let n2=0;
+   for(const off of [-3.0,3.0]){
+    if(n2>=2) break;
+    const sx=cx+rx*off, sz=cz+rz*off;
+    if(Math.abs(sx)>250||Math.abs(sz)>250) continue;
+    if(!footFree(sx,sz,1.2)) continue;
+    sandbagWall(sx,sz,3.0,Math.atan2(rx,rz),1.0); n2++;
+   }
+  }
+ }
+}
+// 1.5) 临街围栏 (v2): 30% 带朝向登记的地块临街一道 (中式矮石墙/欧式树篱) —— 前院围合+巷战掩体
+for(const L of D.lots){
+ if(!L.fx&&!L.fz) continue;
+ if(wr(0,1)>=0.3) continue;
+ const cx=L.x+L.fx*(L.d/2+2.0), cz=L.z+L.fz*(L.d/2+2.0);
+ const hx=Math.cos(L.sa)*(L.w/2+0.8), hz=Math.sin(L.sa)*(L.w/2+0.8);
+ if(CN) stoneWall(cx-hx,cz-hz,cx+hx,cz+hz,0.85); else hedgerow(cx-hx,cz-hz,cx+hx,cz+hz);
+}
+// 1.6) 路旁树 (v2): 主街/干道隔段一株 (侧偏 7~9.5m) —— 林荫感+视觉掩体, fieldAt 让位农田
+for(const ln of D.polys){
+ if(ln.cls==='lane'||ln.cls==='sub') continue;   // 巷/次街不植行道树 (排屋贴街)
+ for(let i=0;i<ln.pts.length-1;i++){
+  const a=ln.pts[i], b=ln.pts[i+1];
+  const dx=b[0]-a[0],dz=b[1]-a[1],L=Math.hypot(dx,dz); if(L<6) continue;
+  const ux=dx/L,uz=dz/L;
+  const sd=wr(0,1)<0.5?-1:1, off=wr(7,9.5);
+  const tx=a[0]+ux*L*0.5-uz*sd*off, tz=a[1]+uz*L*0.5+ux*sd*off;
+  if(Math.abs(tx)>250||Math.abs(tz)>250) continue;
+  if(!footFree(tx,tz,1.3)) continue;                       // 树干不进建筑足迹
+  if(RURAL_FIELDS.length&&fieldAt(tx,tz)) continue;
+  if(wr(0,1)<0.3) tree(tx,tz,wr(0.85,1.3));
+ }
+}
+// 1.7) 广场集市感 (v3 多聚落): 每聚落周圈箱/桶 —— 主村 3 组 (17~24m) / 副村·卫星村 1 组 (12~16m),
+//      避旗杆 —— 集市遗迹, 巷战散掩体 (旧版只布 D.core 单核)
+for(const st of (D.settles||[{x:D.core.x,z:D.core.z,main:true}])){
+ const nG=st.main?3:1, r0=st.main?17:12, r1=st.main?24:16;
+ for(let k=0;k<nG;k++){
+  const a=wr(0,6.283), rr=wr(r0,r1);
+  const px=st.x+Math.cos(a)*rr, pz=st.z+Math.sin(a)*rr;
+  if(!footFree(px,pz,0.9)) continue;                        // 集市件不进地标/民宅足迹
+  if(wr(0,1)<0.5) crate(px,pz,wr(1.0,1.4),wr(0,1.6)); else barrel(px,pz);
+ }
+}
+// 2) 掩体审计: 干道每 ~42m 交替两翼一处 (通视走廊 ≤70m 口径), 村口方向加拒马
+{
+ let k=0;
+ for(const ln of D.polys){
+  if(ln.cls!=='trunk0'&&ln.cls!=='trunk1') continue;
+  let acc=16+wr(0,14);                          // 16~30 起始相位 (确定性: wr)
+  for(let i=0;i<ln.pts.length-1;i++){
+   const a=ln.pts[i], b=ln.pts[i+1];
+   const dx=b[0]-a[0],dz=b[1]-a[1],L=Math.hypot(dx,dz); if(L<4) continue;
+   const ux=dx/L,uz=dz/L;
+   for(let s=0;s<L;s+=2){
+    acc+=2; if(acc<42) continue;
+    acc=0;
+    const px=a[0]+ux*s, pz=a[1]+uz*s;
+    const sd=((k++)%2)?1:-1, off=wr(5.5,7.5);
+    const cx=px-uz*sd*off, cz=pz+ux*sd*off;
+    if(!footFree(cx,cz,1.2)) continue;                      // 掩体不进建筑足迹 (弯道处建筑可能贴路)
+    const r=wr(0,1);
+    if(r<0.3) crate(cx,cz,wr(1.0,1.5),wr(0,1.6));
+    else if(r<0.55) barrel(cx,cz);
+    else if(r<0.8) hedgehog(cx,cz);
+    else sandbagWall(cx,cz,3.2,Math.atan2(uz,ux)+HPI,1.0);
+    if(Math.hypot(px-D.core.x,pz-D.core.z)<34&&wr(0,1)<0.6&&footFree(px-uz*3.2,pz+ux*3.2,1.2)) hedgehog(px-uz*3.2,pz+ux*3.2);   // 村口拒马
+   }
+  }
+ }
+}
+// 3) 旗圈家具: 环上两段沙袋 (圈缘 r+2.4, 不压旗杆) + 木箱; NAV 放行旗圈 (旗杆细, 占位格由放行带兜底)
+for(const f of CAMPAIGN.flags){
+ for(let k=0;k<2;k++){
+  const a=wr(0,6.283), rr=f.r+2.4;
+  const sx=f.x+Math.cos(a)*rr, sz=f.z+Math.sin(a)*rr;
+  if(footFree(sx,sz,1.0)) sandbagWall(sx,sz,3.4,a+HPI,1.0);
+ }
+ if(wr(0,1)<0.7){ const cx2=f.x+wr(-7,7), cz2=f.z+wr(-7,7); if(footFree(cx2,cz2,0.9)) crate(cx2,cz2,1.2,wr(0,1.5)); }
+ NAV_CLEARS.push({x:f.x,z:f.z,r:5.2});
+}
+// 4) 林地: 圆域撒树 (fieldAt 让位农田; tree/deadTree 自带 propFree 互斥)
+for(const wd of D.woods){
+ const n=Math.floor(wd.r*wd.r/30);
+ for(let i=0;i<n;i++){
+  const a=wr(0,6.283), rr=Math.sqrt(wr(0,1))*wd.r;
+  const x=wd.x+Math.cos(a)*rr, z=wd.z+Math.sin(a)*rr;
+  if(Math.abs(x)>250||Math.abs(z)>250) continue;
+  if(RURAL_FIELDS.length&&fieldAt(x,z)) continue;
+  if(wr(0,1)<0.16) deadTree(x,z); else tree(x,z,wr(0.8,1.35));
+ }
+}
+// 5) 田缘墙 + 田内草垛 (2026-10-24 农田掩体批; 00c 数据阶段已定计划):
+//    f.walls=边索引表 (2~3 边, 候选边已避路 ≥4.5/避基地 ≥26) —— 中式矮石墙/欧式树篱, bocage 掩体链;
+//    f.hay=草垛点表 (1~3) —— 硬掩体圆柱 (与莫斯科草垛同款 CYLS 口径, 工兵可拆), 半身掩体+视觉锚点。
+for(const f of RURAL_FIELDS){
+ const E=[[f.x0,f.z0,f.x1,f.z0],[f.x0,f.z1,f.x1,f.z1],[f.x0,f.z0,f.x0,f.z1],[f.x1,f.z0,f.x1,f.z1]];
+ for(const wi of (f.walls||[])){
+  const e=E[wi]; if(!e) continue;
+  if(CN) stoneWall(e[0],e[1],e[2],e[3],0.85); else hedgerow(e[0],e[1],e[2],e[3]);
+ }
+ for(const h of (f.hay||[])){
+  if(!freeSpot(h.x,h.z,1.5)) continue;                     // 草垛不进建筑足迹 (00c 已避路/田缘)
+  const g0=heightAt(h.x,h.z);
+  mesh(new THREE.CylinderGeometry(1.1,1.1,1.6,12),MAT.hay,h.x,g0+1.1,h.z);
+  CYLS.push({x:h.x,z:h.z,r:1.15,y0:g0,y1:g0+2.2});
+  coverPoints.push({x:h.x,z:h.z-2});
+ }
+}
+// 5b) 野地孤树 (00c singles 计划): 田块间/聚落间散株 —— 掩体链补洞 + 破"圆盘树林"均质感
+for(const p of (D.singles||[])){
+ if(Math.abs(p.x)>MAP_SIZE/2-6||Math.abs(p.z)>MAP_SIZE/2-6) continue;
+ if(!footFree(p.x,p.z,1.4)) continue;
+ if(RURAL_FIELDS.length&&fieldAt(p.x,p.z)) continue;
+ tree(p.x,p.z,p.s);
+}
+}
 function buildWorld(){
+if(typeof ACTIVE_CAMPAIGN==='undefined'||!ACTIVE_CAMPAIGN){
+ACTIVE_CAMPAIGN=typeof deepClone==='function'?deepClone(CAMPAIGN):CAMPAIGN;
+CAMPAIGN=ACTIVE_CAMPAIGN;
+}
+// 单队生存主基地居中 (2026-10-07d 裁定3, 仅预设图): solo 主基地=距图心最近的旗旁 7m (诺曼底即教堂旁
+// C 旗) —— 在布局函数执行**前**改写 ACTIVE_CAMPAIGN.bases ⇒ 营区布景/部署/重生/zDefPosts/坦克落位全链跟随。
+// procgen 同款裁定在 00c 数据阶段做 (基地改写后路网/净空才能跟着长); canyon 无基地、海战图不开放丧尸。
+// spawns (攻方前出营) 一并清空: solo 从主基地出发, 不再被部署到远处进攻出发地。
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo'&&ACTIVE_CAMPAIGN.layout!=='procgen'&&ACTIVE_CAMPAIGN.bases&&ACTIVE_CAMPAIGN.bases.length){
+let bf=null,bd=1e9;
+for(const f of ACTIVE_CAMPAIGN.flags){ if(f.ship!==undefined) continue;
+const d=f.x*f.x+f.z*f.z; if(d<bd){ bd=d; bf=f; } }
+if(bf){
+const L=Math.hypot(bf.x,bf.z);
+const bx=L>1?Math.round(bf.x+bf.x/L*7):bf.x, bz=L>1?Math.round(bf.z+bf.z/L*7):bf.z;
+ACTIVE_CAMPAIGN.bases[0]={x:bx,z:bz};
+ACTIVE_CAMPAIGN.bases[1]={x:bx,z:bz};
+ACTIVE_CAMPAIGN.spawns=[];
+}
+}
 // 破袭模式: 补给库占旗点中心, 布局前先预留足迹, 房屋才会环绕其摆放
 if(GAMEMODE==='demolition'){
 for(const f of CAMPAIGN.flags) B_FOOT.push(footRect(f.x,f.z,0,5.5,5.5,0.8));
@@ -2188,7 +2351,8 @@ for(const f of CAMPAIGN.flags) B_FOOT.push(footRect(f.x,f.z,0,5.5,5.5,0.8));
 		case 'woods': layoutWoods(); break;
 		case 'island': layoutIsland(); break;
 		case 'canyon': layoutCanyon(); break;
-		case 'opensea': layoutOpensea(); break;   // P4 全海图: 只放海面件, 不建任何陆上内容
+		// (2026-11-10: case 'opensea' 随珊瑚海/铁底湾下架摘除, layoutOpensea 原文见 archive/)
+		case 'procgen': layoutProcgen(); break;   // 随机战场 (2026-10-06): 00c 数据 → 素材复用落位
 		default: layoutRural(); break;
 	}
 // 大桥 (胡康=木排架; 淞沪=石拱×2): 按桥型分派
@@ -2209,12 +2373,32 @@ if(g) DEPOTS.push({id:f.id,x:f.x,z:f.z,g,destroyed:false});
 }
 }
 // 基地营区 (通用): 全部相对基地坐标偏移, 角落基地(遭遇战)同样适用
-// P4 全海图例外: 基地坐标落在**大舰身上** (本队旗舰 = 移动基地), 在海上摆帐篷/沙袋等于给海床铺营地。
-if(CAMPAIGN.terr!=='opensea') CAMPAIGN.bases.forEach((b,t)=>{
+// (2026-11-10: 旧"全海图例外"门随海战图下架摘除 —— 通用分支本就与陆图逐位同轨)
+CAMPAIGN.bases.forEach((b,t)=>{
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo'&&t>0) return;   // solo 双基地同点: 营区只画一套 (2026-10-07d)
 const sgn=b.x<0?1:-1;
 tent(b.x+sgn*2,b.z+6,0.3); tent(b.x,b.z-6,-0.2); tent(b.x-sgn*4,b.z,0);
 sandbagWall(b.x+sgn*10,b.z+6,5,HPI); sandbagWall(b.x+sgn*10,b.z-6,5,HPI); sandbagWall(b.x+sgn*8,b.z,5,HPI);
 crate(b.x+sgn*4,b.z+10,1.3,0); barrel(b.x+sgn*5,b.z-9);
+});
+// 基地附属建筑 (2026-10-07d 全局要素, 用户裁定"主基地旁不要只是三个小屋"): 外侧民居/木屋各一,
+// placeAt 通用落位 (地形/占位失败自动弃置, 不强求) —— 各图基地写死位置周边本就留空, 命中率≈1;
+// (海图除外 —— 2026-11-10 起无海图, 门已摘)。solo 双基地同点只放一套。
+// ★方向 = **外侧** (背向地图中心, sgn 取反): 回归三连的根因就是第一版沿用了营区帐篷的 sgn (朝内) ——
+//   内侧是火制走廊/主街/基地间通路所在 (淞沪迫击炮弹道被民居西墙拦截 killattr T3 / 城市图侵街
+//   layouts / 雾林守线基地间路标段穿墙 nav), 外侧是基地背后, 三类走廊都不经过。
+CAMPAIGN.bases.forEach((b,t)=>{
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo'&&t>0) return;
+const s2=b.x<0?-1:1;   // 外侧 (与上方帐篷的 sgn 相反)
+const MS=(CAMPAIGN.mapSize||640)/2;
+const tryBld=(dx,dz,w,d,fn)=>{
+const x=b.x+dx, z=b.z+dz;
+if(Math.abs(x)>MS-14||Math.abs(z)>MS-14) return;
+const p=placeAt(x,z,Math.atan2(dx,dz)+HPI,w,d,{maxDh:1.7,strict:true});
+if(p) fn(p.x,p.z,p.ry);
+};
+tryBld(s2*16,6,7,6,(x,z,ry)=>cnHouse(x,z,ry,7,6));
+tryBld(s2*13,-10,6,5,(x,z,ry)=>logCabin(x,z,ry));
 });
 decorateTrenches();
 // 河流水面/冰面: 沿河道中心线的连续条带网格 (主河 + 淞沪支流汊港共用同一渲染器)。
@@ -2434,8 +2618,32 @@ for(let i=0;i<grassCount;i++){
 inst.receiveShadow=true;
 scene.add(inst);
 registerBurnableInst(inst,GRASS_BY_CELL);
-// 灌木散布 (可燃/可碾): 密度随主题草量与画质缩放, 之后烧毁按记录消失
-scatterBushes();
+	// ── 对峙轴带灌木加密 (2026-10-24e 随机图 farm 专属): 横向 |lat|≤78K 低矮装饰掩体补量 ──
+	// 必须放在 scatterBushes() **之前**: bush() 只入 BUSH_BATCH, 由 scatterBushes 尾部的 flushBushes()
+	// 一并实例化 (之后另调 bush 而不再 flush = 批永不渲染)。门要钉 procgen —— PG 在预设图也存在
+	// (群系哈希自随机种子), 不钉 layout 则预设图 1/3 概率误入: 平白多 16 株灌木 + wr() 流被消费
+	// ⇒ 其后 sineRoad 等散布逐帧漂移, 预设布局不可复现。
+	if(CAMPAIGN.layout==='procgen'&&PG.biome==='farm'&&CAMPAIGN.bases&&CAMPAIGN.bases.length===2){
+	const gK=Math.max(0.8,(MAP_SIZE/2)/190), GB=78*gK;
+	const B0=CAMPAIGN.bases[0], B1=CAMPAIGN.bases[1];
+	let ux=B1.x-B0.x, uz=B1.z-B0.z; const ul=Math.hypot(ux,uz)||1; ux/=ul; uz/=ul;
+	const mxp=(B0.x+B1.x)/2, mzp=(B0.z+B1.z)/2;
+	const nX=Math.round(16*gK);
+	for(let i=0,placed=0;i<nX*4&&placed<nX;i++){
+	const lon=wr(-ul*0.5,ul*0.5), lat=wr(-GB,GB);
+	const x=mxp+ux*lon+(-uz)*lat, z=mzp+uz*lon+ux*lat;
+	if(roadDist(x,z)<5) continue;
+	if(fieldAt(x,z)) continue;
+	let near=false;
+	for(const f of CAMPAIGN.flags){ if(Math.hypot(x-f.x,z-f.z)<f.r+6){ near=true; break; } }
+	if(near) continue;
+	if(!freeSpot(x,z,1.2)) continue;
+	bush(x,z,wr(0.85,1.5));
+	placed++;
+	}
+	}
+	// 灌木散布 (可燃/可碾): 密度随主题草量与画质缩放, 之后烧毁按记录消失
+	scatterBushes();
 // ── 诺曼底农田: 高杆庄稼 (小麦蹲伏即隐/玉米站立也隐) —— 无碰撞体, 子弹穿透, 遮 Bot 视线 ──
 if(RURAL_FIELDS.length){
 const wheatTex=svgApply(makeTex(128,128,(g,w,h)=>{
@@ -2520,6 +2728,52 @@ registerBurnableInst(im,CROP_BY_CELL);
 CROP_FIELDS.push({x0:f.x0,x1:f.x1,z0:f.z0,z1:f.z1,h:f.t==='wheat'?1.15:f.t==='corn'?2.0:1.6});
 }
 }
+// ── 高草丛 (2026-10-24e 随机图): 无田空带的植被因素 —— 数据阶段规划 (PGDATA.grass, 避田/路/旗/聚落),
+//    此处建 billboard 草丛 + 复用庄稼软遮蔽 (CROP_FIELDS h1.4: 蹲伏可隐/遮Bot视线/无碰撞/子弹穿透) + 可燃。
+if(typeof PGDATA!=='undefined'&&PGDATA&&PGDATA.grass&&PGDATA.grass.length){
+const grassTex=svgApply(makeTex(128,128,(g,w,h)=>{
+g.clearRect(0,0,w,h);
+for(let i=0;i<30;i++){
+const x=3+i*4.1+rand(0,2), hh=rand(92,124);
+const dry=randi(120,165);
+g.strokeStyle=`rgba(${randi(96,140)+dry*0.2|0},${randi(130,170)},${randi(52,80)},${rand(.7,.95)})`;
+g.lineWidth=rand(1.4,2.4);
+g.beginPath(); g.moveTo(x,h); g.quadraticCurveTo(x+rand(-4,4),h-hh*0.6,x+rand(-6,6),h-hh); g.stroke();
+if(i%3===0){ g.fillStyle=g.strokeStyle; g.beginPath(); g.arc(x+rand(-5,5),h-hh,rand(1.6,2.8),0,TAU); g.fill(); }
+}
+}),'tallgrass');
+const grassGeo=new THREE.PlaneGeometry(1.2,1.55); grassGeo.translate(0,0.775,0);
+for(const gp of PGDATA.grass){
+const cap=Math.round(gp.r*gp.r*2.1);
+const im=new THREE.InstancedMesh(grassGeo,new THREE.MeshLambertMaterial({map:grassTex,transparent:true,alphaTest:0.4,side:THREE.DoubleSide}),cap);
+const CELL=new Map();
+let k=0;
+for(let i=0;i<cap*2;i++){
+const a=wr(0,6.2832), rr=Math.sqrt(wr(0,1))*gp.r;
+const x=gp.x+Math.cos(a)*rr, z=gp.z+Math.sin(a)*rr;
+if(roadDist(x,z)<4.5) continue;
+if(!freeSpot(x,z,0)) continue;
+const g0=heightAt(x,z);
+const ry=wr(0,6.2832), sc=wr(0.82,1.18);   // ★2026-10-25 顺手修配套: 两发 wr 提前到容量门之前消费 —— RNG 流与旧跑逐位一致
+if(k>=cap) continue;   // ★2026-10-25 顺手修 (20261024e 批未提交区, verify-sink 稳定红根因): 候选通过率高于容量规划时 k 会越过 cap ⇒ 实机 InstancedMesh.setMatrixAt 越界、世界构建即崩。continue 不 break, 只跳过越界候选的侧效应 (fuel/网格/注册)
+fuelAdd(x,z,0.7);
+const ci=fCellI(x,z);
+let arr=CELL.get(ci);
+if(!arr){ arr=[]; CELL.set(ci,arr); }
+dummy.position.set(x,g0,z);
+dummy.rotation.y=ry;
+dummy.scale.setScalar(sc);
+dummy.updateMatrix();
+im.setMatrixAt(k,dummy.matrix);
+arr.push(k); k++;
+}
+if(!k){ scene.remove(im); continue; }
+im.count=k; im.receiveShadow=true;
+scene.add(im);
+registerBurnableInst(im,CELL);
+CROP_FIELDS.push({x0:gp.x-gp.r,x1:gp.x+gp.r,z0:gp.z-gp.r,z1:gp.z+gp.r,h:1.4});
+}
+}
 if(CAMPAIGN.sineRoad){
 for(let x=-(MAP_SIZE/2-36);x<=MAP_SIZE/2-36;x+=28){ // 2026-09-06 B7a/P2-11: 旧写死 ±124
 const z=sineRoadZ(x)+6.5;
@@ -2531,6 +2785,9 @@ CYLS.push({x,z,r:0.2,y0:g0,y1:g0+6.5});
 }
 // 全图树木落位完毕: 合并实例批 (树干/叶面各 1 个 InstancedMesh)
 flushTreeBatch();
+// 垂柳实例批合并 (2026-11-10 柳树批): 干/枝/叶冠 3 张 InstancedMesh —— 必须在全部布局代码之后
+// (村口柳 ④① / 沿河柳带 ⑥ / 草原村柳 都在 buildWorld 内登记 WILL_BATCH)
+flushWillows();
 // 建筑地基平台 (2026-09-20): 布局期登记的 PADS 在此一次性写回地形网格顶点 (网格载入期已按原地形建好)
 if(typeof refreshTerrainMesh==='function'){ const _padN=refreshTerrainMesh(); if(_padN&&typeof console!=='undefined'&&console.log) console.log('[地形] 建筑地基平台: 重刷 '+_padN+' 个地形顶点'); }
 // 深度分层 · 共面冲突消解 (2026-09-27) **不在这里调**: 05c 之后还有 15f 反舰炮台 / 17 固定炮位 / 16 坠机残骸
@@ -2538,25 +2795,24 @@ if(typeof refreshTerrainMesh==='function'){ const _padN=refreshTerrainMesh(); if
 // 唯一调用点在 24-main 末尾 (全部脚本的构建期代码跑完之后), 见 05-world resolveCoplanarConflicts 头注释。
 }
 buildWorld();
-// ship 字段 (2026-09-30 阶段五 P4): 甲板旗点 —— 旗位坐标按"大舰 t=0 位姿"的世界坐标写,
-//   运行期由 15h 的 capitalFlagTick 按舰体局部坐标反算 (舰在巡航, 旗跟着走)。
-const FLAGS=CAMPAIGN.flags.map(f=>({id:f.id,x:f.x,z:f.z,r:f.r,own:f.own,owner:-1,cap:0,capTeam:-1,ship:f.ship,
-crateL:f.crateL,poleH:f.poleH}));   // ★2026-10-02b: 甲板锚/低旗两字段必须跟过来, 否则箱子随机散/旗杆一律 7m
+// (史实注 2026-11-10: 旧"ship 甲板旗点"字段 —— 旗位按大舰 t=0 位姿写、由 15h capitalFlagTick 逐帧
+//   反算 —— 已随珊瑚海/铁底湾下架摘除, 现存旗点全部是陆上固定旗。)
+// 单队生存 (2026-10-07 裁定3.1): 无敌方队伍 —— 旗点全中立 (旧版 own:1 会让"第二个队伍"凭空存在)
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo') for(const f of CAMPAIGN.flags) delete f.own;
+const FLAGS=CAMPAIGN.flags.map(f=>({id:f.id,x:f.x,z:f.z,r:f.r,own:f.own,owner:-1,cap:0,capTeam:-1,
+poleH:f.poleH}));   // (2026-11-10: ship/crateL 甲板锚字段随大舰下架摘除 —— 余下地图无甲板旗点; poleH 低旗为通用档保留)
 const BASES=CAMPAIGN.bases.map(b=>({x:b.x,z:b.z}));
 FLAGS.forEach(f=>{
-// 甲板旗点: 基高取**甲板面** (capDeckWorldY 按战役数据离线解析 —— 此刻 ships 还没生成, 见 00-config),
-//   不是 heightAt: 舰位在深海上, heightAt 会给出海床 (负数), 旗杆会长在水下。
-const onDeck=(f.ship!==undefined&&typeof capDeckWorldY==='function');
-const g0=onDeck?capDeckWorldY(f.ship):heightAt(f.x,f.z);
+// (2026-11-10: 甲板旗点"基高取甲板面"分支随大舰下架摘除 —— 现一律 heightAt 落地)
+const g0=heightAt(f.x,f.z);
 // 杆高 poleH (★2026-10-02b 甲板旗低旗化): 缺省 7 = 旧几何逐位。低旗用于"旗位就在主炮扫掠带正下方"
-//   的点 (铁底湾前主炮 poleH 4.5): 旗面带 (杆顶−1.5 ~ 杆顶) 整体降到炮管下缘之下, 塔转向不再扫穿旗面
-//   —— 比挪旗点少动占领圈/旗名/i18n 词典 (判据见 00-config poleH 注释)。
+//   的点 (史实注: 铁底湾前主炮 poleH 4.5, 该图已下架): 旗面带 (杆顶−1.5 ~ 杆顶) 整体降到炮管下缘之下,
+//   塔转向不再扫穿旗面 —— 比挪旗点少动占领圈/旗名/i18n 词典 (通用档保留)。
 const poleH=f.poleH||7;
 const pole=mesh(new THREE.CylinderGeometry(0.07,0.09,poleH,8),MAT.metal,f.x,g0+poleH/2,f.z);
-// 甲板旗杆**不进 CYLS**: CYLS 是载入期烘焙的静态碰撞/占位表, 而旗杆随舰移动 —— 登记进去等于
-//   在海上留一根不动的隐形杆 (而且 OCC 不会跟着更新)。r=0.15 的细杆本来就不该算障碍。
-const cylRef=onDeck?null:{x:f.x,z:f.z,r:0.15,y0:g0,y1:g0+poleH};
-if(cylRef) CYLS.push(cylRef);
+// 陆图旗杆进 CYLS (静态碰撞/占位表): r=0.15 细杆, 可被绕行/打断的占位口径与旧版一致。
+const cylRef={x:f.x,z:f.z,r:0.15,y0:g0,y1:g0+poleH};
+CYLS.push(cylRef);
 const flagC=document.createElement('canvas'); flagC.width=64; flagC.height=40;
 f.flagCtx=flagC.getContext('2d');
 f.flagTex=new THREE.CanvasTexture(flagC);
@@ -2569,13 +2825,37 @@ const fm=new THREE.Mesh(fg, new THREE.MeshLambertMaterial({map:f.flagTex,side:TH
 fm.position.set(f.x+0.075,g0+poleH-0.75,f.z);
 world.add(fm);
 f.flagMesh=fm; f.poleTop=g0+poleH-0.75; f.gy=g0; f.poleH=poleH;
-f.poleMesh=pole; f.poleCyl=cylRef; f.onDeck=onDeck;   // 15h 的 capitalFlagTick 按这三个引用搬旗
+f.poleMesh=pole; f.poleCyl=cylRef;   // (2026-11-10: f.onDeck/capitalFlagTick 搬旗账随大舰下架摘除)
 drawFlagTex(f);
 });
 function drawFlagTex(f){
 const g=f.flagCtx;
 if(f.owner===0){ g.textAlign='start'; g.fillStyle=TEAM_FACTION[0].flagBg; g.fillRect(0,0,64,40); g.fillStyle='#fff'; g.font='bold 26px sans-serif'; g.fillText(TEAM_FACTION[0].sym,20,31); }
 else if(f.owner===1){ g.textAlign='start'; g.fillStyle=TEAM_FACTION[1].flagBg; g.fillRect(0,0,64,40); g.fillStyle='#eee'; g.font='bold 26px sans-serif'; g.fillText(TEAM_FACTION[1].sym,20,31); }
+else if(f.owner===2){
+// 丧尸阵营旗帜 (破损暗灰绿布面 + PvZ 经典灰青僵尸探出手爪剪影)
+g.fillStyle='#364237'; g.fillRect(0,0,64,40);
+// 撕裂划痕与暗部布纹
+g.fillStyle='#222b23';
+g.beginPath(); g.moveTo(4,0); g.lineTo(16,40); g.lineTo(12,40); g.lineTo(2,0); g.fill();
+g.beginPath(); g.moveTo(48,0); g.lineTo(58,40); g.lineTo(54,40); g.lineTo(44,0); g.fill();
+g.fillStyle='#241e17'; g.fillRect(0,35,64,5);
+// PvZ 经典僵尸枯爪剪影 (腐肤灰青色 #9ecfa0)
+g.fillStyle='#9ecfa0';
+g.beginPath();
+g.moveTo(27,35); g.lineTo(28,24); g.lineTo(24,20);
+g.lineTo(19,16); g.lineTo(20,14); g.lineTo(25,17); // 大拇指
+g.lineTo(27,9); g.lineTo(29,9); g.lineTo(30,16);   // 食指
+g.lineTo(32,7); g.lineTo(34,7); g.lineTo(35,16);   // 中指
+g.lineTo(37,10); g.lineTo(39,11); g.lineTo(38,18); // 无名指
+g.lineTo(42,15); g.lineTo(43,17); g.lineTo(38,22); // 小指
+g.lineTo(35,26); g.lineTo(35,35);
+g.closePath(); g.fill();
+g.strokeStyle='#263428'; g.lineWidth=0.8; g.stroke();
+// 右上角点位微缩编号
+g.textAlign='right'; g.fillStyle='rgba(255,255,255,0.75)'; g.font='bold 10px sans-serif';
+g.fillText(f.id,60,12);
+}
 else {
 g.fillStyle='#c9c9bb'; g.fillRect(0,0,64,40); g.fillStyle='#555';
 // 多字点位名 (如"大桥") 自动缩字号并居中
@@ -2635,25 +2915,24 @@ return s;
 }
 // 弹药箱: 每个旗点与基地附近 (通用, 避让建筑足迹); 大桥旗点固定放在桥面上, 避免落进河谷
 FLAGS.forEach(f=>{
-// 甲板旗点 (P4 全海图): 弹药箱落在**甲板面**上 (capDeckWorldY 载入期解析, 此刻大舰还没生成) ——
-//   海上没有别的补给来源, 登舰攻防没有箱子就是单向消耗。与陆上同一条 ammoCrate 链, 只换底高。
-if(f.onDeck&&typeof capDeckWorldY==='function'){
-let okD=false;
-// ★2026-10-02b 实机"弹药箱在船外悬浮着": 有 crateL 局部锚的甲板旗 (两张海图全部 12 面) 直接按锚
-//   强放 —— 旧 ±4 随机散是陆图开阔地的手感, 甲板上它会把箱子散到舷外 (lx 8.3+4=12.3 > 甲板半宽)
-//   或埋进舰塔/炮座盒 (freeSpot 只懂 2D 道具互斥, 不懂舰体几何)。锚位判据在 00-config crateL 注释,
-//   硬门在 dev/verify-navalround5-20261002.js (甲板矩形/box 净空/走道通行三查)。
-if(f.crateL&&typeof capShipLocalXY==='function'){
-const w=capShipLocalXY(f.ship,f.crateL[0],f.crateL[1]);
-if(w) okD=ammoCrate(w.x,w.z,true,capDeckWorldY(f.ship),f.ship);
+// (2026-11-10: 甲板旗弹药箱分支随珊瑚海/铁底湾下架摘除 —— 原文见 archive/naval-coral-ironbottom-20261110/)
+// 桥面旗的弹药箱 (2026-10-07e 修): 旧版硬编码**主桥** bridgePt(-4,1.4) —— 两个病: ①procgen 水乡
+//   有 2~3 座桥, 二桥/三桥桥头旗的箱子被摆到主桥上 (距旗 ~90m, 探针"附近无弹药箱"实测抓出);
+//   ②桥头旗 (离桥心 >16m 的桥堍旗) 同样吃这条分支 ⇒ 箱子离旗 18m 且两旗箱位重合 (道具互斥破坏)。
+//   现口径: 旧位仍贴旗 (≤16m) 时**逐位沿用** (淞沪/胡康桥面旗零漂移, 已核: 胡康大桥旗箱距 1.8m);
+//   否则改"距旗最近的桥 + 桥面内夹取贴旗点" (桥头旗箱落桥堍端, 仍在桥面上)。
+if(BRIDGES.length&&onBridge(f.x,f.z,4)){
+let p=bridgePt(-4,1.4);
+if(Math.hypot(p[0]-f.x,p[1]-f.z)>16){
+let BB=BRIDGES[0],bd=1e9;
+for(const B of BRIDGES){ const d=Math.hypot(B.x-f.x,B.z-f.z); if(d<bd){bd=d;BB=B;} }
+const cs=Math.cos(BB.yaw), sn=Math.sin(BB.yaw), lx=f.x-BB.x, lz=f.z-BB.z;
+let uu=lx*sn+lz*cs, vv=lx*cs-lz*sn;                        // 旗的桥局部坐标 (u=桥长向, v=桥宽向)
+uu=Math.max(-(BB.len/2-1.4),Math.min(BB.len/2-1.4,uu));    // 夹到桥面内 (两端各留 1.4m)
+vv=Math.max(-(BB.w/2-0.6),Math.min(BB.w/2-0.6,vv));
+p=bridgePtOf(BB,uu+(uu>=0?-1.3:1.3),vv);                   // 桥面内退 1.3m (让开旗杆正下方)
 }
-for(let t=0;t<16&&!okD;t++){
-const px=f.x+wr(-4,4), pz=f.z+wr(-4,4);
-if(freeSpot(px,pz,1.2)) okD=ammoCrate(px,pz,false,capDeckWorldY(f.ship),f.ship);
-}
-if(!okD) ammoCrate(f.x+3,f.z,true,capDeckWorldY(f.ship),f.ship);
-}
-else if(BRIDGE&&onBridge(f.x,f.z,4)){ const p=bridgePt(-4,1.4); if(!ammoCrate(p[0],p[1])) ammoCrate(p[0],p[1],true); } // 桥缘沙袋半径内会被互斥挡住, 兜底强放
+if(!ammoCrate(p[0],p[1])) ammoCrate(p[0],p[1],true); } // 桥缘沙袋半径内会被互斥挡住, 兜底强放
 else{
 let ok=false, ox=0, oz=0;
 for(let t=0;t<32&&!ok;t++){
@@ -2684,30 +2963,18 @@ if(freeSpot(px,pz,0.5)){ ammoCrate(px,pz,true); break; }
 });
 // 基地弹药箱 (通用): rr=0 即原位 (与旧版逐位一致 —— 其他战役布局指纹零漂移的前提); 被灌木/道具
 // 占位时沿环向外扫找净位 (不越过建筑足迹), 全部失败才强放 (保证每个基地必有弹药箱)。
-// deckIdx (2026-10-01): 全海图的"基地"就是本队旗舰的 t=0 位置 ⇒ 基地箱也是甲板件 (旧版按 heightAt
-//   落在海床、且箱体埋在舰体里)。陆上战役 capBaseShipIdx 返回 -1 ⇒ 三个实参都不传, 逐位同旧。
-const ammoAt=(x,z,deckIdx)=>{
-const y0=(deckIdx===undefined)?undefined:capDeckWorldY(deckIdx);
+// (2026-11-10: 旧 deckIdx/capDeckWorldY 甲板底高账随珊瑚海/铁底湾下架摘除 —— 全部旗/基地箱走地面高)
+const ammoAt=(x,z)=>{
 for(let a=0;a<40;a++){
 const ang=(a%10)*TAU/10, rr=a<10?0:(3+Math.floor((a-10)/10)*3);
 const px=x+Math.sin(ang)*rr, pz=z+Math.cos(ang)*rr;
-if(freeSpot(px,pz,0.5)&&ammoCrate(px,pz,false,y0,deckIdx)) return true;
+if(freeSpot(px,pz,0.5)&&ammoCrate(px,pz,false)) return true;
 }
-return ammoCrate(x,z,true,y0,deckIdx);
+return ammoCrate(x,z,true);
 };
 if(BASES.length){
-const b0=(typeof capBaseShipIdx==='function')?capBaseShipIdx(0):-1;
-const b1=(typeof capBaseShipIdx==='function')?capBaseShipIdx(1):-1;
-// ★2026-10-02b (顺手发现"基地箱埋进舰体"): 基地舰有 baseCrateL 局部锚 ⇒ 按锚强放 (判据/注释同旗点
-//   crateL); 旧 BASES±(3,±3) 换算舰局部是 (±3,3), 埋在甲板室墙面里。陆图 b0/b1=-1 ⇒ 两路都不走, 逐位同旧。
-const capBaseCrate=(idx)=>{
-if(idx<0||typeof capShipLocalXY!=='function') return false;
-const C=(CAMPAIGN.capital||[])[idx]; if(!C||!C.baseCrateL) return false;
-const w=capShipLocalXY(idx,C.baseCrateL[0],C.baseCrateL[1]); if(!w) return false;
-return ammoCrate(w.x,w.z,true,capDeckWorldY(idx),idx);
-};
-if(!capBaseCrate(b0)) ammoAt(BASES[0].x+(BASES[0].x<0?3:-3),BASES[0].z+3,b0>=0?b0:undefined);
-if(!capBaseCrate(b1)) ammoAt(BASES[1].x+(BASES[1].x<0?3:-3),BASES[1].z-3,b1>=0?b1:undefined);
+ammoAt(BASES[0].x+(BASES[0].x<0?3:-3),BASES[0].z+3);
+ammoAt(BASES[1].x+(BASES[1].x<0?3:-3),BASES[1].z-3);
 }
 // ══════════════════════════════════════════════════════════════════════════════
 // 固定火力点模型单源 (2026-09-21B §3 翻新批, owner: firepoints) —— 05c 尾段, 供本文件 mg42() 与

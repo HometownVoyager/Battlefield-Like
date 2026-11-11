@@ -57,7 +57,7 @@ function capturePristineWorld(){
 if(WSN.ready) return true;
 try{
 WSN.worldKids=world.children.slice();
-WSN.sceneKids=scene.children.slice();
+WSN.sceneKids=scene.children.filter(c=>!(c&&(c._isPrecip||c._isCloud||(typeof window!=='undefined'&&window.__precipObj&&c===window.__precipObj)))).slice();
 // ② 静态碰撞盒 (AABB + dead 一起存: killBox 把 AABB 推到 99999 当"已死"用)
 WSN.boxN=BOXES.length;
 WSN.box=BOXES.map(b=>[b.dead?1:0,b.minX,b.minY,b.minZ,b.maxX,b.maxY,b.maxZ]);
@@ -103,6 +103,7 @@ if(im.instanceColor&&im.instanceColor.array) e.c=Float32Array.from(im.instanceCo
 WSN.inst.push(e);
 };
 if(typeof TREE_IM!=='undefined'&&TREE_IM){ snapIM(TREE_IM.trunks); snapIM(TREE_IM.leaves); }
+if(typeof WLOW_IM!=='undefined'&&WLOW_IM){ snapIM(WLOW_IM.trunks); snapIM(WLOW_IM.branches); snapIM(WLOW_IM.leaves); } // 垂柳三张实例批 (2026-11-10 柳树批: 倒伏/焦黑/沉入态一并还原)
 if(typeof BUSH_IM!=='undefined') snapIM(BUSH_IM);
 // ④c 草丛/庄稼实例批的"按格索引表": 烧尽时 delete(格) 且实例零缩放 —— 只还原矩阵的话,
 // 下一局同一格再烧就不会隐藏这批实例 (表里已经没有那一格了), 故连表内容一起存
@@ -142,14 +143,26 @@ WSN.ready=false; return false;
 function _wsnRestoreGraph(root,snap){
 if(!root||!snap) return;
 const keep=new Set(snap);
+const activePrecip=(typeof getActivePrecipObj==='function'?getActivePrecipObj():((typeof window!=='undefined'&&window.__precipObj)?window.__precipObj:null));
 for(let i=root.children.length-1;i>=0;i--){
 const c=root.children[i];
 if(keep.has(c)) continue;
+if(root===scene&&(c===activePrecip||(c&&(c._isPrecip||(typeof window!=='undefined'&&c===window.__precipObj))))) continue;
 root.children.splice(i,1);
 if(c&&c.parent===root) c.parent=null;
+if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(c);
 }
 root.children.length=0;
-for(const o of snap){ if(!o) continue; o.parent=root; root.children.push(o); }
+for(const o of snap){
+if(!o) continue;
+if(root===scene&&(o._isPrecip||o.isLineSegments||(o.isPoints&&o._isPrecip))) continue;
+o.parent=root;
+root.children.push(o);
+}
+if(root===scene&&activePrecip&&!root.children.includes(activePrecip)){
+activePrecip.parent=root;
+root.children.push(activePrecip);
+}
 }
 // ═════ 运行期特效清理 (在场景台账还原之前): 清表 + 撤物理体; 网格由台账还原整段摘除 ═════
 // 池化对象 (粒子精灵/拖痕网格) 连池一起丢弃: 池里留着"已被摘出场景"的对象, 之后复用就是隐形特效;
@@ -296,10 +309,7 @@ pos.needsUpdate=true;
 }
 if(typeof drawFlagTex==='function') drawFlagTex(f);
 }
-// ⑨b 大舰复位 (2026-10-01b): 大舰自本批起属于"载入期世界" (快照里有它们的网格), 上一局的瘫痪/
-//   进水/炮位废损/巡航偏移不在快照里 —— 统一走 15h capitalReset 单源 (respawnClear + 甲板旗点重绑)。
-//   非海战图/只载部分脚本的沙箱按 typeof 守卫跳过。
-if(typeof capitalReset==='function'&&typeof capitalShips!=='undefined'&&capitalShips.length){ try{ capitalReset(); }catch(e){} }
+// ⑨b (2026-11-10: 大舰复位 capitalReset 钩随大舰子系统下架摘除)
 // ⑩ 残留光效/HUD (爆炸闪光灯/雷暴白屏)
 try{ flashLight.intensity=0; }catch(e){}
 try{ flashTimer=0; }catch(e){}
@@ -307,6 +317,8 @@ try{ stormFlash=0; const ov=document.getElementById('stormOv'); if(ov) ov.style.
 // ⑪ 占用网格 + 空间索引 + 寻路网格按还原后的碰撞体重建 (顺带抹掉火焰/工事留下的占用格)
 try{ _navDirtyT=0; }catch(e){}
 try{ NAV.refresh(); }catch(e){ console.warn('[世界还原] 导航重建失败:',e&&e.message); }
+// ⑫ 环境与天气状态同步 (防止就地换局/复位后雾距/雾色/曝光与当前 WX_CFG 脱节)
+try{ if(typeof applySceneEnvironment==='function') applySceneEnvironment(); }catch(e){}
 // 耗时诊断 (一次换局/回主菜单一次): 实机若感到卡顿, 这条日志是唯一读数
 const _t1=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
 console.log('[世界还原] 世界已复原: 台账 '+WSN.worldKids.length+' 项 · scene '+WSN.sceneKids.length+' 项 · 碰撞盒 '+WSN.boxN

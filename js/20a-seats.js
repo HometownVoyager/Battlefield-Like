@@ -29,8 +29,11 @@ const h=clamp(v.heat,0,1);
 const over=(v.heat>=1||v.heatLock===true);
 if(wrap&&wrap.style.display!=='block') wrap.style.display='block';
 if(fill){
-fill.style.width=(h*100)+'%';
-fill.style.background=over?'#ff5a3a':(h>0.7?'linear-gradient(90deg,#e8c56a,#e83a1a)':'linear-gradient(90deg,#8fd8f0,#e8c56a)');
+// 变了才写 (2026-11-01 性能批): 旧版每帧无条件赋 style, 同值赋值也触发 CSSOM 失效
+const wv=(h*100)+'%';
+if(fill._lw!==wv){ fill._lw=wv; fill.style.width=wv; }
+const bg=over?'#ff5a3a':(h>0.7?'linear-gradient(90deg,#e8c56a,#e83a1a)':'linear-gradient(90deg,#8fd8f0,#e8c56a)');
+if(fill._lb!==bg){ fill._lb=bg; fill.style.background=bg; }
 }
 if(over&&_mgHeatOverVeh!==v){
 _mgHeatOverVeh=v;
@@ -51,16 +54,22 @@ t.turretYaw=angleLerpTo(t.turretYaw,wantTY,t.def.tRate*dt);
 let wantPitch=clamp(p.pitch,-0.12,0.32);
 if(p.tankView){
 // 炮手镜: 测距并抬炮补偿弹道下坠
-const cd=camForward(), co=camera.position.clone();
+// 320m 测距 10Hz 节流 (2026-11-01 性能批, 与 _pipT 同档): 全程 DDA + 逐坦克圆柱测距, 结果只进
+// wantPitch 的阻尼目标 (dampF 6/s), 100ms 新鲜度不可感。距离缓存 _rngD, 射线期间走复用槽。
+if(nowT-updatePlayerTank._rngT>=0.1){
+updatePlayerTank._rngT=nowT;
+const cd=camForward(_scF), co=_scO.copy(camera.position);
 let D=320;
 const wr2=raycastWorld(co,cd,D);
 if(wr2) D=wr2.dist;
 for(const t2 of tanks){
 if(t2===t||!t2.alive) continue;
-const r2=rayCyl(co,cd,vehHitCyl(t2),D);
+const r2=rayCyl(co,cd,vehHitCyl(t2,_scCyl),D);
 if(r2) D=r2.t;
 }
-	wantPitch=clamp(p.pitch+SHELL_G*D/(2*SHELL_SPD*SHELL_SPD),-0.12,0.35);
+updatePlayerTank._rngD=D;
+}
+	wantPitch=clamp(p.pitch+SHELL_G*updatePlayerTank._rngD/(2*SHELL_SPD*SHELL_SPD),-0.12,0.35);
 }
 t.turretPitch=dampF(t.turretPitch,wantPitch,6,dt);
 p.fireT-=dt;
@@ -76,13 +85,13 @@ if(p.streakBuff){ t.cannonCd*=p.streakBuff.reloadMul; t.cdMax=t.cannonCd; }   //
 }
 // 同轴机枪(右键)
 if(mouse2Down&&!matchOver){
-const cd=camForward();
-const co=camera.position.clone();
+const cd=camForward(_scF);
+const co=_scO.copy(camera.position);
 let aimD=200;
 const wr=raycastWorld(co,cd,aimD);
 if(wr) aimD=wr.dist;
-const aimP=co.addScaledVector(cd,aimD);
-let dir=aimP.sub(t.coaxMuzzle()).normalize();
+const aimP=_scA.copy(co).addScaledVector(cd,aimD);
+let dir=_scD.copy(aimP).sub(t.coaxMuzzle()).normalize();
 if(dir.dot(t.aimDir())>0.85){
 dir.x+=rand(-0.012,0.012); dir.y+=rand(-0.009,0.009); dir.z+=rand(-0.012,0.012); dir.normalize();
 // 瞄准吸附 (2026-09-27): 同轴机枪 = 机枪档; 同样挂在散布之后 (掰的是这一发的最终方向)
@@ -99,16 +108,16 @@ updatePlayerTank._pipT=nowT;
 const pip=seatElm('tankPip');
 {
 const sp2=t.aimDir().multiplyScalar(SHELL_SPD);
-const simP=t.muzzle.clone();
+const simP=_scO.copy(t.muzzle);   // 复用槽 (2026-11-01 性能批): 旧版 muzzle.clone + 每步 clone
 let hitP=null;
 for(let i=0;i<36;i++){
 	sp2.y-=SHELL_G*0.1;
 const step=sp2.length()*0.1;
-const dirN=sp2.clone().normalize();
+const dirN=_scD.copy(sp2).normalize();
 const wr=raycastWorld(simP,dirN,step);
-if(wr){ hitP=simP.clone().addScaledVector(dirN,wr.dist); break; }
+if(wr){ hitP=_scA.copy(simP).addScaledVector(dirN,wr.dist); break; }
 simP.addScaledVector(dirN,step);
-if(simP.y<heightAt(simP.x,simP.z)){ hitP=simP.clone(); break; }
+if(simP.y<heightAt(simP.x,simP.z)){ hitP=simP; break; }
 }
 if(!hitP) hitP=simP;
 const v=hitP.project(camera);
@@ -141,52 +150,73 @@ _heat.style.background=t.cannonCd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e
 vehMgHeatHud(t); // 机枪热量条 (2026-09-21 A#3): 只读 tank-core 写的 t.heat/t.heatLock; 幽灵坦克在函数内早退
 updateInteractHint();
 }
-updatePlayerTank._els={}; updatePlayerTank._pipT=0;
+updatePlayerTank._els={}; updatePlayerTank._pipT=0; updatePlayerTank._rngT=0; updatePlayerTank._rngD=320;
+// 座位链逐帧复用槽 (2026-11-01 性能批): 相机前向/位置/瞄准点/方向各一槽, 本帧内串行消费不持有
+const _scF=V3(0,0,1), _scO=V3(), _scA=V3(), _scD=V3(0,0,1), _scCyl={x:0,z:0,r:2.3,y0:0,y1:0};
+const _scCylT={x:0,z:0,r:2.2,y0:0,y1:0};
+// 投影/落点写入单源 (2026-11-01 性能批): 旧版 updatePlayerPlane 每帧新建 _prj/_put 两个闭包 + 每次投影一个 V3。
+// 投影走 _seatPrjV 复用槽 —— 返回值由调用方本帧内同步消费 (读 x/y 即丢), 不跨调用持有 ⇒ 单槽安全。
+const _seatPrjV=V3();
+function _seatPrj(x,y,z){ const v=_seatPrjV.set(x,y,z).project(camera); return (v.z<1&&Math.abs(v.x)<1.05&&Math.abs(v.y)<1.05)?v:null; }
+function _seatPut(id,v){ const e2=seatElm(id);
+if(v){ e2.style.display='block'; e2.style.left=((v.x*0.5+0.5)*innerWidth)+'px'; e2.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px'; }
+else e2.style.display='none'; }
 function updatePlayerPlane(dt){
 const p=player, pl=p.onVehicle;
 if(!pl.alive){ p.onVehicle=null; return; }
-seatElm('heatFill').style.width=(pl.bombs/pl.def.bombs*100)+'%';
-seatElm('heatFill').style.background='#9fc0e8';
+const hf=seatElm('heatFill');   // 去重写 (2026-11-01 性能批): _lw/_lb 键与 vehMgHeatHud 共用 ⇒ 跨座位缓存一致
+const hv=(pl.bombs/pl.def.bombs*100)+'%';
+if(hf._lw!==hv){ hf._lw=hv; hf.style.width=hv; }
+if(hf._lb!=='#9fc0e8'){ hf._lb='#9fc0e8'; hf.style.background='#9fc0e8'; }
 // ═══ 飞机火控 HUD (P3-7a 2026-09-30, 用户痛点"驾驶时对空对地全无辅助, 只能碰运气") ═══
 // 四件套全走"世界点 → camera.project 投影"(leadPip 同款), 不用屏幕中心 —— 追尾相机 lookAt
 // 前方 22m 带俯角, 屏幕中心与弹道方向差 ~7-11°, 那正是旧版"准星缺失+视差"手感灾难的主因。
 // 收尾纪律 (D6): 四个 pip 都是 20a 直写 style 的双写点字段, 22-hud 兜底 sweep 里必须逐个 hudHideReal。
-const _prj=(x,y,z)=>{ const v=V3(x,y,z).project(camera); return (v.z<1&&Math.abs(v.x)<1.05&&Math.abs(v.y)<1.05)?v:null; };
-const _put=(id,v)=>{ const e2=seatElm(id);
-if(v){ e2.style.display='block'; e2.style.left=((v.x*0.5+0.5)*innerWidth)+'px'; e2.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px'; }
-else e2.style.display='none'; };
+const _prj=_seatPrj, _put=_seatPut;   // 模块级单源 (2026-11-01 性能批): 旧版每帧新建两个闭包 + 每次投影一个 V3
 // ① 炮线准星 (boresight): 机枪出膛线 (pos+fwd×2.4 沿 fwdDir) 远点投影 —— 十字永远钉在弹道方向上
-const fd=pl.fwdDir();
+const fd=pl.fwdDir(_scF);
 _put('gunPip',_prj(pl.pos.x+fd.x*300,pl.pos.y+fd.y*300,pl.pos.z+fd.z*300));
-// ② 扫射弹着点: 机枪线 (fireBullet 直线无下坠) 与地形首个交点 (8m 步进+半步回退细化)
-let sHit=null;
+// ② 扫射弹着点 + ③ 航弹落点 (CCIP): 地形步进 (74 次 heightAt/帧) 与 60 步弹道积分 10Hz 节流
+//    (updatePlayerTank._rngT 同款口径) —— 命中世界点缓存进 _spH/_ccH, **逐帧重投影**: 屏幕位置仍随相机
+//    连续, 只有世界参考点最多滞后 0.1s (对地面参考点可接受; ① 准星仍逐帧)。
+//    ③ 物理原样: 与 dropBomb 逐字同式初值 (vel×0.85, vy=min(fv.y,0)-4) + updateNades 同款
+//    半隐式积分 (vy 先减 g 再进位) + fuse 6s 上限 —— 首个触地点即爆点, 6s 未触地按空中爆点标。
+const sp=updatePlayerPlane._spH, cc=updatePlayerPlane._ccH;
+if(nowT-updatePlayerPlane._pipT>=0.1){
+updatePlayerPlane._pipT=nowT;
+let sOK=false;
 { let sx=pl.pos.x+fd.x*2.4, sy=pl.pos.y+fd.y*2.4, sz=pl.pos.z+fd.z*2.4;
 for(let d=8;d<600;d+=8){
 const px2=sx+fd.x*8, py2=sy+fd.y*8, pz2=sz+fd.z*8;
-if(py2<=heightAt(px2,pz2)){ const mx=(sx+px2)/2,my=(sy+py2)/2,mz=(sz+pz2)/2; sHit=(my<=heightAt(mx,mz))?V3(mx,my,mz):V3(px2,py2,pz2); break; }
+if(py2<=heightAt(px2,pz2)){ const mx=(sx+px2)/2,my=(sy+py2)/2,mz=(sz+pz2)/2;
+if(my<=heightAt(mx,mz)){ sp.x=mx; sp.y=my; sp.z=mz; } else { sp.x=px2; sp.y=py2; sp.z=pz2; }
+sOK=true; break; }
 sx=px2; sy=py2; sz=pz2;
 } }
-_put('strafePip',sHit?_prj(sHit.x,sHit.y,sHit.z):null);
-// ③ 航弹落点 (CCIP): 与 dropBomb 逐字同式初值 (vel×0.85, vy=min(fv.y,0)-4) + updateNades 同款
-//    半隐式积分 (vy 先减 g 再进位) + fuse 6s 上限 —— 首个触地点即爆点 (bounced→fuse 0.02), 6s 未触地按空中爆点标
+sp.ok=sOK;
 if(pl.bombs>0){
-const fv=pl.velVec();
-let bx=pl.pos.x, by=pl.pos.y-1, bz=pl.pos.z, vx=fv.x*0.85, vy=Math.min(fv.y,0)-4, vz=fv.z*0.85, bt=0, bpt=null;
+const fv=pl.velVec(_scD);
+let bx=pl.pos.x, by=pl.pos.y-1, bz=pl.pos.z, vx=fv.x*0.85, vy=Math.min(fv.y,0)-4, vz=fv.z*0.85, bt=0, bOK=false;
 while(bt<6){ vy-=0.98; bx+=vx*0.1; by+=vy*0.1; bz+=vz*0.1; bt+=0.1;
-if(by<=heightAt(bx,bz)+0.05||bt>=6-1e-9){ bpt=V3(bx,by,bz); break; } }
-_put('ccipPip',bpt?_prj(bpt.x,bpt.y,bpt.z):null);
-} else seatElm('ccipPip').style.display='none';
+if(by<=heightAt(bx,bz)+0.05||bt>=6-1e-9){ cc.x=bx; cc.y=by; cc.z=bz; bOK=true; break; } }
+cc.ok=bOK;
+} else cc.ok=false;
+}
+_put('strafePip',sp.ok?_prj(sp.x,sp.y,sp.z):null);
+_put('ccipPip',cc.ok?_prj(cc.x,cc.y,cc.z):null);
 // ④ 空空指示框: 最近敌机屏幕投影 + 距离读数 + "咬住可开火"高亮 (机头夹角 <3.2° 且 <280m = airmg 吸附档接得上的窗口)
 let ep=null,ed=1e9;
-for(const e2 of planes){ if(!e2.alive||e2.team===pl.team) continue; const d=e2.pos.distanceTo(pl.pos); if(d<ed){ ed=d; ep=e2; } }
+for(let i2=0;i2<planes.length;i2++){ const e2=planes[i2]; if(!e2.alive||e2.team===pl.team) continue; const d=e2.pos.distanceTo(pl.pos); if(d<ed){ ed=d; ep=e2; } }
 if(ep&&ed<420){
 const v=_prj(ep.pos.x,ep.pos.y,ep.pos.z);
 if(v){
 const e4=seatElm('airPip');
 e4.style.display='block'; e4.style.left=((v.x*0.5+0.5)*innerWidth)+'px'; e4.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px';
-e4.setAttribute('data-d',Math.round(ed));
-const rel2=V3(ep.pos.x-pl.pos.x,ep.pos.y-pl.pos.y,ep.pos.z-pl.pos.z).normalize();
-const ang=Math.acos(clamp(rel2.dot(fd),-1,1));
+const dds=String(Math.round(ed)); if(e4._dd!==dds){ e4._dd=dds; e4.setAttribute('data-d',dds); }
+// rel2 标量化 (2026-11-01 性能批): 与 V3(...).normalize() 逐位同判 (零向量长度归 1 ⇒ dot=0)
+const rx=ep.pos.x-pl.pos.x, ry=ep.pos.y-pl.pos.y, rz=ep.pos.z-pl.pos.z;
+const rl=Math.sqrt(rx*rx+ry*ry+rz*rz)||1;
+const ang=Math.acos(clamp((rx*fd.x+ry*fd.y+rz*fd.z)/rl,-1,1));
 e4.style.opacity=(ang<0.056&&ed<280)?'1':'0.55';
 } else seatElm('airPip').style.display='none';
 } else seatElm('airPip').style.display='none';
@@ -209,8 +239,10 @@ if(lkEl._t!==lkTxt){ lkEl._t=lkTxt; lkEl.textContent=lkTxt; } // 文案变化才
 lkEl.style.display=lkTxt?'block':'none';
 updateInteractHint();
 }
+updatePlayerPlane._pipT=0; updatePlayerPlane._spH={ok:false,x:0,y:0,z:0}; updatePlayerPlane._ccH={ok:false,x:0,y:0,z:0};
 function updatePlayerMortar(dt){
 const p=player, m=p.onMortar;
+p.crouch=true; p.prone=false;   // 命中体 parity (2026-11-03): Bot 迫击炮手蹲姿小命中体 (14-bots), 玩家旧版站着 = 挨打面更大, 同规补齐 (mountMortar 已盖, 此处逐帧兜底)
 // 解除 ±0.6rad 回旋限制: 炮身 360° 随动视角
 const rel=angDiff(m.face+Math.PI,p.yaw);
 p.yaw=m.face+Math.PI+rel;
@@ -220,8 +252,8 @@ p.pos.z=m.z-Math.cos(m.face+rel)*0.85;
 p.pos.y=standHeight(p.pos.x,p.pos.z,p.pos.y+1); p.vel.set(0,0,0);
 m.grp.rotation.y=m.face+rel;
 m.cd-=dt;
-const dir=camForward();
-const vo=V3(m.x+dir.x*60,m.y+dir.y*60,m.z+dir.z*60);
+const dir=camForward(_scF);   // 复用槽 (2026-11-01 性能批): 每帧 clone 是纯垃圾
+const vo=_scA.set(m.x+dir.x*60,m.y+dir.y*60,m.z+dir.z*60);   // 同上; vo 本帧内同步消费 (标记位/开火读 x/z)
 // 落点指示圈: 实时显示炮弹落点
 mortarMarker.visible=true;
 mortarMarker.position.set(vo.x,heightAt(vo.x,vo.z)+0.07,vo.z);
@@ -229,14 +261,15 @@ mortarMarker.rotation.y+=dt*1.2;
 const mscale=0.85+Math.sin(nowT*3.2)*0.08;
 mortarMarker.scale.setScalar(mscale);
 if(mouseDown&&m.cd<=0&&!matchOver){
-m.cd=3.2*(p.streakBuff?p.streakBuff.reloadMul:1); m.cdMax=m.cd; // 玩家冷却档 (Bot AI rand(4.2,6.5) 显式节奏分叉); 连杀增益: 射速提升 (2026-09-12)
+m.cd=4.5*(p.streakBuff?p.streakBuff.reloadMul:1); m.cdMax=m.cd; // 玩家冷却档 3.2→4.5 (★2026-10-30 用户裁定⑤削弱); Bot AI rand(6,9) 显式节奏分叉; 连杀增益: 射速提升 (2026-09-12)
 emplMortarShell(m,p,vo.x,vo.z); // 弹道/弹体/击杀来源/炮口烟单源 (13-combat)
 AudioSys.metalSlide(0.35,0.18,140,50);
 addTrauma(0.12);
 }
 // 炮管俯仰随视角(高抛→炮管更竖直), 开火后阻尼回位
 m.tube.rotation.x=dampF(m.tube.rotation.x,0.62-(p.pitch-0.95)*0.3,5,dt);
-seatElm('heatFill').style.width=(clamp(1-m.cd/(m.cdMax||3.2),0,1)*100)+'%';
+const hf=seatElm('heatFill'); const wv=(clamp(1-m.cd/(m.cdMax||4.5),0,1)*100)+'%';
+if(hf._lw!==wv){ hf._lw=wv; hf.style.width=wv; }
 updateInteractHint();
 }
 function updatePlayerAT(dt){
@@ -256,7 +289,7 @@ p.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
 p.pos.y=standHeight(p.pos.x,p.pos.z,p.pos.y+1);
 p.vel.set(0,0,0);
 if(mouseDown&&g.cd<=0&&!matchOver){
-let dir=camForward();
+let dir=camForward(_scF);   // 复用槽 (2026-11-01 性能批)
 // 瞄准吸附 (2026-09-27): 反坦克炮 = 直瞄重火力档 (打坦克/步兵都是同一发穿甲弹)
 if(typeof aimAssistDir==='function') dir=aimAssistDir(V3(g.x,g.y+0.3,g.z),dir,'heavy',{team:p.team,ff:false});
 emplATFire(g,p,dir); // 冷却/炮口/弹速/特效/击杀来源单源 (13-combat, 与 Bot 同一份)
@@ -264,7 +297,8 @@ if(p.streakBuff) g.cd*=p.streakBuff.reloadMul; // 连杀增益: 装填加速 (20
 g.cdMax=g.cd;
 addTrauma(0.45);
 }
-seatElm('heatFill').style.width=(clamp(1-g.cd/(g.cdMax||4.5),0,1)*100)+'%';
+const hf=seatElm('heatFill'); const wv=(clamp(1-g.cd/(g.cdMax||3.6),0,1)*100)+'%';
+if(hf._lw!==wv){ hf._lw=wv; hf.style.width=wv; }
 updateInteractHint();
 }
 // ═════════════════════════════════════════════════════════════════════════════
@@ -305,7 +339,7 @@ p.vel.set(0,0,0);
 // 左键开炮: 方向 = 相机前向 (准星汇聚, 与 updatePlayerAT 的 camForward 同式); 冷却/炮口/弹速/特效/
 // 击杀来源单源在 15f 的 Battery.fire (batteryFire 唯一入口) —— 本文件不写弹道数值。
 if(mouseDown&&g.cd<=0&&!matchOver&&typeof batteryFire==='function'){
-let dir=camForward();
+let dir=camForward(_scF);   // 复用槽 (2026-11-01 性能批)
 // 瞄准吸附 (2026-09-27): 岸防炮 = 直瞄重火力档 (对海对岸双用); 舰艇是它的主目标 (角半径大 ⇒ 窗口自然更宽)
 if(typeof aimAssistDir==='function') dir=aimAssistDir(V3(g.x,g.y+1.0,g.z),dir,'heavy',{team:p.team,ff:false});
 if(batteryFire(g,dir,p)){
@@ -315,8 +349,10 @@ addTrauma(0.45);                                 // 与 updatePlayerAT 的开炮
 }
 }
 const hf=seatElm('heatFill');
-hf.style.width=(clamp(1-g.cd/(g.cdMax||((typeof BATTERY_RELOAD_A==='number')?BATTERY_RELOAD_A:5.2)),0,1)*100)+'%';
-hf.style.background=g.cd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e83a1a)';
+const wv=(clamp(1-g.cd/(g.cdMax||((typeof BATTERY_RELOAD_A==='number')?BATTERY_RELOAD_A:3.6)),0,1)*100)+'%';
+if(hf._lw!==wv){ hf._lw=wv; hf.style.width=wv; }
+const bg=g.cd<=0?'#8fd18f':'linear-gradient(90deg,#e8c56a,#e83a1a)';
+if(hf._lb!==bg){ hf._lb=bg; hf.style.background=bg; }
 updateInteractHint();
 }
 function updatePlayerAA(dt){
@@ -332,10 +368,10 @@ p.vel.set(0,0,0);
 // 提前量指示圈
 const pip=seatElm('leadPip');
 let ep=null,bd=1e9;
-for(const pl2 of planes){ if(pl2.alive&&pl2.team!==p.team){ const d=pl2.pos.distanceTo(V3(g.x,g.y,g.z)); if(d<bd){ bd=d; ep=pl2; } } }
+for(let i2=0;i2<planes.length;i2++){ const pl2=planes[i2]; if(pl2.alive&&pl2.team!==p.team){ const dx=pl2.pos.x-g.x,dy=pl2.pos.y-g.y,dz=pl2.pos.z-g.z; const d=Math.sqrt(dx*dx+dy*dy+dz*dz); if(d<bd){ bd=d; ep=pl2; } } }   // 标量化 (2026-11-01 性能批): 每机一个 V3 是纯垃圾, 与 distanceTo 逐位同值
 if(ep&&bd<280){
 const tof=bd/FLAK_SPD; // 7d-乙: 高炮弹速单源 FLAK_SPD (旧借 SHELL_SPD; 2026-09-06 B7a/P2-8 起单源化)
-const lead=ep.pos.clone().addScaledVector(ep.velVec(),tof);
+const lead=_scA.copy(ep.pos).addScaledVector(ep.velVec(_scD),tof);   // 复用槽 (2026-11-01 性能批): clone+velVec 每帧两_alloc
 const v=lead.project(camera);
 if(v.z<1&&Math.abs(v.x)<1.1&&Math.abs(v.y)<1.1){
 pip.style.display='block';
@@ -346,7 +382,7 @@ pip.style.top=((1-(v.y*0.5+0.5))*innerHeight)+'px';
 if(mouseDown&&g.cd<=0&&!matchOver){
 g.cd=EMPL_AA_CD*(p.streakBuff?p.streakBuff.reloadMul:1); g.cdMax=g.cd; // 与 Bot 同档单源 (D1=c); 连杀增益: 射速提升 (2026-09-12)
 p._src='防空炮'; // 击杀来源: 固定防空炮
-let dir=camForward();
+let dir=camForward(_scF);   // 复用槽 (2026-11-01 性能批)
 // 瞄准吸附 (2026-09-27): 防空炮单列"对空"档 —— 目标含飞机 (提前量指示圈照旧, 吸附只做近失误兜底, 不替玩家算提前量)
 if(typeof aimAssistDir==='function') dir=aimAssistDir(V3(g.x,g.y+1.2,g.z),dir,'air',{team:p.team,ff:false});
 fireFlak(g,p,dir);
@@ -354,7 +390,8 @@ addTrauma(0.1);
 p.recoilPitch+=0.004;
 p.lastFiredT=nowT;
 }
-seatElm('heatFill').style.width=(clamp(1-g.cd/(g.cdMax||EMPL_AA_CD),0,1)*100)+'%';
+const hf=seatElm('heatFill'); const wv=(clamp(1-g.cd/(g.cdMax||EMPL_AA_CD),0,1)*100)+'%';
+if(hf._lw!==wv){ hf._lw=wv; hf.style.width=wv; }
 updateInteractHint();
 }
 function updatePlayerMG(dt){
@@ -368,9 +405,9 @@ mg.pitch.rotation.x=-p.pitch*0.9;
 mg.fireT-=dt;
 mg.heat=Math.max(0,mg.heat-dt*(mouseDown?0:0.22)); // 玩家散热档 0.22 且开火不散 (Bot 0.15 常散=显式节奏分叉)
 if(mouseDown&&mg.fireT<=0&&mg.heat<1&&!matchOver){
-let dir=camForward();   // let: 下面的瞄准吸附会把 dir 换成"掰过的新方向"
+let dir=camForward(_scF);   // let: 下面的瞄准吸附会把 dir 换成"掰过的新方向"; 复用槽 (2026-11-01 性能批)
 const spread=0.011+mg.heat*0.015; // 玩家输入散布 (随热量; Bot 走 0.02*(suppression+0.7))
-const rv=camRight(), uv=rv.clone().cross(dir).negate();
+const rv=camRight(_scO), uv=_scA.copy(rv).cross(dir).negate();   // 复用槽 (2026-11-01 性能批): clone+cross+negate 链每发三_alloc
 dir.addScaledVector(rv,rand(-spread,spread)).addScaledVector(uv,rand(-spread,spread)).normalize();
 p.recoilPitch+=0.0022;
 p.pitch=clamp(p.pitch+0.0012,-0.7,0.45);
@@ -384,7 +421,8 @@ emplMGFire(mg,p,dir); // 弹道/冷却/热量/特效/击杀来源单源 (13-comb
 if(p.streakBuff&&mg.heat>h0) mg.heat=h0+(mg.heat-h0)*p.streakBuff.reloadMul; // 连杀增益: 枪管降温——只放缓积热, 散热速率不变 (2026-09-12)
 if(mg.heat>=1){ AudioSys.metalSlide(0.4,0.3,400,200); } // 过热提示: emplMGFire 内已累加热量
 }
-seatElm('heatFill').style.width=(mg.heat*100)+'%';
+const hf=seatElm('heatFill'); const wv=(mg.heat*100)+'%';
+if(hf._lw!==wv){ hf._lw=wv; hf.style.width=wv; }
 updateInteractHint();
 }
 // ═════════════════════════════════════════════════════════════════════════════
@@ -646,18 +684,18 @@ const ty=(c.pos.y||0)+1.8+Math.tan(pit)*dh;
 if(typeof c.turretAimPoint==='function') c.turretAimPoint(c.pos.x+Math.sin(want)*dh,ty,c.pos.z+Math.cos(want)*dh,dt);
 else if(typeof c.turretAimAt==='function') c.turretAimAt(c.pos.x+Math.sin(want)*dh,c.pos.z+Math.cos(want)*dh,dt);
 }
-const cdF=camForward(), co=camera.position.clone();
+const cdF=camForward(_scF), co=_scO.copy(camera.position);   // 复用槽 (2026-11-01 性能批): 每帧 clone×2 是纯垃圾
 let aimD=620;
 const wr=raycastWorld(co,cdF,aimD);
 if(wr) aimD=wr.dist;
 const aimP=co.addScaledVector(cdF,aimD);
 if(!p.navalGun&&typeof c.turretAimAt==='function') c.turretAimAt(aimP.x,aimP.z,dt);
 // 开火方向: 炮口→瞄准点 (与坦克同口径); 拿不到炮口就退回相机前向
-let aimDir=camForward();
+let aimDir=camForward(_scF);   // cdF 在 aimP 合成后已死, 同槽轮换
 let mzMain=null;   // 主炮炮口 (瞄准吸附的遮挡射线起点; 缺读数时用炮心替代)
 if(typeof c.muzzle==='function'){
 const mz=c.muzzle('main');
-if(mz&&typeof mz.x==='number'){ mzMain=mz; const dv=aimP.clone().sub(mz); if(dv.lengthSq()>1e-6) aimDir=dv.normalize(); }
+if(mz&&typeof mz.x==='number'){ mzMain=mz; const dv=_scA.copy(aimP).sub(mz); if(dv.lengthSq()>1e-6) aimDir=dv.normalize(); }
 }
 // ⑦ 开火: 左键主炮 / 右键机炮 (两栖车 secondary=null ⇒ 右键走同轴机枪)。冷却自管 = 与 HUD 装填条同源。
 const st=p.navalCd||(p.navalCd={main:0,sec:0,torp:0});

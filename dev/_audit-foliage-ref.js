@@ -398,7 +398,12 @@ const inBallistic=refs.filter(r=>BALLISTIC.includes(r.fn));
 const defFiles=[...new Set(refs.map(r=>r.f))];
 console.log('  定义/接入文件: '+defFiles.join(', ')+'   弹道/命中函数体内的引用: '+(inBallistic.length?JSON.stringify(inBallistic):'0'));
 if(inBallistic.length) bad('遮蔽函数出现在弹道/命中函数体内: '+inBallistic.map(r=>r.fn).join(',')); else ok('没有任何引用落在弹道/命中函数体内');
-if(refs.filter(r=>r.f==='14-bots.js').length!==1) bad('14-bots.js 引用数不是 1'); else ok('14-bots.js 恰好 1 处 (perceive 内)');
+// ★2026-11-03 判据跟码修钉 (一.89 遗留): 一.89 的 perceive 优先复核在 perceive() 内合法加了第二处调用 —— 护栏本意是
+//   '只许落在感知层', 数量不再是 1 (循环外复核+循环内粗筛)。改判: ≥1 且全部在 perceive() 内。
+const _bots=refs.filter(r=>r.f==='14-bots.js');
+if(_bots.length<1) bad('14-bots.js 引用数=0 (perceive 内应有植被遮蔽粗筛)');
+else if(_bots.some(r=>r.fn!=='perceive')) bad('14-bots.js 调用不全在 perceive() 内 ('+_bots.map(r=>r.fn).join('/')+')');
+else ok('14-bots.js 共 '+_bots.length+' 处, 全部在 perceive() 内');
 }
 const withCollider=BUSH_LIVE.filter(r=>r.cyl||r.box).length;
 console.log('  灌木记录带 cyl/box 的株数='+withCollider+' (应为 0 —— 不进 BOXES/CYLS 就不可能被 raycastWorld/raySoldiers 命中)');

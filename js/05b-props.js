@@ -132,7 +132,7 @@ for(let i=0;i<3;i++){
 lf.push([yaw0+i*Math.PI/3+wr(-0.12,0.12), wr(-0.25,0.25), s*wr(0.8,1.15)]); // [yaw, 俯仰, 均匀缩放]
 }
 TREE_BATCH.push({x,z,s,g0,lf});
-const cyl={x,z,r:0.35*s,y0:g0,y1:g0+4*s};
+const cyl={x,z,r:0.35*s,y0:g0,y1:g0+4*s,foliage:true}; // foliage: 空中撞楼豁免 (16-aircraft 扫掠, 三虫批①) — 细树干撞不死机体
 CYLS.push(cyl);
 TREE_LIVE.push({kind:'tree',x,z,s,g0,lf,ti:TREE_BATCH.length-1,li:(TREE_BATCH.length-1)*3,cyl,alive:true,dead:false,burnT:-1,burnDur:0,dmg:0,fall:null,igniter:null,fT:0,iT:0,cx:x,cy:g0+3.6*s,cz:z,restCrown:null});
 floraHashAdd(TREE_LIVE[TREE_LIVE.length-1]);
@@ -145,6 +145,7 @@ const leaves=new THREE.InstancedMesh(treeLeafGeo,MAT.leaves,n*3);
 trunks.castShadow=true; trunks.receiveShadow=true;      // 与旧逐棵 mesh 的阴影设置一致
 leaves.castShadow=false; leaves.receiveShadow=false;
 trunks.frustumCulled=false; leaves.frustumCulled=false; // 实例批按整图包围盒剔除, 关闭以防树群消失
+if(typeof instColorInit==='function') instColorInit(trunks); // 树干焦黑染色的前置 (04b 同口径: 建模期白初始化, 免烧毁瞬间重编译)
 const _m=new THREE.Matrix4(), _p=new THREE.Vector3(), _qT=new THREE.Quaternion(), _qL=new THREE.Quaternion(), _e=new THREE.Euler(), _s=new THREE.Vector3();
 TREE_BATCH.forEach((t,ti)=>{
 _p.set(t.x,t.g0+2.2*t.s,t.z); _s.setScalar(t.s);
@@ -166,47 +167,127 @@ const g0=heightAt(x,z)-0.25;
 const t=mesh(new THREE.CylinderGeometry(0.14,0.3,3.6,6),MAT.woodDark,x,g0+1.8,z);
 t.rotation.z=wr(-0.15,0.15);
 const b1=mesh(new THREE.CylinderGeometry(0.05,0.1,1.6,5),MAT.woodDark,x+0.5,g0+3,z); b1.rotation.z=-0.9;
-const cyl={x,z,r:0.3,y0:g0,y1:g0+3.4};
+const cyl={x,z,r:0.3,y0:g0,y1:g0+3.4,foliage:true}; // foliage: 空中撞楼豁免 (三虫批①)
 CYLS.push(cyl);
 fuelAdd(x,z,0.9);
 const rec={kind:'dead',x,z,g0,meshes:[t,b1],cyl,alive:true,dead:false};
 floraHashAdd(rec);
 }
 // 垂柳 (淞沪水乡): 沿河/塘软遮蔽 —— 可穿行, 不挡弹, 轮廓一眼江南
-// 空间账: 干高 2.8, 冠幅 ~3.5 下垂至 ~0.6m (站隐不全遮); 根部圆柱 r0.35
+// 空间账: 干高 2.8, 冠带 3.0~4.0m, 垂条帘下摆至 ~0.5m (站隐不全遮); 根部圆柱 r0.35
 // 2026-09-12 实机修复: 旧版冠部=3 片平面绿盒悬空像飞毯; 改为多层小叶簇+自然垂条
+// 2026-11-10 重构 (连接修复×实例批×交互接入 —— 三病同根: 旧版逐件独立 mesh 且不入任何植被账):
+//   ① 连接散乱: 旧版三根主枝盒中心硬摆在离干轴 0.5m 的半空 (干顶实际只歪 ±0.17m), 冠片/垂条又
+//      各自独立随机散布 —— 枝不接干、冠不裹枝、条不挂冠。现改为主枝根**钉在干顶** (顺干倾斜),
+//      冠片蓬进枝梢高度带 [3.0,4.0] (旧 h∈[2.6,3.6] 整体上抬 0.4), 垂条顶**锚进冠带** [3.3,3.9]
+//      且水平半径钳进冠幅 —— 整树自下而上连贯。
+//   ② 实例批化: 旧版每棵 23 个独立 mesh (干1+枝3+冠7+条12), 淞沪沿河柳带单图 ~79 棵 ≈1800 draw
+//      call; 现登记进 WILL_BATCH, buildWorld 末尾 flushWillows() 合并为 干/枝/叶冠 3 个 InstancedMesh
+//      (与 tree() 同规)。焦黑染色前置 instColorInit 同 04b 口径 (建模期白初始化)。
+//   ③ 交互接入: 旧版不入 TREE_LIVE/FLORA_HASH/燃料表 ⇒ 火烧不着、炸不倒、碾不倒 (纯摆设)。
+//      现按 tree() 同账登记 (kind:'willow'): fuelAdd 可燃 / treeIgnitePass 认柳 / 燃烧→倒伏→焦黑→
+//      沉入同一条链 (04b) / explosionFlora 掀倒 / floraCrushTank 撞倒。
+//   随机数消耗顺序与旧逐件实现完全一致 (每棵 135 次 wr), 布局随机序列不漂移 (golden 对账在
+//   verify-willow-20261110: 柳位序列+PROPS 全表校验和 vs 改前采集的指纹)。
+//   部件姿态全程手算四元数 (轴角+Hamilton 积, 不调 THREE 方法) —— 轻量沙箱桩的 Quaternion 无
+//   set/multiply (与 04b floraObjMatrices 同款纪律); 倒伏/沉入期 04b.willowInstanceMatrices 按
+//   同一份部件表 (wt/wb/wl: 偏移+基础四元数+缩放) 重算实例矩阵, 建模期与运行期永不漂移。
+//   部件四元数只有建模期写死与倒伏期整体旋转两个来源, 探针可从记录数据复算全部几何关系。
+const WILL_BATCH=[];      // 垂柳建模批 (flushWillows 一次性并入实例批)
+let WLOW_IM=null;         // {trunks,branches,leaves} —— 04b 倒伏/焦黑/沉入按记录 wi 索引改写
+function _wqAxis(ux,uy,uz,ang,out){ // 轴角 → 四元数分量 out=[x,y,z,w]
+const s=Math.sin(ang/2);
+out[0]=ux*s; out[1]=uy*s; out[2]=uz*s; out[3]=Math.cos(ang/2);
+return out;
+}
+function _wqMul(a,b,out){ // Hamilton 积 a⊗b (旧 rotation.order='YXZ' 的手算等价)
+out[0]=a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1];
+out[1]=a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0];
+out[2]=a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3];
+out[3]=a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2];
+return out;
+}
+function _wqRotV(q,vx,vy,vz,out){ // v'=q·v·q*  (t=2·qv×v; v'=v+w·t+qv×t)
+const x=q[0],y=q[1],z=q[2],w=q[3];
+const tx=2*(y*vz-z*vy), ty=2*(z*vx-x*vz), tz=2*(x*vy-y*vx);
+out[0]=vx+w*tx+(y*tz-z*ty);
+out[1]=vy+w*ty+(z*tx-x*tz);
+out[2]=vz+w*tz+(x*ty-y*tx);
+return out;
+}
 function willowTree(x,z){
 if(!propFree(x,z,1.4)||!freeSpot(x,z,1.0)) return;
 propTake(x,z,1.4);
 const g0=heightAt(x,z)-0.2;
-// 主干 (微倾, 高 2.8)
-const trunk=mesh(new THREE.CylinderGeometry(0.16,0.30,2.8,7),MAT.bark,x,g0+1.4,z);
-trunk.rotation.z=wr(-0.06,0.06);
-// 主枝: 3 根斜出 (从干顶分叉)
+const rec={kind:'willow',x,z,s:1,g0,wt:null,wb:[],wl:[],wi:WILL_BATCH.length,cyl:null,alive:true,dead:false,burnT:-1,burnDur:0,dmg:0,fall:null,igniter:null,fT:0,iT:0,cx:x,cy:g0+3.5,cz:z,restCrown:null};
+// 主干 (微倾, 高 2.8): 实例=中心 (g0+1.4)+绕 Z 微倾; 干顶 = 中心 + R(tilt)·(0,1.4,0)
+const tilt=wr(-0.06,0.06);
+rec.wt={ox:0,oy:1.4,oz:0,q:[0,0,Math.sin(tilt/2),Math.cos(tilt/2)],sx:1,sy:1,sz:1};
+const tx=x-Math.sin(tilt)*1.4, ty=g0+1.4+Math.cos(tilt)*1.4, tz=z; // 干顶 (世界系; 绕 Z 倾斜不产生 z 偏移)
+// 主枝: 3 根斜出, 根部钉进干顶 (下嵌 0.12) —— 随机消耗与旧版逐位一致 (a=方位抖动, rz=离干角)
 for(let i=0;i<3;i++){
 const a=i*TAU/3+wr(-0.3,0.3);
-const bx=x+Math.cos(a)*0.5, bz=z+Math.sin(a)*0.5;
-const m=mesh(boxGeo(0.10,1.4,0.10),MAT.bark,bx,g0+3.2,bz,a);
-m.rotation.order='YXZ'; m.rotation.z=wr(0.3,0.5);
+const rz=wr(0.3,0.5);
+const dx=Math.sin(rz)*Math.cos(a), dy=Math.cos(rz), dz=Math.sin(rz)*Math.sin(a); // 枝向 (方位 a, 离竖直 rz)
+const q=_wqAxis(Math.sin(a),0,-Math.cos(a),rz,[0,0,0,0]); // 轴=(sinA,0,-cosA) 把长轴 (0,1,0) 转到枝向
+rec.wb.push({ox:tx-x+dx*0.58, oy:ty-g0-0.12+dy*0.58, oz:dz*0.58, q, sx:1,sy:1,sz:1});
 }
-// 冠部: 多层小叶簇 (非平面大盒, 而是 6~8 片小叶面交错)
+// 冠部: 7 片小叶簇蓬进枝梢高度带 [3.0,4.0], 半径钳进枝梢回转圆 (0.34~0.89)
 for(let i=0;i<7;i++){
 const a=wr(0,TAU), r=wr(0.3,1.2), h=wr(2.6,3.6);
-const px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
-const m=mesh(boxGeo(wr(0.8,1.4),0.12,wr(0.6,1.1)),MAT.leaves||MAT.wood,px,g0+h,pz,wr(0,TAU),false,false);
-m.rotation.order='YXZ'; m.rotation.x=wr(-0.3,0.3); m.rotation.z=wr(-0.2,0.2);
+const w=wr(0.8,1.4), dd=wr(0.6,1.1), yaw=wr(0,TAU), rx=wr(-0.3,0.3), rz=wr(-0.2,0.2);
+const rr=0.15+r*0.62;
+const q=_wqMul(_wqMul([0,Math.sin(yaw/2),0,Math.cos(yaw/2)],[Math.sin(rx/2),0,0,Math.cos(rx/2)],[0,0,0,0]),[0,0,Math.sin(rz/2),Math.cos(rz/2)],[0,0,0,0]); // q=qy⊗qx⊗qz
+rec.wl.push({ox:Math.cos(a)*rr, oy:h+0.4, oz:Math.sin(a)*rr, q, sx:w, sy:0.12, sz:dd});
 }
-// 垂条: 10~14 条细长条自冠部下垂 (纯视觉, 不挡弹)
+// 垂条: 12 条细长条自冠带 [3.3,3.9] 垂下 (顶锚进冠带, 水平钳进冠幅), 下摆至 ~0.5m
 for(let i=0;i<12;i++){
-const a=wr(0,TAU), r=wr(0.5,1.6);
-const px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
-const topY=g0+wr(2.8,3.4);
-const len=wr(1.6,2.4);
-const m=mesh(boxGeo(0.06,len,0.06),MAT.leaves||MAT.wood,px,topY-len/2,pz,0,false,false);
-m.rotation.order='YXZ';
-m.rotation.z=wr(-0.15,0.15); m.rotation.x=wr(-0.1,0.1);
+const a=wr(0,TAU), r=wr(0.5,1.6), topY=wr(2.8,3.4), len=wr(1.6,2.4), rz=wr(-0.15,0.15), rx=wr(-0.1,0.1);
+const sr=r*0.7, L=len+0.4;
+const q=_wqMul([Math.sin(rx/2),0,0,Math.cos(rx/2)],[0,0,Math.sin(rz/2),Math.cos(rz/2)],[0,0,0,0]); // q=qx⊗qz
+const off=[0,0,0];
+_wqRotV(q,0,-L/2,0,off); // 中心 = 条顶 + q·(0,-L/2,0): 顶钉在冠带里, 微摆只偏下摆
+rec.wl.push({ox:Math.cos(a)*sr+off[0], oy:topY+0.5+off[1], oz:Math.sin(a)*sr+off[2], q, sx:0.06, sy:L, sz:0.06});
 }
-CYLS.push({x,z,r:0.35,y0:g0,y1:g0+2.8});
+rec.cyl={x,z,r:0.35,y0:g0,y1:g0+2.8,foliage:true}; // 垂柳主干: foliage=空中撞楼豁免 (三虫批①)
+CYLS.push(rec.cyl);
+fuelAdd(x,z,1.0);   // 柳下格可燃: 燃烧弹/沿岸火烧进柳下 → 格子起燃, treeIgnitePass 0.4s 内点燃树冠
+TREE_LIVE.push(rec);
+floraHashAdd(rec);
+WILL_BATCH.push(rec);
+}
+// 垂柳实例批合并 (buildWorld 末尾调用, 紧跟 flushTreeBatch): 干/枝 (bark) + 叶冠/垂条 (leaves) 3 张
+// InstancedMesh。实例索引: 干=wi, 枝=wi*3+k, 叶=wi*19+k (前 7 片冠 + 后 12 条垂条, 04b 同序遍历)。
+const wlowTrunkGeo=new THREE.CylinderGeometry(0.16,0.30,2.8,7);
+const wlowBranchGeo=new THREE.BoxGeometry(0.10,1.4,0.10);
+const wlowLeafGeo=new THREE.BoxGeometry(1,1,1);
+function flushWillows(){
+if(!WILL_BATCH.length) return;
+const n=WILL_BATCH.length;
+const trunks=new THREE.InstancedMesh(wlowTrunkGeo,MAT.bark,n);
+const branches=new THREE.InstancedMesh(wlowBranchGeo,MAT.bark,n*3);
+const leaves=new THREE.InstancedMesh(wlowLeafGeo,MAT.leaves,n*19);
+trunks.castShadow=false; trunks.receiveShadow=true;      // 与旧逐件 mesh() 默认一致 (cast=false,recv=true)
+branches.castShadow=false; branches.receiveShadow=true;
+leaves.castShadow=false; leaves.receiveShadow=false;    // 旧冠/条 recv=false
+trunks.frustumCulled=false; branches.frustumCulled=false; leaves.frustumCulled=false;
+instColorInit(trunks); instColorInit(branches);         // 烧毁焦黑染色的前置 (04b 同口径: 建模期白初始化)
+const _m=new THREE.Matrix4(), _p=new THREE.Vector3(), _s=new THREE.Vector3(), _q=new THREE.Quaternion(); // 真实例: vendor compose 读 ._x 私有字段, 普通对象=旋转全 NaN=实机整批隐形 (2026-11-11 实机回归; 下方按分量赋值走 setter 落 _x)
+WILL_BATCH.forEach((rec,wi)=>{
+const put=(im,ii,p)=>{
+_p.set(rec.x+p.ox, rec.g0+p.oy, rec.z+p.oz);
+_q.x=p.q[0]; _q.y=p.q[1]; _q.z=p.q[2]; _q.w=p.q[3];
+_s.set(p.sx,p.sy,p.sz);
+_m.compose(_p,_q,_s);
+im.setMatrixAt(ii,_m);
+};
+put(trunks,wi,rec.wt);
+for(let k=0;k<3;k++) put(branches,wi*3+k,rec.wb[k]);
+for(let k=0;k<19;k++) put(leaves,wi*19+k,rec.wl[k]);
+});
+world.add(trunks); world.add(branches); world.add(leaves);
+WLOW_IM={trunks,branches,leaves};
+WILL_BATCH.length=0;
 }
 const craterGeo=new THREE.CircleGeometry(1,20);
 const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false,map:TEX.crater}); // 2026-09-06 B8/P3-12: 焦土径向贴图取代纯色
@@ -353,7 +434,7 @@ const c=mesh(new THREE.CylinderGeometry(0.03,0.045,h,5),MAT_BAMBOO,x+ox,g0+h/2,z
 c.rotation.z=wr(-0.08,0.08);
 meshes.push(c);
 }
-const cyl={x,z,r:0.3,y0:g0,y1:g0+5.5};
+const cyl={x,z,r:0.3,y0:g0,y1:g0+5.5,foliage:true}; // 竹丛: foliage=空中撞楼豁免 (三虫批①)
 CYLS.push(cyl);
 fuelAdd(x,z,1.0);
 floraHashAdd({kind:'bamboo',x,z,g0,meshes,cyl,alive:true,dead:false});
@@ -839,6 +920,9 @@ return true;
 // 椰树: 高瘦带倾角的树干 (6.6~9.6m) + 8~10 片羽状叶自干顶外斜下垂 + 椰果.
 // 空间账: 树干 r0.34 为唯一直立碰撞 (冠部不设碰撞 = 子弹可穿叶而过, 与"树叶不挡弹"同口径);
 //   根部下沉 0.15 掩底缘; 可燃 (fuelAdd 1.0 → 烧到该格即起火)
+const _pmM = new THREE.Matrix4(), _pmP = new THREE.Vector3(), _pmQ = new THREE.Quaternion(), _pmE = new THREE.Euler(), _pmS = new THREE.Vector3();
+const palmLeafGeo = boxGeo(0.46, 1.0, 0.09);
+const palmNutGeo = new THREE.SphereGeometry(0.15, 6, 5);
 function palm(x,z,s=1){
 if(!propFree(x,z,0.95*s)) return;
 propTake(x,z,0.95*s);
@@ -851,30 +935,37 @@ grp.rotation.order='YXZ';
 grp.rotation.set(lean*Math.sin(leanA),wr(0,TAU),lean*Math.cos(leanA));
 world.add(grp);
 const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.30,h,7),MAT.bark);
-trunk.position.y=h/2; grp.add(trunk);
-grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+trunk.position.y=h/2;
+trunk.castShadow=true; trunk.receiveShadow=true;
+grp.add(trunk);
 const n=8+wri(0,2);
+const leaves=new THREE.InstancedMesh(palmLeafGeo,MAT.leaves,n);
+leaves.receiveShadow=true;
 for(let i=0;i<n;i++){
 const a=i*TAU/n+wr(-0.18,0.18);
 const len=wr(2.2,3.4)*s, p=wr(0.30,0.72);            // p = 自水平下垂角
 const dir={x:Math.sin(a)*Math.cos(p), y:-Math.sin(p), z:Math.cos(a)*Math.cos(p)};
-const frond=new THREE.Mesh(boxGeo(0.46,len,0.09),MAT.leaves);
-frond.position.set(dir.x*len*0.5, h+dir.y*len*0.5, dir.z*len*0.5);
-frond.rotation.order='YXZ';
-// ★ 2026-09-26 B4 修: 叶片**长轴 = 盒子的局部 Y** (boxGeo(0.46宽, len长, 0.09薄)), 而旧写法
-//   rotation.set(p,a,0) 把 +Y 映到 (sin a·sin p, cos p, cos a·sin p) —— 与 dir 给出的下垂方向
-//   (sin a·cos p, -sin p, cos a·cos p) 恰好差 90°: 叶柄横着朝侧上方伸, 沿下垂方向的倒是叶片的**薄轴**
-//   (0.09) ⇒ 整圈叶子像插在树顶的一排横杠。改成 p+HPI 后 +Y 精确落回 dir (sin(p+HPI)=cos p,
-//   cos(p+HPI)=-sin p): 长轴沿下垂方向, 叶片平面仍由"水平切向 × 下垂向"张成 (与旧版同一张面, 只转 90°)。
-frond.rotation.set(p+HPI,a,0);
-grp.add(frond);
+_pmP.set(dir.x*len*0.5, h+dir.y*len*0.5, dir.z*len*0.5);
+_pmE.set(p+HPI, a, 0, 'YXZ');
+_pmQ.setFromEuler(_pmE);
+_pmS.set(1, len, 1);
+_pmM.compose(_pmP, _pmQ, _pmS);
+leaves.setMatrixAt(i, _pmM);
 }
-for(let i=0;i<wri(3,5);i++){
+if(leaves.instanceMatrix) leaves.instanceMatrix.needsUpdate=true;
+grp.add(leaves);
+const nutCount=wri(3,5);
+const nuts=new THREE.InstancedMesh(palmNutGeo,MAT_PALM_NUT,nutCount);
+_pmS.set(1, 1, 1);
+_pmQ.identity();
+for(let i=0;i<nutCount;i++){
 const a=wr(0,TAU), r=wr(0.18,0.34);
-const nut=new THREE.Mesh(new THREE.SphereGeometry(0.15,6,5),MAT_PALM_NUT);
-nut.position.set(Math.sin(a)*r,h-0.24,Math.cos(a)*r);
-grp.add(nut);
+_pmP.set(Math.sin(a)*r, h-0.24, Math.cos(a)*r);
+_pmM.compose(_pmP, _pmQ, _pmS);
+nuts.setMatrixAt(i, _pmM);
 }
+if(nuts.instanceMatrix) nuts.instanceMatrix.needsUpdate=true;
+grp.add(nuts);
 const cyl={x,z,r:0.34*s,y0:g0,y1:g0+h};
 CYLS.push(cyl);
 fuelAdd(x,z,1.0);

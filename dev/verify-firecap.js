@@ -38,7 +38,7 @@ igniteArea(10,0,1,'attacker'); // 对照组: 无上限
 `);
 const CI1=run('fCellI(0,0)'), CI2=run('fCellI(10,0)');
 let dt=1/30, t=0, died=0, diedUncapped=0;
-while(t<12){
+while(t<25){
 run('updateFires(1/30);');
 t+=dt;
 if(!died && run(`FBURN[${CI1}]`)<=0){ died=t; }
@@ -46,9 +46,9 @@ if(!diedUncapped && run(`FBURN[${CI2}]`)<=0){ diedUncapped=t; }
 if(died&&diedUncapped) break;
 }
 console.log(`capped(3s) 实际熄灭于 ${died?died.toFixed(2):'未'}s (期望≈3.0-3.3s)`);
-console.log(`uncapped 对照熄灭于 ${diedUncapped?diedUncapped.toFixed(2):'未'}s (期望≈9.5s)`);
+console.log(`uncapped 对照熄灭于 ${diedUncapped?diedUncapped.toFixed(2):'未'}s (期望≈20.9s, 总体烧毁时间增加)`);
 if(!(died>2.8&&died<3.6)) { console.log('✘ cap 未生效'); process.exit(1); }
-if(!(diedUncapped>8)) { console.log('✘ 对照组异常'); process.exit(1); }
+if(!(diedUncapped>18)) { console.log('✘ 对照组异常'); process.exit(1); }
 console.log('✔ 寿命上限生效, 无上限火不受影响');
 // ── 2) 蔓延继承: cap 格引燃的邻格也带 cap ──
 run(`

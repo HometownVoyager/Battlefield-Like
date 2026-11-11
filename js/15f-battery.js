@@ -52,9 +52,9 @@ const BATTERY_WALL_R=3.45;       // 胸墙环中心半径 (内径 ≈3.14, 炮�
 const BATTERY_TRUNNION=1.52;     // 炮耳高 (混凝土场地以上): 高于两翼胸墙 1.15 ⇒ 面海射界不被自家墙挡
 const BATTERY_PAD_HW=6.2;        // 场地平台半宽 (10 边形外接圆 4.2 + 值班步道; ≥5.94 才能把炮位外接方角全罩进硬台面)
 const BATTERY_PAD_RAMP=6;        // 平台裙坡过渡带 (m) —— 与 coastalPit 同口径
-// 弹药节奏 (秒): 与 13-combat.js `emplATFire` 的 atGun Bot 档**同值** (g.cd=5.2+rand(0,1.4))。
+// 弹药节奏 (秒): 与 13-combat.js `emplATFire` 的 atGun Bot 档**同值** (g.cd=3.6+rand(0,0.8))。
 // dev/_battery-selfcheck.js 会从 13-combat.js 源码里再解析一遍这两个数 —— 那边改了而没同步, 自检立刻报红。
-const BATTERY_RELOAD_A=5.2, BATTERY_RELOAD_B=1.4;
+const BATTERY_RELOAD_A=3.6, BATTERY_RELOAD_B=0.8;
 const BATTERY_LEAD_ERR=0.10;     // 提前量误差 (±10% 飞行时间): 与 atGun 的 0.02rad 散布同属"AI 手感"档
 const BATTERY_CREW_DIST=2.7;     // 炮手站位 = 炮位沿 -face 方向 2.7m (2026-09-21 A#9 契约 §6: 与 atGun 同规)
 const BATTERY_PITCH_MIN=-0.42, BATTERY_PITCH_MAX=0.75; // 玩家操作俯仰射界**上限/兜底下限** (真正的下限见 batteryPitchFloor)

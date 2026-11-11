@@ -28,8 +28,8 @@ spawnP(PT.dark,w.pos.x,w.pos.y,w.pos.z,rand(-0.5,0.5),rand(0.5,1.5),rand(-0.5,0.
 spawnP(PT.flash,w.pos.x,w.pos.y,w.pos.z,rand(-1,1),rand(-1,1),rand(-1,1),rand(0.4,0.7),0.5,0.22,0.9,0,true);
 }
 const gh=(typeof planeFloorY==='function')?planeFloorY(w.pos.x,w.pos.z):heightAt(w.pos.x,w.pos.z);
-// ★2026-10-03 (纯海图残骸坠海): heightAt 在 opensea 给的是海床 (水下 22~26m) ⇒ 坠机在海底"触地爆炸",
-//   残骸沉在看不见的海底烧。改用水面地板 (与 planeFloorY 单源): 触水即爆+溅落, 残骸浮在水面烧完再沉。
+// (2026-10-03 引入, 2026-11-10 注记改写): 水面上 heightAt 给的是水底 ⇒ 坠机在水底"触地爆炸",
+//   残骸沉在看不见的水底烧。改用水面地板 (与 planeFloorY 单源): 触水即爆+溅落, 残骸浮在水面烧完再沉。
 if(w.pos.y<=gh+0.6){
 // 坠地爆炸: 无差别杀伤 + 留下焦黑残骸
 w.state='rest';
@@ -82,14 +82,36 @@ if(h>TERR_MAX_H) TERR_MAX_H=h;
 }
 return TERR_MAX_H;
 }
-// 飞机的"地板"高度 (2026-10-01b 修"全海图没有撞地线"): heightAt 在 opensea 给的是**海床** (海面下
-//   22~26m) —— 旧版撞地线 = 海床+2 ⇒ 飞机可以贴着浪底飞、扎进海里不炸。地形/水面取较高者为地板。
-//   非水域 waterYAt 返回 −1e8 ⇒ 逐位退化为 heightAt (既有 13 图零变化)。
+// 飞机的"地板"高度 (2026-10-01b 引入): 水面上 heightAt 给的是**水底** —— 旧版撞地线 = 水底+2 ⇒
+//   飞机可以贴着浪底飞、扎进水里不炸。地形/水面取较高者为地板。
+//   非水域 waterYAt 返回 −1e8 ⇒ 逐位退化为 heightAt。(2026-11-10: opensea 字样随纯海战图下架摘除)
 function planeFloorY(x,z){
 const gh=heightAt(x,z);
 if(typeof waterYAt!=='function') return gh;
 const wy=waterYAt(x,z);
 return (wy>-1e8)?Math.max(gh,wy):gh;
+}
+// ── 空中撞楼扫掠 (2026-11-10 三虫批①): 机体位移线段 vs 建筑碰撞体 ──
+// 旧版机体只查 planeFloorY (地形/水面地板), BOXES/CYLS 完全不参与 ⇒ 飞机直穿楼房/塔/烟囱。
+// 扫掠 = 上一帧位置→本帧位置的线段 (rayBox/rayCyl 参数化原语, 与 raycastWorld 同族单源);
+// 帧 步 1~4m 而墙厚 0.3m+ ⇒ 逐帧点测必然隧穿, 必须扫掠线段。树/枯树/垂柳/竹 = foliage 圆柱
+// 豁免 (细杆撞不死机体, 低空掠林不算撞楼 — 05b-props 四处打标); 残骸/沙袋/拒马/油桶等碰撞盒
+// 照常致死。候选收集走 eachBoxNear/eachCylNear (RGRID 邻近), 回调提升为模块级 = 零分配 (与
+// 04-collision _cmS 同款纪律); 命中即结构受创 + crash 档机毁 (die 第二参, 见 die() 注)。
+const _plSwO=V3(), _plSwD=V3(), _plSwHit={on:false,t:0,x:0,y:0,z:0};
+function _plSwTake(r){
+_plSwHit.on=true; _plSwHit.t=r.t;
+_plSwHit.x=_plSwO.x+_plSwD.x*r.t; _plSwHit.y=_plSwO.y+_plSwD.y*r.t; _plSwHit.z=_plSwO.z+_plSwD.z*r.t;
+}
+function _plSwBoxCb(b){
+if(b.dead||_plSwHit.on) return;
+const r=rayBox(_plSwO,_plSwD,b,_plSwHit.t);
+if(r) _plSwTake(r);
+}
+function _plSwCylCb(c){
+if(c.dead||c.foliage||_plSwHit.on) return;
+const r=rayCyl(_plSwO,_plSwD,c,_plSwHit.t);
+if(r) _plSwTake(r);
 }
 // ══════════════════════════════════════════════════════════════════════
 // 战机剪影几何工厂 (2026-09-20 I2 批: 按国家/机型出可辨识剪影)
@@ -107,14 +129,7 @@ return {shape:r.shape||PL_DEF.shape, span:r.span||PL_DEF.span, flen:r.flen||PL_D
  nose:r.nose||PL_DEF.nose, tip:r.tip||PL_DEF.tip, fin:r.fin||PL_DEF.fin, canopy:r.canopy||PL_DEF.canopy,
  belly:r.belly?1:0, biplane:r.biplane?1:0, pylons:r.pylons?1:0};
 }
-// 停机/拦阻的甲板抬升量 (2026-10-01d, 实机"飞机在起飞之前是嵌在甲板上的"): Plane 的网格原点在
-//   **机身轴线** (螺旋桨 y=0, 建模无起落架 —— 剪影口径), 机腹最低探到 −(FR+0.17×size)。把 pos.y
-//   钉在甲板面等于半截机身埋进甲板。停机 = 机腹着陆: 抬升量 = 机腹最低点 + 余量 (0.07×size),
-//   停放/拦阻/停驻三处同读这一支 (15h capParkPlanes / capTryArrest / capArrestTick)。
-function plParkLift(pl){
-const P=plSpec(pl&&pl.def&&pl.def.pl), s=(pl&&pl.def&&pl.def.size)||1;
-return P.fr*s+0.24*s;
-}
+// (2026-11-10: 停机/拦阻甲板抬升量 plParkLift 随大舰子系统下架摘除 —— 唯一消费者是 15h 停机链)
 // 机身: 尾细前粗锥筒 + 机鼻档 (inline 细长机鼻+桨毂锥+桨毂炮 / radial 星型粗机头) + 座舱盖
 function planeFuselage(T,P,s,M){
 const g=T.grp, FL=P.flen*s, FR=P.fr*s;
@@ -238,8 +253,10 @@ planeFuselage(this,P,s,M);
 planeWings(this,P,s,M);
 planeTail(this,P,s,M);
 planeDetails(this,P,s,M);
-// 阵营标识 (2026-09-02 用户指定): 机翼双条纹+垂尾涂队色+尾灯闪烁+悬浮队色三角信标
+// 阵营标识 (2026-09-02 用户指定): 机翼双条纹+垂尾涂队色+尾灯闪烁+悬浮队色信标
 // 信标: 无视深度遮挡/雾, 恒定世界尺寸4m, 地面玩家远距高空也能一眼辨敌我
+// 形状 (2026-10-24 用户指定): **只有敌方**用倒三角 (尖朝下), 友方保持原正三角 —— 判据单源 00-config
+// beaconInverted (相对 player.team), 与 15-vehicles 坦克信标同一判据
 for(const sx of [-1,1]){
 const band=new THREE.Mesh(new THREE.BoxGeometry(P.span*s*0.10,0.12*s,Math.max(0.9*s,P.flen*s*0.30)*0.95),markMat);
 band.position.set(sx*P.span*s*0.20,-0.04*s,P.flen*s*0.06); this.grp.add(band);
@@ -250,7 +267,10 @@ const bc=document.createElement('canvas'); bc.width=bc.height=64;
 const bg7=bc.getContext('2d');
 bg7.fillStyle='#'+(((TEAM_COL[this.team]>>>0).toString(16)).padStart(6,'0'));
 bg7.strokeStyle='#ffffff'; bg7.lineWidth=7;
-bg7.beginPath(); bg7.moveTo(32,5); bg7.lineTo(59,57); bg7.lineTo(5,57); bg7.closePath();
+bg7.beginPath();
+if(beaconInverted(this.team)){ bg7.moveTo(32,59); bg7.lineTo(59,5); bg7.lineTo(5,5); } // 敌方: 倒三角 (顶边在上, 尖朝下; canvas y 向下)
+else{ bg7.moveTo(32,5); bg7.lineTo(59,57); bg7.lineTo(5,57); }                        // 友方: 原正三角 (尖朝上)
+bg7.closePath();
 bg7.fill(); bg7.stroke();
 this.beaconMat=new THREE.SpriteMaterial({map:new THREE.CanvasTexture(bc),transparent:true,depthTest:false,depthWrite:false});
 this.beacon=new THREE.Sprite(this.beaconMat);
@@ -277,17 +297,19 @@ this.wingNavL.position.set(-wx,wy,wz); this.wingNavR.position.set(wx,wy,wz);
 this.wingNavL.scale.set(1.1,1.1,1); this.wingNavR.scale.set(1.1,1.1,1);
 this.grp.add(this.wingNavL); this.grp.add(this.wingNavR);
 }
+// 桨盘贴着机鼻 (2026-11-01 修: 旧 +0.08s 让桨盘悬在机鼻前 8cm, 侧视一道空气缝; 直列档有桨毂锥
+//   (尖 0.50FL) / 星型档整流罩前脸 0.50FL —— 桨片 (厚 0.05) 后缘埋进二者, 剪影才是"装在鼻子上")。
 this.prop=new THREE.Mesh(new THREE.BoxGeometry(Math.max(1.6*s,P.span*s*0.24),0.12,0.05),new THREE.MeshLambertMaterial({color:0x1a140e}));
-this.prop.position.set(0,0,P.flen*s*0.50+0.08*s);
+this.prop.position.set(0,0,P.flen*s*0.50-0.02*s);
 this.grp.add(this.prop);
 this.grp.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
 world.add(this.grp);
 }
-velVec(){
-return V3(Math.sin(this.yaw)*Math.cos(this.pitch),Math.sin(this.pitch),Math.cos(this.yaw)*Math.cos(this.pitch)).multiplyScalar(this.speed);
+velVec(out){
+return (out||V3()).set(Math.sin(this.yaw)*Math.cos(this.pitch),Math.sin(this.pitch),Math.cos(this.yaw)*Math.cos(this.pitch)).multiplyScalar(this.speed);
 }
-fwdDir(){
-return V3(Math.sin(this.yaw)*Math.cos(this.pitch),Math.sin(this.pitch),Math.cos(this.yaw)*Math.cos(this.pitch));
+fwdDir(out){
+return (out||V3()).set(Math.sin(this.yaw)*Math.cos(this.pitch),Math.sin(this.pitch),Math.cos(this.yaw)*Math.cos(this.pitch));
 }
 // ── 飞行核心单源 (P3-7a 2026-09-30): playerFly 与 planeAI 共用的同一套积分器 ──
 // 旧版两者各写一套姿态积分 (AI 直写 yaw/pitch/roll/speed, 玩家另写一套带手搓侧滑补偿),
@@ -355,10 +377,30 @@ nades.push({m,pos:p,vel:V3(fv.x*0.85,Math.min(fv.y,0)-4,fv.z*0.85),fuse:6,throwe
 if(lk) showScorePop(t2('航弹制导: {0}',t2(lk.name||(lk.kind==='tank'?'坦克':'地面目标'))));
 AudioSys.metalSlide(0.25,0.12,500,300);
 }
+// ★2026-10-26 排查轮二审 修复 (H2/P2): 指挥官投弹令 strike 的**清账**抽成单源方法。
+//   ①现象 (用户可见): 给一架敌方/己方 AI 战机下"指定投弹点"后, 若这架机中途跳伞 / 被玩家接管 /
+//     机毁重生, 指挥地图面板永远显示"投弹中", 命令线一直指着那个早已作废的点; 45s 超时也不清
+//     (超时判据在 planeAI 的 strike 块里, 而下面 update() 的分派是
+//      `if(playerDriven) … else if(crewBot&&crewBot.alive) planeAI(dt) else 无人驾驶` ——
+//      **没有 crewBot 的飞机根本不跑 planeAI**, 那块里靠局部 _done() 收尾的代码永远执行不到)。
+//   ②根因 (旧写为什么错): "清令"这件事只在两处各写了一份, 而且都挂在有人的路径上:
+//     planeAI 的局部 _done() (投出/无弹/超时) 与 respawn() 里的两行直写。跳伞 (:takeDmg 摘 crewBot)、
+//     玩家接管、以及任何把 crewBot 摘空的路径都不经过这两处 ⇒ strikePt 与 cmdOrder.mode='strike'
+//     双宿双飞地永久挂在机上, 面板/命令线读的是 order.mode (不是 strikePt), 于是永远空转显示投弹中。
+//   ③现在的单源口径: 清令 = 本方法, 四个消费点全调它, 不再各写一份:
+//     · planeAI 的 _done() (一次性任务正常完成: 投出 / 无弹 / 45s 超时)
+//     · takeDmg 跳伞段 (机组 Bot 被摘 = 无人能完成令, 立刻清, 不等下一帧)
+//     · respawn() (机毁 = 任务失败, 重生不带令; 语义与 2026-10-26 指挥官批那条修复一致)
+//     · update() 的分派点两条不变量 (见该处注释): playerDriven ⇒ 清 (玩家的机不吃 Bot 投弹令);
+//       无人驾驶 ⇒ 清 (没人能完成它)。这两条把范围外文件 (20-player 玩家跳伞 / 15h 航母甲板登机)
+//       的路径也一并自愈, 跨文件不必再各点一遍。
+//   为什么不是双源: 判据 ("令还该不该挂着") 只有一处实现, 消费点只调不判 —— 新增清令场景也必须调本方法。
+_cmdOrderClear(){
+this.strikePt=null;
+if(this.cmdOrder){ this.cmdOrder.mode='free'; this.cmdOrder.x=0; this.cmdOrder.z=0; }
+}
 update(dt){
-// 航母甲板停放态 (P4 2026-09-30, 15h capArrestTick): 停在飞行甲板上的舰载机整帧让位 —— 物理/姿态积分/
-// AI/开火全不跑, 只留弹射输入与甲板搬运。无大舰的战役首行即 false ⇒ 既有 13 张图零行为变化。
-if(typeof capArrestTick==='function'&&capArrestTick(this,dt)) return;
+// (2026-11-10: 航母甲板停放态 capArrestTick 整帧接管随大舰子系统下架摘除)
 if(!this.alive){
 	this.respawnT-=dt;
 	this.engine.update(0,0);
@@ -404,10 +446,27 @@ this.engine.update(120+this.speed*1.5, this.playerDriven?0.16:clamp(0.22-dCam/28
 this.prop.rotation.z+=dt*(20+this.speed*0.5);
 this.fireT-=dt; this.bombCd-=dt;
 if(this.bombs<this.def.bombs){ this.rearmT-=dt; if(this.rearmT<=0){ this.bombs++; this.rearmT=PLANE_FLIGHT.rearmT; } }
-// 驾驶分派: 三条路径都只写 fctl 意图, 姿态/速度积分统一走 flightStep (P3-7a 单源)
-if(this.playerDriven){ if(this.aiPilotOn) this.aiPilotFly(dt); else this.playerFly(dt); } // 7b-丙: 接管态=AI 飞行员代打, 同一 fctl 接口
+// ★2026-10-26 排查轮二审 修复 (H2/P2 第四现场 —— 本项真正的"根"): 指挥官投弹令的**执行者只有 planeAI**,
+//   而 planeAI 的调用门就是下面这行 `else if(this.crewBot&&this.crewBot.alive)`。一旦 crewBot 被摘
+//   (跳伞 / 玩家接管 / 机毁重生), 这架机就永远进不了 planeAI 的 strike 块, 该块里那份局部 _done()
+//   (投出/无弹/45s 超时三个出口) 全部不可达 ⇒ strikePt 与 cmdOrder.mode='strike' 永久挂着:
+//   ①现象 (用户可见): 指挥地图面板永远显示"投弹中", 命令线一直指着那个早已作废的点, 45s 超时也不清;
+//     面板/命令线读的是 order.mode 而不是 strikePt, 所以连"strikePt 已空"都看不出来。
+//   ②根因: "清令"被写在三条各自为政的路径里 (planeAI 的 _done / respawn 的两行 / 跳伞段没有),
+//     没有任何一条覆盖"机组已不在机上"这个状态 —— 而恰恰是那个状态让执行者消失。
+//   ③单源口径: 清令统一走 this._cmdOrderClear()。这里在**分派点**补两条不变量, 把范围外文件
+//     (20-player 玩家 F 跳伞、15h-capital 航母甲板登机) 产生的同款状态也一次自愈, 不必跨文件各点一遍:
+//       · playerDriven (含 AI 代打的接管态): 玩家的机不吃 Bot 投弹令 —— 他要么自己按 B 投, 要么换令;
+//         一条挂在机上的 Bot 令会让面板/命令线对着玩家座机说谎, 且玩家一跳伞就变成幽灵令。
+//       · 无人驾驶 (crewBot 为空 / 已阵亡): 没有任何执行者能完成这条令。
+//     两条都是"令不该继续挂着"的同一判据, 实现只有 _cmdOrderClear 一处; 分派点只负责触发, 不重写公式。
+if(this.playerDriven){
+if(this.strikePt||(this.cmdOrder&&this.cmdOrder.mode!=='free')) this._cmdOrderClear();
+if(this.aiPilotOn) this.aiPilotFly(dt); else this.playerFly(dt);    // 7b-丙: 接管态=AI 飞行员代打, 同一 fctl 接口
+}
 else if(this.crewBot&&this.crewBot.alive){ this.planeAI(dt); }
 else {
+if(this.strikePt||(this.cmdOrder&&this.cmdOrder.mode!=='free')) this._cmdOrderClear();   // 无机组 = 无人能完成投弹令
 // 无人驾驶: 失控螺旋坠机 —— 旧版 roll 无界连滚 + 俯仰扎头; 现按 fctl 口径给满舵坡度,
 // 由协调转弯自然拧成一股盘旋下坠的螺旋 (乘员已死/被摘, 5 秒级的谢幕演出, 口径见 7a 交付文档)
 // 7b-丙: 玩家跳伞/离机 → 接管态随无人驾驶一并收账 (冷却照记, 防落地秒开)
@@ -423,11 +482,36 @@ player.pos.copy(this.pos); player.vel.set(0,0,0);
 }
 // 位移积分 + 伪升力下沉 (P3-7a ②): 机背朝天分量 cos(pitch)·cos(roll) 越小沉得越快 ——
 // 平飞零下沉 (AI 巡航层不泊松掉高), 60° 坡 ≈7 m/s, 倒飞全额 —— 压大坡度必须拉杆补高度
+const _swx0=this.pos.x, _swy0=this.pos.y, _swz0=this.pos.z; // 空中撞楼扫掠起点 (三虫批①)
 const upY=Math.cos(this.pitch)*Math.cos(this.roll);
 this.pos.x+=Math.sin(this.yaw)*Math.cos(this.pitch)*this.speed*dt;
 this.pos.z+=Math.cos(this.yaw)*Math.cos(this.pitch)*this.speed*dt;
 this.pos.y+=Math.sin(this.pitch)*this.speed*dt-PLANE_FLIGHT.sinkG*(1-Math.max(0,upY))*dt;
 if(this.pos.y>PLANE_FLIGHT.ceiling) this.pitch=Math.min(this.pitch,-0.05);
+// ── 空中撞楼 (三虫批①): 扫掠线段命中建筑/工事碰撞体 = 撞楼机毁 ──
+// reach 加机鼻前伸余量 (flen·0.5·size≈1.8, 取 1.5 折算): 机鼻触楼即炸, 不是机心穿墙后才炸。
+// kind 全收 (box/cyl 都算; rayBox 不查 dead 但 killOne 已把死盒挪到 99999, 回调里再挡一道)。
+// 命中点给 damageStructures (撞塌的楼算击落者的战果, 与残骸触地 damageStructures 同口径);
+// die crash 档 = 坠楼机毁人亡, return 挡住下方撞地判定 (同一帧两处 die 会双份残骸/战报)。
+{
+const _swmx=this.pos.x-_swx0, _swmy=this.pos.y-_swy0, _swmz=this.pos.z-_swz0;
+const _swmv=Math.sqrt(_swmx*_swmx+_swmy*_swmy+_swmz*_swmz);
+if(_swmv>0.01){
+_plSwHit.on=false; _plSwHit.t=_swmv+this.def.size*1.5;
+_plSwO.set(_swx0,_swy0,_swz0);
+_plSwD.set(_swmx/_swmv,_swmy/_swmv,_swmz/_swmv);
+const _mrg=2.5;
+eachBoxNear(Math.min(_swx0,this.pos.x)-_mrg,Math.min(_swz0,this.pos.z)-_mrg,
+Math.max(_swx0,this.pos.x)+_mrg,Math.max(_swz0,this.pos.z)+_mrg,_plSwBoxCb);
+eachCylNear(Math.min(_swx0,this.pos.x)-_mrg,Math.min(_swz0,this.pos.z)-_mrg,
+Math.max(_swx0,this.pos.x)+_mrg,Math.max(_swz0,this.pos.z)+_mrg,_plSwCylCb);
+if(_plSwHit.on){
+if(typeof damageStructures==='function') damageStructures(_plSwHit,7,260,this.lastHitBy||null);
+this.die(this.lastHitBy||null,true);
+return;
+}
+}
+}
 const lim2=MAP_SIZE/2+PLANE_FLIGHT.bound;
 if(Math.abs(this.pos.x)>lim2||Math.abs(this.pos.z)>lim2){
 const wantYaw=Math.atan2(-this.pos.x,-this.pos.z);
@@ -448,17 +532,23 @@ if(this.smokeT<=0){ this.smokeT=0.06;
 spawnP(PT.dark,this.pos.x,this.pos.y,this.pos.z,0,0,0,0.8,1.2,1.2,0.6,0);
 }
 }
-// ★2026-10-04 (B14 机-舰实体碰撞): 纯海图上旧版机与舰**零碰撞** —— 俯冲几何失误的机直接穿过舰体。
-//   判定只取**舰体带** (capitalSolidAt: 水线~甲板面): ①AI 攻击剖面瞄甲板面+1.2m, 改出线=水面上 16m
-//   —— 低于航母舰岛顶 (~20m), 若把上层建筑也设为撞毁面, 投弹后改出的机会成批"撞岛自杀"
-//   (probe-planes 撞山死 7/8 实测), 舰岛掠过维持既有视觉简化; ②甲板停放的机不走这里
-//   (capArrestTick 在 update 首行整帧接管); 弹射出膛点在甲板面上方 1.2m, 在 +0.25 空域门外。
-if(typeof capitalSolidAt==='function'){
-const capHit=capitalSolidAt(this.pos.x,this.pos.y,this.pos.z);
-if(capHit){ this.pos.y=Math.max(this.pos.y,capHit.surf); this.die(this.lastHitBy||null); return; }
+// 载具残血起火 (2026-11-09 批): 机体燃烧 —— 掉血账直扣 hp (击杀归因=点燃者) + 依速喷火粒/烟
+// (飞机不带 follow 火源: 飞行拖火会沿航线点燃全图, 见 04b-fire vehBurnIgnite 注)
+if(this.burning&&this.alive){
+this.burnFxT=(this.burnFxT||0)-dt;
+if(this.burnFxT<=0){ this.burnFxT=0.05;
+spawnP(PT.flash,this.pos.x+rand(-0.6,0.6),this.pos.y+rand(-0.4,0.4),this.pos.z+rand(-0.6,0.6),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1,true);
+spawnP(PT.dark,this.pos.x,this.pos.y+0.8,this.pos.z,rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),0.9,1.7,rand(1.2,2.2),0.55,0.1);
 }
+this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
+// ★2026-11-10: 烧毁就地停帧 (与 15b-trucks/15d-naval 燃烧账同款, 本处与 15-vehicles 当初一起漏了
+// return) —— die() 无重入门, 继续走下方机-舰实体/撞地两处会在同一帧**再次** die(): 双份残骸克隆 +
+// 双份战报/票/爆炸 (低空烧毁即触发)。
+if(this.hp<=0){ this.die(this.burnBy||null); return; }
+}
+// (2026-11-10: B14 机-舰实体碰撞随大舰子系统下架摘除)
 const gh=planeFloorY(this.pos.x,this.pos.z);
-if(this.pos.y<gh+2) this.die(this.lastHitBy||null);
+if(this.pos.y<gh+2) this.die(this.lastHitBy||null,true); // crash 档 (三虫批②): 坠地=机毁人亡, 不再自动跳伞
 }
 planeAI(dt){
 this.stateT-=dt;
@@ -515,8 +605,7 @@ this.fireT=Math.max(this.fireT,PLANE_DIFF[SETTINGS.diff].react*(ep.playerDriven?
 }
 if(this.state==='dogfight'){
 const ep=this.dogTgt;
-if(!ep||!ep.alive){ this.state='patrol'; this.stateT=rand(5,10); this.dogTgt=null; this.roll=dampF(this.roll,0,2,dt); return; }
-const d=ep.pos.distanceTo(this.pos);
+if(!ep||!ep.alive){ this.state='patrol'; this.stateT=rand(5,10); this.dogTgt=null; this.roll=dampF(this.roll,0,2,dt); return; }const d=ep.pos.distanceTo(this.pos);
 // ── 低空保护② (2026-09-30 实机批): 本机 AGL<breakAGL → 整帧放弃攻击几何 ——
 //    坡度减半 (把满坡 66° 的伪升力下沉 ≈8.5m/s 砍半) + 满杆拉起 + 满油门, 零开火。
 //    旧版只有机下 gh+14 的尾守卫 (抬一点俯仰继续咬): 满坡咬圈一边转一边沉, 改出动力学
@@ -543,6 +632,47 @@ if(Math.random()<0.12) AudioSys.gunshot('smg',this.pos.distanceTo(camera.positio
 if(d>340){ this.state='patrol'; this.stateT=rand(5,10); this.dogTgt=null; } // 脱离线比进入线 (240×eng≤300) 宽出半拍, 防临界抖动
 return;
 }
+// ── 指挥官投弹令 strike (2026-10-26 指挥官批, 26-commander; 设计 §5/R5) ──
+// 一次性任务: 瞄着指定点进入攻击航线投弹, 投出/无弹/超时(45s) 即恢复自由 (cmdOrder.mode 回 free)。
+// "途中被咬尾照常自卫": 上方的缠斗进入门对非 dive/dogfight 态照常放行 —— 被咬进 dogfight 时该分支
+// 先 return, 缠斗结束回来本块接着带航线; 本块不占 state (保持 patrol), 地形规避/拒止带在前同样优先。
+if(this.strikePt){
+const sp=this.strikePt;
+const gyS=planeFloorY(sp.x,sp.z);
+// ★2026-10-26 排查轮二审: 清令走 _cmdOrderClear 单源 (旧写在这里内联一份 strikePt=null + order 归 free,
+//   与 respawn() 那份是同一判据的第二份实现; 且本块只有跑 planeAI 的有人机才到得了, 无机组的机靠
+//   update() 分派点的两条不变量兜底 —— 详见 _cmdOrderClear 的说明块)。
+const _done=()=>{ this._cmdOrderClear(); };
+// ★2026-10-26 排查轮 P1 修复 (指挥官 strike 令 35% 完全不投弹): 投弹门要 bombCd<=0 && |dyS|<0.3 &&
+//   距离窗三条件**同一帧**成立, 而距离窗只在掠过令点前的一小段里开着且随接近迅速收窄;
+//   bombCd 出厂是 rand(3,6) (本文件 :212) 且投弹后 rand(5,9) —— 只要窗口开着时 bombCd 还没归零,
+//   这一趟就永久错过, 一直挂到 45s 超时清令 (实测 20 次全新 boot 有 7 次一次不投, d1 分布 31m~184m)。
+//   玩家下的是「投弹此点」的一次性任务: 冷却不该让它落空。进航线后按到令点距离把 bombCd 归零
+//   (窗口还没开时归零也无害 —— 窗口一开就能投), 保留 bombCd 只为节流连投, 不再吞掉整次任务。
+if(this.bombCd>0){
+const _dhS=Math.hypot(sp.x-this.pos.x,sp.z-this.pos.z);
+if(_dhS<420) this.bombCd=0;
+}
+if(this.bombs<=0||(this.strikeT0!==undefined&&nowT-(this.strikeT0||0)>45)){
+_done(); this.state='climb'; this.stateT=4; this.target=null;
+return;
+}
+const dhS=Math.hypot(sp.x-this.pos.x,sp.z-this.pos.z);
+const aimYS=gyS+2+Math.max(0,dhS-150)*0.5;   // 远处保持巡航高度, 接近后才压入轰炸剖面 (规避块兜底撞山)
+const dyS=steerToward(this,V3(sp.x,aimYS,sp.z),this.def.spd[1],1,[-0.55,0.1]);
+if(this.bombCd<=0&&Math.abs(dyS)<0.3){
+const hS=Math.max(this.pos.y-gyS,4);
+const tofS=Math.sqrt(2*hS/9.8);
+if(dhS<this.speed*tofS*0.6&&dhS>this.speed*tofS*0.15){
+this.bombCd=rand(5,9); this.bombs--;
+this.dropBomb(this.crewBot||this.crew);
+_done();                                    // 投出 = 任务完成, 一次性
+this.state='climb'; this.stateT=4; this.target=null;
+return;
+}
+}
+return;
+}
 if(this.state==='patrol'){
 // 巡航层: 有山战役自动抬升到"全图最高地形+42m", 无山维持 62m;
 // 巡逻圈半径随地图缩放 (320 图 110m 不变, 800 图≈174m 覆盖全部旗区)
@@ -566,17 +696,8 @@ if(typeof specRide==='function'&&specRide(t)) continue;   // 观战者座驾不�
 const d=t.pos.distanceTo(this.pos);
 if(d<280){ const sc=(this.bombs>0?150:60)-d*0.3+rand(0,30); if(sc>bs){ bs=sc; best=t; } }
 }
-// 对舰目标 (2026-10-01b 用户裁定"航母、飞机、航弹应该有足够的影响力"): 旧版只点名坦克/步兵 ——
-//   纯海战图上飞机全程绕圈看戏。现在: 大舰只在**挂弹时**点名 (机炮啃不动装甲, 打了也是浪费架次);
-//   小艇扫射/轰炸皆可 (与对地步兵同档, 挂弹加成)。塔拉瓦的沿岸小艇从此也在空袭范围内。
-if(typeof capitalShips!=='undefined'&&Array.isArray(capitalShips)) for(const s of capitalShips){
-if(!s||s.team===this.team||s.state!=='run') continue;
-if(this.bombs<=0) continue;                                // 没弹不碰大舰
-const d=Math.hypot(s.pos.x-this.pos.x,s.pos.z-this.pos.z);
-if(d>560) continue;
-const sc=200-d*0.22+rand(0,40);
-if(sc>bs){ bs=sc; best=s; }
-}
+// 对舰目标 (2026-10-01b): 小艇扫射/轰炸皆可 (与对地步兵同档, 挂弹加成) —— 塔拉瓦的沿岸小艇从此也在
+//   空袭范围内。(2026-11-10: 大舰挂弹点名分支随大舰子系统下架摘除)
 if(typeof navalCraft!=='undefined'&&Array.isArray(navalCraft)) for(const c of navalCraft){
 if(!c||!c.alive||c.team===this.team||c.state==='sinking'||c.state==='wreck') continue;
 if(typeof specRide==='function'&&specRide(c)) continue;
@@ -596,6 +717,20 @@ for(const s2 of combatants){ if(s2.alive&&s2.team===s.team&&Math.hypot(s2.pos.x-
 sc+=cluster*16;
 if(sc>bs){ bs=sc; best=s; }
 }
+// 丧尸群点名 (2026-10-07d, 用户"投弹炸丧尸而不是其他点位"): 丧尸模式巡逻选目标时把尸潮当
+// 一等候选 —— 群聚密度就是分 (9m 簇 ×16), 大波/尸潮堆天然压过散兵。O(n²) 仅巡逻决策期跑 (4~8s 一次)。
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE&&typeof ZOMBIES!=='undefined'&&ZOMBIES.length){
+for(const s of ZOMBIES){
+if(!s.alive) continue;
+const d=Math.hypot(s.pos.x-this.pos.x,s.pos.z-this.pos.z);
+if(d>220) continue;
+let sc=40-d*0.25+rand(0,25);
+let cluster=0;
+for(const s2 of ZOMBIES){ if(s2.alive&&Math.hypot(s2.pos.x-s.pos.x,s2.pos.z-s.pos.z)<9) cluster++; }
+sc+=cluster*16;
+if(sc>bs){ bs=sc; best=s; }
+}
+}
 if(best){ this.target=best; this.state='dive'; this.stateT=7.5; this.avdT=0; } // avdT: 规避带提交不跨态 (不吞俯冲起头)
 else this.stateT=rand(4,8);
 }
@@ -608,24 +743,24 @@ else {
 // ★2026-10-04 (海战审计 B14 瞄水线病): 旧瞄准点 deckY*0.6 换算到世界只有**水线上 2~5m** —— 在干舷
 //   之下, 轰炸机追着舰体水线扎、航弹贴水线炸 (对舰几乎无效)。瞄准点抬到**甲板面 +1.2m** (甲板是
 //   真实命中面; 1.2m 余量让引信在甲板上方触发而不是半埋进铺面)。
-const capT=(tgt.kind==='capital');
-const aimY=tgt.pos.y+(capT?tgt.spec.deckY+1.2:2);
+const aimY=tgt.pos.y+2;   // (2026-11-10: capT 大舰剖面项随大舰子系统下架摘除)
 const PD=PLANE_DIFF[SETTINGS.diff];
 // 对玩家放宽 (2026-10-06 难度批标准档): 目标是玩家本人 (步行扫射) 或玩家驾驶的车时, 扫射进入距 ×0.8、
 // 射速 ×1.15 —— 航弹投放带不单列 (面杀伤, 且有掩体减免), 只削机炮扫射的点名压力。
 const _pTg=(tgt===player)||!!tgt.playerDriven;
 const dy=steerToward(this,V3(tgt.pos.x,aimY,tgt.pos.z),this.def.spd[1],1,[-0.55,0.1]);
 const dh=Math.hypot(tgt.pos.x-this.pos.x,tgt.pos.z-this.pos.z);
-if(!capT&&this.fireT<=0&&dh<110*PD.sg*(_pTg?0.8:1)&&Math.abs(dy)<0.22&&this.pos.y>12){
-this.fireT=this.def.rof*PD.rof*(_pTg?1.15:1); // 7b-甲: 对地扫射同接射速档 (大舰不扫射 —— 机炮无用, 只投弹)
+if(this.fireT<=0&&dh<110*PD.sg*(_pTg?0.8:1)&&Math.abs(dy)<0.22&&this.pos.y>12){
+this.fireT=this.def.rof*PD.rof*(_pTg?1.15:1); // 7b-甲: 对地扫射同接射速档 (2026-11-10: !capT 门随大舰子系统下架摘除)
 this.fireMGBurst(this.crewBot||this.crew,1.2);
 }
 if(this.bombs>0&&this.bombCd<=0&&Math.abs(dy)<0.3){
-const h=this.pos.y-(tgt.pos.y+(capT?tgt.spec.deckY+1.2:0));
+const h=this.pos.y-tgt.pos.y;
 const tof=Math.sqrt(Math.max(2*h/9.8,0.01));
-// ★2026-10-04 (B14 提前量): 目标是 4m/s 级的移动舰, 按当前位置算落点必然落后一个身位 ——
-//   释放门按"预测落点"算水平距离 (速度经 capTgtVel 单源取: 大舰 velX/velZ, 小艇标量 vel 按航向分解)。
-const tv=(typeof capTgtVel==='function')?capTgtVel(tgt,_planeLeadVel):_planeLeadVel;
+// ★2026-10-04 (B14 提前量): 目标是 4m/s 级的移动艇, 按当前位置算落点必然落后一个身位 ——
+//   释放门按"预测落点"算水平距离 (2026-11-10: 原 15h capTgtVel 的艇/机分支收编为 planeTgtVel,
+//   大舰 velX/velZ 分支随大舰子系统下架摘除)。
+const tv=planeTgtVel(tgt,_planeLeadVel);
 const px2=tgt.pos.x+tv.x*tof, pz2=tgt.pos.z+tv.z*tof;
 const dhP=Math.hypot(px2-this.pos.x,pz2-this.pos.z);
 if(dhP<this.speed*tof*PD.bmHi&&dhP>this.speed*tof*PD.bmLo){
@@ -807,6 +942,15 @@ else if(this.crewBot&&this.hp>0&&this.hp<this.maxHp*0.32){
 // 并在开伞前收掉上一顶伞 (旧版只写 cb.chuting=true, 缺 chute/onGround ⇒ 伞降保护与索敌口径都判不出来)。
 const cb=this.crewBot;
 this.crewBot=null;
+// ★2026-10-26 排查轮二审 修复 (H2/P2 第二现场): 跳伞 = 本机从此**没有机组 Bot**, 而
+//   ①指挥官投弹令的唯一执行者是 planeAI, 而 planeAI 只在 `crewBot&&crewBot.alive` 时被调
+//     (update 的驾驶分派) —— 机组一走, 令就再没人能完成, 也不会再有人清它;
+//   ②旧写更彻底: 这一段只摘 crewBot 就走人, strikePt 与 cmdOrder.mode='strike' 原样挂着,
+//     玩家视角 = 那架敌机在指挥地图上永远"投弹中"、命令线一直指着早已没意义的点。
+//   现在摘人同时清令 (任务失败口径, 与 respawn 的机毁同义), 清账走 _cmdOrderClear 单源。
+//   注意调用点**在 this.crewBot=null 之后**且本方法不读 crewBot —— 清令不依赖"机组还在"这个前提
+//   (依赖它就会在这里静默跳过, 正是要修的病)。
+this._cmdOrderClear();
 cb.onVehicle=null;
 const px=this.pos.x, py=Math.max(this.pos.y-2,heightAt(this.pos.x,this.pos.z)+3), pz=this.pos.z;
 if(typeof cb.chuteBegin==='function') cb.chuteBegin(px,py,pz);
@@ -815,14 +959,18 @@ else { cb.chuting=true; cb.pos.set(px,py,pz); cb.mesh.root.visible=true; cb.path
 else if(amt>8&&this.evadeT<=0&&Math.random()<PLANE_DIFF[SETTINGS.diff].evd){ // 7b-乙: 规避概率/时长接难度表 (旧写死 0.7/1.4~2.6)
 this.evadeT=rand(1.4,2.6)*PLANE_DIFF[SETTINGS.diff].evT; this.evadeDir=Math.random()<0.5?1:-1; this.state='patrol'; this.dogTgt=null;
 }
+// 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走; 飞行员 Bot 在 32% 已跳伞, 先于起火线)
+if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
 if(this.hp<=0) this.die(attacker);
 }
-die(attacker){
+// crash (2026-11-10, 三虫批②): 坠地/撞楼/空中撞机三类**碰撞系机毁**传 true —— 机组必死 (机毁人亡),
+// 玩家分支不再走 AUTO_EXIT_VEH 自动跳伞 (旧版坠地瞬间还开伞 = "过于非人类", 用户实报);
+// 被击落/烧毁等**火力系机毁**不传 ⇒ 玩家照旧可自动跳伞逃生 (sf_autoexit 语义不变), AI 飞行员
+// 照旧 damage(999) 随机同殁。
+die(attacker,crash){
 const spec=(typeof specRide==='function')&&specRide(this); // 观战者座驾: 车可以毁, 人绝不死 (2026-09-26H, 见下)
 this.alive=false; this.respawnT=rand(35,48); this.crew.alive=false;
-// ★2026-10-03: 拦阻账不跨生死 —— 停放中被毁的机若不清 capArrest, 重生机会被 capArrestTick 冻在
-//   半空出生点"等弹射" (AI 8s 后原地弹射 / 玩家直到按 Space)。
-this.capArrest=null; this.capParkT=0;
+// (2026-11-10: 拦阻账清理随大舰子系统下架摘除)
 // 7b-丙: 锁定/接管/缠斗目标随本体退场一并清 (目标引用不许过夜 —— 与 userData 禁对象引用同一族纪律)
 this.dogTgt=null; this.lockTgt=null; this.aiPilotOn=false; this.aiPilotTgt=null; this.aiLosT=0;
 this.aiEvT=0; this.aiEvCd=0; this.aiEvSrc=null; // 热修⑤+30j: 规避窗/威胁源随退场一并清
@@ -842,9 +990,11 @@ this.grp.visible=false;
 try{
 if(this.beacon) this.grp.remove(this.beacon); // 信标不随残骸克隆 (否则残骸静置时悬浮标识隔墙可见)
 if(this.wingNavL){ this.grp.remove(this.wingNavL); this.grp.remove(this.wingNavR); } // 夜航灯同理: 残骸不再闪红绿 (update 早退会冻结闪烁态)
+if(this._specTag) this.grp.remove(this._specTag); // 观战名牌同理 (2026-11-01): 名牌 depthTest:false+renderOrder 7, 随残骸克隆 = 隔墙冻结帧常显; 账归 22b 管
 const wm=this.grp.clone();
 if(this.beacon) this.grp.add(this.beacon);
 if(this.wingNavL){ this.grp.add(this.wingNavL); this.grp.add(this.wingNavR); }
+if(this._specTag) this.grp.add(this._specTag);
 wm.visible=true;                              // 防御: clone 连 visible 一起复制, 显式恢复
 scene.add(wm);
 const fv=this.velVec();
@@ -865,6 +1015,10 @@ this.playerDriven=false;
 player.onVehicle=null;
 // 观战者: 不走死亡链 (2026-09-26H) —— 安全脱离到机旁平地, 0 死/0 票; 普通玩家照旧 damage(999) 走全链
 if(spec){ if(typeof specRideEject==='function') specRideEject(this); }
+// 自动脱离载具 (2026-11-09 批, sf_autoexit 默认关): 机毁瞬间跳伞离机, 代替 damage(999) 死亡链。
+// crash 档豁免 (2026-11-10 三虫批②): 坠地/撞楼/撞机是碰撞系机毁 —— 人已随机体坠地, 跳伞不成立,
+// 一律走 damage(999) 死亡链 (用户裁定"过于非人类")。仅火力系机毁 (被击落/烧毁) 保留自动逃生。
+else if(!crash&&AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){ autoExitWreck(this,true); }
 else player.damage(999,attacker,false);
 }
 if(this.crewBot){
@@ -880,6 +1034,7 @@ if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('击�
 else attacker.score=(attacker.score||0)+SCORE_TABLE.plane;
 addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击落红档 (2026-09-30 批): 飞机无乘员 die 链兜底 (crewBot 走 damage(999)→Bot.die 有, 空机没有), 统一在此出档
+if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
 tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);
 explosionFX(this.pos.clone());
@@ -896,23 +1051,25 @@ const sx1=bp2.x+rand(-14,14), sz1=bp2.z+rand(-14,14);
 this.pos.set(sx1,Math.max(65,heightAt(sx1,sz1)+40),sz1);
 this.yaw=this.team===0?0:Math.PI; this.pitch=0; this.roll=0;
 this.hp=this.maxHp; this.alive=true; this.crew.alive=true; this.speed=PLANE_FLIGHT.birthSpeed;
+// 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者不得跨生死携带 (机体模型重生复用)
+this.burning=false; this.burnBy=null; this.burnSrc=null; this.burnFxT=0;
 this.state='patrol'; this.stateT=rand(5,10); this.target=null;
 this.bombs=this.def.bombs; this.playerDriven=false; this.evadeT=0;
+// 指挥官投弹令一次性 (2026-10-26 指挥官批): 机毁 = 任务失败, 重生不带令。
+ // ★指挥官令账同步清 (2026-10-26 修复): 旧写只清 strikePt, 编制表里的 order.mode 仍挂 'strike' ——
+ //   面板/命令线永远读作投弹中, 而 strikePt 已是 null, 这架机在指挥地图上永远是空转的有令态
+ //   (面板与命令线判据读 order.mode, 不读 strikePt)。机毁=任务失败, 令账同归 free。
+ // ★2026-10-26 排查轮二审 修复 (H2/P2 第三现场): 上面两段是同一件事的两行直写, 与 planeAI 的 _done()、
+ //   跳伞段各写一份 = 三份同判据实现 (改一处漏两处)。现统一走 _cmdOrderClear 单源, 语义逐字不变
+ //   (strikePt 清 + order.mode/'x'/'z' 归零), 只是不再在这里维护第二份公式。
+ this._cmdOrderClear();
 this.dogTgt=null; this.lockTgt=null; this.aiPilotOn=false; this.aiPilotTgt=null; this.aiLosT=0;
 this.aiEvT=0; this.aiEvCd=0; this.aiEvSrc=null; // 热修⑤: 规避窗随退场/重生一并清 // 7b-丙: 接管/锁定态不跨重生
 this.avdT=0;
 this.pilotWaitT=0;
 this.crewBot=null;
-this.capArrest=null; this.capParkT=0;                 // ★2026-10-03: 与 die() 同账 (重生不继承拦阻)
 this.grp.visible=true;
-// ★2026-10-03 (舰载机重生锚改弹射器): 本队航母在航 ⇒ 重生 = 直接弹射起飞 (capLaunchPlane 单源:
-//   落点=弹射器滑轨 + 顶速出膛) —— 旧版在 basePos (旗舰战列舰) 上空 65m 凭空出现, 全队机叠在同一个
-//   移动点上 ("成群冒出来"), 且冒出来就挂在舰队交战圈里挨打。无航母 (铁底湾) 或航母已瘫 ⇒ 保持既有
-//   basePos 上空出生 (typeof/状态双守卫, 非海战图与铁底湾逐位零变化)。
-if(typeof capitalShips!=='undefined'&&capitalShips.length&&typeof capLaunchPlane==='function'){
-const cv=(typeof capCarrierOfTeam==='function')?capCarrierOfTeam(this.team):null;
-if(cv&&cv.state==='run') capLaunchPlane(this,true);
-}
+// (2026-11-10: 舰载机弹射器重生随大舰子系统下架摘除 —— 恢复既有 basePos 上空出生)
 // 己方战机战损重生: 文字播报让玩家知道本方空中支援已回场 (构造函数不走这里, 开局不播报)
 if(this.team===player.team) announceVehRespawn(this);
 }
@@ -941,6 +1098,16 @@ function planeLeadAim(pl,tgt){
 return tgt.pos.clone().addScaledVector(tgt.velVec(),clamp(pl.pos.distanceTo(tgt.pos)/PLANE_AI.leadT,0,0.9));
 }
 const _planeLeadVel={x:0,y:0,z:0};   // 对海投弹提前量的速度槽 (planeAI dive 态复用, 不在热路径造对象)
+// 目标速度单源 (2026-11-10 收编, 原 15h capTgtVel 的艇/机分支): 大舰 velX/velZ 分支随大舰子系统下架摘除
+function planeTgtVel(tgt,out){
+out=out||{x:0,y:0,z:0};
+out.x=0; out.y=0; out.z=0;
+if(!tgt||!tgt.pos) return out;
+if(tgt.kind==='plane'&&typeof tgt.velVec==='function'){ const v=tgt.velVec(); out.x=v.x; out.y=v.y; out.z=v.z; }
+else if(typeof tgt.vel==='number'){ const sp=tgt.vel, c=Math.cos(tgt.yaw||0), n=Math.sin(tgt.yaw||0); out.x=n*sp; out.z=c*sp; }
+else if(tgt.vel){ out.x=tgt.vel.x||0; out.y=tgt.vel.y||0; out.z=tgt.vel.z||0; }
+return out;
+}
 // 不双打 (7b-乙): 每架敌机统计已被几架**己方 AI** 咬住, 取最少的 (同分取先)。
 function pickDogTarget(me){
 let best=null,bestN=1e9;
@@ -998,9 +1165,7 @@ showScorePop(t2('已锁定: {0} · {1}m',t2(t.name||(t.kind==='tank'?'坦克':'�
 function planeTakeoverToggle(){
 const pl=player.onVehicle;
 if(!pl||pl.kind!=='plane'||!pl.alive||!player.alive||matchOver) return;
-// P4 (2026-09-30 用户裁定① 简化起降): 停在航母甲板上时 Space = **一键弹射起飞**, 不再走接管切换
-// (弹射是"把飞机送上天"的唯一主动作, 与"老飞行员代打"抢同一个键没有意义)
-if(pl.capArrest&&typeof capLaunchPlane==='function'){ capLaunchPlane(pl); return; }
+// (2026-11-10: 甲板弹射起飞快捷键随大舰子系统下架摘除)
 if(pl.aiPilotOn){ planeTakeoverEnd(pl,'交还控制'); return; }
 if((player.takeoverCd||0)>0){ showScorePop(t2('AI 飞行员歇息中 · {0}s',String(Math.ceil(player.takeoverCd)))); return; }
 const t=pl.lockTgt;
@@ -1053,12 +1218,59 @@ if(dx*dx+dy*dy+dz*dz<=r2) return pl;
 }
 return null;
 }
+// ── 空中撞机 (2026-11-10 三虫批③): 机-机实体碰撞, 相撞=双方同时机毁人亡 ──
+// 旧版飞机之间零实体判定 (只有弹道判定 planeHitTest/planeNearTest) ⇒ 两机互相穿过。
+// 判据两条件同帧成立: ① 两机心距 < 机体半径和 (PLANE_COL_BODY_K×size — 机体半长
+// flen·0.5·size≈1.8·size, 取 1.7 折算 = 机鼻对机尾实体接触那一档; 刻意**不用** planeHitR
+// 2.4·size —— 那是弹道判定的放宽半径, 拿来做碰撞会把 5m 级擦身也判成撞机);
+// ② 相对速度朝对方收拢 > PLANE_COL_CLOSE m/s —— 收拢门把"同速编队/同圆巡航的贴机"与真撞机
+// 分开: 出生点相邻的同队双机平行起飞 (相对速度≈0) 不算撞, 迎头对冲/追尾吃尾照判。
+// 归因 = 对方机组 (玩家座机→player, AI 机→crewBot, 空机→crew 兜底, 与 fireMGBurst 射手口径一致);
+// die crash 档 (三虫批②): 双方机组必死不跳伞 (用户裁定"双方同时机毁人亡"); 友机互撞走 die 内
+// ff 门不记分不播报, 票照扣。调用点 = 24-main 飞机循环之后 (当帧位姿已齐), 世界帧长 dt 门:
+// 时停/布势冻结 (dt<=0) 不产生新事件, 指挥减速 (dt=0.2) 照常判定。
+const PLANE_COL_BODY_K=1.7, PLANE_COL_CLOSE=2;
+const _plColVa=V3(), _plColVb=V3();
+function updatePlaneCollisions(dt){
+if(!(dt>0)||planes.length<2) return;
+for(let i=0;i<planes.length;i++){
+const a=planes[i];
+if(!a||!a.alive) continue;
+a.fwdDir(_plColVa).multiplyScalar(a.speed);
+for(let j=i+1;j<planes.length;j++){
+const b=planes[j];
+if(!b||!b.alive) continue;
+const dx=b.pos.x-a.pos.x, dy=b.pos.y-a.pos.y, dz=b.pos.z-a.pos.z;
+const rr=PLANE_COL_BODY_K*(a.def.size+b.def.size);
+if(dx*dx+dy*dy+dz*dz>=rr*rr) continue;
+b.fwdDir(_plColVb).multiplyScalar(b.speed);
+// 收拢门: (va-vb)·(b-a) > CLOSE ⇒ a 相对 b 正在撞过去 (同速/分离=豁免)
+if((_plColVa.x-_plColVb.x)*dx+(_plColVa.y-_plColVb.y)*dy+(_plColVa.z-_plColVb.z)*dz<=PLANE_COL_CLOSE) continue;
+const aPilot=a.playerDriven?player:(a.crewBot||a.crew);
+const bPilot=b.playerDriven?player:(b.crewBot||b.crew);
+a.die(bPilot,true);
+b.die(aPilot,true);
+}
+}
+}
 function fireFlak(gun,shooter,dir){
 const o=V3(gun.x,gun.y,gun.z).addScaledVector(dir,1.6); // 弹壳出生炮轴心 (2026-09-06 P2-20: 旧 +0.4 与炮管视觉错位)
 AudioSys.gunshot('mg',o.distanceTo(camera.position),0);
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*2,dir.y*2,dir.z*2,0.35,3,0.07,1,0,true);
 flakShots.push({pos:o.clone(),vel:dir.clone().multiplyScalar(FLAK_SPD),team:shooter.team,owner:shooter,life:1.7,age:0}); // 弹速单源 FLAK_SPD (7d-乙 四联 20mm: 旧借 SHELL_SPD 380 ⇒ 460, life 2.05→1.7 同步收紧保 ~780m 射程包线不变; age: 出膛计时, B13 舰体实体判定的豁免窗用)
 }
+// 3D 点到线段距离平方计算函数 (2026-10-07 防隧穿连续扫掠)
+function distSqPointToSegment(px,py,pz,x1,y1,z1,x2,y2,z2){
+const dx=x2-x1, dy=y2-y1, dz=z2-z1;
+const l2=dx*dx+dy*dy+dz*dz;
+if(l2<1e-8) return (px-x1)**2+(py-y1)**2+(pz-z1)**2;
+let t=((px-x1)*dx+(py-y1)*dy+(pz-z1)*dz)/l2;
+t=Math.max(0,Math.min(1,t));
+const qx=x1+t*dx, qy=y1+t*dy, qz=z1+t*dz;
+return (px-qx)**2+(py-qy)**2+(pz-qz)**2;
+}
+if(typeof globalThis!=='undefined') globalThis.distSqPointToSegment=distSqPointToSegment;
+
 function updateFlak(dt,rdt){
 // 逐发按自己的帧长 (2026-09-27M 时停修复批; 单源 22b specTimeShotDt → owner.isPlayer):
 // 时停下 AI 的高炮弹停在半空 (不推进/不过期/不判定), 玩家在防空炮位上打出的照飞照爆 ——
@@ -1070,16 +1282,11 @@ const fdt=FD?FD(f.owner,rdt,dt):dt;
 if(!(fdt>0)) continue;
 f.life-=fdt;
 f.age=(f.age||0)+fdt;
+const p0x=f.pos.x, p0y=f.pos.y, p0z=f.pos.z;
 f.pos.addScaledVector(f.vel,fdt);
+const p1x=f.pos.x, p1y=f.pos.y, p1z=f.pos.z;
 let boom=f.life<=0;
-// ★2026-10-04 (海战审计 B13): 高炮弹对大舰的实体判定 —— 旧版只测飞机/步兵/坦克/地形四类, 纯海图上
-//   heightAt 给的是海床 (水面下 20m+), 舰体甲板带与上层建筑对高炮弹不存在 ⇒ 弹从舰岛正中穿过。
-//   命中舰体带 (capitalSolidAt) 或上层建筑 (capSuperSolidAt) 即空炸。出膛豁免 0.02s (≈9m @ FLAK_SPD):
-//   大舰自己的防空炮位就坐在上层建筑顶上, 弹壳出生点贴着本舰结构, 不豁免会出膛自炸。
-if(!boom&&f.age>0.02&&typeof capSuperSolidAt==='function'){
-const capSolid=(typeof capitalSolidAt==='function')?capitalSolidAt(f.pos.x,f.pos.y,f.pos.z):null;
-if(capSolid||capSuperSolidAt(f.pos.x,f.pos.y,f.pos.z)) boom=true;
-}
+// (2026-11-10: 高炮弹对大舰/上层建筑实体判定随大舰子系统下架摘除)
 // 7c: 近炸判定几何单源 planeNearTest (引信半径 8 bot/11 玩家保留 —— 引信≠机体, 但不再手写点距循环;
 // 旧循环半径内多机全吃改为第一架, 双机同贴一发弹的边缘情形不再双份扣血)。
 {
@@ -1094,11 +1301,12 @@ if(f.owner&&f.owner.isPlayer&&fp.alive&&typeof onPlayerHitAny==='function') onPl
 boom=true;
 }
 }
-// 解除"防空炮只能对空": 弹片可命中地面士兵/载具, 触地即爆
+// 解除"防空炮只能对空": 弹片可命中地面士兵/载具, 触地即爆 (连续扫掠防隧穿)
 if(!boom){
 for(const s of combatants){
 if(!s.alive||s.onVehicle||s.team===f.team) continue;
-if(Math.hypot(s.pos.x-f.pos.x,s.pos.z-f.pos.z)<1.1&&Math.abs((s.pos.y+1)-f.pos.y)<2.2){
+const dSq=distSqPointToSegment(s.pos.x,s.pos.y+1.0,s.pos.z,p0x,p0y,p0z,p1x,p1y,p1z);
+if(dSq<1.1*1.1){
 if(typeof markHitCls==='function') markHitCls('shell');
 s.damage(rand(20,36),f.owner&&f.owner.alive?f.owner:null,false);
 if(f.owner&&f.owner.isPlayer&&f.owner.alive&&s.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell');
@@ -1109,7 +1317,9 @@ boom=true; break;
 if(!boom){
 for(const t of tanks){
 if(!t.alive||t.team===f.team) continue;
-if(Math.hypot(t.pos.x-f.pos.x,t.pos.z-f.pos.z)<2.3&&f.pos.y>t.pos.y-0.6&&f.pos.y<t.pos.y+3.2){
+const cy=Math.max(t.pos.y,Math.min(t.pos.y+2.6,(p0y+p1y)*0.5));
+const dSq=distSqPointToSegment(t.pos.x,cy,t.pos.z,p0x,p0y,p0z,p1x,p1y,p1z);
+if(dSq<2.3*2.3){
 if(typeof markHitCls==='function') markHitCls('shell');
 t.takeDmg(rand(5,9),f.owner&&f.owner.alive?f.owner:null);
 if(f.owner&&f.owner.isPlayer&&f.owner.alive&&t.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell');

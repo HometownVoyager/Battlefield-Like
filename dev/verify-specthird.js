@@ -170,7 +170,7 @@ sandbox.globalThis=sandbox;
 sandbox.THREE=THREE;
 sandbox.window=window;
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/15c-specveh.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 // pinRandom=true: 让 rand(a,b) 恒取区间中点 (Math.random=0.5) ⇒ 弹道散布/后坐抖动全部归零, 断言可复现。
 // 用 Object.create(Math) 的浅层代理, 只在沙箱内影子化 random, 不影响宿主脚本自己的 Math。
 function boot(campIdx,pinRandom){
@@ -252,9 +252,9 @@ ok(r.cap&&r.cap.shooter===true,'T1 前置: 这一枪确实由玩家(shooter===pl
 ok(r.markerBefore===true,'T1 开火瞬间 ffSpecSniper=true (由开火武器 key 落定)');
 ok(r.after.hp<r.before.hp&&r.after.alive===true,'T1 ★ 友方步兵掉血且仍活着: 100 → '+r.after.hp+' (旧口径 100 → 100, 一枪不掉血)');
 }
-// ═════ T2 阴性对照: 同一观战者持普通步枪打友方 → 不掉血 ═════
+// ═════ T2 (2026-11-09 中立批改写): 同一观战者持普通步枪打友方 → 掉血 ═════
 function t2(){
-console.log('T2 阴性对照: 同一观战者持普通步枪(主武器)打友方 → 不掉血');
+console.log('T2 观战者本尊普通步枪(主武器)打友方 → 掉血 (2026-11-09 中立批: 观战武器全中立)');
 const ctx=boot(0,true);
 const r=vm.runInContext(`(()=>{try{
 ${fixture(0)}
@@ -280,8 +280,8 @@ return {weapon:player.slots[0].key,before,after,marker:cap&&cap.spec,benign:cap&
 if(typeof r==='string'){ exc('T2',r); return; }
 console.log('     · 主武器='+r.weapon+' ('+r.benign+') 开火前 hp='+r.before+' → 开火后 hp='+r.after+' / 标记='+r.marker);
 ok(r.weapon!=='specsniper','T2 前置: 0 号槽是普通主武器 ('+r.weapon+')');
-ok(r.marker===false,'T2 ★ 非连狙武器: ffSpecSniper=false (其它武器保持现状)');
-ok(r.after===r.before,'T2 ★ 友方步兵不掉血 (旧口径与新口径一致: 100 → '+r.after+')');
+ok(r.marker===false,'T2 ★ 非连狙武器: ffSpecSniper=false (旗级语义未动; 无差别由 coFfFire 的 spectator 门放开)');
+ok(r.after<r.before,'T2 ★ 观战者本尊普通步枪也伤友军 (2026-11-09 裁定: 100 → '+r.after+')');
 ok(r.allyHp2<r.after,'T2 再换回连狙立刻恢复无差别火力 (标记跟随手持武器, 不是一次性开关)');
 }
 // ═════ T3 幽灵坦克主炮: 行为与改动前一致 ═════
@@ -307,8 +307,8 @@ g.aimDir&&g.aimDir();                      // 不抛异常
 const mgOrigin=V3(ally.pos.x,ally.pos.y+1.0,ally.pos.z+5);
 const sr=raySoldiers(mgOrigin,V3(0,0,-1),60,player);
 const mgHit=!!sr&&sr.sol===ally;
-// ③ 非观战普通玩家 (无标记) 打友军仍然被过滤
-player.ffAll=false; player.ffSpecSniper=false;
+// ③ 非观战普通玩家 (关观战+无标记) 打友军仍被过滤 —— 2026-11-09 中立批后 spectator 门才是判据
+player.ffAll=false; player.ffSpecSniper=false; player.spectator=false;
 const sr2=raySoldiers(mgOrigin,V3(0,0,-1),60,player);
 const plainFiltered=!sr2||sr2.sol!==ally;
 return {bound,ffAll,specMarker,shell,mgHit,plainFiltered,gTeam:g.team,hp:Math.round(ally.hp)};
@@ -320,7 +320,7 @@ ok(r.bound===true&&r.ffAll===true,'T3 前置: 上车仍置 ffAll (15c-specveh �
 ok(r.specMarker===false,'T3 ★ 上幽灵坦克不会顺带点亮 ffSpecSniper (两个标记互不干扰)');
 ok(r.shell.team===-1&&r.shell.owner===true&&r.shell.dmg===520&&r.shell.added===1,'T3 主炮炮弹 team=-1 / owner=玩家 / 单发 520 (与改动前一致)');
 ok(r.mgHit===true,'T3 同轴机枪打友方步兵仍生效 —— 走的是 ffAll, 不是本批新增的连狙标记');
-ok(r.plainFiltered===true,'T3 阴性对照: 两个标记都关掉时, 友军重新被敌我过滤挡住 (过滤逻辑没被写死)');
+ok(r.plainFiltered===true,'T3 阴性对照: 非观战普通玩家(关观战+无标记)打友军仍被敌我过滤挡住 (spectator 门没写死)');
 }
 // ═════ T4 标记复位: 换枪/下车/死亡/换局 ═════
 function t4(){
@@ -505,9 +505,19 @@ const read=f=>fs.readFileSync(path.join(root,f),'utf8');
 const inp=read('js/19-input.js'),pl=read('js/20-player.js'),main=read('js/24-main.js'),i18n=read('js/00b-i18n.js');
 ok(inp.indexOf("if(e.code==='KeyU')")>=0&&inp.indexOf('player.thirdPerson=!player.thirdPerson')>=0,'T7 接线: 19-input KeyU = 第三人称开关');
 const codes=(inp.match(/e\.code==='([A-Za-z0-9]+)'/g)||[]).map(s=>s.replace(/^e\.code==='|'$/g,''));
-const used=['Tab','Escape','KeyP','KeyM','Space','KeyC','KeyZ','KeyX','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','KeyR','KeyV','KeyG','KeyH','KeyB','KeyF','KeyT','KeyY'];
+// ★2026-10-27 指挥官交互批: 减速键 N→V、近战键 V→N 互换 (用户裁定「N 太远」, V 在 WASD 手位且减速是
+//   **按住**的持续动作必须左手可及)。对 T7 的两处影响, 都是有意语义变更、不是回归:
+//   ① 19-input 里**不再有** `e.code==='KeyV'` 字面量 —— 减速键改读单源 `CMD_TIME.KEY` (26-commander),
+//      这样键位只在一处定义, 本文件不再持有第二份;
+//   ② 近战键的分支字面量由 'KeyV' 换成 'KeyN'。
+//   所以既有键清单里 KeyV 换成 KeyN; 同时补一条"减速键没有回退成硬编码"的判据 (下面 T7 新断言)。
+const used=['Tab','Escape','KeyP','KeyM','Space','KeyC','KeyZ','KeyX','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','KeyR','KeyN','KeyG','KeyH','KeyB','KeyF','KeyT','KeyY'];
 ok(codes.filter(c=>c==='KeyU').length===1&&used.every(k=>codes.indexOf(k)>=0)&&inp.indexOf('keys.KeyU')<0,
 'T7 键位核对: U 只有一处分支且未做持续按键 (e.code 分支共 '+codes.length+' 个; 既有键全在: '+used.length+' 个)');
+// 2026-10-27: 减速键位单源核对 —— 键位定义只能在 26-commander 的 CMD_TIME.KEY 一处, 19-input 只许读它。
+// 这条与上面的 used 清单互补: 清单证明"近战分支还在", 这条证明"减速没有变成硬编码的第二份"。
+ok(inp.indexOf('e.code===CMD_TIME.KEY')>=0&&inp.indexOf("e.code==='KeyV'")<0,
+ 'T7 键位核对: 减速键只读 CMD_TIME.KEY 单源 (19-input 不再持有 KeyV 字面量)');
 ok(pl.indexOf('function thirdPersonOn()')>=0&&pl.indexOf('function playerFireOrigin()')>=0&&pl.indexOf('function playerAimDir()')>=0&&pl.indexOf('function tpAimPoint(')>=0,'T7 接线: 20-player 提供 thirdPersonOn/playerFireOrigin/playerAimDir/tpAimPoint 单源');
 ok(pl.indexOf('const o=oS;')>=0&&pl.indexOf('fireRocket(p,oS.clone()')>=0,'T7 接线: 连射/火箭/迫击炮/巡飞弹四条开火路径都用 playerFireOrigin');
 // ★2026-09-27I 改判: 第三人称视场补写并入"本体链帧长 pdt" (24-main 新拆的一支, 让观战时停下仍能走动/飞行;

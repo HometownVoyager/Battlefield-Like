@@ -13,6 +13,25 @@ let inited=false;
 // 结算后排程的尾音/定时器触发的远雷照响, 而且 returnToMenu 里一句 setAmbientMute(false) 又把引擎增益
 // 还原成上一帧的音量 —— 主菜单里那声"没停的战场音"即此 (用户实报)。
 let silenced=false;
+// ★2026-11-04b 时停音频批 (用户实报: 时停期间发动机引擎仍有声音, "应该还有其他类似的问题"):
+//   静默闸门只认"结算/主菜单" (silenced), 时停 dt=0 时载具 update 仍照常调 engine.update(freq,vol),
+//   连续振荡器/环境层/定时器周期声全都照响 —— 战场冻住了声音没冻住。这里立一条与 silenced 并列的
+//   "时停冻结"账: 由 24-main 每帧按 specTimeFrozen() 单源喂入 (有变化才动作, 稳态零 WebAudio 写入),
+//   冻结时引擎增益归零/环境层归零/周期声与延迟尾音一律不出声, 解冻按各自 lastVol/base 原样恢复。
+//   与 silenced 同优先级: 任一为真都算静音, 解冻不会把结算页的静默闸门偷偷放开。
+let timeFrozen=false;
+function audioTimeFrozen(){ return !!(timeFrozen||(typeof specTimeFrozen==='function'&&specTimeFrozen())); }
+function setTimeFrozenMute(on){
+const want=!!on;
+if(want===timeFrozen) return;
+timeFrozen=want;
+if(!ctx) return;
+const t0=ctx.currentTime;
+// 环境层 (风噪/雨声/暴风雪): 冻结归零, 解冻回各自的 base (与 setAmbientMute 同款口径)
+for(const a of ambMutes){ try{ a.g.gain.cancelScheduledValues(t0); a.g.gain.setTargetAtTime(want?0:a.base,t0,0.08); }catch(e){} }
+// 全部在管引擎: 冻结把增益压到 0, 解冻按 lastVol 还原 (振荡器不停, 免重建时的爆音)
+for(const e of engines) if(e.nodes){ try{ e.nodes.g.gain.cancelScheduledValues(t0); e.nodes.g.gain.setTargetAtTime(want?0:e.lastVol,t0,0.08); }catch(err){} }
+}
 function init(){
 if(inited) return; inited=true;
 ctx = new (window.AudioContext||window.webkitAudioContext)();
@@ -53,7 +72,8 @@ silenced=false;
 if(!ctx) return;
 const t0=ctx.currentTime;
 try{ kill.gain.cancelScheduledValues(t0); kill.gain.setValueAtTime(kill.gain.value,t0); kill.gain.linearRampToValueAtTime(1,t0+0.06); }catch(e){}
-for(const a of ambMutes){ try{ a.g.gain.setTargetAtTime(a.base,t0,0.2); }catch(e){} }
+// 时停未解除时不许把环境层放开 (回战局/开新局与 K 解冻可能不同帧)
+for(const a of ambMutes){ try{ a.g.gain.setTargetAtTime(audioTimeFrozen()?0:a.base,t0,0.2); }catch(e){} }
 }
 function isSilenced(){ return silenced; }
 // 只读视图 (沙箱断言/实机诊断用): 闸门值 · 环境层增益 · 在管引擎数
@@ -70,6 +90,14 @@ function env(g, t0, peak, dec, sus=0.0001){
 g.gain.setValueAtTime(0.0001,t0);
 g.gain.linearRampToValueAtTime(peak, t0+0.004);
 g.gain.exponentialRampToValueAtTime(Math.max(sus,0.0001), t0+dec);
+}
+function scheduleNodeRelease(nodes, delaySec){
+setTimeout(()=>{
+for(let i=0;i<nodes.length;i++){
+const n=nodes[i];
+if(n){ try{ n.disconnect(); }catch(e){} }
+}
+},(delaySec+0.1)*1000);
 }
 let farWinT=0, farWinN=0;
 function gunshot(type, dist=0, pan=0){
@@ -96,6 +124,8 @@ const out = ctx.createGain(); out.gain.value=1;
 const lpO = ctx.createBiquadFilter(); lpO.type='lowpass'; lpO.frequency.value=sp.lp;
 out.connect(lpO);
 if(panN){ panN.pan.value=clamp(pan,-1,1); lpO.connect(panN); panN.connect(comp); } else lpO.connect(comp);
+const relNodes=[out,lpO];
+if(panN) relNodes.push(panN);
 // 1) 枪口激波: 极短宽频噪声脆响
 const n=noiseSrc();
 const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=P.crack*rand(0.92,1.1); bp.Q.value=0.45;
@@ -104,6 +134,7 @@ ng.gain.setValueAtTime(0.0001,t0);
 ng.gain.linearRampToValueAtTime(P.v*sp.gain*selfB,t0+0.0015);
 ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.022);
 n.connect(bp); bp.connect(ng); ng.connect(out); n.start(t0); n.stop(t0+0.05);
+relNodes.push(n,bp,ng);
 // 1b) 高频瞬态"啪"层: 让近处枪声清脆不发闷
 const hfProx=clamp(1-dist/90,0,1);
 if(hfProx>0.05){
@@ -114,6 +145,7 @@ gh2.gain.setValueAtTime(0.0001,t0);
 gh2.gain.linearRampToValueAtTime(P.v*0.62*hfProx*selfB,t0+0.001);
 gh2.gain.exponentialRampToValueAtTime(0.0001,t0+0.012);
 nh.connect(hp2); hp2.connect(gh2); gh2.connect(out); nh.start(t0); nh.stop(t0+0.03);
+relNodes.push(nh,hp2,gh2);
 }
 // 2) 低频炮口冲击波: 近距离才有体感
 const prox=clamp(1-dist/50,0,1);
@@ -126,8 +158,10 @@ o.connect(og); og.connect(out); o.start(t0); o.stop(t0+P.bd*2+0.05);
 const n3=noiseSrc(); const lp3=ctx.createBiquadFilter(); lp3.type='lowpass'; lp3.frequency.value=430;
 const g3=ctx.createGain(); env(g3,t0,P.v*0.35*prox*selfB,P.bd*1.5);
 n3.connect(lp3); lp3.connect(g3); g3.connect(out); n3.start(t0); n3.stop(t0+P.bd*1.5+0.05);
+relNodes.push(o,og,n3,lp3,g3);
 }
 // 3) 旷野回声: 双拍延时模拟山壁/林地混响, 距离越远延迟越长
+let maxEchoDur=0.1;
 const far=clamp(dist/230,0,1);
 if(far>0.08){
 const taps=[t0+0.06+far*0.14, t0+0.14+far*0.28];
@@ -138,11 +172,16 @@ const lp2=ctx.createBiquadFilter(); lp2.type='lowpass'; lp2.frequency.value=lerp
 const g2=ctx.createGain();
 g2.gain.setValueAtTime(0.0001,taps[ti]);
 g2.gain.linearRampToValueAtTime(vols[ti],taps[ti]+0.022);
-g2.gain.exponentialRampToValueAtTime(0.0001,taps[ti]+P.tail*(0.4+far*0.7)*(1-ti*0.3));
+const tailDur=P.tail*(0.4+far*0.7)*(1-ti*0.3);
+g2.gain.exponentialRampToValueAtTime(0.0001,taps[ti]+tailDur);
 n2.connect(lp2); lp2.connect(g2); g2.connect(out);
-n2.start(taps[ti]); n2.stop(taps[ti]+P.tail*(0.4+far*0.7)*(1-ti*0.3)+0.1);
+n2.start(taps[ti]); n2.stop(taps[ti]+tailDur+0.1);
+relNodes.push(n2,lp2,g2);
+const endD=(taps[ti]-t0)+tailDur+0.1;
+if(endD>maxEchoDur) maxEchoDur=endD;
 }
 }
+scheduleNodeRelease(relNodes, Math.max(0.3, maxEchoDur));
 }
 function explosion(dist=0){
 if(!inited) return;
@@ -155,6 +194,7 @@ const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass';
 lp.frequency.setValueAtTime(Math.min(sp.lp,5000),t0); lp.frequency.exponentialRampToValueAtTime(120,t0+1.3);
 const ng=ctx.createGain(); env(ng,t0,1.3*sp.gain,1.3);
 n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1.4);
+scheduleNodeRelease([o,og,n,lp,ng], 1.5);
 }
 function click(freq=2200, vol=0.25, dur=0.03){
 if(!inited) return;
@@ -273,6 +313,7 @@ const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass';
 lp.frequency.setValueAtTime(Math.min(sp.lp,3800),t0); lp.frequency.exponentialRampToValueAtTime(160,t0+0.9);
 const ng=ctx.createGain(); env(ng,t0,1.2*sp.gain,0.9);
 n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1);
+scheduleNodeRelease([o,og,n,lp,ng], 1.1);
 }
 function flakPop(dist=0){
 if(!inited) return;
@@ -281,14 +322,16 @@ const sp=spatial(dist,300); if(sp.gain<0.02) return;
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=Math.min(sp.lp,1500);
 const g=ctx.createGain(); env(g,t0,0.55*sp.gain,0.35);
 n.connect(lp); lp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.4);
+scheduleNodeRelease([n,lp,g], 0.5);
 }
 const engines=new Set(); // 持续声源(坦克/飞机引擎): 暂停/结算时统一静音
 function createEngine(kind){
 const e={ nodes:null, kind, lastVol:0 };
 e.update=(freq,vol)=>{
 if(!inited){ return; }
-// 静默期: 只记音量不出声 (结算/主菜单期载具不更新, 这里兜底"万一还被调用")
-if(silenced){
+// 静默期 / 时停冻结期: 只记音量不出声 (结算/主菜单/时停里载具不更新, 这里兜底"万一还被调用")
+// ★2026-11-04b: 时停冻结并入同一道门 —— 旧版只认 silenced, 于是时停里引擎照样嗡嗡响。
+if(silenced||audioTimeFrozen()){
 e.lastVol=clamp(vol,0,0.4);
 if(e.nodes){ try{ e.nodes.g.gain.setTargetAtTime(0,ctx.currentTime,0.05); }catch(err){} }
 return;
@@ -330,10 +373,23 @@ return e;
 const ambMutes=[];
 function setAmbientMute(m){
 if(!ctx) return;
-// 静默期 (结算/主菜单) 优先: 此时 setAmbientMute(false) 不许把环境/引擎放开 (旧版 returnToMenu 就是这么漏的)
-const mute=m||silenced;
+// 静默期 (结算/主菜单) / 时停冻结期 优先: 此时 setAmbientMute(false) 不许把环境/引擎放开
+const mute=m||silenced||audioTimeFrozen();
 for(const a of ambMutes) a.g.gain.setTargetAtTime(mute?0:a.base,ctx.currentTime,0.12);
 for(const e of engines) if(e.nodes){ try{ e.nodes.g.gain.setTargetAtTime(mute?0:e.lastVol,ctx.currentTime,0.12); }catch(err){} }
+}
+let _wxGainNode=null;
+function updateWeatherAmbient(){
+if(!ctx) return;
+const targetLevel=(audioTimeFrozen())?0:((typeof WX_CFG!=='undefined'&&WX_CFG.audioLevel)?WX_CFG.audioLevel:0);
+if(_wxGainNode){
+_wxGainNode.gain.setTargetAtTime(targetLevel,ctx.currentTime,0.2);
+// 冻结期别把 base 记成 0 (解冻时 setAmbientMute/restoreAll 要按真基准还原雨声/风声)
+if(!audioTimeFrozen()){
+const mIdx=ambMutes.findIndex(a=>a.g===_wxGainNode);
+if(mIdx>=0) ambMutes[mIdx].base=targetLevel;
+}
+}
 }
 function startAmbient(){
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=280;
@@ -354,11 +410,13 @@ const wLfo=ctx.createOscillator(); wLfo.frequency.value=0.17;
 const wLg=ctx.createGain(); wLg.gain.value=260;
 wLfo.connect(wLg); wLg.connect(wl.frequency);
 rn.connect(wl); wl.connect(wg); wg.connect(comp); rn.start(); wLfo.start();
+_wxGainNode=wg;
 ambMutes.push({g:wg,base:wg.gain.value});
 }else{
 const rl=ctx.createBiquadFilter(); rl.type='bandpass'; rl.frequency.value=1500; rl.Q.value=0.35;
 const rg=ctx.createGain(); rg.gain.value=WX_CFG.audioLevel;
 rn.connect(rl); rl.connect(rg); rg.connect(comp); rn.start();
+_wxGainNode=rg;
 ambMutes.push({g:rg,base:rg.gain.value});
 }
 }
@@ -369,7 +427,7 @@ setInterval(()=>{ if(Math.random()<0.55) bird(); }, 2400);
 setTimeout(bird,1200);
 }
 function distantMG(){
-if(silenced||gamePaused||matchOver) return;
+if(silenced||audioTimeFrozen()||gamePaused||matchOver) return;
 if(!ctx) return;
 const t0=ctx.currentTime;
 const nCnt=randi(5,14), gap=rand(0.07,0.11);
@@ -422,7 +480,7 @@ uwLP.frequency.linearRampToValueAtTime(on?420:20000,t0+(on?0.18:0.25));
 }
 function bird(){
 // 夜档静音鸟鸣 (昼夜设计 §3.3): THEME.birds===false 是主题档 (winter/ruin/nightsea 等本来就无鸟), NIGHT_MODE 是全局夜档
-if(silenced||!ctx||THEME.birds===false||NIGHT_MODE||gamePaused||matchOver) return;
+if(silenced||audioTimeFrozen()||!ctx||THEME.birds===false||NIGHT_MODE||gamePaused||matchOver) return;
 const t0=ctx.currentTime;
 const o=ctx.createOscillator(); o.type='sine';
 const g=ctx.createGain(); g.gain.value=0;
@@ -448,7 +506,25 @@ t+=rand(0.11,0.28);
 }
 o.start(t0); o.stop(t+0.3);
 }
-const api = { init, gunshot, explosion, click, metalSlide, ping, footstep, whizz, ricochet, hurt, hitmarkSnd, nadeBounce, cannon, flakPop, createEngine, setVol, resume, mortarThunk, setAmbientMute, stopAll, restoreAll, isSilenced, audioDebug, splash, setUnderwater };
+// 丧尸低吼 (2026-10-06 丧尸模式): 一次性低频锯齿滑音 + 低通, 距离衰减 —— 无循环源 ⇒ endMatch stopAll 链零负担
+function zgroan(dist){
+if(!inited) return;
+const t0=ctx.currentTime;
+const o=ctx.createOscillator(); o.type='sawtooth';
+const base=rand(70,110);
+o.frequency.setValueAtTime(base,t0);
+o.frequency.linearRampToValueAtTime(base*rand(0.7,0.9),t0+0.5);
+o.frequency.linearRampToValueAtTime(base*rand(0.55,0.75),t0+1.0);
+const g=ctx.createGain();
+const vol=0.14*Math.pow(Math.max(0,1-dist/48),2);
+g.gain.setValueAtTime(0,t0);
+g.gain.linearRampToValueAtTime(vol,t0+0.12);
+g.gain.linearRampToValueAtTime(0.0001,t0+1.1);
+const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=420;
+o.connect(f); f.connect(g); g.connect(comp);
+o.start(t0); o.stop(t0+1.15);
+}
+const api = { init, gunshot, explosion, click, metalSlide, ping, footstep, whizz, ricochet, hurt, zgroan, hitmarkSnd, nadeBounce, cannon, flakPop, createEngine, setVol, resume, mortarThunk, setAmbientMute, stopAll, restoreAll, isSilenced, audioDebug, splash, setUnderwater, setTimeFrozenMute, audioTimeFrozen };
 // ═════════════════════════════════════════════════════════════════════════════
 // 【追加段】海战音效 (2026-09-20N 海战批, owner: naval-crew) —— 本段全部是新增行, 既有函数体一字不动;
 //   插在静默闸门循环**之前**注册 ⇒ 新入口自动获得与既有入口完全对称的"静默期一律不发声"闸门 (§硬约束④)。
@@ -720,12 +796,13 @@ return {crafts:out,mapSize:_navalAud.size,engines:engines.size,inited,silenced,
 gate:(kill&&kill.gain)?kill.gain.value:null,uwLPFreq:(uwLP&&uwLP.frequency)?uwLP.frequency.value:null};
 }
 api.navalAudioTick=navalAudioTick;     // 挂进 api ⇒ 下面的闸门循环会一并包成"静默期一律不发声"
+api.updateWeatherAmbient=updateWeatherAmbient;
 // 统一发声门控 (2026-09-17 音效停止批): 静默期 (结算页/主菜单) 里任何来源的调用一律不发声 ——
 // 包括 setTimeout/setInterval 里排队的那些 (雷暴远雷就是真实来源: 它在结算之后才响, 旧版没有闸门,
 // 于是"结算页上还在打雷")。createEngine 不过闸 (它返回引擎对象, 静默由引擎自身的 update 处理);
 // init/resume/setVol/setAmbientMute/stopAll/restoreAll/isSilenced/audioDebug 是控制面, 也不能被闸掉。
 {
-const bypass=new Set(['init','resume','setVol','setAmbientMute','stopAll','restoreAll','isSilenced','audioDebug','createEngine','setUnderwater']);
+const bypass=new Set(['init','resume','setVol','setAmbientMute','stopAll','restoreAll','isSilenced','audioDebug','createEngine','setUnderwater','updateWeatherAmbient','setTimeFrozenMute','audioTimeFrozen']);
 for(const k of Object.keys(api)){
 if(bypass.has(k)) continue;
 const f=api[k];

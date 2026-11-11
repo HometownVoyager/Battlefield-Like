@@ -41,7 +41,7 @@ World:class{constructor(){this.gravity=new _V3();this.broadphase=null;this.solve
 Body:class{constructor(o){Object.assign(this,o||{});this.shapes=[];this.position=new _V3();this.velocity=new _V3();this.angularVelocity=new _V3();this.quaternion=new Quat();}addShape(s){this.shapes.push(s);}},
 Box:class{},Sphere:class{},Material:class{},ContactMaterial:class{},NaiveBroadphase:class{},PointToPointConstraint:class{}};
 if(window) window.CANNON=CANNON_STUB;
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
 function boot(){
 for(const k in byId) delete byId[k];
@@ -74,6 +74,7 @@ player.team=0; player.cls=3; player.spectator=true; player.specUsed=true; select
 player.spectator=false;
 const d=fireLoiter(player,V3(0,60,0),V3(0,0,-1));
 d.grace=0; d.life=9999; d.spd=13;
+const bodyYaw0=player.yaw, bodyPitch0=player.pitch;   // ⑤ 捕获点: 首个转向步之前 (2026-11-06 判据跟走)
 const sens=0.0022*((typeof SETTINGS!=='undefined'&&SETTINGS.sens)||1)*(85/74);
 const rateYaw=2.5, ratePitch=1.9, DT=1/60;
 const hold=()=>{ d.pos.set(0,60,0); updateLoiters(DT,DT); };
@@ -96,8 +97,9 @@ const oldResidual=Math.abs(angDiff(yOld,d.yaw));                // 旧公式 3s 
 const p5=d.pitch;
 for(let f=0;f<1200;f++) hold();
 const p6=d.pitch;
-// ⑤ 本体姿态 = 弹体姿态 (同一量)
-const same=(d.yaw===player.yaw)&&(Math.abs(player.pitch-d.pitch)<1e-9);
+// ⑤ 本体姿态 (2026-11-06 批判据跟走: 用户实报"转向会带着本体一起转向" ⇒ 旧判据"跟随"推翻):
+//    制导期间本体角**不随**弹体动 (bodyYaw0 捕获于首个转向步之前, 中间全是 updateLoiters 直驱)
+const notFollowed=(player.yaw===bodyYaw0)&&(player.pitch===bodyPitch0);
 // ⑥ 19-input 真事件: 制导期间 movementX 只进 tvDX, 本体 yaw 不变
 pointerLocked=true;   // 沙箱没有指针锁 API: 19-input 入口有 !pointerLocked 早退, 这里模拟已锁定
 const kd=__evH.mousemove||[];
@@ -108,8 +110,9 @@ const ev={tvDX:player.tvDX,tvDY:player.tvDY,yawMoved:player.yaw!==py0,pitchMoved
 // ⑦ 结束清账: 引爆后 tvDX/tvDY 归零
 player.tvDX=99; player.tvDY=-99; loiterDetonate(d,d.pos.clone());
 const cleared={x:player.tvDX,y:player.tvDY,dead:d.dead};
+const exitKept=(player.yaw===bodyYaw0)&&(player.pitch===bodyPitch0);   // 退场保持发射时朝向 (2026-11-06 二次裁定: 11-05"退场一次性对齐"撤销, 引爆不写本体角)
 return {exp1,step1:y1-y0,cap2:y2-y1,capExp:rateYaw*DT,restYaw:Math.abs(y4-y3),restPitch:Math.abs(p4-p3),
-oldResidual,drift20s:p6-p5,same,ev,cleared,sens,
+oldResidual,drift20s:p6-p5,notFollowed,exitKept,ev,cleared,sens,
 mousemoveHandlers:kd.length};
 }catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`);
 if(typeof r==='string'){ EXC('L1',r); } else {
@@ -117,7 +120,8 @@ ok(Math.abs(r.step1-r.exp1)<1e-12, `L1 增量→姿态逐位等于解析式 (100
 ok(Math.abs(Math.abs(r.cap2)-r.capExp)<1e-12&&r.cap2<0, `L1 角速度上限仍在: 一帧 5000px 只走 ${r.cap2.toFixed(5)} rad = −rateYaw·dt (movementX 为正 ⇒ yaw 负向), 超出部分**丢弃**`);
 ok(r.restYaw<1e-12&&r.restPitch<1e-12, `L1 ★ 松手即停: 零输入 120 帧姿态逐位不变 (Δyaw=${r.restYaw}, Δpitch=${r.restPitch}) —— 旧公式在同一状态还要再拐 ${r.oldResidual.toFixed(2)} rad (3s 内)`);
 ok(Math.abs(r.drift20s)<0.02, `L1 ★ 不再持续下沉: 零输入 20s 的俯仰漂移 ${r.drift20s.toFixed(4)} rad (旧版那句 -0.06rad/s 的低头在直控下会变成 20s 沉 1.2rad)`);
-ok(r.same===true, 'L1 本体姿态跟随弹体 (player.yaw===d.yaw): 视角与弹体是同一个量, 退出 TV 视角时画面不跳');
+ok(r.notFollowed===true, 'L1 ★ 制导期间本体不随弹体转向 (2026-11-06 用户裁定推翻旧"跟随"判据: 转向不再带着本体一起转)');
+ok(r.exitKept===true, 'L1 ★ 退场保持发射时朝向 (detonate 后本体角仍=发射时: 2026-11-06 二次裁定"引爆/消失后朝向应为发射时朝向", 11-05"退场一次性对齐"撤销)');
 ok(r.mousemoveHandlers>0&&r.ev.tvDX===37*r.mousemoveHandlers&&r.ev.tvDY===-12*r.mousemoveHandlers&&!r.ev.yawMoved&&!r.ev.pitchMoved,
 `L1 19-input 真事件: 制导期间 ${r.mousemoveHandlers} 个 mousemove 处理器把 movement 记进 tvDX/tvDY (${r.ev.tvDX}/${r.ev.tvDY}), 本体 yaw/pitch **未动**`);
 ok(r.cleared.x===0&&r.cleared.y===0&&r.cleared.dead===true, 'L1 制导结束清账: 引爆后 tvDX/tvDY=0 (下一枚出膛不会先"拐一下")');

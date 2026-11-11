@@ -50,6 +50,7 @@ player.onMG=mg; mg.user=player;
 player.pos.x=mg.x-Math.sin(mg.face)*0.85;
 player.pos.z=mg.z-Math.cos(mg.face)*0.85;
 player.yaw=mg.face+Math.PI; player.pitch=0; player.ads=false;
+player.crouch=false; player.prone=false;   // 命中体 parity (2026-11-03): Bot MG/AT/AA 炮手强制站姿 (14-bots), 玩家同规 —— 附身上炮前的蹲姿不得带进炮位命中体
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
 }
@@ -58,6 +59,7 @@ player.onAT=g; g.user=player;
 player.pos.x=g.x-Math.sin(g.face)*AT_CREW_DIST; // 站位单源常量 (00-config)
 player.pos.z=g.z-Math.cos(g.face)*AT_CREW_DIST;
 player.yaw=g.face+Math.PI; player.pitch=0; player.ads=false;
+player.crouch=false; player.prone=false;   // 命中体 parity (2026-11-03): 同 mountMG
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
 }
@@ -65,11 +67,13 @@ function mountAA(g){
 player.onAA=g; g.user=player;
 player.pos.x=g.x; player.pos.z=g.z-0.9;
 player.pitch=0.5; player.ads=false;
+player.crouch=false; player.prone=false;   // 命中体 parity (2026-11-03): 同 mountMG
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
 }
 function mountMortar(m){
 player.onMortar=m; m.user=player;
+player.crouch=true; player.prone=false;   // 命中体 parity (2026-11-03): Bot 迫击炮手蹲姿小命中体 (14-bots), 玩家旧版站着 = 比 Bot 更大的挨打面, 同规补齐
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
 showScorePop('迫击炮瞄准中');
@@ -107,6 +111,41 @@ if(typeof showScorePop==='function') showScorePop('座驾被毁 · 观战者安�
 return true;
 }
 
+// 自动脱离载具 (2026-11-09 批, sf_autoexit 默认关): 载具被击毁瞬间玩家自动逃生, 代替 damage(999) 死亡链。
+// bail=false (坦克): 落位车旁平地 (与 specRideEject 同款 occBlocked 五向探针), 0 死/0 票 —— 车组其余名额仍
+//   随车结算 (Tank.die crewSlots 口径不变); bail=true (飞机): 与 F 离机跳伞分支同口径 (机下 2.5m + 机头前向
+//   初速 + 开伞)。调用前提: Tank.die/Plane.die 已清 playerDriven/onVehicle 且判过 spec (观战者走 specRideEject)。
+function autoExitWreck(v,bail){
+const p=player;
+p.ffAll=false; p.tankView=false; p.navalGun=false;
+p.flying=false; p.flyAero=false; p._aeroSpd=0;
+p.crouch=false; p.prone=false;
+const so=document.getElementById('scopeOv');
+if(so) so.style.display='none';
+if(bail&&v&&v.pos){
+p.pos.set(v.pos.x,v.pos.y-2.5,v.pos.z);
+if(typeof v.fwdDir==='function'){ const f=v.fwdDir(); p.vel.set(f.x*6,0,f.z*6); } else p.vel.set(0,0,0);
+p.chute=true; p.onGround=false;
+if(!playerChuteMesh){ playerChuteMesh=mkChute(); scene.add(playerChuteMesh); }
+showScorePop('跳伞! 自动脱离');
+}else if(v&&v.pos){
+p.vel.set(0,0,0);
+let px=v.pos.x+3.4, pz=v.pos.z;
+for(const off of [[3.4,0],[-3.4,0],[0,4.4],[0,-4.4],[4.4,4.4]]){
+const tx=v.pos.x+off[0], tz=v.pos.z+off[1];
+if(!occBlocked(tx,tz)){ px=tx; pz=tz; break; }
+}
+p.pos.set(px,0,pz);
+p.pos.y=standHeight(px,pz,(v.pos.y||0)+2);
+p.onGround=true;
+camera.fov=74;
+camera.updateProjectionMatrix();
+showScorePop('座驾被毁 · 已自动脱离');
+}
+if(typeof VM!=='undefined'&&VM&&VM.root) VM.root.visible=true;
+{ const hw=document.getElementById('heatWrap'); if(hw) hw.style.display='none'; }
+}
+
 // 准星锁定交互目标 (2026-10-06 交互批, 用户裁定"有效距离内准星对准 F 交互物时, F 暂时锁定到它"):
 // 解决"补给箱和迫击炮/机枪摆在一起, 按下去的却不是想要的那个"的挑选问题。单源函数 ——
 // tryInteract (执行) 与 updateInteractHint (提示) 共用本结果, 提示与执行结构上不可能再脱节。
@@ -116,11 +155,14 @@ return true;
 // lim = atan2(half, dist)+3.2°, 即"准星大体落在目标身上"就算对准。
 // 返回 {kind,obj} 或 null。座位/甲板/跳帮/前摇层 (tryInteract ①~⑥) **不参与锁定** —— 那些层是
 // "自身状态操作" (下炮/下车/取消), 没有挑选歧义; 观战层同理 (幽灵坦克召唤无对象可选)。
+// 逐帧复用槽 (2026-11-01 性能批): xcInteractLock/架枪检测/手电锥 三处每帧 camForward()/V3() 分配的替代槽。
+// 每个槽只有一个消费者函数, 调用点同步消费不跨帧持有 ⇒ 无重叠生命周期。
+const _xcF=V3(0,0,1), _plBd=V3(0,0,1), _plO1=V3(), _plO2=V3(), _flF=V3(0,0,1);
 function xcInteractLock(){
 const p=player;
 if(!p.alive||p.loiter) return null;
-if(p.onVehicle||p.onNaval||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.capitalGun||p.useCast||p.spectator) return null;
-const eye=camera.position, fwd=camForward();
+if(p.onVehicle||p.onNaval||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.useCast||p.spectator) return null;
+const eye=camera.position, fwd=camForward(_xcF);
 if(!fwd||fwd.lengthSq()<0.1) return null;
 const cand=[];
 const push=(kind,obj,x,y,z,half)=>{
@@ -139,14 +181,7 @@ for(const tk of tanks){ if(tk.alive&&tk.team===p.team&&Math.hypot(tk.pos.x-p.pos
 const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
 if(nc) push('naval',nc,nc.pos.x,nc.pos.y+0.9,nc.pos.z,1.8);
 }
-{
-const cs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
-if(cs) push('capital',cs,cs.pos.x,cs.pos.y+2,cs.pos.z,3.5);
-}
-{
-const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
-if(pp) push('plane',pp,pp.pos.x,pp.pos.y+1,pp.pos.z,2.2);
-}
+// (2026-11-10: 大舰登舰/舰载机候选 push 随大舰子系统下架摘除)
 for(const mg of MG42S){ if(empReady(mg)&&empInReach(mg,p.pos.x,p.pos.y,p.pos.z,2.6)) push('mg',mg,mg.x,heightAt(mg.x,mg.z)+0.6,mg.z,0.9); }
 for(const g of ATGUNS){ if(empReady(g)&&empInReach(g,p.pos.x,p.pos.y,p.pos.z,3)) push('at',g,g.x,heightAt(g.x,g.z)+0.9,g.z,1.3); }
 for(const g of AAGUNS){ if(empReady(g)&&empInReach(g,p.pos.x,p.pos.y,p.pos.z,3)) push('aa',g,g.x,heightAt(g.x,g.z)+1.1,g.z,1.4); }
@@ -203,59 +238,13 @@ return;
 //   ★观战者同样走这条 (用户裁定①"状态优先级栈"): 曾在艇上就按艇上的语义, 不再被召唤抢键。
 	if(player.onNaval){
 	const c=player.onNaval;
-	// ★2026-10-03 跳帮登舰 (夺点死锁破解): 艇贴到任何大舰舷侧 (boardR 内, capNearestBoardable 单点,
-	//   不分敌我 —— 并靠本舰是回家补给, 并靠敌舰是登舰夺旗) ⇒ F = 登舰。排在两义之前: 并靠时的
-	//   明确意图是上舰, 不该被"下船/鱼雷"抢走; 座位互斥/水态复位/VM 收起全在 capBoard 单源里
-	//   (与游泳登舰是同一条路径, 不另写第二条)。
-	const bs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
-	if(bs&&typeof capBoard==='function'&&capBoard(bs)) return;
+	// (2026-11-10: 跳帮登舰插队支随大舰子系统下架摘除)
 	// 2026-09-26E 审计 12: 用 navalCanExitNow 单源 (无鱼雷载具在深水也走"下船=下水游泳", 不再弹无鱼雷发射管)
 	if(navalCanExitNow(c)) navalStartExit(c,false);
 	else navalFireTorpedo(c);
 	return;
 	}
-	// ②b 大舰甲板 (2026-09-30 阶段五 P4, 15h-capital): 站在甲板上时 F = **走到最近的舷缘跳海**
-	//   (甲板是海上陆地, 没有"下船"概念 —— 离开的方式就是走下舷缘落水; 靠近舷缘才放行, 与小艇的
-	//   navalCanExitNow "走到船壳边"同一支手感)。
-		//   ★2026-10-01b 分炮塔接管 (用户裁定"各个分炮塔可以上去操控"): F 优先级在甲板层内 =
-		//   ① 已在炮位上 ⇒ 下炮 (capGunRelease) ② 炮位接管半径内 (CAPITAL_CFG.gunR, 单源 15h capGunNear)
-		//   ⇒ 上炮 (capGunMount) ③ 都不是 ⇒ 舷缘跳海。报废炮位 capGunNear 不返回 (打坏了就不能用)。
-		//   ★2026-10-01c 修"炮塔无法被玩家接管": 分支触发器旧版是座位字段 player.onCapital —— 只有
-		//   走 F 登舰 (capBoard) 才置位, **部署直接落在甲板上的玩家它是空的** ⇒ F 什么都不做 (而提示层
-		//   capGunNear 是按位置的, 还会显示"F 操作副炮" —— 提示与判据脱节, 审计 20 的同款病)。
-		//   现在按**脚下是哪艘舰** (capDeckOf 单源, 与乘员搬运/旗点同一支判据) 触发, onCapital 只是
-		//   capGunMount 内部的座位账 (上炮时自会置位); 跳海/提示同源传舰。
-		// ★2026-10-03 高度门: 判"脚下这片甲板"改用带 curY 的 capDeckShipAt —— capDeckOf 不判高度,
-		//   而"水线以下不挡"的贴舰底泳者同样落在甲板矩形里 ⇒ 水下的人被甲板层截胡 ("走到舷缘再按 F
-		//   跳海"发给潜水员)。onCapital 座位账优先 (上舰时盖的章, 高度必然对)。
-		const dShip=player.onCapital||((typeof capDeckShipAt==='function')?capDeckShipAt(player.pos.x,player.pos.z,player.pos.y):((typeof capDeckOf==='function')?capDeckOf(player.pos.x,player.pos.z):null));
-		if(dShip){
-		if(player.capitalGun){ if(typeof capGunRelease==='function') capGunRelease(); return; }
-		// ★2026-10-02b 实机"F 键冲突 (跳海 vs 补充弹药)": 甲板分支旧版无条件 return ⇒ 通用段的弹药箱
-		//   补弹 (本文件 ~:330) 在甲板上**永远不可达** —— 站在箱边按 F, 要么被 capGunNear 吃掉去上炮,
-		//   要么弹"跳海"提示。补弹按同参 (2.6m / resupplyCd 门) 插进甲板层优先级栈。
-		if(player.resupplyCd<=0){
-		for(const ac of AMMO_CRATES){
-		if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
-		player.grabAction={kind:'ammo',crate:ac};
-		VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
-		document.getElementById('interact').style.display='none';
-		return;
-		}
-		}
-		}
-		const g=(typeof capGunNear==='function')?capGunNear():null;
-		if(g&&typeof capGunMount==='function'&&capGunMount(g)) return;
-		// ★2026-10-02b 冲突同族第二处: 停放的舰载机 (capNearestParkedPlane, 7m) 也排在甲板分支之后 ⇒
-		//   航母甲板上走到停机旁按 F 同样是跳海。登机入栈: 上炮 > 登机 > 跳海 (炮位是明确意图, 停机次之)。
-		{
-		const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
-		if(pp&&typeof capBoardPlane==='function'&&capBoardPlane(pp)) return;
-		}
-		if(typeof capCanExitNow==='function'&&capCanExitNow(dShip)) capExitNow(dShip);
-		else if(typeof showScorePop==='function') showScorePop(t('走到舷缘再按 F 跳海'),0);
-		return;
-		}
+	// (2026-11-10: ②b 大舰甲板层 —— 舷缘跳海/分炮塔接管/甲板补弹/舰载机登机 —— 随大舰子系统下架摘除)
 // ③ 观战模式 (2026-09-17 观战扩展批): 常规载具/阵位/补给一概不用 (自由观察专用), 只保留
 // **观战专属载具「幽灵坦克」的召唤上车** —— (2026-09-21 A#4 契约C 用户裁定④): F = 在当前位置召唤并直接上车
 // (不再要求"4.5m 内有车才进", 也不再有"召唤但人还在车外"的中间态)。
@@ -291,15 +280,25 @@ return;
 }
 t.playerDriven=false; t.isAI=true; t.vel=0;
 player.onVehicle=null;
+player.tankView=false;
+if(player.navalGun) player.navalGun=false;
+const so=document.getElementById('scopeOv');
+if(so) so.style.display='none';
+camera.fov=74;
+camera.updateProjectionMatrix();
+
+let placed=false;
 for(const off of [[3.2,0],[-3.2,0],[0,4],[0,-4],[4,4]]){
 const px=t.pos.x+off[0], pz=t.pos.z+off[1];
-if(!occBlocked(px,pz)){ player.pos.set(px,0,pz); break; }
-player.pos.set(t.pos.x+3.2,0,t.pos.z);
+if(!occBlocked(px,pz)){ player.pos.set(px,0,pz); placed=true; break; }
 }
-player.pos.y=standHeight(player.pos.x,player.pos.z,t.pos.y+2);
+if(!placed) player.pos.set(t.pos.x,t.pos.y+2.5,t.pos.z);
+else player.pos.y=standHeight(player.pos.x,player.pos.z,t.pos.y+2);
 player.vel.set(0,0,0);
 VM.root.visible=true;
-document.getElementById('heatWrap').style.display='none';
+const hw=document.getElementById('heatWrap');
+if(hw) hw.style.display='none';
+if(typeof clearWeaponHUDCache==='function') clearWeaponHUDCache();
 return;
 }
 if(player.onMG){
@@ -313,7 +312,7 @@ if(player.onAA){ releaseEmpl(player.onAA,true); player.onAA=null; VM.root.visibl
 // 迫击炮: 上炮/下炮 (架设后所有人可用, 回收=迫击炮手按B)
 if(player.onMortar){
 const m3=player.onMortar;
-releaseEmpl(m3,true); player.onMortar=null; VM.root.visible=true;
+releaseEmpl(m3,true); player.onMortar=null; player.crouch=false; VM.root.visible=true;   // 蹲姿随下炮还原 (2026-11-03 parity)
 document.getElementById('heatWrap').style.display='none';
 return;
 }
@@ -327,22 +326,22 @@ VM.root.visible=true;
 document.getElementById('heatWrap').style.display='none';
 return;
 }
-// 使用前摇进行中再按F: 取消上机 (释放占位, 不触发上炮冷却)
+// 使用前摇进行中再按F: ★2026-10-30 用户裁定② = **极少加快** (推进前摇 2.5%, 原为取消上机) ——
+//   取消仍有 移动打断 / X / 左键 / 受击>25 四条路 (与全读条网同规)。占位不动, 也不触发上炮冷却。
 if(player.useCast){
-const ug=player.useCast.g;
-if(ug&&ug.user===player) ug.user=null;
-player.useCast=null;
-showScorePop('使用已取消');
+player.useCast.t+=player.useCast.dur*BAR_PRESS_BOOST;
 return;
 }
 // 准星锁定 (2026-10-06 交互批): 地面栈开算前先问一次"准星对准了谁" —— 有锁定时, 锁定类直接用
 // 锁定对象、其余类全部让位 (xc 派生判据在 xcInteractLock 内与执行段同款); 无锁定时逐位走旧栈。
 const xc=xcInteractLock();
 {
-const m2=xc?(xc.kind==='mortar'?xc.obj:null):MORTARS.find(m=>m.alive&&empReady(m)&&Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8);
-if(m2){
-m2.user=player; // 前摇占位: 一门炮同一时刻只允许一个操作者(玩家/Bot同规)
-player.useCast={kind:'mortar',g:m2,t:0,dur:EM_CAST_DUR};
+	const m2=xc?(xc.kind==='mortar'?xc.obj:null):MORTARS.find(m=>m.alive&&empReady(m)&&Math.hypot(m.x-player.pos.x,m.z-player.pos.z)<2.8);
+	if(m2){
+	if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
+	player.stealBar();   // ★2026-10-25 反馈轮①: 读条中 F 上炮 = 打断读条 (确认起步才抢)
+	m2.user=player; // 前摇占位: 一门炮同一时刻只允许一个操作者(玩家/Bot同规)
+	player.useCast={kind:'mortar',g:m2,t:0,dur:EM_CAST_DUR};
 AudioSys.click(700,0.25,0.05);
 showScorePop('操作迫击炮…保持不动 (移动取消)');
 return;
@@ -351,41 +350,32 @@ return;
 if(!xc||xc.kind==='tank') for(const t of tanks){
 if(xc&&xc.obj!==t) continue;
 if(!t.alive||t.team!==player.team) continue;
-if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<4.5){
-if(t.crewBot){ t.crewBot.dismountVehicle(false); showScorePop('你接管了坦克'); }
+		if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<4.5){
+		if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
+		player.stealBar();   // ★2026-10-25 反馈轮①: 读条中 F 上坦克 = 打断读条 (旧版只摘 nadeHeld, 换弹态会冻在车上)
+	if(t.crewBot){ t.crewBot.dismountVehicle(false); showScorePop('你接管了坦克'); }
 t.playerDriven=true; t.isAI=false; t.vel=0;
 player.onVehicle=t;
 player.ads=false; player.nadeHeld=false;
 player.yaw=t.yaw+t.turretYaw+Math.PI; player.pitch=0;
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
+if(typeof clearWeaponHUDCache==='function') clearWeaponHUDCache();
 return;
 }
 }
 // 海战载具 (2026-09-20N 海战批): 走到艇边按 F 上艇 —— 陆上 4.5m / 水上游泳贴近 2.5m (用户裁定①,
 // 半径单源在 20a-seats navalBoardRadius)。车组交还与座位初始化全在 navalBoard 里 (与部署界面选艇同一条路径)。
 {
-if(!xc||xc.kind==='naval'){
-const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
-if(nc&&(!xc||xc.obj===nc)&&navalBoard(nc)) return;
+	if(!xc||xc.kind==='naval'){
+		const nc=(typeof navalNearestBoardable==='function')?navalNearestBoardable():null;
+		if(nc&&(!xc||xc.obj===nc)){
+		if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
+		if(navalBoard(nc)){ player.stealBar(); return; }   // ★2026-10-25 反馈轮①: 登艇成功=打断读条 (先登后收, 成功才抢)
+		}
+	}
 }
-}
-// 大舰登舰 (2026-09-30 阶段五 P4, 15h-capital): 游泳/涉水贴近舷侧按 F 上甲板 —— 半径 CAPITAL_CFG.boardR
-// (大舰吃水 6m, 只能从水面侧靠)。排在艇之后: 艇更近就先上艇 (艇是"摆渡到舰边"的自然工具)。
-{
-if(!xc||xc.kind==='capital'){
-const cs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
-if(cs&&(!xc||xc.obj===cs)&&typeof capBoard==='function'&&capBoard(cs)) return;
-}
-}
-// 航母甲板上的舰载机 (P4 2026-09-30): 走到停放中的飞机旁按 F 登机 —— 上机后 Space = 一键弹射起飞。
-// 排在登舰之后: 站在舰上时优先"上舰", 飞机只是舰上的家具之一 (要先登舰才够得着)。
-{
-if(!xc||xc.kind==='plane'){
-const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
-if(pp&&(!xc||xc.obj===pp)&&typeof capBoardPlane==='function'&&capBoardPlane(pp)) return;
-}
-}
+// (2026-11-10: 游泳登舰 capBoard 与舰载机登机 capBoardPlane 两支随大舰子系统下架摘除)
 if(!xc||xc.kind==='mg') for(const mg of MG42S){
 if(xc&&xc.obj!==mg) continue;
 if(!empReady(mg)) continue;
@@ -431,7 +421,9 @@ if(player.resupplyCd<=0){
 if(!xc||xc.kind==='ammo') for(const ac of AMMO_CRATES){
 if(xc&&xc.obj!==ac) continue;
 if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
+if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
 player.grabAction={kind:'ammo',crate:ac};
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 读条账目旗(nadeHeld/bandaging)与模型层一起收 (换弹/包扎/举雷被 F 抢走都先归位)
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
 document.getElementById('interact').style.display='none';
 return;
@@ -443,7 +435,9 @@ for(const t of trucks){
 if(xc&&xc.obj!==t) continue;
 if(!t.alive||t.escaped) continue;
 if(Math.hypot(t.pos.x-player.pos.x,t.pos.z-player.pos.z)<3.6&&Math.abs(t.pos.y-player.pos.y)<3){
+if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
 player.grabAction={kind:'truck',crate:t};
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 同弹药箱分支 (账目旗+模型层一起收)
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
 document.getElementById('interact').style.display='none';
 return;
@@ -455,7 +449,9 @@ if((!xc||xc.kind==='supply')&&player.team===0){
 for(const sp of SUPPLY_POINTS){
 if(xc&&xc.obj!==sp) continue;
 if(Math.hypot(sp.x-player.pos.x,sp.z-player.pos.z)<2.8){
+if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
 player.grabAction={kind:'supply',crate:sp};
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 同弹药箱分支 (账目旗+模型层一起收)
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
 document.getElementById('interact').style.display='none';
 return;
@@ -468,7 +464,9 @@ if(!xc||xc.kind==='medcrate') for(const c of MED_CRATES){
 if(xc&&xc.obj!==c) continue;
 if(c.team!==player.team||c.uses<=0) continue;
 if(Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.6){
+if(!player.barStealArmed('KeyF')) return;   // ★2026-10-30 读条交互批: 双击确认 (起步前)
 player.grabAction={kind:'medcrate',crate:c};
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 同弹药箱分支 (账目旗+模型层一起收)
 VM.state='grab'; VM.stateT=0; VM.stateDur=0.85; vmSndFlags={};
 document.getElementById('interact').style.display='none';
 return;
@@ -491,12 +489,12 @@ if(elm&&elm._line){ elm._line=null; elm.style.display='none'; }
 }
 // 观战飞行双模式 (2026-09-01 用户指定, 两者是不同东西):
 //  创造悬停(flyAero=false): MC创造式 —— 无重力可悬停, WASD水平 + 空格升/Shift降, 松键缓停
-//  气动飞行(flyAero=true):  复用巡飞弹飞行动作 —— 始终沿视线方向前飞不可停, 右键加速(13→40m/s), 俯冲触地落地
+//  气动飞行(flyAero=true):  复用巡飞弹飞行动作 —— 始终沿视线方向前飞不可停, 空格加速(13→40m/s), 俯冲触地落地 (2026-11-06 右键→空格)
 function specFlightMove(p,dt){
 if(p.flyAero){
 const cp=Math.cos(p.pitch), sp=Math.sin(p.pitch);
 const dirx=-Math.sin(p.yaw)*cp, diry=sp, dirz=-Math.cos(p.yaw)*cp;
-const spd=dampF(p._aeroSpd||13,(mouse2Down?40:13),2.2,dt); // 速度数值与巡飞弹同一组
+const spd=dampF(p._aeroSpd||13,((keys.Space&&!p._ltSpace)?40:13),2.2,dt); // 速度数值与巡飞弹同一组; 2026-11-06 加速键右键→空格 (右键让位瞄准); 2026-11-07 !p._ltSpace=操控边界吞边沿 (操控退场瞬间按住的空格, 松开前不加速)
 p._aeroSpd=spd;
 p.vel.set(dirx*spd,diry*spd,dirz*spd);
 p.pos.x+=p.vel.x*dt; p.pos.y+=p.vel.y*dt; p.pos.z+=p.vel.z*dt;
@@ -510,7 +508,7 @@ if(p.vel.y<-0.5){ specLand(p); return; } // 俯冲触地: 切回行走
 const sy=Math.sin(p.yaw), cy=Math.cos(p.yaw);
 const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0), str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
 let tx=-sy*fwd+cy*str, ty=0, tz=-cy*fwd-sy*str;
-if(keys.Space) ty+=1;
+if(keys.Space&&!p._ltSpace) ty+=1;   // !p._ltSpace: 巡飞弹操控边界吞边沿 (2026-11-07) — 悬停升/自由飞行升同规, 松开前不吃残空格
 if(keys.ShiftLeft) ty-=1;
 const tl=Math.hypot(tx,ty,tz);
 if(tl>0.01){ tx/=tl; ty/=tl; tz/=tl; }
@@ -531,6 +529,273 @@ p.vel.set(0,0,0);
 p.flying=false; p.flyAero=false; p._aeroSpd=0; p.onGround=true;
 AudioSys.footstep(true,0);
 showScorePop('落地 · 行走状态');
+}
+// ═══ 自由观战视模式 (2026-11-01, MC 旁观者式; 与上方"调试观战"飞行是两个东西) ═══
+// 入口单源 enterSpecView (部署页「观战」按钮, 22-hud/23-deploy/24-main 三处按 specWillBe 同判据换字):
+//   票尽 + 未开调试观战 ⇒ 可进。player.spectator=true (复用全部免伤/不被索敌/清场排除门, 零新增分支)
+//   + player.specView=true 区分模式; **不盖 specUsed 章** (21-match recCommit 2026-11-01 口径:
+//   视模式只看不动 ⇒ 按原阵营出胜负且计入历史; 旧调试观战能干涉战局才不计)。
+//   player.team 全程不动 ⇒ 附身敌我 Bot 都只是"借眼睛", 结算阵营恒为开局阵营。
+function enterSpecView(){
+if(typeof matchOver!=='undefined'&&matchOver) return;
+if(player.alive||player.spectator) return;
+if(tickets[player.team]>0) return;               // 还有票 ⇒ 只能走正常部署 (按钮此时就是「部署」)
+if(player.specWant===true) return;               // 调试观战待生效 ⇒ 那条路走部署入场, 不进视模式
+player.specWant=null;
+player.spectator=true; player.specView=true;
+player.specViewHost=null; player.specViewSpd=14;
+player.vel.set(0,0,0); player.flying=false; player.flyAero=false; player.onGround=false; player.chute=false;
+// 相机种子位 = 当前机位 (死亡航拍镜头), 朝向从相机前向反推 —— 进场不跳变。
+// 相机系前向 = (-sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch)) (与步行第一人称同一套角)
+if(typeof camera!=='undefined'&&camera){
+const _svDir=camera.getWorldDirection(V3());
+player.pos.copy(camera.position);
+player.yaw=Math.atan2(-_svDir.x,-_svDir.z);
+player.pitch=Math.asin(clamp(_svDir.y,-1,1));
+}
+if(typeof VM!=='undefined'&&VM.root) VM.root.visible=false;   // 武器模型收起 (视模式无武器)
+document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+if(typeof syncDeployHud==='function') syncDeployHud();
+if(typeof lockPointer==='function') lockPointer();
+showScorePop('自由观战 · 滚轮调速 · 左键附身Bot · Q/E切换 · 右键脱离');
+}
+function specViewDetach(seedCam){
+player.nadeHeld=false; if(typeof VM!=='undefined') VM.mirrorHost=false;   // 镜像账收尾 (2026-11-03): 举雷哨兵/镜像标记不跨态
+svHostModelRestore();   // 宿主模型第一人称收纳的还原 (真附身批)
+if(typeof vmAbortAction==='function') vmAbortAction();
+if(typeof VM!=='undefined'&&VM.root) VM.root.visible=false;   // 回自由观战: 武器收起
+player.curW=(player._svCurW!==undefined)?player._svCurW:player.curW; player._svCurW=undefined;   // 弹药面板镜像账还原
+player.specViewHost=null; player.vel.set(0,0,0);
+if(seedCam&&typeof camera!=='undefined'&&camera){
+// 从 Bot 眼位平移到相机当前位置 = "原地化作自由观战" (MC 的 detach 手感), 朝向沿用正在看的方向
+const _svDir=camera.getWorldDirection(V3());
+player.pos.copy(camera.position);
+player.yaw=Math.atan2(-_svDir.x,-_svDir.z);
+player.pitch=Math.asin(clamp(_svDir.y,-1,1));
+}
+}
+// 准星射线选主 (LMB): 视锥 ±5.7° 内最近者, 隔墙/登载具者不可附身 (乘员相机在车体内=黑屏; 只给步行 Bot)
+function specViewPickHost(){
+if(typeof camera==='undefined'||!camera) return null;
+const dir=camera.getWorldDirection(V3());
+let best=null,bestScore=Infinity;
+for(const b of soldiers){
+if(!b.alive||b.zombie||b.onVehicle||b.onNaval) continue;   // 丧尸不可附身 (2026-11-03): Zombie extends Bot 同在 soldiers, 无 slots 无枪械 (2026-11-10: capCrew 项随大舰子系统下架摘除)
+const ex=b.pos.x-camera.position.x, ey=b.pos.y+1.5-camera.position.y, ez=b.pos.z-camera.position.z;
+const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
+if(d<1||d>260) continue;
+const dot=(ex*dir.x+ey*dir.y+ez*dir.z)/d;
+if(dot<0.995) continue;
+if(typeof raycastWorld==='function'){
+const hit=raycastWorld(camera.position,V3(ex/d,ey/d,ez/d),d-0.7);
+if(hit) continue;                              // 视线被挡 = 隔墙不可附身
+}
+const score=(1-dot)*1000+d*0.4;                  // 角度优先, 距离次之
+if(score<bestScore){ bestScore=score; best=b; }
+}
+return best;
+}
+// 宿主"手里实际是哪把枪"单源 (2026-11-04 附身武器镜像批): Bot 没有 curW 字段, 当前武器由开火分支临时
+// 决定 —— 反坦克/迫击炮兵对人目标会切副武器手枪连发自卫 (14-bots), 第三人称宿主切手枪模型
+// (switchVisualGun + visualGunTimer 1.8s 还原), heldWpnKey 因此是"宿主现在手里是什么"的现成唯一账
+// (写点: setClass / switchVisualGun / aimShot 副武器与主武器还原 / 火箭筒打装甲 1029·4306)。反查槽位:
+// 主武器键 ⇒ slots[0]; 其它按键匹配 slots[1]; 无账 (假宿主/丧尸子类) ⇒ 退回 slots[0] 与旧行为一致。
+function svHostCurSlot(h){
+if(!h||!h.slots||!h.slots.length) return null;
+if(h.heldWpnKey&&h.heldWpnKey!==h.wpnKey){
+const s1=h.slots[1];
+if(s1&&s1.key===h.heldWpnKey) return s1;
+}
+return h.slots[0]||null;
+}
+// 宿主武器镜像单源 (2026-11-04): specViewTick 两分支共用 —— curW 钉到宿主手里那把 (弹药面板/👁指示器/
+// rocketTip 全链跟随), 且 VM 换枪: 旧版附身只在 specViewPossess 换装一次 (slots[0]), 宿主切副武器后
+// 视角永远停在主武器 = "看着拿火箭筒却连发手枪弹" (用户实报)。换枪门: VM 只在 idle/draw 态接新枪
+// (镜像换弹/举雷/包扎中不抢, 打断归位由 svHostActionMirror/vmAbortAction 收, 下一帧自然补换)。
+function svHostWeaponMirror(h){
+const w=svHostCurSlot(h);
+if(w) player.curW=w;
+if(w&&typeof vmEquip==='function'&&VM.key!==w.key&&(VM.state==='idle'||VM.state==='draw')){
+vmEquip(w.key,h.team); VM.state='idle'; VM.stateT=0; VM.stateDur=0;
+}
+}
+function specViewPossess(b){
+// 真附身换装单源 (2026-11-01 用户裁定"全方位像附身" → ★2026-11-03 两模式统一): 附身即把视角武器换成
+// 宿主主武器 + VM 挂账 —— 视模式不再收枪 (24-main 的 updateViewModel 门同步放宽到 specViewHost),
+// 换弹/举雷/包扎/开火反馈经 svHostActionMirror 全量镜像。两模式共用 _svCurW 账 —— specViewTick 逐帧
+// 把 player.curW 钉到宿主武器, 22-hud 弹药面板读它 ⇒ 枪名/弹数/备弹全显宿主。
+if(player.nadeHeld) player.nadeHeld=false;               // 上一态残留 (本体举雷中附身): 雷回袋不消耗, 与 F 抢占同语义
+if(typeof VM!=='undefined') VM.mirrorHost=false;         // 镜像标记跨目标清账 (换附身对象时旧镜像不得延续)
+if(typeof vmAbortAction==='function') vmAbortAction();   // 抢 VM.state 前先收尾 (10-viewmodel 纪律)
+const w=svHostCurSlot(b);   // 宿主当前武器 (2026-11-04): 不再钉死主武器槽 (附身瞬间宿主已持副武器同样跟装)
+if(w&&typeof vmEquip==='function'&&VM.key!==w.key){ vmEquip(w.key,player.team); VM.state='idle'; VM.stateT=0; VM.stateDur=0; }
+if(typeof VM!=='undefined'&&VM.root) VM.root.visible=true;
+if(player._svCurW===undefined) player._svCurW=player.curW;
+player.specViewHost=b; player.vel.set(0,0,0);
+showScorePop(t('附身视角 · {0}',b.name?t(b.name):'Bot'));
+}
+// 调试观战附身 (2026-11-01 用户裁定, Q=附身/E=脱离 见 19-input): 入口包装 —— 首次附身保存观察位
+// (脱离时还原), **视角武器模型换成宿主的主武器** (updateViewModel 由 24-main 独立驱动, 不吃本体
+// 冻结门 ⇒ 附身中照常待机晃动; 只读不开火), 再次 Q = 直接换目标 (原观察位保留)。
+function dbgSpecPossess(b){
+if(!player.specViewHost){
+player._svSaved={x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch,tp:!!player.thirdPerson,pr:!!player.prone,cr:!!player.crouch,vmKey:VM.key};
+player.thirdPerson=false;
+// 相机附加项清零: 后坐/侧身/落地下沉是上一态残留, 附身镜头不该带着 (脱离不还原这几项, 无碍)
+player.recoilPitch=0; player.recoilYaw=0; player.leanT=0; player.landDip=0;
+}
+specViewPossess(b);   // VM 换宿主枪 + 挂 host (真附身换装单源, 两模式共用)
+}
+function dbgSpecDetach(){
+player.nadeHeld=false; if(typeof VM!=='undefined') VM.mirrorHost=false;   // 镜像账收尾 (2026-11-03): 同 specViewDetach
+svHostModelRestore();   // 宿主模型第一人称收纳的还原 (真附身批)
+if(typeof vmAbortAction==='function') vmAbortAction();   // 换弹镜像等被占的 VM 态走同一份收尾 (10-viewmodel 纪律)
+const s=player._svSaved;
+player.specViewHost=null; player._svSaved=null;
+if(s){
+player.pos.set(s.x,s.y,s.z); player.yaw=s.yaw; player.pitch=s.pitch; player.thirdPerson=!!s.tp; player.prone=!!s.pr; player.crouch=!!s.cr;   // 姿态旗随观察位还原 (附身期间镜像的是宿主, 2026-11-02)
+// 视角武器还原 (附身时换成了宿主的枪)
+if(s.vmKey&&typeof vmEquip==='function'&&VM.key!==s.vmKey){ vmEquip(s.vmKey,player.team); VM.state='idle'; VM.stateT=0; VM.stateDur=0; }
+}
+if(typeof VM!=='undefined'&&VM.root) VM.root.visible=true;
+player.curW=(player._svCurW!==undefined)?player._svCurW:player.curW; player._svCurW=undefined;   // 弹药面板镜像账还原
+showScorePop('已脱离 · 调试观战');
+}
+// 真附身呈现层单源 (2026-11-01 用户裁定"全方位像附身"):
+//   svHostModelRestore —— 宿主模型第一人称收纳的还原点 (specViewTick 逐帧按视角收纳; 脱离/关调试/再部署/换局必经)。
+//   svHostFireFx —— 宿主出膛的"这是我的手在开枪"反馈: VM 后坐+枪口焰/枪口灯 (vmFireKick) + 微震镜。
+//   只对调试附身生效 (13-combat fireBullet 钩; 视模式附身是死者, updateViewModel 不跑, VM 反馈会冻在半路)。
+function svHostModelRestore(){ const h=player.specViewHost; if(h&&h.alive&&!h.onVehicle&&!h.onNaval&&h.mesh&&h.mesh.root) h.mesh.root.visible=true; }
+// ★2026-11-02 实机修复: buildSoldierMesh 返回的是**包装对象** (root/headG/gunG...), 真身是 .root ——
+// 上一批五处全写成 h.mesh.visible (普通对象的闲散属性, three.js 不读) ⇒ 宿主模型从未被藏掉,
+// 第一人称视角武器与第三人称整套模型同屏 (两个身体/枪怼脸/相机钻进头盔=黑屏)。还原守卫: 阵亡不还原
+// (布娃娃接管, die() 已收 root), 登车/登艇不还原 (车内本该隐身, 14-bots 上车惯例 root.visible=false)。
+function svHostFireFx(def){
+if(typeof vmFireKick!=='function'||!VM.gunParts) return;
+vmFireKick();
+addTrauma(0.1);
+}
+// 真附身·宿主动作镜像单源 (2026-11-03): 宿主 Bot 的 换弹/举雷(AT雷)前摇/包扎 → VM 状态机镜像, 调试附身与
+// 视模式附身共用 (旧版只镜像换弹且视模式整层不做 —— updateViewModel 门只放活人, 用户实报"附身看不到宿主
+// 消耗弹药/换弹等大批动作")。VM.mirrorHost 标记"当前 VM 动作是镜像": finishReload (18-game) 与包扎打断判定
+// (10-viewmodel) 按它让位, 宿主账不被玩家侧结算污染; 宿主侧被受创打断 (Bot.damage 同款 >25 门) ⇒
+// vmAbortAction 同帧收 —— 双方永远同步归位。判据对齐 Bot 账: reloadT 归零而弹匣未满 = 没换完 (打断)。
+function svHostActionMirror(h){
+if(typeof VM==='undefined'||!VM||!VM.root) return;
+// ── 换弹镜像: 宿主 reloadT 驱动 (走玩家既有换弹管线, 20-player:736 旧块收编)
+// ── 副武器在手 (2026-11-04 附身武器镜像批): 镜像 pReloadT (Bot 副武器换弹账, 14-bots 起账/完成/受创打断
+//    与主武器同一张打断网)。满仓/归零判据与主武器同语义; 主武器镜像分支逐字不动 (verify-specview 源码锚)。
+const _side=!!(h.slots&&h.slots[1]&&typeof svHostCurSlot==='function'&&svHostCurSlot(h)===h.slots[1]);
+if(_side){
+if(h.pReloadT>0){
+if(VM.state==='idle'&&h.slots[1].mag<h.slots[1].def.mag){
+VM.state='reload'; VM.stateT=0; VM.stateDur=Math.max(0.3,h.pReloadT); vmSndFlags={}; VM.mirrorHost=true;
+}
+}else if(VM.state==='reload'&&VM.mirrorHost&&h.slots[1].mag<h.slots[1].def.mag){
+if(typeof vmAbortAction==='function') vmAbortAction();
+VM.mirrorHost=false;
+}
+}else if(h.reloadT>0){
+if(VM.state==='idle'&&!(h.slots&&h.slots[0]&&h.slots[0].mag>=h.slots[0].def.mag)){
+VM.state='reload'; VM.stateT=0; VM.stateDur=Math.max(0.3,h.reloadT); vmSndFlags={}; VM.mirrorHost=true;
+}
+}else if(VM.state==='reload'&&VM.mirrorHost&&!(h.slots&&h.slots[0]&&h.slots[0].mag>=h.slots[0].def.mag)){
+if(typeof vmAbortAction==='function') vmAbortAction();   // 宿主换弹被打断 ⇒ 镜像同帧收 (弹药不结算语义一致)
+VM.mirrorHost=false;
+}
+// ── 举雷/AT雷前摇镜像: 宿主 state nade/atnade 驱动持雷哨兵态 (stateDur=999); 离岗 (掷出/被打断) 即收
+//    —— 不重放出手弧 (世界层雷体已可见), vmAbortAction 收走手上雷模与枪显隐。
+const _nw=(h.state==='nade'||h.state==='atnade')&&h.nadeAnimT>0;
+if(_nw){
+if(VM.state!=='nade'){ VM.state='nade'; VM.stateT=0; VM.stateDur=999; vmSndFlags={}; player.nadeHeld=true; VM.mirrorHost=true; }
+}else if(VM.state==='nade'&&VM.stateDur>10&&player.nadeHeld&&VM.mirrorHost){
+player.nadeHeld=false; VM.mirrorHost=false;
+if(typeof vmAbortAction==='function') vmAbortAction();
+}
+// ── 包扎镜像: 宿主 bandageT 驱动; 提前归零 = 被打断 ⇒ 同帧收 (绷带不结算, 与玩家同语义)。
+//    归零容差 0.12s: 自然走完那帧 reloadT/bandageT 与动画终点同帧, 别把收尾动作掐断。
+if(h.bandageT>0){
+if(VM.state==='idle'){ VM.state='bandage'; VM.stateT=0; VM.stateDur=Math.max(0.4,h.bandageT); vmSndFlags={}; VM.mirrorHost=true; }
+}else if(VM.state==='bandage'&&VM.mirrorHost&&VM.stateT<VM.stateDur-0.12){
+if(typeof vmAbortAction==='function') vmAbortAction();
+VM.mirrorHost=false;
+}
+}
+// Q/E 轮换: 存活步行 Bot 按与观战者的距离排序, 环绕轮换; 未附身时从最近一个开始
+function specViewCycle(dir){
+if(!player.specView||player.alive) return;
+const list=soldiers.filter(b=>b.alive&&!b.zombie&&!b.onVehicle&&!b.onNaval);   // 丧尸排除 (2026-11-03, 同 specViewPickHost; 2026-11-10: capCrew 项随大舰子系统下架摘除)
+if(!list.length){ showScorePop('场上没有可附身的 Bot'); return; }
+list.sort((a,b)=>a.pos.distanceToSquared(player.pos)-b.pos.distanceToSquared(player.pos));
+let idx=list.indexOf(player.specViewHost);
+idx=idx<0?0:(idx+dir+list.length)%list.length;
+specViewPossess(list[idx]);
+}
+// 每帧 tick (24-main, updatePlayer 旁路): 附身=把观战者眼睛钉到 Bot (只读, 不写 Bot);
+// 自由=沿视线创造飞行 (WASD+滚轮调速, Space 升/Shift 降), **零碰撞零地形吸附** —— MC 旁观者口径
+function specViewTick(dt){
+if(matchOver) return;
+const h=player.specViewHost;
+if(!player.specView){
+// 调试观战附身 (2026-11-01 用户裁定, Q/E 键见 19-input): 与视模式共用 specViewHost 管线, 差异——
+// ①钉**脚底** (步行第一人称相机会自算眼高/起伏, 附身镜头直接复用既有相机链); ②本体位由
+// dbgSpecPossess 保存 / dbgSpecDetach 还原 (脱离回原观察位, 幽灵坦克等不动); ③免伤由 spectator 门兜底。
+if(!h) return;
+if(!h.alive){ dbgSpecDetach(); showScorePop('附身目标已阵亡 · 已还原调试观战位'); return; }
+if(h.onVehicle||h.onNaval){ dbgSpecDetach(); showScorePop('附身目标已进入载具 · 已还原调试观战位'); return; }   // 车体内=黑屏
+player.pos.set(h.pos.x,h.pos.y,h.pos.z);
+// 眼高随 Bot 姿态直写 + 姿态旗镜像: 执行序是 specViewTick → updateCamera, 后者步行分支仍会把 p.eyeH 往
+// eyeTgt 阻尼一步 —— 只把 prone/crouch 一并镜像到 player, eyeTgt 才与宿主一致 (本体 updatePlayer 已冻结,
+// 这两面旗附身期间无其他写者; dbgSpecDetach 随观察位一起还原)。
+player.prone=!!h.prone; player.crouch=!!h.crouch;
+player.eyeH=h.prone?0.48:h.crouch?1.12:1.62;
+// ★角系换算: Bot 前向 = (sin(yaw),cos(yaw)) (与载具同系), 相机前向 = (-sin(yaw),-cos(yaw)) ⇒ 差 π
+// (2026-11-01 用户实测"视角与宿主相反"即漏了这半圈; 与 15c-specveh 上车 player.yaw=g.yaw+π 同一口径)
+player.yaw=(h.yaw||0)+Math.PI; player.pitch=h.pitch||0;
+// ── 真附身呈现层 (2026-11-01 用户裁定"全方位像附身"): ①幽灵化 —— 宿主模型第一人称收纳 (第三人称追尾
+//    时还原 ⇒ 屏上永远只有一具身体: FP=宿主枪的视角武器, 3P=宿主本体; 玩家 avatar 恒隐, updatePlayerAvatar
+//    顶部门)。②弹药面板镜像 —— curW 钉到宿主主武器 (账在 specViewPossess/_svCurW, 脱离/再部署还原)。
+//    ③压制晕影随宿主 (22-hud supOv 读 player.suppressV)。④宿主换弹 → VM 换弹动画/读条条镜像 (走玩家
+//    既有换弹管线, R 键已被 19-input 吞掉不会打架)。
+if(h.mesh&&h.mesh.root) h.mesh.root.visible=(typeof thirdPersonOn==='function')?thirdPersonOn():false;   // .root 才是真身 (★2026-11-02, 见 svHostModelRestore 注)
+svHostWeaponMirror(h);   // 宿主当前武器单源 (2026-11-04): curW 钉定 + VM 换枪 (含副武器), specViewPossess 同源
+player.suppressV=h.suppression||0;
+svHostActionMirror(h);   // 宿主动作镜像单源 (2026-11-03): 换弹/举雷/包扎 + 宿主被打断同帧收
+return;
+}
+if(player.alive) return;   // 视模式要求死者 (调试观战活人走上面分支)
+if(h){
+if(!h.alive){ specViewDetach(false); showScorePop('附身目标已阵亡 · 回到自由观战'); return; }
+if(h.onVehicle||h.onNaval){ specViewDetach(false); showScorePop('附身目标已进入载具 · 回到自由观战'); return; }   // 车体内=黑屏
+// 眼位高度与 14-bots eyePos 同式 (卧0.5/蹲1.15/站1.62) —— 相机分支直接把 p.pos 当眼位用
+player.pos.set(h.pos.x,h.pos.y+(h.prone?0.5:h.crouch?1.15:1.62),h.pos.z);
+player.yaw=(h.yaw||0)+Math.PI; player.pitch=h.pitch||0;   // Bot 前向(sin,cos) ⇒ 相机系 +π (同上)
+// 真附身呈现层 (视模式): 宿主模型恒收 (死者的相机分支没有第三人称) + 弹药面板镜像 + 压制晕影。
+// ★2026-11-03: VM 反馈全量镜像 —— updateViewModel 门在 24-main 放宽到 specViewHost, 视模式附身同样
+// 跑换弹动画/举雷/包扎/开火后坐 (旧版枪收起+状态机不跑, 用户实报"看不到宿主消耗弹药换弹等大批动作")。
+if(h.mesh&&h.mesh.root) h.mesh.root.visible=false;   // .root 才是真身 (★2026-11-02, 见 svHostModelRestore 注)
+svHostWeaponMirror(h);   // 宿主当前武器单源 (2026-11-04): curW 钉定 + VM 换枪 (含副武器), specViewPossess 同源
+player.suppressV=h.suppression||0;
+svHostActionMirror(h);   // 宿主动作镜像单源 (2026-11-03)
+return;
+}
+const sy=Math.sin(player.yaw), cy=Math.cos(player.yaw);
+const cp=Math.cos(player.pitch), sp=Math.sin(player.pitch);
+const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0), str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
+let tx=-sy*cp*fwd+cy*str, ty=sp*fwd, tz=-cy*cp*fwd-sy*str;
+if(keys.Space&&!p._ltSpace) ty+=1;   // !p._ltSpace: 巡飞弹操控边界吞边沿 (2026-11-07) — 悬停升/自由飞行升同规, 松开前不吃残空格
+if(keys.ShiftLeft) ty-=1;
+const tl=Math.hypot(tx,ty,tz);
+if(tl>0.01){ tx/=tl; ty/=tl; tz/=tl; }
+const spd=clamp(player.specViewSpd||14,3,90);
+player.vel.x=dampF(player.vel.x,tx*spd,4,dt);
+player.vel.y=dampF(player.vel.y,ty*spd,4,dt);
+player.vel.z=dampF(player.vel.z,tz*spd,4,dt);
+player.pos.x+=player.vel.x*dt; player.pos.y+=player.vel.y*dt; player.pos.z+=player.vel.z*dt;
+if(player.pos.y>240){ player.pos.y=240; player.vel.y=Math.min(0,player.vel.y); }   // 升限防飞离战区
+const _bnd=MAP_SIZE*0.5+80;                        // 与舰船夹持同宽出界带: 世界网格只铺到 +20, 再远是空海
+player.pos.x=clamp(player.pos.x,-_bnd,_bnd);
+player.pos.z=clamp(player.pos.z,-_bnd,_bnd);
 }
 // 摔落伤害: 落地瞬间按竖直冲击速度线性结算 (2026-09-02 用户指定); 河道/水面缓冲免伤, 观战免伤由 damage() 兜底
 function fallDamage(p){
@@ -556,12 +821,19 @@ if(typeof navalHudTick==='function') navalHudTick(dt);
 if(typeof AudioSys!=='undefined'&&AudioSys.navalAudioTick) AudioSys.navalAudioTick(wdt,dt);
 if(!player.alive){ return; }
 const p=player;
+// ★2026-11-01 附身中冻结门 (调试观战附身, specViewTick 钉位): 本体只读 —— 移动/开火/交互/读条全停,
+// 脱离=19-input 的 E (dbgSpecDetach 还原观察位)。视模式附身走上面的 !alive 早退, 不经过这里。
+if(p.specViewHost) return;
 p.meleeCd-=dt; p.resupplyCd-=dt;
+if(!keys.Space) p._ltSpace=false;   // 2026-11-07 实机反馈批: 吞边沿旗清零上提到帧首 (原在 TV 制导分支内, 操控结束后没人清 ⇒ 残真卡死) —— 操控退场瞬间仍按着空格时, 本体的跳跃/悬停升/气动加速都要求**松开重按**, 不吃残键 (与 _ltRClick "松开才重触发"同构)
 if(p.streakBuff&&nowT>=p.streakBuff.until) p.streakBuff=null; // 连杀增益到期 (2026-09-11)
 p.bandResupCd=Math.max(0,(p.bandResupCd||0)-dt);
 p.suppressV=Math.max(0,p.suppressV-dt*0.8);
 // 固定火力点使用前摇: 移动打断, 计时满上机 (目标被夺则提示)
 if(p.useCast){
+// ★2026-10-12 用户实报②: 前摇与读条互斥 —— F 上炮/上机时若还在包扎, 这里反向把包扎收掉 (否则屏上两条
+//   进度条同时在跑; 且上机后包扎段不再 tick, 计时永远冻在 >0 而模型留在手上)。
+if(p.bandaging>0) p.cancelReadBar('包扎被打断!');
 const uc=p.useCast;
 if(keys.KeyW||keys.KeyA||keys.KeyS||keys.KeyD||keys.Space||p.flying){
 if(uc.g&&uc.g.user===p) uc.g.user=null;
@@ -572,6 +844,7 @@ uc.t+=dt;
 if(uc.t>=uc.dur){
 const g2=uc.g;
 p.useCast=null;
+p.barArmKey=null;   // ★2026-10-30: 前摇自然走完清打断确认账 (同上)
 if(uc.kind==='mg'&&g2.user===p) mountMG(g2);
 else if(uc.kind==='at'&&g2.user===p) mountAT(g2);
 else if(uc.kind==='aa'&&g2.user===p) mountAA(g2);
@@ -580,16 +853,30 @@ else{ if(g2&&g2.user===p) g2.user=null; showScorePop('目标已被占用'); }
 }
 }
 }
-// 呼吸回血(削弱): 仅能自然恢复到70, 满血需绷带
-if(nowT-p.lastDmgT>6&&p.hp<70) p.hp=Math.min(70,p.hp+4*dt);
-// 绷带包扎
+// 自然回血阶梯 (2026-10-09):
+// <30 为重伤流血状态, 脱战也不自愈 (需医疗包/急救/绷带包扎脱离危殆);
+// 30~70 脱战6秒后呼吸回血恢复至 70 封顶并停留 (4 HP/s);
+// 仅当生命值明确 >70 且 <100 时, 脱战6秒后温和速率恢复至 100 满血 (2.5 HP/s)
+if(nowT-p.lastDmgT>6){
+ if(p.hp>=30&&p.hp<70) p.hp=Math.min(70,p.hp+4*dt);
+ else if(p.hp>70&&p.hp<100) p.hp=Math.min(100,p.hp+2.5*dt);
+}
+// 绷带包扎 (★2026-10-12 用户实报②: 读条互斥单源)
 if(p.bandaging>0){
+// 与拆除读条同规 (06-engineering updateDemolish 的 VM.state!=='idle' 判据): 读条期间只要有**别的行动
+//   占用身体** (上炮/上车/上艇/进炮位/驾巡飞弹/取弹…) 或 VM 动作态已被抢走 ⇒ 一律按"被打断"收账。
+// 旧版只认"自己走完"这一条出口 ⇒ F 取弹抢走 VM.state 后, bandaging 会一路 tick 到满 (照样回血),
+//   而 VM.state 再也不是 'bandage', 10-viewmodel 里那个分支的收尾永不执行 ⇒ 绷带卷 + 缠臂环永久留手上。
+if(p.readBarBusy()) p.cancelReadBar('包扎被打断!');
+else{
 p.bandaging-=dt;
 if(p.bandaging<=0){
+p.barArmKey=null;   // ★2026-10-30: 读条自然走完清打断确认账 (旧键不得残留到下一条读条的双击窗里)
 p.bandages--;
 p.hp=Math.min(100,p.hp+BANDAGE_HEAL);
 showScorePop('包扎完成 +45');
 AudioSys.click(1200,0.3,0.06);
+}
 }
 }
 // TV制导中: 视角切至巡飞弹, 左键提前引爆; 本体物理照常模拟 (跳跃中发射也会正常落地)
@@ -597,13 +884,18 @@ if(p.loiter){
 if(mouseDown&&!p._ltClick){ p._ltClick=true; if(p.loiter) loiterDetonate(p.loiter,p.loiter.pos.clone()); }
 if(!mouseDown) p._ltClick=false;
 if(!mouse2Down) p._ltRClick=false;
-// 观战飞行中引导巡飞弹: 本体保持飞行机动 (视角同时舵控TV弹), 无重力
-if(p.spectator&&p.flying){ p.stamina=1; specFlightMove(p,dt); updateInteractHint(); return; }
+// ★2026-11-07 实机反馈批 (用户裁定③): 操控巡飞弹期间本体**定身** —— 观战飞行态原地悬停 (速度阻尼归零 /
+//   无重力 / 不积分位移), 步行态走下面既有重力链照常下落; 受伤/回血/回体照常 (只冻操作不冻结算)。
+//   旧写 spectator&&flying 继续跑 specFlightMove 消费同一份输入: 悬停按空格=本体上升 / 气动按空格=本体沿
+//   视线 40m/s 前飞 (背追档里看得一清二楚 = 用户实报"巡飞弹视角内自己一个人向前飞出"), 且弹体加速与本体
+//   机动抢同一个空格。气动飞行已在 fireLoiter 就地切悬停。(旧 _ltSpace 清零行上提到帧首, 见 updatePlayer 头)
+if(p.spectator&&p.flying){ p.stamina=1; p.vel.x=dampF(p.vel.x,0,8,dt); p.vel.y=dampF(p.vel.y,0,8,dt); p.vel.z=dampF(p.vel.z,0,8,dt); updateInteractHint(); return; }
 p.vel.x=dampF(p.vel.x,0,8,dt);
 p.vel.z=dampF(p.vel.z,0,8,dt);
 p.vel.y-=13*dt;
 if(p.chute&&p.vel.y<-3.2) p.vel.y=-3.2;
 p.pos.x+=p.vel.x*dt; p.pos.y+=p.vel.y*dt; p.pos.z+=p.vel.z*dt;
+if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: TV制导中跳跃出膛的本体仍在上升, 同口径防顶穿楼板
 collideMove(p.pos,0.42);
 const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);
 // 海图水面地板 (★2026-10-03, 与步行块同批): TV制导坠落触深水水面即收伞入水, 不再沉到海床
@@ -637,13 +929,15 @@ p.recoilPitch=clamp(p.recoilPitch,-0.2,0.2);
 // 架枪检测: 胸前有齐腰遮挡且头顶上方无遮挡 (架枪时沿架设方向检测, 避免转头就脱离)
 p.canBrace=false;
 if(p.onGround&&!p.prone&&!p.onVehicle&&!p.onMG&&!p.onAT&&!p.onAA&&!p.onBattery&&Math.hypot(p.vel.x,p.vel.z)<0.8){
-const bd=p.braced?V3(-Math.sin(p.braceYaw),0,-Math.cos(p.braceYaw)):camForward(); bd.y=0;
+const bd=_plBd;   // 复用槽 (2026-11-01 性能批): 架枪检测每帧 3 个 V3 是纯垃圾
+if(p.braced) bd.set(-Math.sin(p.braceYaw),0,-Math.cos(p.braceYaw)); else camForward(bd);
+bd.y=0;
 if(bd.lengthSq()>0.1){
 bd.normalize();
 const chestY=p.pos.y+(p.crouch?0.72:1.05);
-const hit=raycastWorld(V3(p.pos.x,chestY,p.pos.z),bd,1.15);
+const hit=raycastWorld(_plO1.set(p.pos.x,chestY,p.pos.z),bd,1.15);
 if(hit&&hit.kind!=='ground'){
-const over=raycastWorld(V3(p.pos.x,chestY+0.55,p.pos.z),bd,1.3);
+const over=raycastWorld(_plO2.set(p.pos.x,chestY+0.55,p.pos.z),bd,1.3);
 if(!over) p.canBrace=true;
 }
 }
@@ -655,33 +949,40 @@ const rel=clamp(angDiff(p.braceYaw,p.yaw),-0.72,0.72);
 p.yaw=p.braceYaw+rel;
 p.pitch=clamp(p.pitch,-0.5,0.42);
 }
-if(p.onVehicle){ if(p.onVehicle.kind==='plane') updatePlayerPlane(dt); else updatePlayerTank(dt); stamRegenTick(p,dt,nowT); return; }
-if(p.onAT){ updatePlayerAT(dt); stamRegenTick(p,dt,nowT); return; }
-if(p.onAA){ updatePlayerAA(dt); stamRegenTick(p,dt,nowT); return; }
-if(p.onMG){ updatePlayerMG(dt); stamRegenTick(p,dt,nowT); return; }
+// ── 指挥地图定身判据 (R11) —— 单源, 且**必须在座位分派点之前**算出 ──
+// ★2026-10-26 排查轮二审 修复 (G1/P1 · R11「开地图期间玩家定身」不完整: 开着指挥地图开车开炮):
+//   ①现象/用户可见后果: 指挥官持通讯仪开图后, 只要这一帧人在任何座位里 (坦克/飞机/机枪/反坦克炮/
+//     防空炮/迫击炮/岸防炮/海战艇/大舰炮位), 指挥地图照常盖在屏幕上, 底下的人却能开车、能开炮、
+//     能转炮塔 —— 定身 (fwd/str 清零 / 不跳 / 不侧身) 一帧都没生效。
+//   ②根因 (旧写为什么错): 旧写把 cmdLock 算在**九个座位分派 if 之后**的移动块前面, 而每个座位分支
+//     都直接 return ⇒ 只要进了任一座位分支, 后面的定身段整块被跳过。上一轮的历史修复只堵住了键盘
+//     入口 (19-input 的 keydown 早退), 对"人已经在座位里"与"经交互入口进座位"这两条结构上无覆盖。
+//   ③现在的单源口径: cmdLock = 本帧"开图定身"的唯一判据, 只算一次、且只在这里算一次; 值域唯一来源
+//     是 26-commander 的 cmdMapImmobilized() (mapOn && !mapDeploy), 本文件不另立任何姿态/开图判据。
+//     座位分派一律带 !cmdLock ⇒ 开图期间绝不进入任何座位更新 (驾驶/开炮/AI 桩一次都不跑)。
+//     "开图中在座位里"这个非法态由世界侧同帧收口: 26-commander 的 cmdMapMustClose() 每帧复验,
+//     座位态当帧收图 —— 两处合起来, 非法态活不过一帧。
+//     零回归: cmdLock=false 时下面每一行与旧写逐字节等价 (!cmdLock&& 与原文同值; 真分支本就由旧写的
+//     return 挡掉, 行为面等价)。
+const cmdLock=(typeof cmdMapImmobilized==='function')&&cmdMapImmobilized();
+if(!cmdLock&&p.onVehicle){ if(p.onVehicle.kind==='plane') updatePlayerPlane(dt); else updatePlayerTank(dt); stamRegenTick(p,dt,nowT); return; }
+if(!cmdLock&&p.onAT){ updatePlayerAT(dt); stamRegenTick(p,dt,nowT); return; }
+if(!cmdLock&&p.onAA){ updatePlayerAA(dt); stamRegenTick(p,dt,nowT); return; }
+if(!cmdLock&&p.onMG){ updatePlayerMG(dt); stamRegenTick(p,dt,nowT); return; }
 // 岸防炮座位 (2026-09-21 A#9 契约D): 与载具/固定火力同为**唯一分派点**上的一支 —— updatePlayerBattery 由
 // sea-hud 写在 20a-seats; typeof 守卫 (模块缺失时静默跳过, 不报错)。
-if(p.onBattery){ if(typeof updatePlayerBattery==='function') updatePlayerBattery(dt); stamRegenTick(p,dt,nowT); return; }
-if(p.onMortar){ updatePlayerMortar(dt); stamRegenTick(p,dt,nowT); return; }
+if(!cmdLock&&p.onBattery){ if(typeof updatePlayerBattery==='function') updatePlayerBattery(dt); stamRegenTick(p,dt,nowT); return; }
+if(!cmdLock&&p.onMortar){ updatePlayerMortar(dt); stamRegenTick(p,dt,nowT); return; }
 // 海战舰船 (2026-09-20N 海战批): 座位在主循环里的**唯一分派点**, 与载具/固定火力同位 (实现在 20a-seats)。
 // 座位字段是 p.onNaval 而不是 p.onVehicle (定稿 §11.6) —— 见 20a-seats 文件头的三条理由。
-if(p.onNaval){ updatePlayerNaval(dt); stamRegenTick(p,dt,nowT); return; }
-// 大舰炮位接管 (2026-10-01b, 15h-capital): 座位分派点上的又一支 —— 炮位上**不动/不开步兵枪**,
-// 视角仍由 19-input 采集, 座圈回转/开火在 updateCapital → capGunTick 消费 (与 AI 同一数据流)。
-// 站位由 capGunTick 钉在炮位锚点 (舰在动, 锚点跟着动), 这里只做炮位侧的常规收账与提示。
-if(p.capitalGun){
-if(p.nadeHeld) p.nadeHeld=false;                       // 上炮前举着的雷就地收回 (与上固定炮位同规)
-if(p.ads) p.ads=false;
-stamRegenTick(p,dt,nowT);
-if(typeof updateInteractHint==='function') updateInteractHint();
-return;
-}
+if(!cmdLock&&p.onNaval){ updatePlayerNaval(dt); stamRegenTick(p,dt,nowT); return; }
+// (2026-11-10: 大舰炮位接管座位分派支随大舰子系统下架摘除)
 // 观战模式: 弹药/物资每0.5s回满 (无限补给) + 创造飞行分支 —— 2026-09-01 用户指定
 if(p.spectator){
 if(!p._specSupT||nowT-p._specSupT>0.5){
 p._specSupT=nowT;
 for(const s of p.slots){ s.mag=s.def.mag; s.reserve=s.def.reserve; }
-const g2=clsGear(p.cls,p.team);
+const g2=specGear(); // 观战: 四弹种全给 (2026-10-24 用户指定; 旧版按兵种表 ⇒ 狙击手观战没有 AT雷/燃烧弹)
 p.nadeCount=g2.nades; p.atNades=g2.atn; p.smokeCount=g2.smoke; p.incinCount=g2.incin;
 p.bandages=p.maxBandages;
 }
@@ -689,8 +990,16 @@ p.bandages=p.maxBandages;
 // 引导巡飞弹时左键仍是"手动引爆"(上面那段, 优先级更高), 故此处只在未控弹时接管
 if(p.flying){ p.stamina=1; specFlightMove(p,dt); playerFireTick(dt,true); updateInteractHint(); return; }
 }
-const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
-const str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
+// ── 指挥地图定身 (2026-10-26 指挥官批, 设计 R11/D18): 开图 = 低头看图 —— 移动/侧身全灭 ──
+// (姿态门保证开图必是步行地面态, 无悬空/载具怪相; 受击不自动关, 盲区即代价)
+// ★2026-10-26 排查轮二审 修复 (致命 SyntaxError: 整个游戏起不来): 上一轮把 cmdLock 提到函数头
+//   (见上面座位分派段的单源声明) 时**没有删掉这里原有的这一行**, 于是同一个 updatePlayer 作用域里
+//   出现两条 `const cmdLock` ⇒ `SyntaxError: Identifier 'cmdLock' has already been declared`,
+//   js/20-player.js 整个文件解析失败。本文件在 46 个脚本里排第 40 位且 updatePlayer 是主循环每帧入口,
+//   文件一挂游戏直接白屏。判据: node --check js/20-player.js。
+//   定身判据保持**只算一次**: 这里复用函数头那一个 cmdLock, 不再自行求值 (单源)。
+const fwd=cmdLock?0:(keys.KeyW?1:0)-(keys.KeyS?1:0);
+const str=cmdLock?0:(keys.KeyD?1:0)-(keys.KeyA?1:0);
 if(p.pendingBuild&&VM.state==='build'&&(fwd!==0||str!==0||keys.Space)){ cancelBuild(p); showScorePop('建造已取消'); }
 // ── 水体状态 (2026-09-18 塔拉瓦批, 全库通用; 与 Bot 同规则 —— 纲领第 2 条) ──
 // 涉水 (0.5~1.35m): 减速但可开火(精度下降); 游泳 (>1.35m): 浮于水面, 不可冲刺/卧倒/开火, Shift=下潜
@@ -731,7 +1040,7 @@ if(wantSprint) p.braced=false;
 p.sprinting=wantSprint;
 p.holdBreath=!swimming&&keys.ShiftLeft&&p.ads;
 let leanTgt=0;
-if(!p.sprinting&&!p.prone&&p.onGround&&!p.braced){ leanTgt=(keys.KeyQ?-1:0)+(keys.KeyE?1:0); }
+if(!p.sprinting&&!p.prone&&p.onGround&&!p.braced&&!cmdLock){ leanTgt=(keys.KeyQ?-1:0)+(keys.KeyE?1:0); }
 p.leanT=dampF(p.leanT,leanTgt,10,dt);
 if(p.spectator) p.stamina=1; // 观战: 无限体力 —— 冲刺/屏息/跳跃均不消耗 (2026-09-02 用户指定)
 else if(p.sprinting){ p.stamina=Math.max(0,p.stamina-dt*0.22/STAM_SPRINT_MUL); p.stamUseT=nowT; }
@@ -739,18 +1048,14 @@ else if(p.sprinting){ p.stamina=Math.max(0,p.stamina-dt*0.22/STAM_SPRINT_MUL); p
 //   冲刺时一旦开镜(右键)会自动激活屏息, 满条 3.3s 耗光, 用户实报"跑步开枪体能异常加快"。0.12 ≈ 冲刺 1.36 倍,
 //   保留"屏息是有限资源"的设计但不再惩罚性的贵; 激活逻辑 (Shift+开镜) 维持原样不动。
 else if(p.holdBreath){ p.stamina=Math.max(0,p.stamina-dt*0.12); p.stamUseT=nowT; }
-// 大海致命化 (2026-10-01c 用户设想"上浮会迅速耗尽体力条"): 纯海战图 (terr:'opensea') 游泳**只耗不回**,
-//   满条 ~7.7s 耗尽 —— 比冲刺 (0.088/s) 更费力气; 耗尽后由下面游泳分支强制下沉接溺水链。陆战图游泳零变化。
-else if(swimming&&CAMPAIGN.terr==='opensea'){ p.stamina=Math.max(0,p.stamina-dt*CAPITAL_CFG.seaSwimDrain); p.stamUseT=nowT; }
-else stamRegenTick(p,dt,nowT); // 回体单源 (1s 冷却窗 + 0.16/s), 与座位/巡飞弹早退分支共用
-const seaExhausted=swimming&&CAMPAIGN.terr==='opensea'&&p.stamina<=0.001;
+else stamRegenTick(p,dt,nowT); // 回体单源 (1s 冷却窗 + 0.16/s), 与座位/巡飞弹早退分支共用 (2026-11-10: opensea 只耗不回档/seaExhausted 账随纯海战图下架摘除)
 if(p.holdBreath&&p.stamina<=0.02) p.holdBreath=false;
 let speed=p.prone?1.15:p.crouch?2.2:(p.sprinting?6.4:4.3);
 // 持枪移速系数 (2026-09-28 阶段三 P1, 用户裁定"不同武器移速不同, 手枪最快"): 武器表 wSpd 单源
 // (09a-defs: 手枪 1.0 > 冲锋枪 0.97 > 卡宾/栓动 0.95~0.96 > STG44/自动 0.94 > 狙击 0.93 > 火箭筒/反坦克枪 0.9)。
 // 游泳/涉水等水态系数在下面叠加; 载具/座位态不走这段地面移速。Bot 同款乘区见 14-bots vel 应用点。
 speed*=(p.curW&&p.curW.def&&p.curW.def.wSpd)||1;
-if(swimming) speed=((p.diveD||0)>0.2?SWIM_SPD*0.85:SWIM_SPD)*(seaExhausted?0.55:1); // 游泳/潜泳 (潜行更慢; 体力耗尽的泳者更慢, 2026-10-01c)
+if(swimming) speed=((p.diveD||0)>0.2?SWIM_SPD*0.85:SWIM_SPD); // 游泳/潜泳 (潜行更慢; 2026-11-10: seaExhausted 乘区随纯海战图下架摘除)
 else if(wading) speed*=WADE_SPD;                              // 涉水 (0.5~1.35m): ×0.55
 else if(wetting) speed*=WET_SPD;                              // 湿沙/踝深 (≤0.5m): ×0.9 (2026-09-26E 审计 33)
 if(!swimming){
@@ -780,14 +1085,8 @@ p.vel.z=dampF(p.vel.z,mz*speed,accel*dt>1?12:accel,dt);
 if(swimming){
 // ── 游泳/潜水 (2026-09-18): 无重力 —— 浮力把脚托到"水面下 1.32m"(头露出水面, 眼高≈水面上 0.3m);
 // Shift 下潜 (至多 DIVE_MAX, 且不得穿海床), 空格主动上浮, 松键自动缓慢上浮; 不可跳跃
-// ── 大海致命化 (2026-10-01c): 体力耗尽的泳者**强制下沉** (没力气浮了), 且浮不上来/潜不下去 ——
-//   头一没入水面就走既有憋气链, 且挣扎态憋气消耗 ×seaDrownMul (见下) ⇒ 海里 ~15s 内带走一个人。
 const bed=heightAt(p.pos.x,p.pos.z,true);
-if(seaExhausted){
-p.diveD=Math.min(DIVE_MAX,(p.diveD||0)+CAPITAL_CFG.seaSinkRate*dt);
-if(!p._seaSank){ p._seaSank=true; showScorePop('⚠ 体力耗尽! 正在下沉…'); }
-}
-else if(keys.ShiftLeft) p.diveD=Math.min((p.diveD||0)+DIVE_DOWN*dt,DIVE_MAX);
+if(keys.ShiftLeft) p.diveD=Math.min((p.diveD||0)+DIVE_DOWN*dt,DIVE_MAX);   // (2026-11-10: 大海致命化强制下沉段随纯海战图下架摘除)
 else if(keys.Space) p.diveD=Math.max(0,(p.diveD||0)-DIVE_UP*1.5*dt);
 else p.diveD=Math.max(0,(p.diveD||0)-DIVE_UP*dt);
 // ★2026-09-26E (审计 37): 玩家浮力并入波场 —— 旧版只有浮标与艇模型吃 waveAmp (海面网格是平面、
@@ -799,7 +1098,7 @@ p.vel.y=0;
 p.pos.y=dampF(p.pos.y,targetY,7,dt);
 p.onGround=false;
 }else{
-if(keys.Space&&p.onGround&&p.stamina>0.1){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }
+if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }   // cmdLock: 指挥地图定身不跳 (2026-10-26); !p._ltSpace: 巡飞弹操控退场吞边沿 —— 按住空格进操控再退场, 松开前不起跳 (2026-11-07 实机反馈批 "在地上不停跳跃")
 p.vel.y-=13*dt;
 }
 if(p.chute){
@@ -818,6 +1117,7 @@ const mv=slopeGateMove(p.pos,p.vel.x*dt,p.vel.z*dt);
 p.pos.x+=mv[0]; p.pos.z+=mv[1];
 }else{ p.pos.x+=p.vel.x*dt; p.pos.z+=p.vel.z*dt; }
 p.pos.y+=p.vel.y*dt;
+if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: 上升段头探进底面就地停住 (配合 _cmBoxCb/_cmCylCb 头部擦碰容差, 楼板下跳跃不再被横推挤出穿墙)
 collideMove(p.pos,0.42);
 const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);
 // 海图水面地板 (★2026-10-03 修"跳伞下到海底才解除伞"): 深水上空触水面=落地即入水 —— 收伞转游泳,
@@ -850,10 +1150,7 @@ p.landDip=Math.max(0,p.landDip-dt*3);
 const hd=headDepthAt(p.pos.x,p.pos.y,p.pos.z);
 p.headDepth=hd;
 if(hd>0){
-// 溺水挣扎 (2026-10-01c 大海致命化): 体力耗尽的泳者头入水后憋气消耗 ×seaDrownMul (换气急促),
-//   OXY_MAX 22s 的从容憋气在"正在淹死"的人身上只有 ~7s —— 否则体力链杀不死人 (下沉 1m 只要 1s)。
-const oxMul=(seaExhausted&&CAMPAIGN.terr==='opensea')?CAPITAL_CFG.seaDrownMul:1;
-p.oxy=(p.oxy===undefined?1:p.oxy)-dt*oxMul/OXY_MAX;
+p.oxy=(p.oxy===undefined?1:p.oxy)-dt/OXY_MAX;   // (2026-11-10: 溺水挣扎 ×seaDrownMul 乘区随纯海战图下架摘除)
 if(p.oxy<=0){
 p.oxy=0;
 p._drownAcc=(p._drownAcc||0)+OXY_DMG*dt;
@@ -914,6 +1211,9 @@ updateInteractHint();
 // canFire = 调用方的前置闸门: 地面排除"冲刺中/包扎中", 飞行态无此限制 (观战飞行本就不冲刺)。
 function playerFireTick(dt,canFire){
 const w=player.curW;
+// 通讯仪 = 工具型主武器 (2026-10-26 指挥官批, 设计 §3): 本身无火力 —— 左键无语义
+// (不开火也不给空仓点击音), 右键的开图分流在 19-input mousedown。
+if(w&&w.def&&w.def.tool) canFire=false;
 // 观战连狙的无差别火力标记 (2026-09-20 观战连狙批, 用户口径"只有观战连狙可打双方"):
 // 每帧按"观战身份 + 当前武器 key"同步一次 —— 换枪/下车/关观战都会在同帧内落回 false,
 // 因此不存在"打过一枪之后 ffSpecSniper 残留、换回步枪还能打友军"的窗口。
@@ -1003,15 +1303,17 @@ const o=oS; // 弹道起点: 第三人称=角色眼位, 第一人称=camera.posi
 p._src=w.def.name||''; // 击杀来源: 当前武器名
 // 瞄准吸附 (2026-09-27, 用户要求): 枪弹的最后一道工序 —— 散布/后坐都已结算完, 这里只把"差一点点打中"
 // 的那一枪轻轻掰回目标 (开镜档收容角略大); 关档/无候选时原样返回, 零行为漂移。
-// 无差别火力 (观战连狙) 才放开同队过滤: 与 coFfFire 同一口径, 不给普通武器"帮打队友"的吸附。
-if(typeof aimAssistDir==='function') dir=aimAssistDir(o,dir,adsB>0.5?'ads':'hip',{team:p.team,ff:!!p.ffSpecSniper});
+// 无差别火力 (2026-11-09 裁定: 观战者本尊全部步兵武器) 才放开同队过滤: 与 coFfFire 同一口径, 非观战武器不给"帮打队友"的吸附。
+if(typeof aimAssistDir==='function') dir=aimAssistDir(o,dir,adsB>0.5?'ads':'hip',{team:p.team,ff:!!(p.ffSpecSniper||p.spectator)});
 fireBullet(p,o,dir,w.def,null);
 if(!w.def.enbloc||w.mag>0){
 const cp=oS.clone().add(camForward().multiplyScalar(0.35)).add(camRight().multiplyScalar(0.14)).add(V3(0,-0.05,0));
 if(w.def.type!=='bolt') spawnCasing(cp,camRight(),V3(0,1,0));
 }
 if(w.def.enbloc&&w.mag===0){
-setTimeout(()=>AudioSys.ping(),80);
+// ★2026-11-04b 时停音频批: 漏夹 ping 是墙钟延迟声, 冻结期不该响 (时停里玩家自己仍可开火, 但这一声
+//   是"弹夹落地"的战场反馈, 不是观察者动作音 —— 与 08-effects 远雷同款延迟尾音闸)。
+setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; AudioSys.ping(); },80);
 const clipP=oS.clone().add(camForward().multiplyScalar(0.4));
 spawnCasing(clipP,camRight(),V3(0,1.5,0));
 }
@@ -1029,7 +1331,7 @@ function updateInteractHint(){
 //   两者原先都不在指纹里 ⇒ 观战者"步行 → 上艇"这一下提示**不会刷新**, 屏幕上还停着"F 召唤并进入幽灵坦克"
 //   (用户报的"F 冲突"在 UI 上的直接来源)。幽灵坦克单独占一位: kind 切换 (tank↔ghost) 时 onVehicle 位恒为 1,
 //   只看 onVehicle 那一位同样不刷新。
-const sig=(player.onVehicle?1:0)|(player.onMG?2:0)|(player.onMortar?4:0)|(player.onAT?8:0)|(player.onAA?16:0)|(player.spectator?32:0)|(player.alive?64:0)|(player.useCast?128:0)|(player.thirdPerson?256:0)|(player.onBattery?512:0)|(player.navalGun?1024:0)|(player.onNaval?2048:0)|((player.onVehicle&&player.onVehicle.kind==='ghost')?4096:0)|(player.capitalGun?8192:0)|((typeof capGunNear==='function'&&capGunNear())?16384:0);
+const sig=(player.onVehicle?1:0)|(player.onMG?2:0)|(player.onMortar?4:0)|(player.onAT?8:0)|(player.onAA?16:0)|(player.spectator?32:0)|(player.alive?64:0)|(player.useCast?128:0)|(player.thirdPerson?256:0)|(player.onBattery?512:0)|(player.navalGun?1024:0)|(player.onNaval?2048:0)|((player.onVehicle&&player.onVehicle.kind==='ghost')?4096:0);   // (2026-11-10: capitalGun/capGunNear 两位随大舰子系统下架摘除)
 if(sig===updateInteractHint._sig&&nowT-updateInteractHint._t<0.1) return;
 updateInteractHint._sig=sig; updateInteractHint._t=nowT;
 // 兵种技能常驻小提示 (右下角)
@@ -1038,10 +1340,10 @@ const tip=document.getElementById('clsTip');
 	// 兵种技能常驻小提示 (右下角) —— 海战驾驶位不显示兵种提示 (p.onNaval): 那时 B/G/V 等步兵动作
 	// 已被 19-input 的座位闸门挡掉, 提示里再写"按 B 放医疗箱"就是错误引导; U 视角提示在下面单独一行照常显示。
 	if(player.alive&&player.deployed&&!player.onVehicle&&!player.onNaval&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onBattery){
-	if(player.loiter) tt=player.spectator
-	?t2('<b>左键</b> 自爆 · <b>右键</b> 加速 · <b>鼠标</b> 制导 · <b>F</b> 切换视角 · <b>T</b> 弃弹传送')
-	:t2('<b>左键</b> 自爆 · <b>右键</b> 加速 · <b>鼠标</b> 制导 · <b>F</b> 切换视角');
-	else if(player.spectator) tt=t2('观战中 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(右键加速) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌 · <b>F</b> 召唤幽灵坦克');
+if(player.loiter) tt=player.spectator
+?t2('<b>左键</b> 自爆 · <b>空格</b> 加速 · <b>右键</b> 开镜 · <b>鼠标</b> 制导 · <b>U</b> 切换视角 · <b>T</b> 弃弹传送')
+:t2('<b>左键</b> 自爆 · <b>空格</b> 加速 · <b>右键</b> 开镜 · <b>鼠标</b> 制导 · <b>U</b> 切换视角');
+else if(player.spectator) tt=t2('调试模式 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(空格加速·右键瞄准) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌 · <b>F</b> 召唤幽灵坦克 · <b>Q</b> 附身准星Bot · <b>E</b> 脱离');
 	else if(player.onMortar) tt=t2('<b>左键</b> 发射 · <b>鼠标</b> 调弹道 · <b>F</b> 离开');
 	else if(player.cls===4){
 	const bt2=BUILD_MENU[player.buildSel||0];
@@ -1064,14 +1366,17 @@ if(player.alive&&player.deployed&&player.spectator){
 const s2=t2('<b>K</b> 时停(冻结战场 · 你本人仍可走动/飞行) · <b>J</b> 观战信息层');
 tt=tt?tt+'<br>'+s2:s2;
 }
+// 详细操作开关 (2026-11-09 批): 关=右下兵种常驻键位表整块隐藏 (含 U/观战工具行) —— 状态与战报不受影响
+if(typeof SHOW_CTL_HINTS!=='undefined'&&!SHOW_CTL_HINTS) tt='';
 if(tip._last!==tt){ tip._last=tt; tip.innerHTML=tt; tip.style.display=tt?'block':'none'; }
 const elm=document.getElementById('interact');
 // ★2026-09-22: 提示行必须与 tryInteract 的**优先级栈逐级同序** —— 旧版观战分支同样排在最前, 于是
 //   观战者在艇上时看到的是"F 召唤并进入幽灵坦克", 而 F 实际被艇的座位吃掉/或反过来 (用户报的"冲突"
 //   在 UI 上同样可见)。现在三条语义各自先判自己的状态, 只有都不成立才轮到观战召唤。
 if(player.onVehicle&&player.onVehicle.kind==='ghost'){
-elm.style.display='block';
+if(SHOW_CTL_HINTS){ elm.style.display='block';
 elm.innerHTML=t2('<b>F</b> 下车 · <b>W/S</b>驾驶 <b>A/D</b>转向 <b>鼠标</b>炮塔 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>车长镜 · 观战专属');
+}else elm.style.display='none'; // 详细操作开关 (2026-11-09 批): 关=多键操作明细整行隐藏
 return;
 }
 if(player.useCast){ // 固定火力点使用前摇进度
@@ -1083,15 +1388,13 @@ return;
 // 浮在深水时用定稿给出的操作行 '[左键] 主炮 · [右键] 机炮 · [F] 鱼雷' (键已存在); 两栖车无鱼雷管时用
 // '[左键] 主炮 · [右键] 机炮'。可下船时改提示下船 (键 'F' 仍是同一个, 语义随状态)。
 // 2026-09-21: 补 C 三态提示 (追尾/炮手镜/艏向第一人称) —— 与 19-input 的 navalCycleView、22-hud 的操作行同源。
-	if(player.onNaval){
-	const c=player.onNaval;
-	const view=t2(player.navalGun?'<b>C</b> 炮手镜 (稳像)':(player.thirdPerson?'<b>C</b> 视角: 追尾':'<b>C</b> 视角: 艏向'));
+		if(player.onNaval){
+		if(!SHOW_CTL_HINTS){ elm.style.display='none'; return; } // 详细操作开关 (2026-11-09 批): 关=多键操作明细整行隐藏
+		const c=player.onNaval;
+		const view=t2(player.navalGun?'<b>C</b> 炮手镜 (稳像)':(player.thirdPerson?'<b>C</b> 视角: 追尾':'<b>C</b> 视角: 艏向'));
 	elm.style.display='block';
-	// ★2026-10-03: 贴帮优先提示跳帮 (与 tryInteract 的插队顺序同序 —— 提示与判据同源)
-	const bs=(typeof capNearestBoardable==='function')?capNearestBoardable():null;
-	elm.innerHTML=bs
-	?t2('<b>F</b> 跳帮登舰 · <b>W/S</b>驾驶 <b>A/D</b>转向 <b>左键</b>主炮 <b>右键</b>机炮')+' · '+view
-	:navalCanFootExit(c)
+	// (2026-11-10: 贴帮优先跳帮提示随大舰子系统下架摘除)
+	elm.innerHTML=navalCanFootExit(c)
 	?t2('<b>F</b> 下船 · <b>W/S</b>驾驶 <b>A/D</b>转向 <b>左键</b>主炮 <b>右键</b>机炮')+' · '+view
 	:t2((c.spec&&c.spec.torpedo>0)?'[左键] 主炮 · [右键] 机炮 · [F] 鱼雷':'[左键] 主炮 · [右键] 机炮')+' · '+view;
 	return;
@@ -1105,39 +1408,11 @@ return;
 }
 elm.style.display='none'; return;
 }
-if(player.onVehicle&&player.onVehicle.kind==='plane'){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 跳伞 · <b>W/S</b>油门 <b>A/D</b>压坡转向 <b>鼠标</b>拉杆 <b>左键</b>机枪 <b>右键/B</b>炸弹'); return; }
-if(player.onVehicle){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开坦克 · <b>WASD</b>驾驶 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>炮手镜'); return; }
+if(player.onVehicle&&player.onVehicle.kind==='plane'){ if(SHOW_CTL_HINTS){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 跳伞 · <b>W/S</b>油门 <b>A/D</b>压坡转向 <b>鼠标</b>拉杆 <b>左键</b>机枪 <b>右键/B</b>炸弹'); } else elm.style.display='none'; return; } // 详细操作开关 (2026-11-09 批)
+if(player.onVehicle){ if(SHOW_CTL_HINTS){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开坦克 · <b>WASD</b>驾驶 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>炮手镜 <b>L</b>大灯'); } else elm.style.display='none'; return; } // 详细操作开关 (2026-11-09 批): 单键交互入口 (F 使用X/F 进入X) 不受开关影响
 if(player.onMG){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开机枪'); return; }
-	// 大舰炮位 (2026-10-01b 分炮塔接管): 已在炮位上=离开; 否则接管半径内有活炮位=操作 (与 tryInteract 同序)。
-	// 排在 onMG 之后 / MORTARS 之前 —— 大舰甲板上没有机枪/迫击炮, 次序不与陆上提示竞争。
-	if(player.capitalGun){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开炮位 · <b>左键</b> 开火 · <b>鼠标</b> 瞄准'); return; }
-	// ★2026-10-02b 甲板层提示整段与 tryInteract 的甲板分支同序 (补弹 > 上炮 > 登机 > 跳海) —— 旧版这里
-	//   只有一条 capGunNear: 箱边会漏出下面的通用"补充弹药"提示而按 F 却是跳海; 艇靠帮时更会漏出
-	//   "F 进入 PT 艇" (F 实际是跳海) —— 审计 20 "提示与判据脱节"的甲板版。跳海不可用时提示怎么走到舷缘。
-	{
-	// ★2026-10-03 高度门 (与 tryInteract 甲板分支同源): capDeckOf 不判高度, 贴舰底泳者会被甲板提示截胡
-	const dShip=(player.onCapital||((typeof capDeckShipAt==='function')?capDeckShipAt(player.pos.x,player.pos.z,player.pos.y):((typeof capDeckOf==='function')?capDeckOf(player.pos.x,player.pos.z):null)));
-	if(dShip){
-	if(player.resupplyCd<=0){
-	for(const ac of AMMO_CRATES){
-	if(Math.hypot(ac.x-player.pos.x,ac.z-player.pos.z)<2.6){
-	elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 补充弹药'); return;
-	}
-	}
-	}
-	const cg=(typeof capGunNear==='function')?capGunNear():null;
-	if(cg){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 操作 {0}',t2(cg.name)); return; }
-	{
-	const pp=(typeof capNearestParkedPlane==='function')?capNearestParkedPlane():null;
-	if(pp){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 登机 · <b>Space</b> 弹射起飞'); return; }
-	}
-	const canJump=(typeof capCanExitNow==='function')?capCanExitNow(dShip):false;
-	elm.style.display='block';
-	elm.innerHTML=canJump?t2('<b>F</b> 跳海'):t2('走到舷缘再按 F 跳海');
-	return;
-	}
-	}
-if(player.onMortar){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开迫击炮 · <b>左键</b> 发射 · <b>鼠标</b> 调整弹道'); return; }
+	// (2026-11-10: 大舰炮位/甲板层提示段随大舰子系统下架摘除)
+if(player.onMortar){ if(SHOW_CTL_HINTS){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开迫击炮 · <b>左键</b> 发射 · <b>鼠标</b> 调整弹道'); } else elm.style.display='none'; return; } // 详细操作开关 (2026-11-09 批)
 if(player.onAT){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开反坦克炮'); return; }
 if(player.onAA){ elm.style.display='block'; elm.innerHTML=t2('<b>F</b> 离开防空炮'); return; }
 // 岸防炮 (2026-09-21 A#9 契约D): 已上炮=离开; 否则 3m 内有可操作炮位 = 操作 (与 tryInteract 的判据同源)
@@ -1273,9 +1548,7 @@ const TP_AIM_FAR=120;// 准星前方无遮挡时的弹道归零距离 (米)
 // p.thirdPerson 二选一, 不走本函数 —— 本函数的语义是"步行第三人称", 故把 onNaval 也列进互斥清单。
 function thirdPersonOn(){
 const p=player;
-// ★2026-10-04 (海战审计 V3): 补大舰两个座位 —— onCapital (甲板步行态要第三人称没问题, 但**炮位接管**
-//   capitalGun 是固定锚点的操炮态, 步行第三人称追尾机会钻进炮塔/舰岛; 旧版互斥清单漏了它)。
-return !!(p.thirdPerson&&p.alive&&!p.onVehicle&&!p.onNaval&&!p.onCapital&&!p.capitalGun&&!p.loiter&&!p.chute&&!p.ads
+return !!(p.thirdPerson&&p.alive&&!p.onVehicle&&!p.onNaval&&!p.loiter&&!p.chute&&!p.ads   // (2026-11-10: onCapital/capitalGun 项随大舰子系统下架摘除)
 &&!p.onMG&&!p.onAT&&!p.onAA&&!p.onMortar&&!p.onBattery&&!p.swim);
 }
 // 角色"眼位"单源: 第三人称相机锚点与**开火弹道起点**共用同一处坐标 (p.eyeH 与第一人称相机同一阻尼值)
@@ -1324,15 +1597,15 @@ return d.normalize();
 //   ⇒ 三人称看到的是"从人手里飞出去"的同一条弹道, 与一人称形状不同而落点相同 (预演即实弹)。
 // 方向 = 从出手点指向**准星命中点** (tpAimPoint 单源, 含士兵/载具/世界几何) ⇒ 视差在远处收敛, 越远越贴准星。
 const NADE_HAND_R=0.24, NADE_HAND_D=0.30;   // 右手相对眼位: 右偏 0.24m / 下压 0.30m
-function playerThrowOrigin(){
+function playerThrowOrigin(out){   // out 复用槽 (2026-11-01 性能批): 持雷预瞄每帧调用, 旧版每次新 V3
 const ep=playerEyePos(), y=player.yaw;
-return V3(ep.x+Math.cos(y)*NADE_HAND_R, ep.y-NADE_HAND_D, ep.z-Math.sin(y)*NADE_HAND_R);
+return (out||V3()).set(ep.x+Math.cos(y)*NADE_HAND_R, ep.y-NADE_HAND_D, ep.z-Math.sin(y)*NADE_HAND_R);
 }
-function playerThrowDir(o){
+function playerThrowDir(o,out){
 const camF=camForward();
 const aim=tpAimPoint(camF);
 if(o.distanceTo(aim)<1.2) return camF;      // 退化保护 (贴脸低头看脚): 直接沿视线, 免得朝后打
-const d=aim.clone().sub(o);
+const d=out?out.copy(aim).sub(o):aim.clone().sub(o);
 return d.lengthSq()<1e-6?camF:d.normalize();
 }
 // 第三人称视场过渡: updateViewModel 每帧按第一人称档 (74 / 开镜档) 写 camera.fov, 而 updateCamera 在它**之前**跑 ——
@@ -1487,6 +1760,9 @@ av.gunG.rotation.x=dampF(av.gunG.rotation.x,0.2,5,dt);
 return av;
 }
 function updatePlayerAvatar(dt){
+// ★2026-11-01 附身中 (调试观战) 本体模型永久隐藏 —— 旧版第三人称会把观战者本体和宿主 Bot
+// 钉在同一坐标上 = "两个人挤在一起" (用户实测)。此时第三人称追尾机位跟随的就是宿主, 只留 Bot 模型。
+if(player.specViewHost){ playerAvatarHide(); return null; }
 const av=playerAvatarEnsure();
 if(!av) return null;
 const p=player;
@@ -1501,6 +1777,21 @@ av.root.visible=true;
 av.root.position.set(p.pos.x,p.pos.y,p.pos.z);
 // 模型正面朝 +Z, 而玩家视线朝 -Z (p.yaw=0 时前方是 (0,0,-1)) ⇒ 转半圈对齐 (与载具 p.yaw=yaw+PI 同一约定)
 av.root.rotation.set(0,p.yaw+Math.PI,0);
+if(av.flGrp){
+  const flOn=!!(p.alive&&!p.onVehicle&&!p.onNaval&&p.flashlight&&(typeof thirdPersonOn==='function'&&thirdPersonOn()));
+  av.flGrp.visible=flOn;
+  if(flOn&&av.flGrp.flCone&&typeof truncateConeMesh==='function'){
+    const fwd=camForward(_flF);   // 复用槽 (2026-11-01 性能批)
+    const hit=raycastWorld(p.pos,fwd,av.flGrp.baseL||14);
+    const occD=hit?hit.dist:(av.flGrp.baseL||14);
+    // ★2026-11-05 实机反馈批 (用户实报"开手电切第三人称, 光锥漂移到别处"): fz 语义是**锥父空间里灯口的
+    //   前向偏移** (车灯=灯口在 grp 前方 fz 处, 08-effects:970 传 veh._hl.fz)。士兵灯体就是 flGrp 原点
+    //   ⇒ 必须传 0。旧版把"满长静止位 position.z=baseL*0.5"误当 fz 传入, 而 truncateConeMesh 内部
+    //   position.z=fz+effL/2、锥体几何以中点居中 ⇒ 光锥顶点被抬到灯口前 effL/2, 满长时整体前漂
+    //   baseL/2 (flConeL=22 ⇒ 悬空 11m) —— 14-bots Bot 同型调用同批修 (单源语义在 truncateConeMesh)。
+    truncateConeMesh(av.flGrp.flCone,av.flGrp.baseL||14,occD,0);
+  }
+}
 const prone=!!p.prone, crouch=!!p.crouch&&!prone;
 // "交战"= 开镜/开火后坐/架枪 (Bot 的 engaged 还含 mgUse/empUse —— 玩家在固定火力点上第三人称本就不生效, 见 thirdPersonOn)
 const engaged=!!p.ads||(p.fireAnimT||0)>0||!!p.braced;
@@ -1567,6 +1858,11 @@ av.legR.hip.rotation.x=dampF(av.legR.hip.rotation.x,lerp(jHipR,cR.hip-pp,kw),10,
 av.legL.knee.rotation.x=dampF(av.legL.knee.rotation.x,lerp(jKneeL,cL.knee,kw),10,dt);
 av.legR.knee.rotation.x=dampF(av.legR.knee.rotation.x,lerp(jKneeR,cR.knee,kw),10,dt);
 }
+// 本帧手持件的种类 (2026-10-27 通讯仪批): 姿态机按 kind 取持握表 (11-soldiers gunHoldOf)。
+// 取 av._gunKind 而不是现算 gunKindOf(p.curW.key): 挂枪段在**本函数末尾**才换模型并把 kind 写进
+// av._gunKind, 所以"本帧已挂上的模型"与 av._gunKind 恒为同一把 —— 用它取持握表才不会出现
+// "模型还是步枪、姿态已按通讯仪摆"的那一帧。av._gunKind 尚空 (首次装备) 时才退回当前武器键。
+const gkNow=av._gunKind||((p.curW&&typeof gunKindOf==='function')?gunKindOf(p.curW.key):'rifle');
 // ── 手臂基准 (Bot 四分支 + 开镜收拢): shX=肩前后摆, el=肘弯, shZ=肩外展, shY=肩水平转 ──
 let shR,elR,shL,elL,shRy=0,shLy=0,shRz=0,shLz=0;
 if(prone){
@@ -1587,12 +1883,26 @@ shR=-0.42; elR=-1.3; shRz=-0.24;
 shL=-1.08; elL=-0.28; shLz=0.5;
 }
 if(air){ shR+=0.18; shL+=0.22; }                                   // 腾空: 双臂略抬 (与收腿同族的空中姿态)
+// ── 通讯仪专用持握姿态 (2026-10-27, 用户 7 项需求第 1.5 条) ──
+// 判定**只认 gunKindOf 给出的 kind + 11-soldiers 的持握表**, 这里不出现任何武器名 (单源纪律):
+// 表里没有的 kind ⇒ hold=null ⇒ 下面每一处都保持原样, 步枪/冲锋枪/机枪/火箭筒逐位不变。
+// 为什么要在基准姿态这一层改: 上面的四分支是按"长枪双手持握"写的, 对 5cm 厚的通讯仪就是
+// "把对讲机当步枪抵肩"; 而换弹/架枪/抵肩这三件事对工具件根本不成立 (表里 noReload/noBrace)。
+const hold=(typeof gunHoldOf==='function')?gunHoldOf(gkNow):null;
+if(hold&&!prone){
+// 站/蹲/疾跑: 右手抬到胸前偏右举机, 左臂自然下垂略内收 —— 数值全部来自表 (GUN_HOLD_BY_KIND.radio),
+// 不在姿态机里写第二份。趴姿不覆盖: 那里"双肘撑地"的基准本来就对, 右手由下面的 armIK 送到机身握点。
+shR=hold.shR; elR=hold.elR; shRz=hold.shRz;
+shL=hold.shL; elL=hold.elL; shLz=hold.shLz;
+}
 shRy+=-av.pelvis.rotation.y*0.85; shLy+=-av.pelvis.rotation.y*0.85; // 侧身补偿: 躯干扭转后手臂仍指向枪身 (Bot 同式)
 // 架枪 (契约G): 枪搭在掩体高度 ⇒ 双臂收拢压枪, 枪身抬到胸口遮挡位 (位置量见下面 gunG)
 const fireK=clamp((p.fireAnimT||0)/FIRE_ANIM_T,0,1);
-if(p.braced){ shR=-0.62; elR=-1.35; shRz=-0.3; shL=-1.18; elL=-0.42; shLz=0.6; }
+// 架枪/换弹两段对工具件 (noBrace/noReload) 整段跳过 —— 通讯仪既不能抵肩也不能拉栓,
+// 让它跟着播这两个动作正是用户说的"拿通讯仪却在演步枪动画"。
+if(p.braced&&!(hold&&hold.noBrace)){ shR=-0.62; elR=-1.35; shRz=-0.3; shL=-1.18; elL=-0.42; shLz=0.6; }
 // 换弹 (契约G, 与 Bot 的 rl 分支同规: 冲刺/匍匐时不换手): 左手离开护木 → 沉到弹匣
-const reloading=(p.reloadT||0)>0;
+const reloading=(p.reloadT||0)>0&&!(hold&&hold.noReload);
 if(reloading&&!sprint&&!prone){ shL=-0.52+Math.sin(nowT*7)*0.16; elL=-1.52; shLz=0.16; }
 // 手雷 (契约G + 2026-09-30 批2 举雷待发): 两段
 //   ① 举雷期 (playerNadeReady) = **蓄力位姿常驻** —— 与下面投掷弧的起点是同一姿态, 松手无缝接上。
@@ -1630,16 +1940,22 @@ if(bandK>0){ shL=-0.30-0.10*Math.sin(nowT*6); elL=-1.95; shLz=0.95; }
 const MIR=(typeof UPPER_MIRROR!=='undefined')?UPPER_MIRROR:((typeof setUpperMirror==='function')?setUpperMirror():-1);
 shRy*=MIR; shLy*=MIR; shRz*=MIR; shLz*=MIR;
 // ── 枪身 gunG 目标角 (与 Bot 同式): 侧身补偿 / 冲刺横端 / 匍匐反向补偿躯干俯角 / 交战看俯仰 ──
-const gunPitch=engaged?-clamp(p.pitch,-0.7,0.7):(sprint?0.3:0.25);
+// 工具件 (持握表命中, 如通讯仪) 不吃"交战⇒枪身随俯仰"这条 —— 那套语义是给"枪口指向准星"的枪械用的;
+// 通讯仪的机面朝向由持握表的 gunX/gunY/gunZ 给, 架枪/开镜/后坐都不该改它 (否则举着对讲机一按右键架枪,
+// 机子就自己抬 14°)。hold 为 null 时表达式逐位不变。
+const gunPitch=(engaged&&!hold)?-clamp(p.pitch,-0.7,0.7):(sprint?0.3:0.25);
 // ★ 2026-09-26 A1: 趴姿的枪身角与 Bot **逐字一致** (gunPitch-pp) —— 玩家这边原来多一个 "+0.1", 那是
 // 俯角的**同向**附加 (gunX 为正 = 枪口朝下), 在贴地的趴姿里等于把枪口往地里压 0.09m (实测枪底 -0.015m)。
 // 而 −pp 本来就已经把骨盆前倾补偿干净了 (A#10 审计① 的口径), 不需要再有第二项。
 let gunX=prone?gunPitch-pp:gunPitch;
 let gunY=-av.pelvis.rotation.y+(sprint?0.95:0);
 let gunZ=sprint?0.16:0;
+// 工具件 (通讯仪) 的机面朝向由持握表给 (gunY 负 = 屏幕转向角色脸侧, 第三人称能看到面板);
+// 疾跑那套"横端在胸前"对 5cm 厚的工具件没有意义, 所以 sprint 附加量在这里不叠。
+if(hold){ gunX+=hold.gunX; gunY+=hold.gunY; gunZ+=hold.gunZ; }
 let gunOffY=0, gunOffZ=0;
 if(thrust>0){ gunOffZ=thrust*0.42; gunX-=thrust*0.16; }        // 刺刀: 枪前刺
-if(p.braced) gunOffY=0.12;                                     // 架枪: 枪抬到胸口遮挡位
+if(p.braced&&!(hold&&hold.noBrace)) gunOffY=0.12;               // 架枪: 枪抬到胸口遮挡位 (工具件不架枪)
 if(reloading&&!sprint&&!prone){ gunX+=0.20; gunZ+=0.12; }       // 换弹: 枪身下压
 if(nadeK>0) gunZ+=0.35*Math.max(0,nadeArc);                     // 手雷: 起手时枪随左臂让开
 else if(nadeHold) gunZ+=0.35;                                   // 举雷期: 枪同样让开 (隐身中; 回枪时从让开位滑回, 不瞬移)
@@ -1651,11 +1967,17 @@ gunX-=fireK*0.26;                                               // 开火: 枪�
 // ★2026-09-30 批2: nadeHold (举雷待发) 也是 0 —— 否则手雷计时一衰减完, handK 回到 1, IK 把双手**抓回枪上**,
 //   表现就是"举着雷的人突然又握住了枪"(与姿势机同一条根因的第二处)。
 const handK=(nadeK>0||nadeHold||bandK>0)?0:(thrust>0?0.35:1);
+// 持握表覆盖 (2026-10-27 通讯仪批): 通讯仪只有右手在机上 (表里 handK 1 / handKL 0), 左手自然下垂不
+// 抓机 —— 若沿用通用 handK=1, armIK 会把左手也拽到机身上 = "双手捧着对讲机抵肩", 正是要修掉的那套
+// 步枪姿态。★ 上面 handK 与下面 handKL 两行是既有探针的源码锚点 (verify-animfix-20260926 的反向对照
+//   锚 + "换弹左臂单独取 0" 断言逐字比对), 所以**不改这两行**, 只在其后派生实际使用的权重。
+const handKUse=(hold)?hold.handK:handK;
 // ★ 2026-09-26 B2: 换弹时**左臂单独取 0** —— Bot 侧有 handKL (14-bots), 玩家侧漏了这一步, 于是上面
 // 摆好的"左手沉到弹匣"被 IK 的 handK=1 逐帧抹掉 (换弹时左臂全程贴回护木 = 换弹动作看不见)。
 // 语义与 Bot 一致: 换弹的语义就是左手离枪去弹匣; 右臂仍为 1 (枪始终在右手)。
 const handKL=(reloading&&!sprint&&!prone)?0:handK;
-if(handK>0.001&&av._gun&&typeof armIK==='function'&&typeof gunGripPoint==='function'){
+const handKLUse=(hold)?hold.handKL:handKL;
+if(handK>0.001&&av._gun&&typeof armIK==='function'&&typeof gunGripPoint==='function'&&handKUse>0.001){
 const gk=av._gunKind||'rifle';
 // 右手 → 握把点; 握把点略超臂长时 (实测步枪在俯仰一端 0.641m > 全伸 0.62m) 同样**沿枪身轴回退**
 // (t<0 = 向枪托端回退, 仍在枪身上) —— 不把挂点挪近 (挪近会把枪身压回躯干), 也不让手脱枪。
@@ -1670,12 +1992,12 @@ tR-=0.15; gp=gunAxisPoint(gk,tR,gunX,gunY,gunZ,pp);
 }
 const rR=armIK(av.armR.sh,av.armR.elm,gp);                      // 右手 → 握把 (扳机手)
 if(rR!==null){
-shR=lerp(shR,av.armR.sh.rotation.x,handK); shRy=lerp(shRy,av.armR.sh.rotation.y,handK);
-shRz=lerp(shRz,av.armR.sh.rotation.z,handK); elR=lerp(elR,av.armR.elm.rotation.x,handK);
+shR=lerp(shR,av.armR.sh.rotation.x,handKUse); shRy=lerp(shRy,av.armR.sh.rotation.y,handKUse);
+shRz=lerp(shRz,av.armR.sh.rotation.z,handKUse); elR=lerp(elR,av.armR.elm.rotation.x,handKUse);
 }
 // 左臂 → 护木点; 冻结挂点下护木点会超臂长(实测 ≈0.85m > 全伸 0.62m), 故沿**枪身轴**回退到可达点
 // (gunAxisPoint: t=1 护木 / t=0 握把) —— 手仍然落在枪身上, 而不是脱手悬空。残差由 armIK 如实返回。
-if(handKL>0.001&&typeof gunForePoint==='function'&&typeof gunAxisPoint==='function'){
+if(handKL>0.001&&typeof gunForePoint==='function'&&typeof gunAxisPoint==='function'&&handKLUse>0.001){
 const reach=(typeof ARM_L1!=='undefined')?(ARM_L1+ARM_L2-0.03):0.59;
 const sl=av.armL.sh.position;
 let t=1, fp=gunForePoint(gk,gunX,gunY,gunZ,pp);
@@ -1685,8 +2007,8 @@ t=Math.max(0,t-0.12); fp=gunAxisPoint(gk,t,gunX,gunY,gunZ,pp);
 }
 const rL=armIK(av.armL.sh,av.armL.elm,fp);                      // 左手 → 护木/可达的枪身站位
 if(rL!==null){
-shL=lerp(shL,av.armL.sh.rotation.x,handKL); shLy=lerp(shLy,av.armL.sh.rotation.y,handKL);
-shLz=lerp(shLz,av.armL.sh.rotation.z,handKL); elL=lerp(elL,av.armL.elm.rotation.x,handKL);
+shL=lerp(shL,av.armL.sh.rotation.x,handKLUse); shLy=lerp(shLy,av.armL.sh.rotation.y,handKLUse);
+shLz=lerp(shLz,av.armL.sh.rotation.z,handKLUse); elL=lerp(elL,av.armL.elm.rotation.x,handKLUse);
 }
 }
 }
@@ -1760,8 +2082,8 @@ let d=TP_DIST;
 const hit=raycastWorld(ep,back,d);      // 防穿墙: 从眼位沿后拉方向测, 撞到就收距
 if(hit) d=Math.max(TP_MIN,hit.dist-0.4);
 const cp=ep.clone().addScaledVector(back,d);
-// 地面下限 (2026-10-04 V3 同批): 纯海图上 heightAt 是海床 (水面下 20m+) —— 下限取 max(地形, 水面),
-// 相机才不会沉到水下滤镜里 (与 capGunAimDist 的取地面口径同式)。
+// 地面下限 (2026-10-04 V3 同批): 水面上 heightAt 是水底 —— 下限取 max(地形, 水面),
+// 相机才不会沉到水下滤镜里。(2026-11-10: 纯海图/capGunAimDist 字样随纯海战图下架摘除)
 const gh3=heightAt(cp.x,cp.z);
 const wy3=(typeof waterYAt==='function')?waterYAt(cp.x,cp.z):-1e9;
 const gmin=Math.max(gh3,(wy3>-1e8)?wy3:-1e9)+TP_GROUND;
@@ -1777,6 +2099,7 @@ updatePlayerAvatar(dt);
 }
 // 炮手镜视场 (2026-09-21): 与坦克车长镜同档 (20-player 坦克分支 fov=30), 倍率感 ≈ 74/30 ≈ 2.5×
 const NAVAL_SCOPE_FOV=30;
+const LOITER_ZOOM_FOV=30;   // 巡飞弹右键开镜放大目标 fov (85/70→30 ≈2.8x, 2026-11-06 飞行瞄准批)
 // 炮手观瞄点 (世界坐标) —— 炮手镜机位单源。降级链 (WS1 naval-model 契约 + 兜底, 缺字段永不 undefined):
 //   ① nodes.sight: 15e 挂在 turretG 下的观瞄镜心 Object3D —— 世界坐标即机位, 随炮塔回转 (最准)
 //   ② dims.sightY: 15e 规格快照给的镜心 y (= 15e 的 deckY + spec.sightH)
@@ -1815,27 +2138,37 @@ const p=player;
 // 玩家本体 (第三人称) 每帧先藏起来, 只有下面的第三人称分支会重新显示 ——
 // 这样跳伞/载具/巡飞弹/死亡镜头/航拍等**所有提前 return 的分支**都不会留下一个停在原地的本体模型。
 playerAvatarHide();
-		// 巡飞弹TV制导视角: 默认弹头第一视角(隐藏弹体, F 切换第三人称追尾可看到弹体)
+		// 巡飞弹TV制导视角: 默认弹头第一视角(隐藏弹体, U 切换第三人称追尾可看到弹体); 右键按住=开镜放大并强制第一人称 (2026-11-06 飞行瞄准批)
 		if(p.loiter&&p.alive){
 		const d=p.loiter;
 		const f=loiterForward(d);
+		const lz=mouse2Down&&!p._ltRClick;   // 开镜放大判定: 与旧右键加速同构 (_ltRClick 吞"按住右键机瞄发射"的边沿, 完整松开一次后才生效; 零新增状态字段)
+		const third=lz?0:p.loiterView;        // 放大时固定第一人称 (机制同步兵第三人称瞄准), 松开恢复原档
+		const tgtFov=lz?LOITER_ZOOM_FOV:(third?70:85);
 		camera.rotation.order='YXZ';
-		if(p.loiterView){
-		d.mesh.visible=true;
+		if(third){
+		// 弹体可见性单写者 = updateLoiters 末尾 (2026-11-05 批): 背追分支不再翻 visible —— 旧版只有
+		// 这个分支能把 fireLoiter 的 false 翻回来 ⇒ 真观战 (alive=false) 自由视角里弹体永隐。
 		const back=f.clone().negate(); back.y+=0.34; back.normalize();
 		let cd=6.8;
 		const hit=raycastWorld(d.pos,back,cd);
 		if(hit) cd=Math.max(1.6,hit.dist-0.4);
 		camera.position.copy(d.pos).addScaledVector(back,cd);
 		camera.lookAt(d.pos.x+f.x*12,d.pos.y+f.y*12,d.pos.z+f.z*12);
-		camera.fov=dampF(camera.fov,70,8,dt);
+		camera.fov=dampF(camera.fov,tgtFov,8,dt);
 		} else {
-		d.mesh.visible=false; // 真弹头视角: 弹体不可见, 摄像机就在光学头罩处
+		// TV 档藏弹体同样归单写者 (updateLoiters: player.alive&&!(player.loiterView||开镜中) ⇒ false) — 摄像机就在光学头罩处
 		camera.position.copy(d.pos).addScaledVector(f,0.5).add(V3(0,0.05,0));
 		camera.rotation.set(d.pitch,d.yaw,Math.sin(nowT*2.2)*0.05+Math.sin(nowT*31)*0.006);
-		camera.fov=dampF(camera.fov,85,8,dt);
+		camera.fov=dampF(camera.fov,tgtFov,8,dt);
 		}
 		camera.updateProjectionMatrix();
+		// ★2026-11-05 实机反馈批 (用户实报"巡飞弹视角看不到玩家本体"): updateCamera 顶部每帧
+		//   playerAvatarHide(), 而 updatePlayerAvatar 只在步行第三人称分支 (thirdPersonCamera) 里调用
+		//   ⇒ TV制导期间本体在世界里彻底消失, 弹体回看发射位 (调试观战悬停引导时尤其常用) 只剩空地。
+		//   本体照常按玩家状态显示/摆姿态, 相机仍在弹体上, TV 画面取向不受影响; 附身视模式 (specViewHost)
+		//   在 updatePlayerAvatar 内部自门仍恒隐, 与第三人称分支同一套纪律。
+		updatePlayerAvatar(dt);
 		return;
 		}
 if(p.chute){
@@ -1851,6 +2184,16 @@ camera.updateProjectionMatrix();
 return;
 }
 if(!p.alive){
+// ★2026-11-01 自由观战视模式相机分支: 排在死亡镜头**之前** —— 视模式下 alive=false, 不接的话
+// 镜头会掉进死亡环绕/航拍。位置/姿态由 specViewTick (24-main 每帧) 写好: 附身=Bot 眼位+姿态, 自由=飞行位。
+if(p.specView){
+camera.rotation.order='YXZ';
+camera.rotation.set(p.pitch||0,p.yaw||0,0);
+camera.position.copy(p.pos);
+camera.fov=dampF(camera.fov,74,10,dt);
+camera.updateProjectionMatrix();
+return;
+}
 // 死亡镜头: 环绕注视布娃娃尸体约2秒
 if(p.deathCamT>0){
 p.deathCamT-=dt;
@@ -2006,3 +2349,31 @@ camera.position.z+=rz2*off*sgn;
 camera.position.y-=Math.abs(p.leanT)*0.05;
 }
 }
+function isNearSupplyCrate(pos){
+if(typeof AMMO_CRATES==='undefined'||!AMMO_CRATES||!AMMO_CRATES.length) return false;
+const p=pos||(typeof player!=='undefined'&&player.pos);
+if(!p) return false;
+return AMMO_CRATES.some(c=>Math.hypot(c.x-p.x,c.z-p.z)<=2.8);
+}
+window.isNearSupplyCrate=isNearSupplyCrate;
+
+function rearmPlayerClass(cls){
+const p=player;
+if(cls!==undefined) p.cls=cls;
+const wkeys=playerClassWeapons(p.team,p.cls);
+const gear=p.spectator?specGear():clsGear(p.cls,p.team); // 观战: 四弹种全给 (与 0.5s 回满同一配置, 部署瞬间就不缺弹种)
+p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEFS[k].reserve}));
+p.curSlot=0;
+p.curW=p.slots[0];
+p.nadeCount=gear.nades;
+p.atNades=gear.atn;
+p.maxBandages=CLASSES[p.cls].bandages||4;
+p.bandages=p.maxBandages;
+p.smokeCount=gear.smoke;
+p.incinCount=gear.incin;
+if(!p.onVehicle&&!p.onMG&&!p.onAT&&!p.onAA&&!p.onMortar&&!p.loiter){
+vmEquip(p.curW.key,p.team);
+VM.root.visible=true;
+}
+}
+window.rearmPlayerClass=rearmPlayerClass;

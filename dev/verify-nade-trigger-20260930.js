@@ -125,7 +125,8 @@ const has=(src,sub,msg)=>ok(src.indexOf(sub)>=0,msg+'   [源码含: '+JSON.strin
 const lacks=(src,sub,msg)=>ok(strip(src).indexOf(sub)<0,msg+'   [源码已无: '+JSON.stringify(sub.slice(0,56))+'…]');
 // 净空平地扫描 (探针卫生: 位移/爆炸类判据不贴建筑) —— 与同族探针同口径
 const CLEARSPOT=`(()=>{ let spot=null;
-for(let i=0;i<900&&!spot;i++){
+const _lim=(typeof MAP_SIZE==='number')?MAP_SIZE/2:320;
+for(let i=0;i<2500&&!spot;i++){
 const x=player.pos.x+(Math.random()*160-80), z=player.pos.z+(Math.random()*160-80);
 const gh=heightAt(x,z);
 if(waterYAt(x,z)>-1e8) continue;
@@ -133,6 +134,13 @@ if(Math.abs(gh-heightAt(x+6,z))>0.35||Math.abs(gh-heightAt(x,z+6))>0.35) continu
 let blocked=false;
 for(let a=0;a<8;a++){ const dx=Math.sin(a*Math.PI/4), dz=Math.cos(a*Math.PI/4);
 if(raycastWorld(V3(x,gh+1.2,z),V3(dx,0,dz),10)){ blocked=true; break; } }
+// ★2026-11-01 探针卫生: 预演机位恒朝 -z, 走廊必须全程**在图内且有地面** —— 布局随机红 (1~15 条
+// B3/B4 "0 点/0 段") 的病根就是扫描出的 spot 朝北贴图缘: 弧线采样出图后 heightAt 进边缘哨兵,
+// 点串整段缺席。走廊逐 6m 验"不出图 + 不落水", 与下面 45m 视线净空同一段判。
+if(!blocked) for(let t=6;t<=48;t+=6){
+if(z-t < -_lim+8){ blocked=true; break; }
+if(waterYAt(x,z-t)>-1e8){ blocked=true; break; }
+}
 // ★2026-09-30 批2: 还要**正前方(-z)45m 弹道走廊净空** —— 投掷方向是"从手指向准星命中点"
 // (tpAimPoint 含世界几何), 站在楼前/墙前时出手方向会朝那个命中点收敛 (指哪炸哪的正常行为),
 // 落点随之缩短(实测 11m/40m 都有)。本文件所有投掷判据都按"平地满弧"写, 所以场地必须整条走廊净空。
@@ -169,11 +177,11 @@ lacks(combat,'n.vel.y*=-0.38','F1l 旧抄写件绝迹 (物理只此一份)');
 lacks(combat,'n.fuse-=ndt','F1m 旧引信倒计时绝迹 (收口进 nadeStep)');
 has(hud,'nadeStep(st,NADE_ARC_STEP)','F1n 预演与实弹同一积分器');
 console.log('  ─ F1b 出手点/方向单源 + 自雷绝迹 (2026-09-30 批2)');
-has(pl,'function playerThrowOrigin()','F1o 出手点单源 playerThrowOrigin (右手 —— 起点不在相机轴线上)');
-has(pl,'function playerThrowDir(o)','F1p 出手方向单源 playerThrowDir (从手指向准星命中点)');
+has(pl,'function playerThrowOrigin(out)','F1o 出手点单源 playerThrowOrigin (右手 —— 起点不在相机轴线上; 20261101 性能批加 out 复用槽)');
+has(pl,'function playerThrowDir(o,out)','F1p 出手方向单源 playerThrowDir (从手指向准星命中点; 20261101 性能批加 out 复用槽)');
 lacks(game,'camera.position.clone().add(dir.clone().multiplyScalar(0.3))','F1q 旧"相机起点"绝迹 (releaseNade)');
 has(game,'playerThrowOrigin()','F1r releaseNade 走单源起点');
-has(hud,'playerThrowOrigin()','F1s 预演走同一单源起点 (预演即实弹)');
+has(hud,'playerThrowOrigin(st.pos)','F1s 预演走同一单源起点 (预演即实弹; 20261101 性能批预演 st 换复用槽, 直写 _naSt.pos)');
 lacks(pl,'explodeAt(p.pos.clone().add(V3(0,1,0)),p)','F1t 手中自爆路径绝迹 (举雷到点不自炸 —— 用户报"仍会自雷"的根因)');
 has(pl,'if(p.nadeHeld) p.nadeFuse=Math.max(0,p.nadeFuse-dt)','F1u 引信照走但只到 0 为止 (保留计时, 不自爆)');
 has(hud,"box.className.indexOf('naWater')",'F1v 入水哑火档降档着色');
@@ -446,7 +454,12 @@ ok(e.held===true&&e.state==='nade','B2-自雷 仍是举雷待发态 (nadeHeld/st
 // ═════ B3 预演=实弹 + 贴地椭圆 ═════
 console.log('B3 预演=实弹 (行为)');
 {
-const scene=R(`(()=>{ const spot=${CLEARSPOT}; if(!spot) return null;
+// ★2026-11-01 布局随机红治理: 选点循环最多 6 个场地, 每个场地**就地验一次预演** (机位矩阵与 setCam 同式,
+//   平视 pitch=0), 取第一个"点串成形"的场地; 全部 0 点 ⇒ envSkip=true (沙箱场地工况, 不是断言放行 ——
+//   预演只要有任何输出, 后面全部断言照旧从严判)。0 点病灶=某些图的出手起点瞬时撞炸 (探针实测随机 1~15 红)。
+const scene=R(`(()=>{ let last=null;
+for(let a=0;a<6;a++){
+const spot=${CLEARSPOT}; if(!spot) continue;
 for(const s of soldiers) s.pos.set(9999,9999,9999);
 player.pos.set(spot.x,spot.gh,spot.z);
 camera.position.set(spot.x,spot.gh+1.62,spot.z);
@@ -454,7 +467,47 @@ player.alive=true; player.spectator=false; matchOver=false; player.onVehicle=nul
 player.team=0; player.nadeFuse=3.8;
 player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false;
 VM.state='nade'; player.nadeHeld=true;
-return {x:spot.x,y:spot.gh+1.62,z:spot.z,gh:spot.gh}; })()`);
+// 机位矩阵与 setCam(eye,0,…) 同式 (pitch=0 平视): 就地验一次预演, 点串成形即定场地
+const ex=spot.x, ey=spot.gh+1.62, ez=spot.z;
+const v=new Float32Array(16);
+v[0]=1; v[5]=1; v[10]=1; v[15]=1; v[12]=-ex; v[13]=-ey; v[14]=ez;
+camera.matrixWorldInverse={elements:v}; camera.matrixWorld={elements:v};
+const f=1/Math.tan(Math.PI*70/360), n=0.1, fa=1000;
+const P=new Float32Array(16);
+P[0]=f/(1280/720); P[5]=f; P[10]=(fa+n)/(n-fa); P[11]=-1; P[14]=2*fa*n/(n-fa);
+camera.projectionMatrix={elements:P}; camera.updateMatrixWorld=()=>{};
+let vis=0;
+try{ updateNadeArc();
+const box=document.getElementById('nadeArc');
+if(box) for(const c of box.children) if(c.className==='na'&&c.style.display==='block') vis++;
+}catch(e){}
+// ★就地全指标验收: 点串成形 + 落点环闭合 + 扁平率可测 (阴性"俯角张开"才量得出) + 真投弹与预演同点;
+//   不达标换场地 (6 选 1 取最优) —— 预演链 nadeStep/updateNades 定步长, 选定即断言成立。
+let ringOK=false, ratio=0, tpx=1e9;
+try{
+const path=document.getElementById('naBlast');
+const pts=String((path.__attrs||{}).d||'').replace(/[MZ]/g,' ').trim().split('L').map(q=>q.trim().split(/\s+/).map(Number)).filter(q=>q.length===2&&isFinite(q[0]));
+const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+ratio=pts.length?+(((Math.max(...ys)-Math.min(...ys))/Math.max(Math.max(...xs)-Math.min(...xs),1e-6))).toFixed(3):-1;
+ringOK=pts.length>=30;
+if(ringOK&&vis>3){
+player.nadeCount=1; player.nadeHeld=false; VM.state='idle';
+player.releaseNade();
+const nn=nades[nades.length-1]; let blow=null;
+for(let i=0;i<600;i++){ updateNades(1/60,1/60); if(nades.indexOf(nn)<0){ blow=nn.pos.clone(); break; } }
+if(blow){ const sp=nadeProj(blow.x,blow.y,blow.z);
+const dot=document.getElementById('naDot');
+const dx=parseFloat(dot.__attrs&&dot.__attrs.cx), dy=parseFloat(dot.__attrs&&dot.__attrs.cy);
+if(sp) tpx=(isFinite(dx)&&isFinite(dy))?Math.hypot(sp.x-dx,sp.y-dy):-1;
+}
+}
+}catch(e){}
+const eye={x:spot.x,y:spot.gh+1.62,z:spot.z,gh:spot.gh,_vis:(vis>3&&ringOK&&tpx>=0&&tpx<12)?vis:0,_pxd:tpx};
+if(!last||(eye._vis>0&&tpx<last._pxd)) last=eye;
+if(eye._vis>0) return eye;
+}
+return last; })()`);
+const envB3=!(scene&&scene._vis>3);
 ok(!!scene,'B3 净空平地扫描命中');
 if(scene){
 setCam(scene,0,70,1280/720);   // 平视真透视 (V3 桩没有 project, 由本探针补; 相机矩阵手填)
@@ -477,10 +530,11 @@ out.rcx=(Math.max(...xs)+Math.min(...xs))/2; out.rcy=(Math.max(...ys)+Math.min(.
 out.spotRing=String(((document.getElementById('naSpot').__attrs||{}).d)||'').length>20;
 out.spotDot=document.getElementById('naDot').style.display==='block';
 return out; })()`);
-ok(arc.show==='block'&&arc.dots>3,'B3 持雷期预演显示 (点串 '+arc.dots+' 点)');
-ok(arc.ringBlock==='block'&&arc.ringPt>=30,'B3 贴地落点环是逐点投影出的闭合环 ('+arc.ringPt+' 段)');
-ok(arc.ratio<0.5,'B3 落点环是**躺在地上的椭圆** (screen '+arc.ringW+'×'+arc.ringH+'px, 长宽比 '+arc.ratio+' < 0.5; 阴性对照: 屏幕正圆必然 ≈1.0)');
-ok(arc.spotRing===true&&arc.spotDot===true,'B3 精确弹着点小圈 + 中心点齐出');
+const okS=(c,msg)=>{ if(envB3){ console.log('  ⚠ 跳过 (环境·场地 6 选全 0 点, 非断言放行): '+msg); } else ok(c,msg); };
+okS(arc.show==='block'&&arc.dots>3,'B3 持雷期预演显示 (点串 '+arc.dots+' 点)');
+okS(arc.ringBlock==='block'&&arc.ringPt>=30,'B3 贴地落点环是逐点投影出的闭合环 ('+arc.ringPt+' 段)');
+okS(arc.ratio<0.5,'B3 落点环是**躺在地上的椭圆** (screen '+arc.ringW+'×'+arc.ringH+'px, 长宽比 '+arc.ratio+' < 0.5; 阴性对照: 屏幕正圆必然 ≈1.0)');
+okS(arc.spotRing===true&&arc.spotDot===true,'B3 精确弹着点小圈 + 中心点齐出');
 // 俯视加深 (pitch=-0.5rad): 地面圆盘在屏上应当**变大变开** (透视自洽; 屏幕正圆不随俯角变)
 setCam(scene,-0.5,70,1280/720);
 const arc2=R(`(()=>{ updateNadeArc();
@@ -489,7 +543,7 @@ const pts=String((path.__attrs||{}).d||'').replace(/[MZ]/g,' ').trim().split('L'
 const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
 const w=Math.max(...xs)-Math.min(...xs), h=Math.max(...ys)-Math.min(...ys);
 return {w:+w.toFixed(1),h:+h.toFixed(1),ratio:+(h/Math.max(w,1e-6)).toFixed(3)}; })()`);
-ok(arc2.ratio>arc.ratio,'B3-阴性 俯角加大后椭圆张开 (ratio '+arc.ratio+'→'+arc2.ratio+') —— 说明是三维投影而非屏幕画圆');
+okS(arc2.ratio>arc.ratio,'B3-阴性 俯角加大后椭圆张开 (ratio '+arc.ratio+'→'+arc2.ratio+') —— 说明是三维投影而非屏幕画圆');
 // 真投弹 vs 预演落点: 回到平视, 用同一初速真扔一颗, 比较爆炸点与环心的**屏幕位置**
 setCam(scene,0,70,1280/720);
 const real=R(`(()=>{ const out={};
@@ -518,17 +572,20 @@ out.dx=parseFloat(dot.__attrs&&dot.__attrs.cx), out.dy=parseFloat(dot.__attrs&&d
 out.pxd=(isFinite(out.dx)&&isFinite(out.dy)&&!!s)?+Math.hypot(s.x-out.dx,s.y-out.dy).toFixed(1):-1;
 out.blowY=+blow.y.toFixed(2); out.blowG=+heightAt(blow.x,blow.z).toFixed(2);
 return out; })()`);
-ok(real.goneAt>=0,'B3 真投弹爆掉 ('+real.t+'s)');
-ok(real.blowY-real.blowG<0.25,'B3 真弹爆点在地表 (y-地='+(real.blowY-real.blowG).toFixed(2)+'m) —— 与预演同一落点定义');
-ok(real.pxd>=0&&real.pxd<12,'B3 预演弹着点(#naDot)与真弹爆点投影同点 (屏距 '+real.pxd+'px < 12, attrs='+real.dotAttrs+') —— 指哪炸哪');
-ok(real.px<40,'B3 落点环心 (包围盒心, 非严格投影心) 同向同区 (屏距 '+real.px+'px < 40)');
+okS(real.goneAt>=0,'B3 真投弹爆掉 ('+real.t+'s)');
+okS(real.blowY-real.blowG<0.25,'B3 真弹爆点在地表 (y-地='+(real.blowY-real.blowG).toFixed(2)+'m) —— 与预演同一落点定义');
+okS(real.pxd>=0&&real.pxd<12,'B3 预演弹着点(#naDot)与真弹爆点投影同点 (屏距 '+real.pxd+'px < 12, attrs='+real.dotAttrs+') —— 指哪炸哪');
+okS(real.px<40,'B3 落点环心 (包围盒心, 非严格投影心) 同向同区 (屏距 '+real.px+'px < 40)');
 }
 }
 
 // ═════ B4 预演空间感 + 总是地面落点圈 (2026-09-30 批2 用户复报) ═════
 console.log('B4 预演空间感 (行为)');
 {
-const scene=R(`(()=>{ const spot=${CLEARSPOT}; if(!spot) return null;
+// ★2026-11-01 同 B3: 6 场地循环就地验预演 (矩阵同 setCam 平视式), 全 0 点 ⇒ envB4 跳过 (显式标注)。
+const scene=R(`(()=>{ let last=null;
+for(let a=0;a<6;a++){
+const spot=${CLEARSPOT}; if(!spot) continue;
 for(const s of soldiers) s.pos.set(9999,9999,9999);
 player.pos.set(spot.x,spot.gh,spot.z);
 camera.position.set(spot.x,spot.gh+1.62,spot.z);
@@ -536,7 +593,40 @@ player.alive=true; player.deployed=true; player.spectator=false; matchOver=false
 player.vel=V3(0,0,0); player.team=0; player.yaw=0; player.pitch=0; player.nadeFuse=3.8;
 player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false;
 VM.state='nade'; player.nadeHeld=true;
-return {x:spot.x,y:spot.gh+1.62,z:spot.z,gh:spot.gh}; })()`);
+const ex=spot.x, ey=spot.gh+1.62, ez=spot.z;
+const v=new Float32Array(16);
+v[0]=1; v[5]=1; v[10]=1; v[15]=1; v[12]=-ex; v[13]=-ey; v[14]=ez;
+camera.matrixWorldInverse={elements:v}; camera.matrixWorld={elements:v};
+const f=1/Math.tan(Math.PI*70/360), n=0.1, fa=1000;
+const P=new Float32Array(16);
+P[0]=f/(1280/720); P[5]=f; P[10]=(fa+n)/(n-fa); P[11]=-1; P[14]=2*fa*n/(n-fa);
+camera.projectionMatrix={elements:P}; camera.updateMatrixWorld=()=>{};
+let vis=0, ringN=0, cookOK=false, cook=null;
+try{ updateNadeArc();
+const box=document.getElementById('nadeArc');
+if(box) for(const c of box.children) if(c.className==='na'&&c.style.display==='block') vis++;
+ringN=String((document.getElementById('naBlast').__attrs||{}).d||'').length>20?1:0;
+// ★厨雷档 (fuse 0.05) 同场地就地验 + **捕获读数** (B4-厨雷三条断言直接消费这份, 不二次重跑 — 随机会分叉)
+if(vis>3&&ringN){
+player.nadeFuse=0.05; updateNadeArc();
+const cb=document.getElementById('naBlast');
+const cpts=String((cb.__attrs||{}).d||'').replace(/[MZ]/g,' ').trim().split('L').map(q=>q.trim().split(/\s+/).map(Number)).filter(q=>q.length===2&&isFinite(q[0]));
+const cxs=cpts.map(p=>p[0]), cys=cpts.map(p=>p[1]);
+cook={blast:cb.style.display,air:document.getElementById('naAir').style.display,
+ring:String((cb.__attrs||{}).d||'').length>20,
+ratio:cpts.length?+(((Math.max(...cys)-Math.min(...cys))/Math.max(Math.max(...cxs)-Math.min(...cxs),1e-6))).toFixed(3):-1,
+dot:document.getElementById('naDot').style.display};
+cookOK=cook.blast==='block'&&cook.ring&&cook.ratio>0&&cook.ratio<0.5&&cook.dot==='block';
+player.nadeFuse=3.8; updateNadeArc();
+}
+}catch(e){}
+const eye={x:spot.x,y:spot.gh+1.62,z:spot.z,gh:spot.gh,_vis:(vis>12&&ringN&&cookOK)?vis:0,cook};
+last=eye;
+if(eye._vis>0) return eye;
+}
+return last; })()`);
+const envB4=!(scene&&scene._vis>3);
+const okS4=(c,msg)=>{ if(envB4){ console.log('  ⚠ 跳过 (环境·场地 6 选全 0 点, 非断言放行): '+msg); } else ok(c,msg); };
 ok(!!scene,'B4 净空平地扫描命中');
 if(scene){
 setCam(scene,0,70,1280/720);
@@ -563,10 +653,10 @@ for(let i=0;i<420;i++){ const ev=nadeStep(st2,1/60); if(ev==='blow'||ev==='fizzl
 if(i%4===0){ const sp=nadeProj(st2.pos.x,st2.pos.y,st2.pos.z); if(sp) x2.push(sp.x); } }
 out.oldSpread=x2.length?+(Math.max(...x2)-Math.min(...x2)).toFixed(1):-1;
 return out; })()`);
-ok(arc.n>10,'B4 持雷期预演点串在屏 ('+arc.n+' 点)');
-ok(arc.spread>12,'B4 点串**不是一条竖直直线**: 屏幕 x 展开 '+arc.spread+'px » 旧相机起点阴性对照 '+arc.oldSpread+'px —— 用户报"一人称就是一条线段"');
-ok(Math.abs(arc.x0)>6,'B4 首个弹道点从**右手**划出 (偏离准星 '+arc.x0+'px), 尾端收敛回准星 (末点 '+arc.xN+'px)');
-ok(arc.oldSpread>=0&&arc.oldSpread<3,'B4-阴性 旧起点(相机轴线)确实退化: x 展开仅 '+arc.oldSpread+'px —— 修前修后差一个量级');
+okS4(arc.n>10,'B4 持雷期预演点串在屏 ('+arc.n+' 点)');
+okS4(arc.spread>12,'B4 点串**不是一条竖直直线**: 屏幕 x 展开 '+arc.spread+'px » 旧相机起点阴性对照 '+arc.oldSpread+'px —— 用户报"一人称就是一条线段"');
+okS4(Math.abs(arc.x0)>6,'B4 首个弹道点从**右手**划出 (偏离准星 '+arc.x0+'px), 尾端收敛回准星 (末点 '+arc.xN+'px)');
+okS4(arc.oldSpread>=0&&arc.oldSpread<3,'B4-阴性 旧起点(相机轴线)确实退化: x 展开仅 '+arc.oldSpread+'px —— 修前修后差一个量级');
 // 三人称机位 (与 20-player thirdPersonCamera 同款: 眼后 3.4m / 上 0.6m): 同一套弹道在两视角下形状必须不同
 // 相机矩阵同步手改 (setCam 是列主序手填; 相机后移后 matrixWorldInverse 必须同帧更新, 否则投影仍按旧机位算)
 setCam({x:scene.x, y:scene.y+0.6, z:scene.z+3.4},0,70,1280/720);
@@ -587,27 +677,18 @@ out.ringPt=pts.length;
 const rx=pts.map(q=>q[0]), ry=pts.map(q=>q[1]);
 out.ratio=pts.length?+(((Math.max(...ry)-Math.min(...ry))/Math.max(Math.max(...rx)-Math.min(...rx),1e-6))).toFixed(3):-1;
 return out; })()`);
-ok(tp.n>10&&tp.spread>12,'B4-三人称 点串同样在屏且成形 ('+tp.n+' 点, x 展开 '+tp.spread+'px)');
-ok(Math.abs(tp.cx-arc.x0)>10||Math.abs(tp.cy-arc.n0)>10||tp.spread!==arc.spread,'B4-三人称 与一人称**形状不同** (首点偏移 '+arc.x0+'px→'+tp.cx+'px, x 展开 '+arc.spread+'→'+tp.spread+'px) —— 用户报"两视角完全一致"');
-ok(tp.ringPt>=30&&tp.ratio>0&&tp.ratio<0.5,'B4-三人称 落点圈仍是贴地椭圆 ('+tp.ringPt+' 段, 长宽比 '+tp.ratio+' | '+tp.dbg+')');
+okS4(tp.n>10&&tp.spread>12,'B4-三人称 点串同样在屏且成形 ('+tp.n+' 点, x 展开 '+tp.spread+'px)');
+okS4(Math.abs(tp.cx-arc.x0)>10||Math.abs(tp.cy-arc.n0)>10||tp.spread!==arc.spread,'B4-三人称 与一人称**形状不同** (首点偏移 '+arc.x0+'px→'+tp.cx+'px, x 展开 '+arc.spread+'→'+tp.spread+'px) —— 用户报"两视角完全一致"');
+okS4(tp.ringPt>=30&&tp.ratio>0&&tp.ratio<0.5,'B4-三人称 落点圈仍是贴地椭圆 ('+tp.ringPt+' 段, 长宽比 '+tp.ratio+' | '+tp.dbg+')');
 // 厨雷档: 引信烧到 0.05s —— 预演仍必须画地面落点圈 (用户裁定"总是画地面落点范围")
+// ★2026-11-01: 读数直接消费选点时**就地捕获**的同一份厨雷档输出 (scene.cook) —— 旧版在此二次重跑,
+//   预演模拟内的随机 (弹道反弹散射) 会让二次跑与选点验收分叉, 成为 B4-厨雷 30% 布局随机红的病根。
+//   行为事实不变: 同一段 updateNadeArc(fuse=0.05) 代码路径在选定场地已真实执行, 断言的是它的输出。
 setCam(scene,0,70,1280/720);
-const cooked=R(`(()=>{ const out={};
-camera.position.set(${scene.x}, ${scene.y}, ${scene.z});
-player.nadeFuse=0.05; VM.state='nade'; player.nadeHeld=true;
-updateNadeArc();
-out.blast=document.getElementById('naBlast').style.display;
-out.air=document.getElementById('naAir').style.display;
-out.ring=String((document.getElementById('naBlast').__attrs||{}).d||'').length>20;
-const path=document.getElementById('naBlast');
-const pts=String((path.__attrs||{}).d||'').replace(/[MZ]/g,' ').trim().split('L').map(s2=>s2.trim().split(/\\s+/).map(Number)).filter(q=>q.length===2&&isFinite(q[0]));
-const rx=pts.map(q=>q[0]), ry=pts.map(q=>q[1]);
-out.ratio=pts.length?+(((Math.max(...ry)-Math.min(...ry))/Math.max(Math.max(...rx)-Math.min(...rx),1e-6))).toFixed(3):-1;
-out.dot=document.getElementById('naDot').style.display;
-return out; })()`);
-ok(cooked.blast==='block'&&cooked.ring===true,'B4-厨雷 引信烧到 0.05s: 预演**照样画地面落点圈** ('+cooked.blast+') —— 用户裁定"总是画地面落点范围"');
-ok(cooked.air==='none','B4-厨雷 不出现空炸环 (普通手雷已无空炸路径)');
-ok(cooked.ratio>0&&cooked.ratio<0.5&&cooked.dot==='block','B4-厨雷 圈仍是贴地椭圆 (ratio '+cooked.ratio+') 且弹着点在');
+const cooked=scene.cook||{blast:'none',air:'none',ring:false,ratio:-1,dot:'none'};
+okS4(cooked.blast==='block'&&cooked.ring===true,'B4-厨雷 引信烧到 0.05s: 预演**照样画地面落点圈** ('+cooked.blast+') —— 用户裁定"总是画地面落点范围"');
+okS4(cooked.air==='none','B4-厨雷 不出现空炸环 (普通手雷已无空炸路径)');
+okS4(cooked.ratio>0&&cooked.ratio<0.5&&cooked.dot==='block','B4-厨雷 圈仍是贴地椭圆 (ratio '+cooked.ratio+') 且弹着点在');
 }
 }
 

@@ -418,7 +418,7 @@ return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,o
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
 const sandbox={
-console,Math,JSON,location:{search:'?seed='+seedN},
+console,Math,JSON,location:{search:'?seed='+seedN+'&pseed='+seedN},
 localStorage:{_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=v;}},
 navigator:{},
 document:{createElement:(t)=>t==='canvas'?({width:0,height:0,getContext:()=>({fillStyle:'',strokeStyle:'',lineWidth:1,font:'',textAlign:'',beginPath(){},moveTo(){},lineTo(){},quadraticCurveTo(){},stroke(){},fillRect(){},clearRect(){},fillText(){},arc(){},save(){},restore(){},translate(){},rotate(){},scale(){}})}):({})},
@@ -444,6 +444,9 @@ sandbox.spawnWallDebris=()=>{};
 sandbox.TAU=Math.PI*2; sandbox.HPI=Math.PI/2;
 const ctx=vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root,'js/00-config.js'),'utf8'),ctx,{filename:'js/00-config.js'});
+// procgen 数据阶段 (2026-10-07b 补载: 旧清单缺 00c ⇒ layoutProcgen 报 PGDATA is not defined,
+// 又是"探针载入清单与实载不一致"盲区 —— 00c 对非 procgen 图自守零执行)
+vm.runInContext(fs.readFileSync(path.join(root,'js/00c-procgen.js'),'utf8'),ctx,{filename:'js/00c-procgen.js'});
 const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;

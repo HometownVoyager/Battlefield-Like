@@ -23,7 +23,14 @@ drop:  radialTex(2,26,[[0,'rgba(232,246,252,.95)'],[0.5,'rgba(190,222,236,.5)'],
 // SVG 精修: 烟/黑烟/尘团改 feTurbulence 位移扰动的蓬松轮廓 (02-scene 生成器, Canvas 径向渐变兜底)
 svgApply(PT.smoke,'puffSmoke'); svgApply(PT.dark,'puffDark'); svgApply(PT.dirt,'puffDirt');
 const particles=[];
-const PARTICLE_MAX=280;
+// ★2026-11-08 性能与画面批: 粒子上限档位化 (原硬编码 280) —— FXMAX_STEPS[fxMaxIdx] (标准280/精简140/增强560),
+// applyFxQuality 由 boot 与 22-hud 循环钮调用; 调低时超出部分就地回收进池, 立即生效。
+let PARTICLE_MAX=280;
+function applyFxQuality(){
+PARTICLE_MAX=FXMAX_STEPS[SETTINGS.fxMaxIdx]||280;
+while(particles.length>PARTICLE_MAX) recycleP(particles.shift());
+}
+applyFxQuality();
 const pPools=new Map();
 function poolKey(tex,additive){ return tex.uuid+(additive?'A':'N'); }
 function recycleP(p){
@@ -202,18 +209,22 @@ c.dmgT=0.5;
 // 点燃地面植被: 云下的草丛/灌木/庄稼起火; 寿命上限 6s 随蔓延继承 (04b-fire FEXPIRE),
 // 燃烧弹火系整体提前熄灭, 不再残留长火线 (残骸/树林等自然火不受影响)
 if(typeof igniteArea==='function') igniteArea(c.x,c.z,4.8,c.thrower,6);
-for(const s of combatants){
-if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员
+const wxIncinDmg=(typeof WX_CFG!=='undefined'&&WX_CFG.fireDmgMul!==undefined)?WX_CFG.fireDmgMul:1.0;
+const victims=combatants.slice();
+for(const s of victims){
+// 2026-11-04b 免着火批: 观战者 (调试/自由观战) 不进燃烧弹云受害者表, 不冒火不抖屏
+if(!(typeof creatureIgnitable==='function'?creatureIgnitable(s):(s.alive&&!s.spectator))||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员
 if(s.team===c.team&&s!==c.thrower) continue;
 const d=Math.hypot(s.pos.x-c.x,(s.pos.y+0.9)-(c.y+0.8),s.pos.z-c.z);
 if(d<c.r+0.5){
-s.damage(11,c.thrower,false);
+s.damage(11*wxIncinDmg,c.thrower,false);
+if(typeof igniteCreature==='function') igniteCreature(s,c.thrower);
 if(s.isPlayer) addTrauma(0.2);
 }
 }
 for(const t of tanks){
 if(!t.alive||t.team===c.team) continue;
-if(Math.hypot(t.pos.x-c.x,t.pos.z-c.z)<c.r+1.5) t.takeDmg(7,c.thrower);
+if(Math.hypot(t.pos.x-c.x,t.pos.z-c.z)<c.r+1.5) t.takeDmg(7*wxIncinDmg,c.thrower);
 }
 }
 }
@@ -247,19 +258,66 @@ let precipObj=null, lightningT=rand(6,14), stormFlash=0;
 // 已知边界: 大舰甲板走 15g 独立碰撞(不在 BOXES), 舰面仍穿 —— 与本批之前行为一致, 需要时另批接。
 const RAIN_COVERS=[]; let rainCoverT=0;
 const _wxCovers=[];   // 本帧短名单: 与相机粒子盒时空相交的顶面 (热路径复用数组)
+let _coverAABB={minX:1e9,maxX:-1e9,minZ:1e9,maxZ:-1e9,maxY:-1e9};
+// ★2026-11-04b 雨雪跟随批 (用户实报: 时停里雨滴随玩家前进; 二报: "还会随玩家的上升下降而上升下降"):
+//   旧版每帧 `precipObj.position.set(camera.x, cam.y-8, camera.z)`, 而粒子坐标是**盒内局部坐标** ⇒
+//   整盒雨丝的世界 x/y/z 逐帧跟着相机/巡飞弹/附身镜头平移, 时停 dt=0 冻住下落与回绕后只剩这份平移,
+//   于是"雨跟着人走"最明显 (非时停只是被大量粒子运动盖住)。
+//   修法 (单源 wxShiftPrecip): 容器仍贴相机 (保证视野里始终有雨、潜水夹水面、顶面遮蔽判据全不变),
+//   但每帧把容器的位移量**反向补进所有粒子的局部坐标** ⇒ 世界坐标 = 局部 + 容器 逐位不变,
+//   三轴都不再连续跟随; 越出盒体的粒子按既有落地/顶面回收同款周期回绕 (远离盒边的粒子零跳变)。
+//   非时停 dt>0 时下落/漂移照常叠加在补偿之上, 雨丝头尾 (相差 0.7m) 必须整段搬否则会被拉成长竖线。
+const WX_R=26;
+let _wxLastX=null, _wxLastY=null, _wxLastZ=null;
+function wxShiftPrecip(dx,dy,dz){
+if(!precipObj||(!dx&&!dy&&!dz)) return;
+const attr=precipObj.geometry&&precipObj.geometry.attributes&&precipObj.geometry.attributes.position;
+if(!attr||!attr.array) return;
+const arr=attr.array, span=2*WX_R;
+const isRain=!!(precipObj.isLine||precipObj.isLineSegments||(typeof WX_CFG!=='undefined'&&WX_CFG.precip==='rain'));
+const hy=isRain?26:24, step=isRain?6:3;
+for(let k=0;k<arr.length;k+=step){
+let x=arr[k]-dx, y=arr[k+1]-dy, z=arr[k+2]-dz;
+// 周期回绕: 只有真正越出盒体的粒子才重入 (盒内粒子世界坐标逐位不动 = 时停里看起来完全冻住)
+while(x>WX_R) x-=span; while(x<-WX_R) x+=span;
+while(z>WX_R) z-=span; while(z<-WX_R) z+=span;
+while(y>hy) y-=hy; while(y<0) y+=hy;
+arr[k]=x; arr[k+1]=y; arr[k+2]=z;
+if(isRain){ arr[k+3]=x; arr[k+4]=y-0.7; arr[k+5]=z; }   // 雨丝尾端整体随头端搬, 恒定 −0.7m
+}
+attr.needsUpdate=true;
+}
 function scanRainCovers(){
 RAIN_COVERS.length=0;
+_coverAABB.minX=1e9; _coverAABB.maxX=-1e9; _coverAABB.minZ=1e9; _coverAABB.maxZ=-1e9; _coverAABB.maxY=-1e9;
 for(let i=0;i<BOXES.length;i++){ const b=BOXES[i];
 if(b.dead||!b.mesh) continue;
 const dy=b.maxY-b.minY, dx=b.maxX-b.minX, dz=b.maxZ-b.minZ;
 if(dy>1.5||dx<0.8||dz<0.8||dx*dz<1.6) continue;
 RAIN_COVERS.push(b);
+if(b.minX<_coverAABB.minX) _coverAABB.minX=b.minX;
+if(b.maxX>_coverAABB.maxX) _coverAABB.maxX=b.maxX;
+if(b.minZ<_coverAABB.minZ) _coverAABB.minZ=b.minZ;
+if(b.maxZ>_coverAABB.maxZ) _coverAABB.maxZ=b.maxZ;
+if(b.maxY>_coverAABB.maxY) _coverAABB.maxY=b.maxY;
 }
 }
 function initWeather(){
+if(precipObj){
+  try{
+    if(precipObj.parent) precipObj.parent.remove(precipObj);
+    else if(typeof scene!=='undefined'&&scene) scene.remove(precipObj);
+    if(precipObj.geometry&&precipObj.geometry.dispose) precipObj.geometry.dispose();
+    if(precipObj.material&&precipObj.material.dispose) precipObj.material.dispose();
+  }catch(e){}
+  precipObj=null;
+}
 // 粒子建池参数收编进 WX_CFG (天气设计 §5-3): 种类 precip / 粒数 precipN —— 雨盒 460/720 与雪池 620/370/900 全为既有校准值。
+// 2026-11-04b: 重建粒子池 = 上一帧容器位姿归零 (新盒的局部坐标以原点为中心); 旧值残留会让首帧误补一个大位移
+_wxLastX=null; _wxLastY=null; _wxLastZ=null;
 if(WX_CFG.precip==='rain'){
-const n=WX_CFG.precipN;
+// 降水密度档 (2026-11-08 性能与画面批): 用户 PRECIP_MUL_STEPS[precipIdx] (1/.5/.25) 乘既有校准粒数 (步进表保证只减不增)
+const n=Math.round(WX_CFG.precipN*(PRECIP_MUL_STEPS[SETTINGS.precipIdx]||1));
 const geo=new THREE.BufferGeometry();
 const pos=new Float32Array(n*6);
 for(let i=0;i<n;i++){
@@ -269,24 +327,30 @@ pos[i*6+3]=x; pos[i*6+4]=y-0.7; pos[i*6+5]=z;
 }
 geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
 precipObj=new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0x9db4c8,transparent:true,opacity:0.38,fog:false}));
+precipObj._isPrecip=true;
 precipObj.frustumCulled=false;
 scene.add(precipObj);
 } else if(WX_CFG.precip==='snow'){
-const n=WX_CFG.precipN;
+// 降水密度档 (2026-11-08 性能与画面批): 与雨分支同规
+const n=Math.round(WX_CFG.precipN*(PRECIP_MUL_STEPS[SETTINGS.precipIdx]||1));
 const geo=new THREE.BufferGeometry();
 const pos=new Float32Array(n*3);
 for(let i=0;i<n;i++){ pos[i*3]=rand(-26,26); pos[i*3+1]=rand(0,24); pos[i*3+2]=rand(-26,26); }
 geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
 precipObj=new THREE.Points(geo,new THREE.PointsMaterial({color:0xf2f5f8,size:0.16,transparent:true,opacity:0.9,fog:false,sizeAttenuation:true}));
+precipObj._isPrecip=true;
 precipObj.frustumCulled=false;
 scene.add(precipObj);
 }
+window.__precipObj=precipObj;
+if(typeof window.getActivePrecipObj!=='function') window.getActivePrecipObj=()=>precipObj;
 // 天气×夜 (昼夜设计 §3.3 顺序钉死): initWeather 在夜档月光/半球系数**之上**再乘天气系数 ——
 // ironbottom(overcast×夜) 就是按这条校准的样本。视觉系数收编进 WX_CFG (天气设计 §5-3);
 // 晴/中雪档系数=1, 赋值与 02-scene 初值逐位相等 (乘 1 无舍入漂移), 统一赋值无回归 (R1)。
 const _nSun=NIGHT_MODE?NIGHT_CFG.sunMul:1, _nHemi=NIGHT_MODE?NIGHT_CFG.hemiMul:1;
 sun.intensity=THEME.sunI*_nSun*WX_CFG.sunMul;
 hemi.intensity=THEME.hemi[2]*_nHemi*WX_CFG.hemiMul;
+sun.castShadow = sunShadowAllowed();
 }
 function updateWeather(dt){
 if(precipObj){
@@ -296,6 +360,15 @@ let pcy=camera.position.y-8;
 if(typeof waterYAt==='function'){
 const pwy=waterYAt(camera.position.x,camera.position.z);
 if(pwy>-1e8&&pcy<pwy-0.5) pcy=pwy-0.5;
+}
+// ★2026-11-04b 雨雪跟随批: 容器照旧贴相机 (视野覆盖/潜水夹水面/顶面遮蔽判据全不变), 但把本帧容器
+//   的三轴位移量反向补进粒子局部坐标 (wxShiftPrecip 单源) ⇒ 粒子的世界坐标逐位不随镜头平移,
+//   时停 dt=0 时雨/雪真正冻在空中; 巡飞弹/附身/自由观战换镜头同理。首帧只记录位姿不补偿。
+if(_wxLastX===null){ _wxLastX=camera.position.x; _wxLastY=pcy; _wxLastZ=camera.position.z; }
+else{
+const ddx=camera.position.x-_wxLastX, ddy=pcy-_wxLastY, ddz=camera.position.z-_wxLastZ;
+if(ddx||ddy||ddz) wxShiftPrecip(ddx,ddy,ddz);
+_wxLastX=camera.position.x; _wxLastY=pcy; _wxLastZ=camera.position.z;
 }
 precipObj.position.set(camera.position.x,pcy,camera.position.z);
 // 顶面短名单 (每帧): 只留"顶面高于盒底"(粒子才可能落到它下面/上面) 且水平投影搭上粒子盒的顶面;
@@ -321,11 +394,12 @@ let y=arr[i3+1]-dt*WX_CFG.precipFall;   // 落速收编 WX_CFG (细雪/中雪 3.
 let x=arr[i3]+Math.sin(nowT*1.4+i*0.7)*dt*0.9;   // 横向漂移各雪档同规 (吹雪漂移=二期候选, 天气设计 §8⑤)
 if(y<0){ y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); }
 else if(_wxCovers.length){
-// ★顶面终结: 世界坐标落进某水平顶面投影且低于其顶面 ⇒ 原地回收 (室内不漏雨雪)
 const wx=x+precipObj.position.x, wz=arr[i3+2]+precipObj.position.z, wy=y+precipObj.position.y;
+if(wy<_coverAABB.maxY&&wx>=_coverAABB.minX&&wx<=_coverAABB.maxX&&wz>=_coverAABB.minZ&&wz<=_coverAABB.maxZ){
 for(let k=0;k<_wxCovers.length;k++){ const b=_wxCovers[k];
 if(wy<b.maxY&&wx>=b.minX&&wx<=b.maxX&&wz>=b.minZ&&wz<=b.maxZ){
 y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); break;
+}
 }
 }
 }
@@ -342,8 +416,8 @@ const nx=rand(-24,24),nz=rand(-24,24);
 arr[i3]=nx; arr[i3+2]=nz;
 arr[i3+3]=nx; arr[i3+5]=nz;
 }else if(_wxCovers.length){
-// ★顶面终结 (判头部端点): 雨丝落到屋顶/桥面即回收, 双端随尾部统一重写
 const wx=arr[i3]+precipObj.position.x, wz=arr[i3+2]+precipObj.position.z, wy=y+precipObj.position.y;
+if(wy<_coverAABB.maxY&&wx>=_coverAABB.minX&&wx<=_coverAABB.maxX&&wz>=_coverAABB.minZ&&wz<=_coverAABB.maxZ){
 for(let k=0;k<_wxCovers.length;k++){ const b=_wxCovers[k];
 if(wy<b.maxY&&wx>=b.minX&&wx<=b.maxX&&wz>=b.minZ&&wz<=b.maxZ){
 y+=26;
@@ -351,6 +425,7 @@ const nx=rand(-24,24),nz=rand(-24,24);
 arr[i3]=nx; arr[i3+2]=nz;
 arr[i3+3]=nx; arr[i3+5]=nz;
 break;
+}
 }
 }
 }
@@ -372,7 +447,9 @@ sun.intensity=THEME.sunI*(NIGHT_MODE?NIGHT_CFG.sunMul:1)*2.6;
 setTimeout(()=>{ sun.intensity=THEME.sunI*(NIGHT_MODE?NIGHT_CFG.sunMul:1)*1.6; },70);
 setTimeout(()=>{ sun.intensity=_nBase; },160);
 const dd=rand(90,320);
-setTimeout(()=>AudioSys.explosion(dd*0.8),dd*2.6);
+// ★2026-11-04b 时停音频批: 远雷是墙钟 setTimeout, 时停前排程的那一声会在冻结期间照响 ——
+//   触发当刻再看一次时停/静默账 (与 01-audio 的 distantMG/bird 同款闸), 冻住的战场不许打雷。
+setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; if(typeof AudioSys!=='undefined'&&AudioSys.isSilenced&&AudioSys.isSilenced()) return; AudioSys.explosion(dd*0.8); },dd*2.6);
 }
 }
 if(stormFlash>0){
@@ -385,8 +462,8 @@ initWeather();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 夜间照明装备 (2026-10-05 昼夜设计 N2, R4: 大灯 / 旗点照明弹 / 探照灯; 夜航灯在 16-aircraft 翼尖)
-// 灯池预算红线 (设计 §5): 真 SpotLight ≤ NIGHT_GEAR.headRealN(2); 真 PointLight = 枪口(10-viewmodel)
-//   + 爆炸(flashLight) + 照明弹 1 盏 ≤ 3。
+// 灯池预算红线 (设计 §5): 真 SpotLight ≤ NIGHT_GEAR.headRealN(2)*2 = 每台开灯载具左右灯口各 1 盏;
+//   真 PointLight = 枪口(10-viewmodel) + 爆炸(flashLight) + 照明弹 1 盏 ≤ 3。
 // 几何一致红线: 所有相位/落点只走 Math.random 系 (rand/randi), 不触碰 wr/wri 布局种子流。
 // 白天零回归: 本段入口全部 NIGHT_MODE 门控 (nightGearTick 在 24-main 也已门控), 白天整段不运行。
 // ══════════════════════════════════════════════════════════════════════════════
@@ -411,17 +488,21 @@ const S=tkSpec(veh.def,veh.def.tk); hw=Math.max(0.5,S.halfW*0.5); fz=S.L/2+0.04;
 fz=veh.dims.L*0.5-0.15; hw=Math.max(0.5,(veh.dims.W||2)*0.3); ly=(veh.dims.deckY||0.9)+0.45;
 }
 const grp=new THREE.Group();
-const gL=_nightGlowSprite('rgba(255,244,214,1)','rgba(255,226,168,0.5)',1.0); gL.position.set(-hw,ly,fz+0.06);
-const gR=_nightGlowSprite('rgba(255,244,214,1)','rgba(255,226,168,0.5)',1.0); gR.position.set(hw,ly,fz+0.06);
-// 假光锥 (additive): 真灯池名额外的车辆靠它读出"开灯" —— 锥顶在灯位, 向前展开
-const cone=new THREE.Mesh(
-new THREE.ConeGeometry(2.7,17,14,1,true),
-new THREE.MeshBasicMaterial({color:0xffe2a8,transparent:true,opacity:0.10,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false}));
-cone.rotation.x=-HPI;                       // apex 朝 -z ⇒ 锥顶落在灯位, 底口向艏向展开
-cone.position.set(0,ly-0.35,fz+17/2-0.25);
-grp.add(gL); grp.add(gR); grp.add(cone);
+const gL=_nightGlowSprite('rgba(255,244,214,1)','rgba(255,226,168,0.6)',1.6); gL.position.set(-hw,ly,fz+0.06);
+const gR=_nightGlowSprite('rgba(255,244,214,1)','rgba(255,226,168,0.6)',1.6); gR.position.set(hw,ly,fz+0.06);
+// 双立体光锥 (additive): 左右车灯各自向前投射真实光束，紧凑战术档覆盖前方道路
+const _headBaseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.headConeL)?NIGHT_GEAR.headConeL:26;
+const coneGeo=new THREE.ConeGeometry(1.8,_headBaseL,14,1,true);
+const coneMat=new THREE.MeshBasicMaterial({color:0xffecc4,transparent:true,opacity:0.12,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false});
+const coneL=new THREE.Mesh(coneGeo,coneMat);
+coneL.rotation.x=-HPI;                       // apex 朝 -z ⇒ 锥顶落在左车灯, 向前方展开
+coneL.position.set(-hw,ly-0.2,fz+_headBaseL*0.5);
+const coneR=new THREE.Mesh(coneGeo,coneMat);
+coneR.rotation.x=-HPI;                       // 锥顶落在右车灯, 向前方展开
+coneR.position.set(hw,ly-0.2,fz+_headBaseL*0.5);
+grp.add(gL); grp.add(gR); grp.add(coneL); grp.add(coneR);
 veh.grp.add(grp);
-veh._hl={grp,glow:[gL,gR],cone};
+veh._hl={grp,glow:[gL,gR],cone:coneL,cones:[coneL,coneR],fz,baseL:_headBaseL};
 return veh._hl;
 }
 function vehHeadlightSet(veh,on){
@@ -440,180 +521,568 @@ function vehHeadlightKill(veh){
 veh.lightsOn=false;
 if(veh._hl){ if(veh._hl.grp.parent) veh._hl.grp.parent.remove(veh._hl.grp); veh._hl=null; }
 }
-// 大灯真灯池 (SpotLight ≤2): 每帧把"离相机最近的开灯载具"换上来, 其余只留假光锥
+// 车灯/手电光锥物理防穿墙动态截断 (算法单源: 根据前方遮挡距离实时收缩光锥与光程, 绝不穿透墙壁)
+function truncateConeMesh(cone,baseL,occD,fz){
+  if(!cone) return;
+  if(occD<0.35){
+    cone.visible=false;
+  }else{
+    cone.visible=true;
+    const effL=Math.min(baseL,occD);
+    const s=clamp(effL/baseL,0.05,1.0);
+    cone.scale.set(s,s,s);
+    cone.position.z=fz+effL*0.5;
+  }
+}
+// 大灯真灯池 (SpotLight ≤ headRealN*2): 每帧把"离相机最近的开灯载具"按台换上 —— 每台 = 左右灯口
+// 各 1 盏 SpotLight (2026-11-01 用户裁定"两盏大灯两道光", 旧版单灯居中只有一道光), 其余载具只留假光锥
 const _hlPool=[];
 function _hlPoolEnsure(){
-while(_hlPool.length<NIGHT_GEAR.headRealN){
-const sl=new THREE.SpotLight(0xffe6b8,0,60,0.44,0.5,1.1);
-sl.castShadow=false; sl.visible=false;
-scene.add(sl); scene.add(sl.target);
-_hlPool.push(sl);
-}
+  const headRange=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.headRange)?NIGHT_GEAR.headRange:52;
+  while(_hlPool.length<NIGHT_GEAR.headRealN*2){
+    const sl=new THREE.SpotLight(0xffe8ba,0,headRange,0.56,0.55,1.0);
+    sl.castShadow=false; sl.visible=false;
+    scene.add(sl); scene.add(sl.target);
+    _hlPool.push(sl);
+  }
 }
 function _hlWorld(veh,out){
-// 车艏灯世界位: pos + 艏向*fz, 高度 pos.y+ly (与 vehHeadlightBuild 同挂点口径)
-let fz=2.3, ly=0.9;
-if(typeof tkSpec==='function'&&veh.def&&veh.def.hullL){ const S=tkSpec(veh.def,veh.def.tk); fz=S.L/2+0.04; ly=Math.max(0.55,S.roof-0.5); }
-else if(veh.dims&&veh.dims.L){ fz=veh.dims.L*0.5-0.15; ly=(veh.dims.deckY||0.9)+0.45; }
-const sn=Math.sin(veh.yaw), cs=Math.cos(veh.yaw);
-out.set(veh.pos.x+sn*fz, veh.pos.y+ly, veh.pos.z+cs*fz);
-return out;
+  // 车艏灯世界位: pos + 艏向*fz, 高度 pos.y+ly (与 vehHeadlightBuild 同挂点口径)
+  // 挂点参数按车缓存 (2026-11-01 性能批): 挂点是 def/dims 的纯派生量, 旧版每帧重跑 tkSpec
+  // (每次调用 Object.assign 两对象 + tb 一对象) —— 夜图灯链每帧每车一次, 热路径零分配军规。
+  let a=veh._hlA;
+  if(a===undefined){
+    a={fz:2.3,ly:0.9,hw:0.85};
+    if(typeof tkSpec==='function'&&veh.def&&veh.def.hullL){ const S=tkSpec(veh.def,veh.def.tk); a.fz=S.L/2+0.04; a.ly=Math.max(0.55,S.roof-0.5); a.hw=Math.max(0.5,S.halfW*0.5); }
+    else if(veh.dims&&veh.dims.L){ a.fz=veh.dims.L*0.5-0.15; a.ly=(veh.dims.deckY||0.9)+0.45; a.hw=Math.max(0.5,(veh.dims.W||2)*0.3); }
+    veh._hlA=a;
+  }
+  const sn=Math.sin(veh.yaw), cs=Math.cos(veh.yaw);
+  out.set(veh.pos.x+sn*a.fz, veh.pos.y+a.ly, veh.pos.z+cs*a.fz);
+  return out;
+}
+// 灯口世界位 (左 side=-1 / 右 side=+1): 艏部中心线点沿**局部右向**偏 ±hw —— 局部 +x 的世界向 =
+// (cos(yaw), 0, -sin(yaw)) (与 vehHeadlightBuild 里 glow 左 -hw/右 +hw 同一套挂点口径, 与 15 系模型约定一致)
+function _hlLamp(veh,side,out){
+  _hlWorld(veh,out);
+  const a=veh._hlA, sn=Math.sin(veh.yaw), cs=Math.cos(veh.yaw);
+  out.x+=cs*side*a.hw; out.z+=-sn*side*a.hw;
+  return out;
 }
 const _hlP=V3(), _hlT=V3();
-// ── 4.2 旗点周期照明弹 ──
+// ── 4.2 旗点周期照明弹 (双层立体照明: 高空强光 + 旗点低空环境漫射) ──
 const FLARES=[]; let _flaresInit=false;
 const _flareLightPool=[];
+function _flareLightPoolEnsure(){
+  if(!_flareLightPool.length){
+    const r=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flareR)?NIGHT_GEAR.flareR:26;
+    // 0: 高空照明弹主光源 (覆盖地面, 衰减 1.15)
+    const plHigh=new THREE.PointLight(0xfffae8,0,r*2.8,1.15);
+    plHigh.castShadow=false; plHigh.visible=false;
+    scene.add(plHigh);
+    _flareLightPool.push(plHigh);
+    // 1: 旗点低空/地面环境漫射光 (挂在旗杆中段离地 3.2m, 真实照亮墙壁、掩体与士兵)
+    const plLow=new THREE.PointLight(0xffecd2,0,r*1.05,1.2);
+    plLow.castShadow=false; plLow.visible=false;
+    scene.add(plLow);
+    _flareLightPool.push(plLow);
+  }
+}
+// ── 4.5 火源动态光照池 (常驻 4 盏暖橙色 PointLight, 动态竞选最近火源, 辅以高频有机跳动 flicker) ──
+const _fireLightPool=[];
+function _ensureFireLightPool(){
+  while(_fireLightPool.length<4){
+    const pl=new THREE.PointLight(0xff7c24,0,16,1.25);
+    pl.castShadow=false;
+    pl.visible=false;
+    scene.add(pl);
+    _fireLightPool.push({
+      light:pl,
+      seed:Math.random()*100
+    });
+  }
+}
+let _flareDiscTex=null;
+function _flareDiscTexture(){
+  if(_flareDiscTex) return _flareDiscTex;
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d');
+  const gr=g.createRadialGradient(64,64,0, 64,64,64);
+  gr.addColorStop(0,'rgba(255,246,215,0.7)');
+  gr.addColorStop(0.3,'rgba(255,246,215,0.45)');
+  gr.addColorStop(0.65,'rgba(255,246,215,0.18)');
+  gr.addColorStop(0.9,'rgba(255,246,215,0.04)');
+  gr.addColorStop(1,'rgba(255,246,215,0)');
+  g.fillStyle=gr;
+  g.fillRect(0,0,128,128);
+  _flareDiscTex=new THREE.CanvasTexture(c);
+  return _flareDiscTex;
+}
+function _createTerrainFlareDiscGeo(cx,cz,radius,rings=8,segments=28){
+  const vertexCount=1+rings*segments;
+  const positions=new Float32Array(vertexCount*3);
+  const uvs=new Float32Array(vertexCount*2);
+  const indices=[];
+
+  const cgy=heightAt(cx,cz);
+  const cwy=(typeof waterYAt==='function')?waterYAt(cx,cz):-1e9;
+  const ctop=(cwy>-1e8)?Math.max(cgy,cwy):cgy;
+  positions[0]=0;
+  positions[1]=ctop+0.08;
+  positions[2]=0;
+  uvs[0]=0.5;
+  uvs[1]=0.5;
+
+  for(let r=1;r<=rings;r++){
+    const rad=radius*(r/rings);
+    for(let s=0;s<segments;s++){
+      const theta=(s/segments)*TAU;
+      const lx=rad*Math.cos(theta);
+      const lz=rad*Math.sin(theta);
+      const wx=cx+lx;
+      const wz=cz+lz;
+      const gy=heightAt(wx,wz);
+      const wy=(typeof waterYAt==='function')?waterYAt(wx,wz):-1e9;
+      const topY=(wy>-1e8)?Math.max(gy,wy):gy;
+
+      const idx=1+(r-1)*segments+s;
+      positions[idx*3]=lx;
+      positions[idx*3+1]=topY+0.08;
+      positions[idx*3+2]=lz;
+
+      uvs[idx*2]=0.5+0.5*(lx/radius);
+      uvs[idx*2+1]=0.5+0.5*(lz/radius);
+    }
+  }
+
+  for(let s=0;s<segments;s++){
+    const next_s=(s+1)%segments;
+    indices.push(0,1+next_s,1+s);
+  }
+
+  for(let r=1;r<rings;r++){
+    const rStartCurr=1+(r-1)*segments;
+    const rStartNext=1+r*segments;
+    for(let s=0;s<segments;s++){
+      const next_s=(s+1)%segments;
+      const c1=rStartCurr+s;
+      const c2=rStartCurr+next_s;
+      const n1=rStartNext+s;
+      const n2=rStartNext+next_s;
+      indices.push(c1,n2,n1);
+      indices.push(c1,c2,n2);
+    }
+  }
+
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+  geo.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
 function nightFlaresInit(){
-_flaresInit=true;
-if(!(GAMEMODE==='conquest'||GAMEMODE==='assault')) return;   // 仅占旗图 (设计 §4.2)
-if(typeof FLAGS==='undefined'||!FLAGS.length) return;
-FLAGS.forEach((f,i)=>{
-if(f.ship!==undefined&&f.ship!==null&&f.ship!==false) return; // 舰上甲板旗不做 (纯海图旗点全在舰上)
-FLARES.push({x:f.x,z:f.z,gy:heightAt(f.x,f.z),
-t0:-(i*7.31+Math.random()*NIGHT_GEAR.flarePeriod),      // Math.random 相位: 不进种子 (几何一致红线)
-y:46,lit:0,sp:null,disc:null});
-});
+  _flaresInit=true;
+  if(!(GAMEMODE==='conquest'||GAMEMODE==='assault')) return;   // 仅占旗图 (设计 §4.2)
+  if(typeof FLAGS==='undefined'||!FLAGS.length) return;
+  FLAGS.forEach((f,i)=>{
+    FLARES.push({x:f.x,z:f.z,gy:heightAt(f.x,f.z),
+      t0:-(i*7.31+Math.random()*NIGHT_GEAR.flarePeriod),      // Math.random 相位: 不进种子 (几何一致红线)
+      y:46,lit:0,sp:null,disc:null});
+  });
 }
 function _flareVisual(fl){
-if(!fl.sp){
-fl.sp=_nightGlowSprite('rgba(255,250,232,1)','rgba(255,238,196,0.55)',9);
-fl.sp.material.fog=false;
-scene.add(fl.sp);
-const dg=new THREE.CircleGeometry(NIGHT_GEAR.flareR,26);
-fl.disc=new THREE.Mesh(dg,new THREE.MeshBasicMaterial({color:0xfff0cc,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
-fl.disc.rotation.x=-HPI;
-scene.add(fl.disc);
-}
+  if(!fl.sp){
+    fl.sp=_nightGlowSprite('rgba(255,250,232,1)','rgba(255,238,196,0.55)',9);
+    fl.sp.material.fog=false;
+    scene.add(fl.sp);
+    const dg=_createTerrainFlareDiscGeo(fl.x,fl.z,NIGHT_GEAR.flareR,8,28);
+    fl.disc=new THREE.Mesh(dg,new THREE.MeshBasicMaterial({
+      map:_flareDiscTexture(),
+      color:0xffffff,
+      transparent:true,
+      opacity:0,
+      blending:THREE.AdditiveBlending,
+      depthWrite:false,
+      depthTest:true,
+      side:THREE.DoubleSide,
+      fog:false
+    }));
+    fl.disc.position.set(fl.x,0,fl.z);
+    scene.add(fl.disc);
+  }
 }
 // 照明弹/探照灯补亮单源: 目标点被照亮的程度 → Bot 索敌 viewD 倍率 (≥1)。14-bots perceive 消费。
 function nightLitMul(x,y,z){
-if(!NIGHT_MODE) return 1;
-let m=1;
-for(const fl of FLARES){
-if(fl.lit<=0.05) continue;
-const dx=x-fl.x, dz=z-fl.z;
-if(dx*dx+dz*dz<NIGHT_GEAR.flareR*NIGHT_GEAR.flareR) m=Math.max(m,NIGHT_GEAR.flareLitView);
-}
-return m;
+  if(!NIGHT_MODE) return 1;
+  let m=1;
+  for(const fl of FLARES){
+    if(fl.lit<=0.05) continue;
+    const dx=x-fl.x, dz=z-fl.z;
+    if(dx*dx+dz*dz<NIGHT_GEAR.flareR*NIGHT_GEAR.flareR) m=Math.max(m,NIGHT_GEAR.flareLitView);
+  }
+  return m;
 }
 // ── 4.3 探照灯: 05a/05a 的静态灯位登记在 SEARCHLIGHTS (00-config), 光柱锥在此惰性构建 ──
 const _searchBeams=[];
 function _searchVisual(sl){
-if(sl._beam) return;
-const root=new THREE.Group();
-root.position.set(sl.x,sl.y,sl.z);
-root.rotation.order='YXZ';
-const tilt=new THREE.Group();
-const h=NIGHT_GEAR.searchR;
-const cone=new THREE.Mesh(
-new THREE.ConeGeometry(5.2,h,16,1,true),
-new THREE.MeshBasicMaterial({color:0xfff6dc,transparent:true,opacity:0.13,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false}));
-cone.rotation.x=-HPI;            // apex 朝 -z ⇒ 锥顶落在灯位
-cone.position.z=h/2;
-tilt.add(cone);
-root.add(tilt);
-const glow=_nightGlowSprite('rgba(255,250,238,1)','rgba(255,240,200,0.5)',2.6);
-root.add(glow);
-scene.add(root);
-sl._beam={root,tilt,az0:sl.az0!==undefined?sl.az0:Math.random()*TAU,phase:sl.phase!==undefined?sl.phase:Math.random()*TAU};
-_searchBeams.push(sl);
+  if(sl._beam) return;
+  const root=new THREE.Group();
+  root.position.set(sl.x,sl.y,sl.z);
+  root.rotation.order='YXZ';
+  const tilt=new THREE.Group();
+  const h=NIGHT_GEAR.searchR;
+  const cone=new THREE.Mesh(
+    new THREE.ConeGeometry(5.2,h,16,1,true),
+    new THREE.MeshBasicMaterial({color:0xfff6dc,transparent:true,opacity:0.13,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false}));
+  cone.rotation.x=-HPI;            // apex 朝 -z ⇒ 锥顶落在灯位
+  cone.position.z=h/2;
+  tilt.add(cone);
+  root.add(tilt);
+  const glow=_nightGlowSprite('rgba(255,250,238,1)','rgba(255,240,200,0.5)',2.6);
+  root.add(glow);
+  scene.add(root);
+  sl._beam={root,tilt,az0:sl.az0!==undefined?sl.az0:Math.random()*TAU,phase:sl.phase!==undefined?sl.phase:Math.random()*TAU};
+  _searchBeams.push(sl);
 }
 const _sDir=V3();
 function _searchDir(sl,out){
-const b=sl._beam;
-const az=b.az0+Math.sin(nowT*0.22+b.phase)*1.05;   // 扫掠: ~14s 一个来回, ±60°
-const el=0.45;
-out.set(Math.sin(az)*Math.cos(el),Math.sin(el),Math.cos(az)*Math.cos(el));
-return az;
+  const b=sl._beam;
+  const az=b.az0+Math.sin(_ngT*0.22+b.phase)*1.05;   // 扫掠: ~14s 一个来回, ±60° (战斗钟 _ngT: 时停冻结, 2026-11-05)
+  const el=0.45;
+  out.set(Math.sin(az)*Math.cos(el),Math.sin(el),Math.cos(az)*Math.cos(el));
+  return az;
 }
 // 照中玩家判定 (设计 §4.3): 光柱线段扫过玩家 ⇒ 记 _searchLitT, Bot 索敌对玩家 viewD ×searchView 且无视 FOV 门
 function _searchHitTick(){
-if(!player||!player.alive||player.spectator) return;
-const px=player.pos.x, py=player.pos.y+1.0, pz=player.pos.z;
-for(const sl of _searchBeams){
-_searchDir(sl,_sDir);
-const ox=sl.x, oy=sl.y, oz=sl.z;
-const wx=px-ox, wy=py-oy, wz=pz-oz;
-const t=wx*_sDir.x+wy*_sDir.y+wz*_sDir.z;
-if(t<3||t>NIGHT_GEAR.searchR) continue;
-const cx=ox+_sDir.x*t-px, cy=oy+_sDir.y*t-py, cz=oz+_sDir.z*t-pz;
-if(cx*cx+cy*cy+cz*cz<NIGHT_GEAR.searchW*NIGHT_GEAR.searchW){ player._searchLitT=nowT; break; }
+  if(!player||!player.alive||player.spectator) return;
+  const px=player.pos.x, py=player.pos.y+1.0, pz=player.pos.z;
+  for(const sl of _searchBeams){
+    _searchDir(sl,_sDir);
+    const ox=sl.x, oy=sl.y, oz=sl.z;
+    const wx=px-ox, wy=py-oy, wz=pz-oz;
+    const t=wx*_sDir.x+wy*_sDir.y+wz*_sDir.z;
+    if(t<3||t>NIGHT_GEAR.searchR) continue;
+    const cx=ox+_sDir.x*t-px, cy=oy+_sDir.y*t-py, cz=oz+_sDir.z*t-pz;
+    if(cx*cx+cy*cy+cz*cz<NIGHT_GEAR.searchW*NIGHT_GEAR.searchW){ player._searchLitT=nowT; break; }
+  }
 }
+// ── 4.4 步兵战术手电筒: 玩家动态视线聚光灯、环境广角溢光、武器溢光与第一人称立体丁达尔光锥 ──
+let _playerFlashlight=null;
+function _ensurePlayerFlashlight(){
+  if(_playerFlashlight) return _playerFlashlight;
+  const flR=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flRange)?NIGHT_GEAR.flRange:35;
+  const fl=new THREE.SpotLight(0xfff2d4,0,flR,0.72,0.52,0.75);
+  fl.castShadow=false; fl.visible=false;
+  scene.add(fl); scene.add(fl.target);
+  _playerFlashlight=fl;
+  return _playerFlashlight;
 }
-// ── 每帧总入口 (24-main, NIGHT_MODE 门控) ──
+// 战术手电近景广角溢光 (PointLight 随身挂载, 照亮近距离地面与身侧环境)
+let _playerFlSpill=null;
+function _ensurePlayerFlashlightSpill(){
+  if(_playerFlSpill) return _playerFlSpill;
+  const sp=new THREE.PointLight(0xfff0cc,0,14,1.4);
+  sp.castShadow=false; sp.visible=false;
+  scene.add(sp);
+  _playerFlSpill=sp;
+  return _playerFlSpill;
+}
+// 第一人称武器模型侧向溢光 (在独立的 vmScene 中为持枪模型提供真实开灯光感)
+let _playerVmFlashlight=null;
+function _ensurePlayerVmFlashlight(){
+  if(_playerVmFlashlight) return _playerVmFlashlight;
+  if(typeof vmScene==='undefined'||!vmScene) return null;
+  const vml=new THREE.PointLight(0xffebd0,0,2.2,1.5);
+  vml.position.set(0.12,0.06,-0.18);
+  vml.visible=false;
+  vmScene.add(vml);
+  _playerVmFlashlight=vml;
+  return _playerVmFlashlight;
+}
+// 第一人称立体战术光锥 (丁达尔空气微粒光柱, 顶点在发射点, 遇障碍防穿墙, 暴雨水汽强散射)
+let _playerFlCone=null;
+function _ensurePlayerFlashlightCone(){
+  if(_playerFlCone) return _playerFlCone;
+  const baseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:22;
+  // ConeGeometry 沿 Y 轴创建: radius=2.2, height=baseL
+  const coneGeo=new THREE.ConeGeometry(2.2,baseL,20,1,true);
+  // 把锥顶 apex 移到原点 (0,0,0), 底面移到 -Y 轴:
+  coneGeo.translate(0,-baseL*0.5,0);
+  // 绕 X 轴旋转 90 度让 -Y 轴精确对齐到 -Z 轴 (相机的正前方向):
+  coneGeo.rotateX(Math.PI*0.5);
+  const coneMat=new THREE.MeshBasicMaterial({
+    color:0xfff4dc,
+    transparent:true,
+    opacity:0.055,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false,
+    side:THREE.DoubleSide,
+    fog:false
+  });
+  const m=new THREE.Mesh(coneGeo,coneMat);
+  m.visible=false;
+  scene.add(m);
+  _playerFlCone=m;
+  return _playerFlCone;
+}
+// 历史接口空桩 (彻底移除地面平面光斑网格, 保持向后兼容安全)
+function _ensureFlSpotMesh(){ return { visible:false, position:V3(), scale:V3(), material:{ opacity:0 } }; }
+const _ensureFlSpotSprite=_ensureFlSpotMesh;
+// ── 夜间链热路径收敛 (2026-10-24 性能排查批) ──
+// ① 手电起点复用槽: 旧版 eye.clone().add(...).add(V3()) 每帧 3 个新向量 (热循环零分配军规);
+// ② 大灯候选表/比较器模块级: 旧版每帧新建 cands 数组 + _camDistSq 闭包 + 比较器闭包 (夜/雨图常态运行);
+// ③ 距离平方入表时算一次 (_hlD2), 排序与 75m 光锥截断门直接读缓存值, 不再在比较器里反复开方重算。
+const _pfO=V3();
+const _pfF=V3(), _pfR=V3();   // 手电 tick 的 forward/right 复用槽 (2026-11-01): camForward() 无 out 参返回 clone
+const _hlCands=[];
+const _hlCmp=(a,b)=>a._d2-b._d2;
+function _hlD2(v){ const p=v.pos, cp=camera.position; const dx=p.x-cp.x, dy=p.y-cp.y, dz=p.z-cp.z; return dx*dx+dy*dy+dz*dz; }
+function playerFlashlightTick(dt){
+  const fl=_ensurePlayerFlashlight();
+  const spill=_ensurePlayerFlashlightSpill();
+  const vml=_ensurePlayerVmFlashlight();
+  const cone=_ensurePlayerFlashlightCone();
+  // ★2026-11-05 调试模式装备批 (用户实报"人身上没有手电筒和L键相关内容"): 旧版此处把 player.spectator
+  //   一并排除 ⇒ 调试模式 (spectator=true 但 alive, 是正常作战单位) 永远无手电。判据改为 alive 单门 ——
+  //   票尽真观战 (specView) alive=false 天然排除; 调试观战活着, 与普通士兵同装备 (L 键同链)。
+  const on=!!(player&&player.alive&&!player.onVehicle&&!player.onNaval&&player.flashlight);
+  if(on){
+    const tp=(typeof thirdPersonOn==='function'&&thirdPersonOn());
+    // ★2026-11-05 实机反馈批 (用户实报"巡飞弹背视角下, 光柱保持在第一人称的相对位置"): 正在操控巡飞弹
+    //   且处于 F 背追档 (loiterView) 时, 手电整链 (真 SpotLight/近景溢光/丁达尔光柱) **锚到弹体本身** ——
+    //   起点=弹体, 朝向=弹鼻。TV 弹头档相机就钉在弹体上, 维持相机锚 (第一人称观感不变)。旧版不分档
+    //   全按相机锚 ⇒ 背追机位拉到弹体后上方, 光柱悬在相机前 (起点/朝向都不随弹体, 用户截图为证)。
+    const lt=(player.loiter&&!player.loiter.dead)?player.loiter:null;
+    const ltBack=!!(lt&&player.loiterView);
+    let fwd,eye;
+    if(ltBack){ fwd=_pfF.copy(loiterForward(lt)); eye=lt.pos; }   // loiterForward 返回共享槽 _loF: 立即拷入本 tick 槽, 不跨帧持有
+    else{ fwd=camForward(_pfF); eye=camera.position; }
+    const right=camRight(_pfR);
+    const flR=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flRange)?NIGHT_GEAR.flRange:35;
+    const baseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:22;
+
+    // 物理障碍检测 (raycastWorld)
+    const hit=raycastWorld(eye,fwd,flR);
+    const occD=hit?hit.dist:flR;
+
+    // 手电光源起点与朝向 (从持枪右胸/武器导轨处投射) — 复用槽零分配 (2026-10-24)
+    const o=_pfO.copy(eye);
+    if(ltBack){ o.addScaledVector(fwd,0.4); }   // 弹鼻光学头罩前方起光 (光柱起点=弹体本身)
+    else{ o.addScaledVector(fwd,0.25).addScaledVector(right,0.12); o.y-=0.1; }
+    fl.position.copy(o);
+    fl.target.position.copy(eye).addScaledVector(fwd,Math.max(1,occD));
+    fl.target.updateMatrixWorld();
+
+    // 关键修复: 仅当正前方撞到实体墙体/障碍物 (kind!=='ground') 时才动态截断光照, 地面是开阔受光面不掐断 distance
+    if(hit&&hit.kind!=='ground'&&occD<flR){
+      fl.distance=Math.max(2.5,Math.min(flR,occD+0.45));
+    }else{
+      fl.distance=flR;
+    }
+
+    // 曝光自适应补偿: 暴雨夜 (~0.34 曝光) 调柔至 ~47 (调降约40%, 柔和清晰杜绝近距惨白过曝)
+    const expo=(typeof renderer!=='undefined'&&renderer.toneMappingExposure)?renderer.toneMappingExposure:1.0;
+    const compIntensity=clamp(16/Math.max(0.20,expo),20,48);
+    const isCloseWall=!!(hit&&hit.kind!=='ground'&&occD<1.4);
+    fl.intensity=isCloseWall?clamp(occD*18,6,compIntensity):compIntensity;
+    fl.angle=0.72;
+    fl.penumbra=0.52;
+    fl.decay=1.1;
+    fl.visible=true;
+
+    // 近景广角溢光更新 (跟随发射点前移 0.7m, 适度柔和微光照亮身边地面与掩体)
+    if(spill){
+      spill.position.copy(o).addScaledVector(fwd,0.7);
+      spill.intensity=compIntensity*0.13;
+      spill.visible=true;
+    }
+
+    // 第一人称武器模型侧向溢光联动 (微调至0.85, 真实柔和金属泛光)
+    if(vml){
+      vml.intensity=0.85;
+      vml.visible=!tp&&!lt;   // 制导中整个 viewmodel 都是隐的 (VM.root.visible=false), vm 灯同步熄 (2026-11-05 批)
+    }
+
+    // 第一人称立体空气光柱: 第一人称下显示, 遇前方障碍平滑收缩防穿墙 (2026-10-10: 复用上面 hit 结果, 避免重复发射世界射线)
+    if(!tp&&cone){
+      const coneD=(hit&&hit.dist<baseL)?hit.dist:baseL;
+      const effL=Math.max(0.3,Math.min(baseL,coneD));
+      // 水汽米氏散射: 暴雨或雨雾天丁达尔光束调至0.075 (清澈自然不泛白刺眼), 晴天保持0.038柔和微光
+      const isWetWx=(typeof WX_CFG!=='undefined')&&(WX_CFG.precip==='rain'||(WX_CFG.fogDim||1)<0.7);
+      if(cone.material) cone.material.opacity=isWetWx?0.075:0.038;
+      cone.position.copy(o);
+      if(ltBack){
+        cone.rotation.order='YXZ';
+        cone.rotation.set(lt.pitch,lt.yaw,0);   // 光柱随弹体姿态 (锥体绕光轴旋转对称, roll 恒 0; 2026-11-05 批)
+      }else{
+        cone.quaternion.copy(camera.quaternion);
+      }
+      const s=clamp(effL/baseL,0.05,1.0);
+      cone.scale.set(s,s,effL/baseL);
+      cone.visible=true;
+    }else if(cone){
+      cone.visible=false;
+    }
+  }else{
+    if(fl&&fl.visible){ fl.intensity=0; fl.visible=false; }
+    if(spill&&spill.visible){ spill.intensity=0; spill.visible=false; }
+    if(vml&&vml.visible){ vml.intensity=0; vml.visible=false; }
+    if(cone&&cone.visible) cone.visible=false;
+  }
+}
+// ── 每帧总入口 (24-main, 暗光或照明开启时运行) ──
+// 夜战装备**战斗钟** (2026-11-05 时停照明弹批): 本段一切相位/扫掠只吃这里的世界帧长 —— 时停 dt=0 ⇒
+// 照明弹缓降/飘移与探照灯扫掠整段冻结, 指挥减速 ×0.2 ⇒ 同步慢放。旧版直接读 nowT (24-main 的墙钟表盘,
+// 时停管道实际并不冻结它 —— 24-main nowOff 记账为秒、nowT 表盘为毫秒, 差 1000 倍 ⇒ nowT 照走), 于是
+// 战场全冻而旗点照明弹照常升空 (用户实报 2026-11-05)。_ngT 只在 nightGearTick 内推进, 不与 nowT 混用。
+let _ngT=0;
 function nightGearTick(dt){
-if(!NIGHT_MODE) return;
+_ngT+=dt;
+playerFlashlightTick(dt);
+const isDark=(typeof isDarkEnvironment==='function')?isDarkEnvironment():NIGHT_MODE;
 // 大灯: AI 状态机 (行进开灯 / 交战关灯, 设计 §4.1) + 玩家车不代管 (L 键自管)
-const cands=[];
+_hlCands.length=0;
+const cands=_hlCands;   // 模块级复用表 (2026-10-24): 夜/雨图每帧跑, 不再逐帧新建数组
 for(const t of tanks){
 if(!t.alive) continue;
 if(t.isAI&&!t.playerDriven){
 const engaged=!!(t.tTarget&&t.tMemT>0);
-const want=!engaged;
+const want=isDark&&!engaged;
 if(!!t.lightsOn!==want) vehHeadlightSet(t,want);
 }
-if(t.lightsOn) cands.push(t);
+if(t.lightsOn){ t._d2=_hlD2(t); cands.push(t); }
 }
 for(const tk of trucks){
 if(!tk.alive||tk.sunk) continue;
-if(!tk.lightsOn) vehHeadlightSet(tk,true);   // 劫道车队夜行常亮 (目标可循, 也暴露)
-if(tk.lightsOn) cands.push(tk);
+if(isDark&&!tk.lightsOn) vehHeadlightSet(tk,true);   // 劫道车队夜行常亮 (目标可循, 也暴露)
+if(tk.lightsOn){ tk._d2=_hlD2(tk); cands.push(tk); }
 }
 if(typeof navalCraft!=='undefined') for(const b of navalCraft){
 if(!b.alive||b.state!=='run') { if(b.lightsOn) vehHeadlightSet(b,false); continue; }
-if(b.isAI&&!b.playerDriven&&!b.lightsOn) vehHeadlightSet(b,true);
-if(b.lightsOn) cands.push(b);
+if(isDark&&b.isAI&&!b.playerDriven&&!b.lightsOn) vehHeadlightSet(b,true);
+if(b.lightsOn){ b._d2=_hlD2(b); cands.push(b); }
 }
-// 真灯池竞选: 离相机最近的开灯载具 (≤headRealN), 其余假光锥
+// 幽灵坦克 (15c 单例, 不在 tanks/trucks/navalCraft 任何一张表里): 调试模式唯一能开的"坦克"。
+// ★2026-11-05 用户实报"坦克上的大灯没有实际效果"病根 —— 旧版大灯候选/真灯池竞选/假光锥防穿墙
+// 三段全都扫不到它, 按 L 只亮假光锥, 真 SpotLight 永远轮不到 ⇒ 地面照不亮。收车 (SPECVEH=null)
+// 自动退出; alive 门对齐其它载具; isAI=false 天然不吃上面 AI 状态机 (L 键自管口径不变)。
+if(typeof SPECVEH!=='undefined'&&SPECVEH&&SPECVEH.alive&&SPECVEH.lightsOn){ SPECVEH._d2=_hlD2(SPECVEH); cands.push(SPECVEH); }
+// 假光锥防穿墙与真灯池竞选: 离相机最近的开灯载具 (≤headRealN), 其余假光锥
 _hlPoolEnsure();
-cands.sort((a,b)=>a.pos.distanceToSquared(camera.position)-b.pos.distanceToSquared(camera.position));
-for(let i=0;i<_hlPool.length;i++){
-const sl=_hlPool[i];
-const v=cands[i];
-if(v&&v.pos.distanceTo(camera.position)<NIGHT_GEAR.headRealR){
-_hlWorld(v,_hlP);
-sl.position.copy(_hlP);
-const sn=Math.sin(v.yaw), cs=Math.cos(v.yaw);
-sl.target.position.set(_hlP.x+sn*26, v.pos.y-0.4, _hlP.z+cs*26);
-sl.target.updateMatrixWorld();
-sl.intensity=2.6; sl.visible=true;
-}else{ sl.intensity=0; sl.visible=false; }
+if(cands.length>1) cands.sort(_hlCmp);
+const headR=Math.max(40, (typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.headRange)?NIGHT_GEAR.headRange:36);
+const headConeL=Math.max(28, (typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.headConeL)?NIGHT_GEAR.headConeL:26);
+// 遍历所有开灯载具, 靠近相机的做车前防穿墙截断 (2026-10-10: 引入 0.12s 节流与前2辆限制, 消除多车并发 raycastWorld)
+for(let ci=0;ci<cands.length;ci++){
+  const v=cands[ci];
+  if(!v._hl) continue;
+  if(v._d2>75*75) continue;
+  v._hlRayT = (v._hlRayT || 0) - dt;
+  if(ci < 2 && v._hlRayT <= 0){
+    v._hlRayT = 0.12;
+    _hlWorld(v,_hlP);
+    const sn=Math.sin(v.yaw), cs=Math.cos(v.yaw);
+    _hlT.set(sn,0,cs);
+    const hit=raycastWorld(_hlP,_hlT,headConeL);
+    v._hlOccD = hit?hit.dist:headConeL;
+  }
+  const occD=(v._hlOccD!==undefined)?v._hlOccD:headConeL;
+  if(v._hl.cones){
+    for(let j=0;j<v._hl.cones.length;j++) truncateConeMesh(v._hl.cones[j],v._hl.baseL||headConeL,occD,v._hl.fz||2.3);
+  }
 }
-// 照明弹
+const expo=(typeof renderer!=='undefined'&&renderer.toneMappingExposure)?renderer.toneMappingExposure:1.0;
+// 坦克大灯自适应补光: 暗光暴雨下 (~0.34 曝光) 补偿至 ~15.5 (约原版 4.2 的 3.7 倍, 照亮道路但不刺眼, 遵从用户"提升小一点"裁定)
+const headComp=clamp(5.2/Math.max(0.20,expo),6.5,16);
+// 真灯滞回 (2026-10-24 性能排查批): headRealR(60m) 内上真灯、+15m 缓冲带外才下 —— 旧版硬门下载具贴着
+// 竞选半径行驶时灯可见性每秒多次翻转, 每次翻转全场材质按新灯态重选 program (数百次 getProgram 查表)
+// + GPU 每片元光环数变化, 是夜/雨图的周期性微卡顿源。滞回后翻转只发生在 15m 宽的缓冲带外缘一次。
+const _rEng2=NIGHT_GEAR.headRealR*NIGHT_GEAR.headRealR;
+const _rHold2=(NIGHT_GEAR.headRealR+15)*(NIGHT_GEAR.headRealR+15);
+// 按台竞选 (rig i = cands[i] ⇔ 池位 i*2 左灯 + i*2+1 右灯): 滞回章仍盖在车上 (_hlReal), 上下灯
+// 永远成对 —— 旧版单灯居中的"一道光"即此循环按单车 1 盏分配所致 (2026-11-01 用户裁定两灯两道光)。
+for(let i=0;i<_hlPool.length;i+=2){
+  const v=cands[i>>1];
+  const slL=_hlPool[i], slR=_hlPool[i+1];
+  let lit=false;
+  if(v){
+    if(v._hlReal===undefined) v._hlReal=false;
+    if(!v._hlReal&&v._d2<_rEng2) v._hlReal=true;
+    else if(v._hlReal&&v._d2>_rHold2) v._hlReal=false;
+    if(v._hlReal){
+      const sn=Math.sin(v.yaw), cs=Math.cos(v.yaw);
+      const occD=(v._hlOccD!==undefined)?v._hlOccD:headConeL;
+      const aim=Math.max(1,occD);
+      // 单灯减亮 0.75×: 左右双灯近场叠照 ≈ 旧单灯 1.5× (总亮随用户"照明范围略小"上调, 但不冲爆曝光补偿标定)
+      const inten=occD<0.6?Math.max(2.0,headComp*0.26):headComp*0.75;
+      const dist=Math.min(headR,occD+0.45); // 动态截断真大灯光照, 杜绝透墙照亮背后房间
+      for(let s2=0;s2<2;s2++){
+        const sl=s2===0?slL:slR;
+        _hlLamp(v,s2===0?-1:1,_hlP);
+        sl.position.copy(_hlP);
+        // 瞄点 = 灯口自身沿艏向前推 aim ⇒ 左右两道**平行**光束 (旧版单灯同式)
+        sl.target.position.set(_hlP.x+sn*aim, v.pos.y+0.3, _hlP.z+cs*aim);
+        sl.target.updateMatrixWorld();
+        sl.distance=dist; sl.intensity=inten; sl.visible=true;
+      }
+      lit=true;
+    }
+  }
+  if(!lit){
+    slL.intensity=0; slL.visible=false;
+    slR.intensity=0; slR.visible=false;
+  }
+}
+// 照明弹 (双层立体照明: 高空主光强覆盖 + 旗点低空环境漫射)
+// ★2026-11-05 isDark 门 (随 24-main 门放宽新增): 大灯 L 键现在能把本 tick 在**晴天白天**也拉起来
+//   (调试模式幽灵坦克大灯), 照明弹/探照灯是暗光装备, 亮环境一律不建不跑 —— 否则晴天开一次车灯,
+//   旗点上空就凭空升起照明弹。雨昼 (isDarkEnvironment 命中) 行为与旧版逐位一致。
+let bestFlare=null,bestD=1e9;   // 亮环境不进循环 ⇒ 恒 null ⇒ 下方灯池走全灭分支 (isDark 门外仍要可见)
+if(isDark){
 if(!_flaresInit) nightFlaresInit();
-let bestFlare=null,bestD=1e9;
 for(const fl of FLARES){
-const p=((nowT-fl.t0)%NIGHT_GEAR.flarePeriod+NIGHT_GEAR.flarePeriod)%NIGHT_GEAR.flarePeriod;
+const p=((_ngT-fl.t0)%NIGHT_GEAR.flarePeriod+NIGHT_GEAR.flarePeriod)%NIGHT_GEAR.flarePeriod;
 if(p<NIGHT_GEAR.flareBurn){
 if(!fl.sp) _flareVisual(fl);
 fl.y=55-p*1.1;                                   // 缓降 55→46
 const rise=Math.min(1,p/0.6), fall=Math.min(1,(NIGHT_GEAR.flareBurn-p)/0.8);
 fl.lit=Math.min(rise,fall);
-const drift=Math.sin(nowT*0.35+fl.x)*1.2;
+const drift=Math.sin(_ngT*0.35+fl.x)*1.2;        // 战斗钟: 时停里飘移同样冻结 (2026-11-05)
 fl.sp.visible=true;
 fl.sp.position.set(fl.x+drift,fl.y,fl.z);
 fl.sp.material.opacity=0.85*fl.lit;
 fl.sp.scale.set(9+2*(1-fl.lit),9+2*(1-fl.lit),1);
 fl.disc.visible=true;
-fl.disc.position.set(fl.x,fl.gy+0.07,fl.z);
-fl.disc.material.opacity=0.11*fl.lit;
+fl.disc.position.set(fl.x,0,fl.z);
+fl.disc.material.opacity=0.22*fl.lit;
 const d2=(fl.x-camera.position.x)**2+(fl.z-camera.position.z)**2;
 if(d2<bestD){ bestD=d2; bestFlare=fl; }
 }else if(fl.lit>0||fl.sp&&fl.sp.visible){
 fl.lit=0; if(fl.sp) fl.sp.visible=false; if(fl.disc) fl.disc.visible=false;
 }
 }
-if(!_flareLightPool.length){
-const pl=new THREE.PointLight(0xfff2d0,0,NIGHT_GEAR.flareR*2.6,1.4);
-pl.visible=false; scene.add(pl);
-_flareLightPool.push(pl);
-}
-const flL=_flareLightPool[0];
+}   // isDark (照明弹段)
+_flareLightPoolEnsure();
+const flHigh=_flareLightPool[0];
+const flLow=_flareLightPool[1];
 if(bestFlare&&bestFlare.lit>0.05){
-flL.position.set(bestFlare.x,bestFlare.y-0.5,bestFlare.z);
-flL.intensity=1.7*bestFlare.lit;
-flL.visible=true;
-}else{ flL.intensity=0; flL.visible=false; }
+  // 高空照明弹照度自适应补光 (2026-10-10 调优: 暴雨夜 ~10.5, 晴夜 ~4.2, 柔和照亮地面与建筑, 消除刺眼大灯过曝)
+  const flareHighComp=clamp(4.2/Math.max(0.20,expo),3.8,11.0);
+  flHigh.position.set(bestFlare.x,bestFlare.y-0.5,bestFlare.z);
+  flHigh.intensity=flareHighComp*bestFlare.lit;
+  flHigh.visible=true;
+
+  // 旗点低空环境漫射光 (挂在旗点地面上方 3.2m, 柔和漫射旗点周围沙袋与工事, 消除近距离惨白反光)
+  const gy=(bestFlare.gy!==undefined)?bestFlare.gy:(typeof heightAt==='function'?heightAt(bestFlare.x,bestFlare.z):0);
+  const flareLowComp=clamp(1.2/Math.max(0.20,expo),1.0,3.2);
+  flLow.position.set(bestFlare.x,gy+3.2,bestFlare.z);
+  flLow.intensity=flareLowComp*bestFlare.lit;
+  flLow.visible=true;
+}else{
+  if(flHigh&&flHigh.visible){ flHigh.intensity=0; flHigh.visible=false; }
+  if(flLow&&flLow.visible){ flLow.intensity=0; flLow.visible=false; }
+}
 // 探照灯
 for(const sl of SEARCHLIGHTS) _searchVisual(sl);
 for(const sl of _searchBeams){
@@ -622,6 +1091,140 @@ sl._beam.root.rotation.y=az;
 sl._beam.tilt.rotation.x=-0.45;
 }
 _searchHitTick();
+// 火源动态光照联动
+updateFireLights(dt);
+}
+
+// ── 4.5 火源动态光照更新 (4 盏动态点光源 + 自然 flicker 闪烁跳动) ──
+// 2026-10-24 性能排查批重写候选链:
+//   ① 候选收集+排序 0.2s 一轮 —— 火源 (残骸/云团/火格) 位置全部静态, 每帧重收重排是纯浪费;
+//   ② 灯位分配滞回 85m 进 / 110m 出 —— 旧版 85m 硬门下玩家贴边移动时灯可见性反复翻转,
+//      每次翻转全场材质按新灯态重选 program (数百次 getProgram 查表), 是暗光图的周期性微卡顿源;
+//   ③ 分配槽 _fireAssign 持久化, 每帧只做 flicker 抖动与位置贴随 —— 零分配零排序;
+//   ④ 白天压制激活数 (2026-10-10 裁定) 与双入口去重守卫原样保留。
+const _fireAssign=[null,null,null,null];
+let _fireScanT=0;
+let _fireT=0;   // flicker 相位钟 (2026-11-05 时停批: 旧读 nowT 墙钟 ⇒ 时停里火光照跳)
+// 扫描账复用 (2026-11-01 性能批): 0.2s 一轮的候选表/比较器/占位查重提到模块级 —— 候选对象本就 5Hz 短命,
+// 但每轮 new Set + 内联比较器闭包是纯账目垃圾, 复用后零分配 (占位查重走 _fireTaken 线性 ≤4 项)。
+const _fireFresh=[];
+const _fireCmp=(a,b)=>(a.distSq/(a.weight*a.weight))-(b.distSq/(b.weight*b.weight));
+function _fireTaken(key){
+  for(let i=0;i<_fireAssign.length;i++){ const c=_fireAssign[i]; if(c&&(c.src||c.ci)===key) return true; }
+  return false;
+}
+function _fireCandAlive(c){
+  if(c.kind==='smoke') return typeof SMOKES!=='undefined'&&SMOKES.indexOf(c.src)>=0&&c.src.incin&&c.src.t<c.src.dur-0.5;
+  if(c.kind==='fs') return c.src.ttl>0;
+  return typeof FIRE_ACTIVE!=='undefined'&&FIRE_ACTIVE.indexOf(c.ci)>=0;
+}
+// 活取候选当前位置 (候选只存 src 引用不烤死坐标 —— addFireSource 的 follow 源随舰航行,
+// 每帧在 updateFires 里被重投影; 快照坐标会让灯钉死在旧海面上, 04b "船开走火浮空"同病)
+const _fireP={x:0,y:0,z:0};
+function _firePos(c){
+  if(c.kind==='smoke'){ _fireP.x=c.src.x; _fireP.y=c.src.y+0.6; _fireP.z=c.src.z; }
+  else if(c.kind==='fs'){ _fireP.x=c.src.x; _fireP.y=c.src.y+0.4; _fireP.z=c.src.z; }
+  else{
+    const cx=(c.ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(c.ci/FN)*FRES-FOFF+FRES/2;
+    const gy=(typeof heightAt==='function')?heightAt(cx,cz):0;
+    _fireP.x=cx; _fireP.y=gy+0.6; _fireP.z=cz;
+  }
+  return _fireP;
+}
+function updateFireLights(dt){
+  // 防单帧内重复执行 (2026-10-10: 消除 08-effects 与 04b-fire 双入口一帧跑两次浪费)
+  if(typeof nowT==='number'&&updateFireLights._lastT===nowT) return;
+  updateFireLights._lastT = nowT;
+  _fireT+=dt;   // 火光跳动战斗钟 (2026-11-05): 时停 dt=0 ⇒ 冻结; 两入口各帧经上方去重只累一次
+  _ensureFireLightPool();
+  if(!camera) return;
+  const camP=camera.position;
+  const isDark=(typeof isDarkEnvironment==='function')?isDarkEnvironment():NIGHT_MODE;
+  const maxActiveLights=(isDark?2:1);   // 渲染优化 (2026-10-10): 强日光下火源点光被阳光淹没, 压制激活数
+  // ── 0.2s 一轮的分配扫描: 验旧 (110m 滞回出槽) → 收新 (85m 入槽) → 按综合分数补空槽 ──
+  _fireScanT-=dt;
+  if(_fireScanT<=0){
+    _fireScanT=0.2;
+    const HOLD2=110*110, ENG2=85*85;
+    for(let i=0;i<_fireAssign.length;i++){
+      const c=_fireAssign[i];
+      if(c){
+        const p=_firePos(c);
+        const dx=p.x-camP.x, dz=p.z-camP.z;
+        if(!_fireCandAlive(c)||dx*dx+dz*dz>HOLD2) _fireAssign[i]=null;
+      }
+    }
+    const fresh=_fireFresh; fresh.length=0;
+    if(typeof SMOKES!=='undefined'){
+      for(let i=0;i<SMOKES.length;i++){
+        const sm=SMOKES[i];
+        if(!sm.incin||sm.t>=sm.dur-0.5) continue;
+        const dx=sm.x-camP.x, dz=sm.z-camP.z, d2=dx*dx+dz*dz;
+        if(d2<ENG2) fresh.push({kind:'smoke',src:sm,distSq:d2,range:16,intensity:22,color:0xff7c24,weight:12});
+      }
+    }
+    if(typeof FIRE_SOURCES!=='undefined'){
+      for(let i=0;i<FIRE_SOURCES.length;i++){
+        const fs=FIRE_SOURCES[i];
+        if(fs.ttl<=0) continue;
+        const dx=fs.x-camP.x, dz=fs.z-camP.z, d2=dx*dx+dz*dz;
+        if(d2<ENG2) fresh.push({kind:'fs',src:fs,distSq:d2,range:15,intensity:18,color:0xff721a,weight:9});
+      }
+    }
+    if(typeof FIRE_ACTIVE!=='undefined'&&FIRE_ACTIVE.length>0&&typeof FN!=='undefined'&&typeof FRES!=='undefined'&&typeof FOFF!=='undefined'){
+      let nearestCi=-1, nearestD2=1e9;
+      for(let i=0;i<FIRE_ACTIVE.length;i++){
+        const ci=FIRE_ACTIVE[i];
+        const cx=(ci%FN)*FRES-FOFF+FRES/2;
+        const cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
+        const d2=(cx-camP.x)**2+(cz-camP.z)**2;
+        if(d2<70*70&&d2<nearestD2){ nearestD2=d2; nearestCi=ci; }
+      }
+      if(nearestCi!==-1) fresh.push({kind:'cell',ci:nearestCi,distSq:nearestD2,range:14,intensity:15,color:0xff8828,weight:7});
+    }
+    if(fresh.length>1) fresh.sort(_fireCmp);
+    // 已占槽的源不重复占位 (云团/火源按对象引用, 植被火按格号)
+    for(let fi=0;fi<fresh.length;fi++){
+      const c=fresh[fi];
+      const key=c.src||c.ci;
+      if(_fireTaken(key)) continue;
+      let slot=-1;
+      for(let i=0;i<maxActiveLights;i++) if(!_fireAssign[i]){ slot=i; break; }
+      if(slot<0) break;
+      _fireAssign[slot]=c;
+    }
+  }
+  const expo=(typeof renderer!=='undefined'&&renderer.toneMappingExposure)?renderer.toneMappingExposure:1.0;
+  const expoMul=clamp(1.1/Math.max(0.22,expo),1.0,3.0);
+  for(let i=0;i<_fireLightPool.length;i++){
+    const item=_fireLightPool[i];
+    const cand=(i<maxActiveLights)?_fireAssign[i]:null;
+    if(cand){
+      // 自然火焰跳动 flicker: 双频正弦 + 随机微扰 (符合有机燃烧物理感)
+      // ★2026-11-05 换战斗钟 _fireT (本函数双入口 08/04b 都收世界 dt, 各帧去重后只累一次): nowT 是
+      //   墙钟表盘, 时停里火焰粒子全冻 (04b dt=0) 而光仍在跳 —— 与"冻的是战场"口径相悖, 同批一并收。
+      const flick=0.82+0.18*Math.sin(_fireT*12.0+item.seed)+0.09*Math.sin(_fireT*24.5+item.seed*1.8)+(Math.random()-0.5)*0.06;
+      const jx=Math.sin(_fireT*6.8+item.seed)*0.12;
+      const jz=Math.cos(_fireT*7.7+item.seed)*0.12;
+      const p=_firePos(cand);
+      item.light.position.set(p.x+jx,p.y,p.z+jz);
+      if(item.light.color){
+        if(typeof item.light.color.setHex==='function') item.light.color.setHex(cand.color);
+        else if(typeof item.light.color.set==='function') item.light.color.set(cand.color);
+        else item.light.color=cand.color;
+      }
+      item.light.distance=cand.range;
+      item.light.decay=1.25;
+      const baseI=cand.intensity*(isDark?expoMul*0.75:0.85);
+      item.light.intensity=baseI*flick;
+      item.light.visible=true;
+    }else{
+      if(item.light.intensity>0||item.light.visible){
+        item.light.intensity=0;
+        item.light.visible=false;
+      }
+    }
+  }
 }
 
 function impactFX(point,normal,kind){

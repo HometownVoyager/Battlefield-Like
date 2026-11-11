@@ -3,11 +3,652 @@
 > 本文档整合 README（开发手册）中**尚未关闭的事项**与新特性的前瞻计划，按四区组织：
 > **§1 本轮新特性（待实机验收）→ §2 计划特性（已定意向）→ §3 开发待办 → §4 历史批次待验收清单**，文末附回归基线。
 > 工作方式（固定约定，见 README §4.6）：改代码 → Node 沙箱回归 → **用户实机验收（截图/现象反馈，不做浏览器操作）** → 修订 → 同步 README 第五、八节并更新本文档。
+> **⚠️ 文档管理规则**：**未完成的文档需要放在主目录，完成了的文档需要放到docs文件夹**。
 > 每完成一项：条目标 ✅ 并注明批次号；已关闭事项从本文档移除（README §8 变更记录为唯一历史事实，本文档是前瞻视图）。
+
+## 一.68 性能排查与光照渲染优化(2026-10-24, 待实机验收)
+承用户报「总是卡顿，推测与光照渲染效率有关」。排查用新遥测探针 `dev/probe-renderstat.js`（15 战役全量实测后注册 run-all-verify）定位成本结构，落地四项修复：
+1. **成本结构排序（排查结论）**：①Draw Call 体量第一（每帧独立 Mesh 5735~11257、唯一材质 483~859、阴影通道翻倍）——静态合批当时仅 solidBox 走 `_bldBatch`，**20261007 指导书「Phase 2 已全面落地 100%」与代码不符**（后续最大杠杆，见交付文档）；②灯数抖动→材质 program 重评（three r152 按 visible 剔灯，可见灯数一变全材质重跑 getProgram ⇒ 暗图/雨图周期性顿挫；`isDarkEnvironment()` 对任何雨图为真 ⇒ 白天雨图也跑夜间灯链）；③夜间灯链每帧闭包/数组分配与排序；④Bot 手电遮挡射线无节流；⑤q0/q1 阴影每帧全刷。
+2. **A 阴影半频**（02-scene `shadowRefreshTick` + 24-main 两渲染分支 `renderer.clear()` 前接线 + applyQuality 换档补刷一帧）：q2 恒 autoUpdate；q0/q1 奇偶帧 needsUpdate≈30Hz。
+3. **B 大灯池滞回**（08-effects nightGearTick）：候选距离平方进复用数组、仅近 2 盏实体化；**滞回带 60/75m**（engage=headRealR、hold=+15m）杜绝临界抖动（=灯数抖动病根）；occD 判定只对入池候选做且 75m 外跳过。
+4. **C 火源灯扫描降频+活取坐标**（updateFireLights 重写）：0.2s 节拍收候选（engage 85m/hold 110m+存活校验），每帧只剩闪烁+`_firePos()` 活读源坐标（顺带修掉烘焙坐标致 follow 船火源不跟船的隐患）；`_lastT` 双调守卫与 maxActiveLights=暗2/亮1 原样保留（2026-10-10 裁定）。
+5. **D Bot 手电射线 0.12s 节流**（14-bots `flRayT`，闪烁锥只消费缓存 occD）+ 玩家手电起点 `_pfO` 复用槽（零分配军规）。爆炸 flashLight 常驻可见=既有稳定灯数设计，未动。
+6. **判据**：新 `dev/verify-perf-20261024.js` **34/0**（行为级：阴影奇偶帧/换档补刷、大灯 59/65/80m 三段滞回、火源 85/110m 滞回+源移动灯跟走、Bot 节流 RGRID 计数 12 帧 1~3 发、版本戳唯一）；`verify-fixes-20261010-batch2` 仍绿；全量 run-all-verify 改前/改后失败集逐条相同（预存红账零新增）。版本戳 `20261012a→20261024a`（js 47 处，css 不动）。
+7. **实机关注点**：①白天图 q0/q1 帧率应整体抬升（阴影半频）；②夜图/雨图在燃烧残骸、开灯车队附近移动时的周期性顿挫应明显减轻（灯池滞回+火源降频）；③夜间大灯 60~75m 带内远灯常亮属滞回设计而非 bug；④q2 高画质的阴影行为不变。
+8. **后续（未做，登记待办）**：静态构件合并批（Draw Call 最大杠杆）；修正 20261007 指导书 Phase 2 状态描述。
+
+## 一.69 随机地形降级为地图卡 × 下钻二级菜单(2026-10-24, 待实机验收)
+承用户裁定：「UI 显示上随机地形地图应与其他地图并列（而非与游戏模式并列），点进去再有二级菜单」。讨论中三项定夺
+（业界惯例佐证：AoE/CoE 系「地图列表内随机图条目 → 二级配置步」通行做法）：
+**①二级菜单=左栏原位下钻**（地图列表切换为随机战场配置页+`‹ 返回地图列表`，右栏简报同步）；**②随机卡不属于任何战区、末位钉卡**，
+任何战区筛选下都可见；**③两页一致**——丧尸生存页的随机卡（原本就列在丧尸图列表里但无种子配置入口）也点开同一子页。
+1. **结构**（index.html）：删第三个模式标签 `data-mode="procgen"`（只剩 历史战役/丧尸生存）；原 `#hubProcgenOpts` 选项块
+   改造为 `#hubProcgenPage` 下钻子页（返回按钮+推演模式+种子+收藏，控件原样搬迁）。
+2. **交互**（22-hud）：新状态量 `hubPgOpen`；随机卡固定标题「★ 随机地形战场 / 战术演练 · 程序化生成」（战役表 title 是
+   "上局已生成世界"名，直用会误导）；点随机卡 = `hubMode` 跟随（历史战役页→procgen、丧尸页保持 zombie）+ 子页开；
+   `‹ 返回`只关面板不清选择（开局仍用已配置种子）；切标签保留选择；进大厅若上局是随机图直接落子页。
+3. **丧尸页随机卡补缺**：简报/阵营改随**当前输入种子**推演（`calcPGInfo`，原先误用上局世界名/阵营）；`sf_pseed`
+   存储与 `seedChanged→reload` 判定从「procgen 模式页」放宽为「选中卡是随机地形」——丧尸图从此可固定种子复现。
+4. **样式**（style.css）：`.map-card.pg` 金色虚线框区别史战卡；`#hubPgBack` 返回按钮；`.hub-subpage`。
+5. **判据**：`verify-combathub-20261008` 探针同步改版（两标签 DOM；TC-06 加西欧筛选钉卡断言；TC-07 重写为
+   卡片下钻/返回/丧尸页联动 7 断言）**70/0 绿**；`verify-text`（i18n 键闭环+戳统一）、`verify-hudfix` T6、
+   `verify-boot-settlement-and-fixed-fav` 26/0 绿；全量 run-all-verify 复盘揪出**另三处版本戳钉**随批升
+   （`verify-perf-20261024` T5、`verify-animfix-20261012` 戳断言改单枚口径、`dev/_game_files.txt` 41 处清单），
+   两探针复跑 **34/0、66/0** 全绿。剩余失败集=README 记录的预存红账（zombie 8/worldrestore 植被 2/hudfix T4/
+   fire 探针自崩/naval/timestopfix/airground/phase4-7d/nade-trigger/fixbatch/animfix-20260926/matseam——全在本批
+   零改动子系统）。i18n：+4 键（随机地形战场/战术演练 · 程序化生成/‹ 返回地图列表/随机战场），删废弃键「战术演练 (随机地形)」。
+6. **实机关注点**：①历史战役页任何战区筛选下列表末位都有「★ 随机地形战场」虚线金卡；②点卡进种子页、返回不开局；
+   ③丧尸页点随机卡同样出种子页，固定种子开局应复现同图；④上局打完随机图回大厅应直接落在种子页。
+7. **实机验收①②修复轮（2026-10-24c）**：用户 Ctrl+F5 实测两报——**①点随机卡左栏不切换**（病根=卡片 onclick 只调
+   `updateHubRightPanel` 漏调 `syncCombatHubUI`，左栏视图切换全在后者；状态变量对而 DOM 不动，探针只钉了状态没钉 DOM）；
+   **②丧尸页两张随机卡**（病根=丧尸分支循环只排 opensea/canyon，procgen 被收进列表，末位钉卡又追加一次）。修：
+   循环补排 procgen、onclick 改走 `syncCombatHubUI`、战区条显隐从「hubMode==='campaign'」改为「非丧尸页且列表视图」
+   （返回后随机卡仍选中时筛选条应回来）。探针补 **DOM 级断言**（点卡后 `#hubProcgenPage` 去 hidden 且
+   `#hubMapGrid` display=none、返回后反之）与**两页随机卡唯一性**断言（丧尸页/全部筛选各 pg=1）——**74/0**；
+   全部筛选=14 史战图+1 钉尾卡=15。版本戳随修复轮升 `20261024c`（index 49 处+清单 41+三探针钉）。
+
+## 一.70 随机图三档规模 × 多聚落骨架 × 农田掩体批(2026-10-24e, 待实机验收)
+承用户四项裁定（AskUserQuestion 定案）：**三档规模** 300/380/480+玩家选档 / **农田**「1+3，量做区分」+绿黄双保底 /
+**田缘掩体** 每田 2~3 边墙+田内草垛 / **反公式化**「1+3，地标应当随机缺席」。同修实机 BUG「西欧随机图整图无农田且无绿田」
+（病根=①抽中 town 群系 `fields:null` 按设计无田而简报许诺了田 ②farm 田型逐块独立均匀抽可全黄无绿）。
+详见 `finished-docs/交付文档-随机图三档规模与骨架多样化-2026-10-24.md`。要点：
+1. **规模**（00-config/22-hud/index）：`PG.size` 读取链 URL `?pgsize=` > `sf_pgsize` > 380，与群系/主题同不占随机流；
+   战役条目 `mapSize`/`botMul`(0.95·1.1·1.3)/`tankN`(1·2·3) 随档；大厅随机图页「战场规模」三段选择器 `#hubPgSizeSeg`，
+   改档并入 `needReload` 整页重载；00c 全常量随 HALF 参数化（高度场网格 GN=Math.round(SZ/5)+1）。
+2. **骨架**（00c）：farm/town 抽 mono 40%/dual 32%/linear 28%——mono=旧构+卫星小村（零漂移锚）；dual=双村对峙 ±0.42·HALF、
+   基地钉主村外侧 58~72m；linear=走廊三村 ±0.46·HALF、基地钉两端。旗族随骨架分派（dual=广场+村口+中场+前哨、
+   linear=广场+村口×2+走廊旗）；净空分档（linear 主村窄档 max(36,46·max(0.8,SK))——旧值 74 令 linear 100% 卡 3 旗）；
+   中场旗横距=max(间距需求,净空需求)；`trunk1` 方向修正（旧写法反向起自副村）。
+3. **农田+掩体**（00c 数据定计划→05c 建造）：田数档 FARM_FN{300:[9,12]/380:[11,14]/480:[14,17]}、town 贴边碎田
+   TOWN_FN{[2,3]/[3,5]/[4,6]}、water 水田；**绿黄双保底**=首块钉 corn 绿/次块钉 wheat 黄/water 首块 rice+保底块兜底
+   （旧兜底误排 water 已修）。每田计划 `f.walls`(2~3 边,过滤路≥4.5/基地≥26)+`f.hay`(1~3,田内路净空≥6,碎田不塞)；
+   05c 执行：中式 `stoneWall 0.85m`/欧式 `hedgerow 2.2~3m 可破坏`、草垛=MAT.hay+CYLS 硬碰撞+coverPoints 进 Bot 寻位；
+   野地孤树 `PGDATA.singles`(12·SK+0~4)。多聚落广场件随 SETTLE 下发（主村 3 件/副村 1 件）。
+4. **地标随机缺席**（00c）：主村教堂/碉楼 75% · 欧主村风车 55% · 副村小地标 35% · 干线厂 55%/段滚点（缺席无替代桩）；
+   落位旋转扇扫 0/±0.6/±1.2/π 重试（dual/linear 主街⊥骨架轴贴 connector 的病根）。
+5. **探针/基线**：`verify-procgen` 全量重写 **506/0**（A=380 三群系结构不变量、B=300/480 扫描 SZTAB 距离窗、
+   同种子同规模全同·跨规模不同图、统计段 240 种子=骨架三型各 ≥15%+地标窗+田均 ≥9+墙/田 ≥2.2+跨河 0）；
+   `_pgbase-capture` 指纹扩 settleS/singles/skeleton/size 重钉 22 种子——**设计变更取代 2026-10-07b 逐位承诺**；
+   风车统计窗改欧式池分母（中式副村是碉楼，混池上限≈50%×70% 是窗口错）。全量 run-all-verify：升戳曾漏
+   `verify-perf`/`verify-animfix-20261012` 两探针戳钉与 `_game_files.txt` 清单（新红两条），随批升齐复绿 34/0·66/0；
+   剩余 11 条红=README 在案预存红账（全在本批零改动子系统）。i18n +5 键；`campSubT` 两处重复合一
+   （搬家未删旧块病）。
+6. **实机验收反馈轮（2026-10-24g，用户两报→三项 AskUserQuestion 定案）**：用户报①「农田大多在边缘，
+   要分布在战场中间/中间两边/侧翼，成为左右战局的因素」②「大部分图没有诺曼底一人多高植物」（病根=田被
+   拒绝采样挤到边缘+pasture/till 平田无植株+town 上批零田，高杆庄稼系统其实一直在）。定案=每图抽田带模板/
+   战斗区只种高杆/新增高草丛软遮蔽。**战区田带**（00c）：对峙轴=基地 0→1、横向带 中路 ≤34K/中侧 ≤78K
+   （K=max(0.8,SK)）；四模板加权抽签 中路青纱帐带 30%/双翼田带 30%/中侧混合 25%/横贯田带 15%；主田带田
+   强制 corn/wheat（首玉米=青纱帐保底+绿保底、次小麦），两段重试+极小田(14~24)救援兜底（belt≥2 达标率
+   300 图 96%/380·480 100%）；pasture/till 只作边田；全田打 `zn` 战区标签（几何单源）。town 碎田环带内收
+   55→40 且全种 corn/wheat。**高草丛**（00c 规划→05c 建造）：无田空带 2~6 丛（中路/中侧优先，避田 9/路 5.5/
+   旗 r+3/聚落 r+10），billboard 草丛+`CROP_FIELDS h1.4` 复用庄稼软遮蔽（蹲伏隐/遮 Bot 视线/无碰撞/子弹穿透/
+   可燃）+对峙轴带低灌木加密(16·K 株)。判据：verify-procgen 增至 **535/0**（模板∈四型/belt 全高杆全在 c+m/
+   zn 与几何一致/草丛计划合法性+统计段 四型各 ≥12%·belt≥2 ≥94%·青纱帐 ≥97%·战区田占比 ≥25%）；基线**三钉**
+   （FP 再扩 fieldTpl/grass）；全链 boot 行为验证（草丛注册 CROP_FIELDS、草丛内两眼互盲=true）。期间树被并发
+   两波推进至 20261024f（见一.71/72），本轮随批升戳 `20261024g`（index 49+清单 41+三探针钉，f 批两探针无戳钉）。
+   实机关注：田带手感（穿中路庄稼地/绕翼侧田墙）/草丛蹲伏隐与燃烧弹点田/三模板辨识度。
+   **反馈轮补修（同日，回归期三修）**：①**加密灌木未渲染**——bush() 只入 BUSH_BATCH、由 scatterBushes 尾的
+   flushBushes() 统一实例化，本批加密块放在其后=批永不渲染；块前移至 scatterBushes() 之前合批（单 BUSH_IM，
+   23b 世界复原 snapIM(BUSH_IM) 语义不变），且门从 `PG.biome==='farm'` 钉死为 `CAMPAIGN.layout==='procgen'`
+   &&farm——PG 在预设图也存在（群系哈希自随机种子），不钉 layout 则预设图 1/3 概率误入+wr() 流被消费 ⇒ 预设
+   布局逐帧漂移（探针钉种子故未爆）。②**verify-sink #14 偶发红（~1/10）定案**——活树篱碰撞箱挂空网格。三步
+   定位（boot 打桩→桩 world.remove 打调用栈→加 addSeq/w0 上下文）：沙箱 window 桩跨 boot 共享，normandy 局
+   startMatch 写的 `__sfMatchWorldStart=1159` 泄漏进 procgen 局（世界 1418 项），开局 retireMatchActors 台账
+   清扫按陈旧边界整段摘掉后段 259 项网格——树篱箱活/网格没了=隐形墙。真页每次载入即新 window 无此泄漏（探针
+   boot 补 `delete window.__sfMatchWorldStart` 复位对局期全局）；**顺手修真缺陷**：清扫段加边界兜底——边界后
+   网格若仍背活碰撞箱（工程沙袋墙跨就地换局正是此列！）一并 killBox+植被记录标死，不留幽灵碰撞。③诊断
+   （SINKDBG/SINK_PSEED/SINK_TRACE）全撤。判据：verify-sink 10/10 稳绿、procgen 535/0、layouts 全过、
+   batch-f 30/0、perf 34/0、hudfix 仅预存 T4、fire 3=在案预存、worldrestore 2(scene 台账)=在案预存且本轮
+   改动均不触 scene.children。
+
+## 一.71 存活坦克队色信标 × 重坦提速 × 水乡坡道反向修复 × 风车方顶/外浮修复(2026-10-24f, 待实机验收)
+承用户四报：①「被击毁的坦克不明显，经常浪费弹药——给存活的坦克加飞机同款的带阵营颜色上标」；②「增加重型坦克的速度，只比对应的轻坦慢一些」；③「随机地图-江南水乡楼梯是反的，高的地方没有连接桥面」；④「风车很多内部构件跑到外面浮空，方顶奇丑无比」。要点：
+1. **坦克信标**（15-vehicles Tank.buildMesh）：16-aircraft 飞机信标同款 canvas 三角 Sprite（TEAM_COL 队色+白描边），scale 2.4m / y=3.8（底缘 2.6>最高车长帽顶 ~2.5、炮管仰角让空）、depthTest=false+renderOrder 9 同飞机口径；**update 顶部单行维护** `beacon.visible=alive&&!(playerDriven&&player.tankView)` + 脉动同飞机式（0.6+0.4·sin）——早退分支前执行，死车/沉没/重生/第一人称车长镜全覆盖，die/respawn 零改动。
+2. **重坦提速**（00-config）：真重坦=潘兴/黑豹/KV-1（heavy 字段是"第二辆"槽位标记，一式中战车/T-26 不在此列），旧 6.5/7.0/5.7 与对应轻坦差 0.6/1.1/3.1——KV-1 慢出三档追不上战线；现收 7.7/7.6/8.0（差 0.6/0.5/0.8），rev 同比例 4.2/4.1/4.3，turn/reload/火控不动（"重"留在转向与装填）。
+3. **引桥坡道反向**（05a stoneBridge）：旧码 `sy=gEnd+rise*t`（t=0 在桥端）⇒ 坡道在**桥端贴地、背离桥面爬到桥面高**——高端悬空不接桥面（实机"楼梯是反的"），且 gEnd 采在桥端侧岸坡低谷、平地桥也造反向凹坡（实测定量：某岸桥端 -0.49/远端顶 -0.07=桥面）。改：落差按**远端实地** gFar 采样、坡面 `sy=dy-rise·t`（桥端=桥面严格齐平）、中段贴地封底（缺口 ≤1.25m 落到地面）、|落差|≤0.15 或 ≥2.5 不建坡。淞沪石桥同函数同修复。
+4. **风车**（05a windmill）：①"方顶"两病根=八角件（8 段 Cylinder 顶点在 θ=0/45..）零旋转——帽角顶在每面墙正中=菱形/方块观感 + 4.0×1.9×4.0 **轴对齐实体碰撞盒**角点 r2.83 从帽体/红锥里戳出（黑楔）；修=帽体/座圈/锥顶统一转 `ry-HPI/4` 帽面对齐墙面 + 碰撞盒换 **CYLS r2.3 圆柱碰撞体**（rayCyl/RGRID 全链同权）严格藏进帽体。②尾舵架整组旧悬在塔后 y7.15~8.0 半空（帽底 8.36 之下、无任何连接）——斜梁加长 2.6m 内端埋入座圈（|z|2.2@y8.55）、外挑至尾轴 y8.1，短吊柱闭合框架。
+5. **判据**：新 `dev/verify-batch-20261024e.js` **82/0**（已注册 run-all-verify）——①信标 Sprite/位高/尺寸/材质+update 源含 alive 显隐与脉动行（不钉行号）；②五阵营数值+轻-重差窗 [0.4,0.9]+轻坦零回归；③三种子（100008/100012/100018，splitmix32 落 water 群系）×每桥每岸：坡道实体盒（BOXES min/max 形状）逐段吻合修正式 ±0.55、顶步贴桥面 ±0.4、末段落远端实地 ±0.4、坡向与落差同号——**正/负落差双分支实测**（下坡岸 3/上坡岸 8）。出图验收：`dev/_wmview.js`（草原风车 iso=帽面对齐无黑楔/尾架从帽后长出）、`dev/_wmpg.js`（水乡桥侧视=坡道自桥面下落接岸）。
+6. **全量 run-all-verify**：11 条稳定红与本批改前预存红账**逐条相同**（verify-zombie / hudfix T4 丧尸累计 / worldrestore scene 台账 56→76 / fire / fixbatch-20260926 / naval / animfix-20260926 / matseam / airground-balance / phase4-7d / nade-trigger；_audit-foliage-ref 偶发 1 次环境抖动）——**本批零新增**；worldrestore 做 A/B 对照（临时撤本批三文件改动）失败逐字相同 ⇒ 非本批引入（他批在飞/在案）。本批触达子系统探针全绿：vehmodels/tankai/buildings/layouts/zfight/sink/procgen/perf/hudfix-T6 戳。
+7. **版本戳** `20261024d→20261024e`（index.html 49 处+__sfStyleVer+verify-hudfix/verify-perf/verify-animfix-20261012 三探针钉+_game_files.txt，随批四处一起升）。实机关注：①残骸不再被当活车打（信标只悬在存活车上方，隔烟雾可辨）；②KV-1/黑豹/潘兴行进与倒车手感（应只比同级中坦略慢）；③水乡/淞沪桥头坡道走向（桥端应与桥面齐平向岸落地）；④风车塔帽=对齐八角鼓座+红锥、塔后尾架应从帽底长出。
+## 一.72 敌方载具信标倒三角 × 观战四弹种全配 × 观战手雷预瞄 × 烧毁植被黑炭化(2026-10-24f 第二波, 待实机验收)
+承用户四报：①「把敌机、敌坦克上方的三角标改为倒三角」——**返工口径**：首版把飞机/坦克信标 canvas 不分队全改了倒三角，用户纠正「友方的也换了？」后改为**只有敌方倒三角、友方保持原正三角**（判据单源 00-config `beaconInverted(team)`=team!==player.team，startGame 先赋 player.team 再落载具 ⇒ 建模期判定安全；玩家换队视角自动翻转）；②「为观战模式增加全部种类的手雷」；③「观战模式没有手雷预瞄线、预瞄范围显示」；④「被烧毁的植物会变成黑炭色再消失」。要点：
+1. **敌方信标倒三角**（16-aircraft/15-vehicles 各自 canvas 两分支）：`beaconInverted(this.team)` 真=倒三角 `moveTo(32,59)→(59,5)→(5,5)`，假=原正三角 `moveTo(32,5)→(59,57)→(5,57)`；队色/位高/尺寸/脉动/显隐口径一律不动（§一.71①的产物契约原样）。
+2. **观战四弹种**（00-config 新 `specGear()` 单源={nades:4,smoke:4,incin:4,atn:4}）：观战 0.5s 补给回满（20-player）/ rearmPlayerClass / 23-deploy 落装三处玩家侧入口统一走它，Bot 侧 clsGear 原样零回归——旧版按兵种表 ⇒ 狙击手观战没有 AT雷/燃烧弹、实验反坦克兵观战没有烟雾弹/AT雷；19-input Digit4 的「反坦克兵切火箭筒」补 `!player.spectator`（观战槽无火箭筒，findIndex(-1) 把 4 键整个吞掉 ⇒ 观战按 4=烟雾弹）；兵种卡武器行观战态显示四弹种全配；游戏说明（中英）补「投掷物四种全配」句（顺带把观战连狙描述里过期的「半自动·4x」修成定义一致的「全自动·4x」）。
+3. **观战手雷预瞄**（22-hud updateNadeArc）：显示条件摘掉 `!player.spectator`——弹道点串/贴地落点圈/精确弹着点/预计投掷距离+圈内人数全套对观战者亮出（物理走 13-combat nadeStep 单源纯函数，与时停无耦合；松手收雷显隐对账观战态同样生效）。
+4. **烧毁植被黑炭化**（04b-fire）：病根=烧尽染色守卫 `bi.im.instanceColor` 在**从未初始化** instanceColor 的实例批上恒假 ⇒ 草丛/庄稼/灌木烧尽只沉入不变黑。修=新 `instColorInit(im)`（白初始化，观感零变化）在建模期对四处实例批生效（registerBurnableInst=草丛/庄稼、flushBushes=灌木、flushTreeBatch=树干）；`vanishFlora(rec,blasted,charred)` 把染焦黑从 `!blasted` 改为显式 `charred`——只有火烧进来的消亡（烧尽调用点传 true）才染黑（0x241d16 实例色/_charredFloraMat 材质），碾压/炸没路径不再误挂黑炭语义。建树干批白初始化顺带免去运行中 instanceColor null→非null 触发 getProgram 重编译的一次性卡顿。既有沉入链（停留 3.5~8s→沉入→零矩阵消失）不变=「变黑**再**消失」。**顺手修**：`_charredFloraMat` 从 `window._xxx` 挂载收编为模块级单例（名字不变）——裸 Node 沙箱 verify-fire 的烧尽路径在 `window` 未定义下 ReferenceError 整探针崩溃（**A/B 实证为预存崩**：撤本批语义改回 `!blasted` 旧口径，同一行同一错崩溃）；修复后 verify-fire 跑通全程，暴露其下被崩溃掩盖的 **3 条预存断言红**（树冠着火后未倒伏 / 倒伏后树干碰撞体未移除 / 火焰每跳伤害 2.34——**A/B 实证预存**：撤本批语义后三条红与数值逐位相同），红账由"崩溃"转为"3 条断言红"，待后续批次消账。
+5. **判据**：新 `dev/verify-batch-20261024f.js` **30/0**（已注册 run-all-verify）——①两文件敌/友两分支+单源判据源断言+beaconInverted 双队视角行为断言+信标产物契约零回归（注：实例色断言须用上下文内 THREE.Color 换算期望值，vendor three 开 ColorManagement 存 linear 空间值）；②specGear 四弹种+clsGear 兵种表零回归+rearmPlayerClass 观战/非观战双分支落装+四处接线源断言；③**行为断言**：spectator 持雷 → #nadeArc/#naBlast/#naSpot/#nadeChargeTip 全亮出+点串 18 点，松手全收干净；④建模期白初始化+烧毁染焦黑（灌木实例色 0x241d16）+无 charred 不染黑负对照+mesh 类换焦黑材质。**触达面探针全绿**：verify-vehmodels 10/0 · verify-batch-20261024e 82/0（信标产物契约）· verify-spec 60/0 · verify-specthird 58/0 · verify-timestopfix 35/0 · verify-foliage / verify-sink / verify-fixes-20261010-batch2（_charredFloraMat 字符串断言仍命中）/ verify-boot / verify-text（i18n 键闭环+戳）全过。
+6. **全量 run-all-verify**：剩余 **11 条稳定红=预存红账逐条同名**（zombie / hudfix T4 丧尸累计 / worldrestore scene 台账 56→76 / **fire** / fixbatch-20260926 / naval 红线7 / animfix-20260926 / matseam（自建 THREE 桩缺 BufferGeometry 的旧崩）/ airground-balance / phase4-7d / nade-trigger）——**本批零新增**；两处说明：①fire 见 §4（崩溃→3 条预存断言红，A/B 归因在案）；②nade-trigger 为**布局随机敏感**探针（世界布局 Math.random ⇒ 投影类 B3/B4 判据好布局 1~2 红 / 坏布局 9~15 红，同树两种样本实测均在；撤观战放开 A/B 红集不变）⇒ 非本批引入。fixbatch 的 VEH_HIT_TOP 源锚与 animfix 的棕榈叶源锚均落在他批未提交改动区（本批 15-vehicles/05b-props 的 diff 仅信标/instColorInit 两个 hunk）。
+7. **版本戳** `20261024e→20261024f`（index.html 48 处+__sfStyleVer+_game_files.txt+verify-perf/verify-hudfix/verify-animfix-20261012 三探针钉）。实机关注：①敌机/敌坦克头顶应为尖朝下倒三角、友方仍尖朝上（换队后对调）；②观战 G/3/4/6 四键都应出手且每 0.5s 回满，持雷有弧线+落点圈；③火烧过的草/庄稼/灌木应先黑一截再沉没，被坦克碾掉的仍保持原色。
+## 一.73 举雷/换弹读条化 × 补给弹药改账(2026-10-25, 待实机验收)
+承用户裁定：「现在拿起手雷/换弹就无法取消，这不好——为手雷和换弹增加包扎同款按 X 取消与同样的打断机制；拿取物资仍原时机，但子弹数改为『总弹量上限+弹夹容量』（有意超上限）而非直接填满弹夹」。
+1. **举雷待发并入读条取消网**（18-game/10-viewmodel/19-input）：`readBarActive()` 扩认 `VM 'nade'+nadeHeld`；X/✕ 取消=**收雷回袋不消耗**（`cancelReadBar` 摘 `nadeHeld`，模型层 `vmAbortAction` 收雷模回枪——只收哨兵持雷段 stateDur>10，松手出手弧 0.55s 不误杀）；受击打断弹「举雷被打断!」；HUD 读条=普通雷引信倒数（分母新单源 `NADE_FUSE_T=3.8`，00-config，19-input 举起处同源），AT/烟雾/燃烧无计时显满条「已举起 · X 收回」。**左键不取消举雷**（19-input mousedown 负条件排除——举雷是按住瞄准的持续态，误点左键不该把雷收掉；收雷只有 X/✕ 两条有意路径）。
+2. **换弹并入取消网**（同链）：X 取消/受击打断=**弹药不结算**（`finishReload` 只在自然走完那条路）；读条显示剩余秒数，**座位门**——上车/上炮后 VM 冻结（24-main 不跑 updateViewModel），条不显示、下车自续走；`cancelReadBar` 账目旗（nadeHold/rl）在 `vmAbortAction` **之前**取（模型层一收 VM.state 回 idle，事后判必扑空）。
+3. **换弹中止的模型归位单源**（10-viewmodel 新 `vmReloadRestore()`）：弹匣/弹夹/火箭弹/枪栓/拉机柄/滑轨六件归位——自然走完（nt≥1）与被取消/被抢走走**同一份**还原（旧版换弹中被 F 取弹药抢走 VM.state ⇒ 弹匣留在半路=「枪缺弹匣」滞留，同族于包扎绷带卷滞留）。栓 z0 改**无条件下捕获**（旧版只捕无拉机柄的枪，带拉机柄的栓动枪取消后无从归位）；slide 三把手枪静止位各不同（-0.03/0.01/-0.02），同捕 z0 不写死。
+4. **六处抢态入口先收当前动作**（20-player 五处取弹药/补给/医疗箱 + 06-engineering 建造）：`vmAbortAction()` 前置于 `VM.state='grab'/'build'`（幂等）——换弹/包扎/举雷被 F/B 抢走都先归位，不再静默丢态。
+5. **补给弹药新账**（18-game `doGrabResolve`）：投掷物+绷带仍全满；子弹 `mag 原样不动，reserve=备用上限+弹夹容量`（汤普森 300+30=330）——超出量恰一匣 ⇒ 与旧版「双满」相比总弹数不亏，只多一道自己按 R 的手续。观战 0.5s 无限补给（20-player:715）与出生配装不在此列、维持双满。
+6. **游戏说明**（index.html 帮助 4 处+暂停面板 1 处）：R 装填/X 架枪/G 手雷/弹药箱四行补「X 取消/受击打断/子弹进弹袋」措辞（i18n 词典同键同步）；i18n +9 键（四弹种收条 5+换弹条 1+打断文案 2+帮助行改写）。
+7. **判据**：新 `dev/verify-nadecancel-20261025.js` **34/0**（已注册 run-all-verify；--neg 阴性对照 14 红=取消网/弹药账/模型层两分支四块全被证明有分辨力）——真沙箱行为：举雷 X 取消（雷模收起·雷不消耗）/举雷受击打断/`tryReload` 真入口起手/换弹中弹匣确实离位/取消归位/自然走完 3→30·90→63 回归/换弹受击打断/`doGrabResolve` 汤普森 330+kar98 105 且弹夹原样。`verify-animfix-20261012` 两处锚随批更新（readBarActive 扩容行/左键负条件）**66/0**；verify-text 161 键闭环绿；verify-hudfix 仅预存 T4；verify-perf 34/0。
+8. **版本戳** `20261024g→20261025a`（index.html 49 处+__sfStyleVer+_game_files.txt 41 处+verify-perf/verify-hudfix/verify-animfix-20261012 三探针钉）。实机关注：①举雷中按 X 雷收回且数量不减、再按 G 重举；②持雷被击中弹「举雷被打断!」且雷收回；③R 换弹出现读条、X 取消弹匣归位、被击中弹「换弹被打断!」且弹数不变；④弹药箱按 F 后弹夹不满、备用弹超上限一匣；⑤上车时换弹条消失、下车继续换完。
+9. **★反馈轮①（20261025b）交互动作抢占**：承用户修正「打断=读条期间做其他交互动作会打断读条」。新单源 `player.stealBar()`（18-game，紧挨 cancelReadBar：安静收读条，账目+模型两层同一出口）——调用点=各入口**确认会起步之后**（空按不抢：无目标 F/冷却中 V/同槽 1/满血或没绷带 H/没雷 G·3·4·6/离炮远 6 回收都不白丢读条；迫击炮回收的抢占在 startMortarRecover 找到炮之后）：19-input 动作键 V/G·3·4·6/H/B/6 迫击炮 + `switchSlot(i,viaKey)`/`tryReload(viaKey)`（**同键重按不抢**：换弹中 R 不重启、同种雷重举不重烧引信；异种雷按键=换举）；20-player F 交互栈 **14 处**（四类炮位前摇/上坦克/登艇/登舰×2/登机×2/上炮塔/跳海/5 取物——取物点由裸 vmAbortAction 升级 stealBar，连 nadeHeld/bandaging 账目旗一起收）；06-engineering 建造前置点移到全部早退后。**系统侧不抢**：viaKey 只来自按键（键盘+手柄 LS），空仓自动换弹/程序换枪不带——不会抢走玩家举着的雷。上坦克分支旧「只摘 nadeHeld、换弹冻车上」顺带统一为打断（第 8 条实机关注⑤的口径随之作废，见交付文档 §6）。
+10. **★反馈轮②受伤门槛**：承用户裁定「会被高于 25 的单次伤害打断」——新单源 `READBAR_DMG_GATE=25`（00-config），18-game damage 读条打断链改 `amt>READBAR_DMG_GATE&&readBarActive()`（判减免后最终 amt；死亡清账仍无条件）。≤25 刮伤（枪弹蹭伤/火蚀/严寒激流跳伤）不再打断任何读条（含包扎——全族统一口径）；>25 重创（爆炸/狙/近战）才打断。i18n 帮助两行随改（「单次受创>25或改做其他动作会打断」）。
+11. **★顺手修（他批未提交代码，A/B 归因在案）**：05c-layouts 草丛实例批 `cap=r²·2.1` 但循环发 `cap*2` 候选，通过率高时 k 越过 cap ⇒ setMatrixAt 越界（**实机=世界构建即崩**；探针=verify-sink 稳定红，上轮全量唯一账外红）。修=`k>=cap` 时 continue 且旋转/缩放两发 wr() 提前消费（RNG 流与旧跑逐位一致，procgen 基线指纹不动）。git diff 该段全在 20261024e 批 + 行内、与本批 8 文件零重叠。修后 verify-sink 5/5 稳绿。
+12. **判据与戳**：verify-nadecancel 扩到 **48/0**（--neg 20 红，新增受伤门/stealBar/tryReload·switchSlot 抢占四块阴性对照；行为新增：25/6 不断·26 断双案、R 重按不重启、switchSlot 抢占、系统 R 不抢雷、stealBar 安静、包扎被抢占）；verify-animfix 受击锚+行为 7→26 随机制走（66/0）；verify-batch-f Digit4 源锚随改写（30/0）；procgen 535/0·layouts·boot·text·perf 全绿。版本戳 `20261025a→20261025b`（index.html 49+清单 41+三探针钉）。实机关注（反馈轮）：换枪/R/近战/F 交互打断读条且无"已取消"刷屏；同键重按不重烧不重启；≤25 不断·>25 断。
+## 一.74 指挥官模式开工批：兵种级 RTS 指挥层(2026-10-26, 待实机验收)
+承开工令：按仓库根《指挥官模式设计-2026-10-25.md》（三轮捉虫 v3 定稿，R1~R12 明裁+D 条款）全量落地。**定位=兵种级附加层，非独立对局模式**（BOOT_MODE 不动，入口=兵种卡）。新文件 `js/26-commander.js`（~830 行，单源全量）+ 14 处外部接线。要点：
+1. **指挥官三件套**：`CLASSES[5]={name:'指挥官',commander:true}`（**仅玩家可选**——`CLS_POOL` 仍 0..4，Bot 永不出指挥官）；`WPN_DEFS.radio`（`tool:true` 无火力，20-player playerFireTick 的 tool 门禁开火）；六阵营兵种表第 6 槽=`['radio',阵营冲锋枪]`（ger=mp40 非突击兵的 stg44）。
+2. **R10 整局双向锁**：单源 `cmdLockStamp`（23-deploy 部署一处盖章：首选招指挥官='in' 此后含死亡重生永远换不出 / 否则='out' 本局中途换不进）+ 兵种卡全过 `cmdClassCardGate` 门（原因文案走 i18n）；丧尸局/海战图（navalN/capital）无指挥官卡（`cmdClassAvailable`，开局编制照建无副作用）。
+3. **开局编制**（`cmdOrbatBuild`，不开放图的局也照建）：本方步兵（排除车载/飞行员/小队/舰炮手/丧尸）按 `foot.filter((_,i)=>i%g===gi)` 整编 ≤5 组挂 `bot.cmdGrp`（**挂组不挂人**——重生自动归队续令 D16）；坦克/飞机编制**挂对象**（`vehicle.cmdOrder`，同对象复位重生存活）；非 free 态 Bot 禁自发上车（14-bots 两处门）。
+4. **四词汇命令**（`cmdOrderUnit`：自由推进/攻击移动/原地防守 + 飞机专属指定投弹点）：attack-move 途中接战、到点占旗；飞机接令进攻击航线投弹（途中被咬自卫）、投完自动复飞补弹、无弹中途令作废恢复自由；坦克战损地图灰显、重生恢复。
+5. **帧长三态门**（24-main `cmdDtGate` 布势冻结=0/减速×0.2/直通，**K 时停 dt≤0 直通=时停优先**；nowOff 既有账目自动同步 nowT）：减速=按住键 0.2×全场 + 焦点 7s 耗尽回常速 + 1/3 回复；`cmdPlayerDt`/`cmdRideDt` 豁免玩家本人与正在开的那台（设置"对我无效"档，默认关=零漂移）；死亡期禁用、观战免费可用。小地图/观战/时停链零改动。
+6. **指挥地图**（举通讯仪右键开，`cmdMapToggle` 单源把关 D18 姿态门=仅步行地面）：canvas 全图（地形/建筑/旗点占领态）+ 己方按队着色带队号 + 缩放平移点选下令；**R12 敌显完全复用小地图管线单源**（同 mmEnemyVis 来源+地图全图信息开关+视野圆蒙版；白天全显=2026-09-06 现状裁定，探针加逐点一致断言）；**D19 废墟补丁**（炸塌建筑 footprint 变废墟色块，挂破坏回调）；**R11 开图定身**、受击不踢出、Esc 只关图连按两次才暂停；观战三路径置灰（指挥官局观战开关灰）。
+7. **D21 布势阶段**：本局首选招指挥官 → 冻结布势地图（敌我不动=cmdDtGate 回 0）：调各组兵种配比（该组按配比落装）+ 预下初始命令 + 「默认布势」跳过按钮；确认开战收图解冻（**源序修复**：`cmdDeployConfirm` 必须先 `cmdMapClose` 再清 `mapDeploy`——close 靠该标志判断布势版挂 body 要搬回 #ui，先清再收=压制网永久滞留 body，探针抓出的真源缺陷）。
+8. **判据**：新 `dev/verify-commander-20261026.js` **124/0**（已注册 run-all-verify；`--neg` 14 阴性补丁 **31 红**对认：帧长门/减速/编制门/组令继承/双向锁/坦克令/通讯仪 tool 门/读条迟滞/冻结自愈/敌近身门/配比绑定/飞机词汇/右键关图/部署空守卫/开图键盘门各块均有分辨力）——含：源锚 35 条、装备三件套（举通讯仪 130 帧零 gunEvents）、双向锁+丧尸/海战免指挥官（新鲜 ctx2 规避 startNewGame 后 CAMPAIGN 冻结不可写的桩坑）、编制动态期望、四词汇行为（远令前进/近令守点/hold 定身/重生归队/坦克目标±0.1/飞机投弹 spy+无弹作废）、减速焦点矩阵 14 态、姿态门 18 案、布势收图 reparent、i18n 22 键、**小地图源零染指断言**（26 不含 mmEnemyVis/drawMinimap、22-hud 不含 cmdMap）。
+9. **全量 run-all-verify**：11 条稳定红与上批（§一.72-6）预存红账**逐条同名同断言**（zombie 8 / hudfix T4 丧尸累计 / worldrestore scene 台账 56→76 / fire 3 / fixbatch VEH_HIT_TOP / naval 红线7 两栖车 / animfix-20260926 / matseam / airground R3 / phase4-7d S4 / nade-trigger 布局随机）——**本批零新增**；唯一账外红 `verify-phase3-20260928` **3 条=本批有意语义变更**（兵种 5→6/槽 5→6/通讯仪无衰减表）——锚随码走三处（P1-a 六兵种、P1-b 六槽+第 6 槽 radio 锚+副武器=阵营冲锋枪修正 SEC 表、P1-c1 tool 豁免同火箭弹）修后 **65/0**；verify-aimassist 全量跑 1 红单跑两连 40/0=布局随机偶发族非本批。
+10. **版本戳** `20261025b→20261026b`（index.html 50 处+__sfStyleVer+`dev/_game_files.txt` 46+verify-hudfix/verify-perf/verify-animfix-20261012 三探针钉）。实机验收清单=设计文档 **§11 十六项**（含布势/双向锁/敌显三态/废墟色块/减速矩阵/观战灰/丧尸海战免指挥官）。
+## 一.76 布势期三命令键失效修复批：E/F/R 在部署阶段按下均无效(2026-10-27, 待实机验收)
+承用户实机报的一行 bug：**「开局前的部署的时候，E/R/F 按下均无效」**。
+1. **现象**：选指挥官卡 → 进布势界面 (战场冻结) → 面板高亮行印着 `E 防守此处` / `F 进攻此处` / `R 自由推进`，标题条也写着同样三个键，帮助页写着「E/F/R 下初始令」——按下去**三个键全无反应**。战斗期 (局内开图) 三个键正常。
+2. **根因（两段叠加，缺一都不会全灭）**：`26-commander.cmdMapKeyGate` 旧写 `if(CMD.mapDeploy) return code!==CMD_KEYS.free;` ——
+   · **E/F**：返回 `true`（已消费）却**不执行任何命令**，调用方 `19-input` 提前 `return` ⇒ 世界侧零变化。这是最坏的一种写法：把「我吃了这个键」与「我做了这件事」解耦，按键被静默丢弃。
+   · **R**：该分支对 R 返回 `false`（不归地图），`19-input` 于是继续往下走；而开图早退块的最后一句是 `if(e.code!==CMD_TIME.KEY) return;` ⇒ R 既没被地图执行、也没被放行到战斗语义，**两头落空**。
+   两段合起来正是用户看到的一个都不响。
+3. **为什么当初会写吞掉**：注释理由是「布势期人还没落地，光标落点没有战术意义」。这条前提本身是错的 —— 布势界面的核心交付就是**初始令**（设计 D21 = 配比 + 初始命令），玩家正要在开打前指定「1 组去 A 点防守」。而且三处界面文案一直在承诺这三个键可用，**实现与自己的 UI 相反**。
+4. **修法**：布势期与战斗期**完全同规** —— `cmdMapKeyGate` 删掉 mapDeploy 分支，三个键都走 `cmdKeyCommand`（落点仍取光标 `cmdCursorPt`）。配套 `cmdMapDraw` 的光标十字去掉 `!CMD.mapDeploy` 门（落点必须可见，否则布势里按 E/F 仍是盲操作）。
+5. **误触改令的顾虑由两件事兜住**：布势期世界冻结（`cmdDtGate` 回 0，令不会立刻被执行成位移）；面板每 2Hz 重画把每组的当前令印在行上（玩家看得见改成了什么）。
+6. **写进不变量**：`cmdMapKeyGate` **不存在「返回 true 但什么都没做」的分支** —— 这正是本 bug 的形态。
+7. **判据**：`dev/verify-cmdui-20261027.js` 新增 **③b 段 8 条**（布势入口 mapOn+mapDeploy+世界冻结 / E=hold 落点逐位对 / F=attack_move / R=free / **可反复改令**（第二次 E 落点跟着光标变）/ 非命令键仍不归地图 / 布势期飞机 F=strike / 收尾可正常收图）+ 1 条源码防回退钉（`cmdMapKeyGate` 函数体内**剥注释后**不得出现 `CMD.mapDeploy`）+ 1 条阴性对照 F2（恢复旧写 ⇒ ③b 段 6 条全红；实测 E 的观测值是 `[true, "free", [0,0]]` —— 返回 true 却零执行，精确复现用户现象）。`dev/probe-cmdui-20261027.js` 新增 **①b 段 4 条真浏览器断言**（真 keyDown/keyUp 走 19-input 全局链 → order 真的变了）。改后：**verify-cmdui 65/0（--neg 38/27）**、**probe-cmdui 27/27**。
+8. **版本戳** `20261027a→20261027b`（index.html 50 处+`__sfStyleVer`+`dev/_game_files.txt` 46+四探针钉）。**实机关注**：布势界面按 E/F/R 三个键都要有反应（面板行上的令文字与地图上的命令线立刻变），滚轮仍切单位，右键/Esc 仍确认开战。
+## 一.75 指挥官交互重做批：对讲机建模 / 队位同源 / 集火 / 三命令键 / 键位对调 / 局内地图不显示(2026-10-27, 待实机验收)
+承用户七项需求（第 1、1.5、2、3、4、5、6、7 项）。本批分三块并行施工：Lead（交互层与地图显隐）+ radio-dev（通讯仪）+ deploy-dev（布势撤销）。
+1. **① 通讯仪按参考图重做成对讲机 + 配色对齐阵营**（radio-dev）：`09-weapons.buildRadioBody(g,team)` 建 22 件网格（机身/上段窄块/天线根/显示面板/扬声器格栅/金属旋钮/PTT 侧键/绿色 LED），剪影按参考图量出的比例落常量（总高 0.30m、宽:高=157:379、上段 45×100 占 26%、天线根 24 宽）；阵营配色单源 `radioPalette(team)` 取 `FACTIONS[team].coat` 压暗派生（六阵营主色 `#43483c/#424448/#4e4d3e/#56503c/#444d51/#545751` 互不相同）。`buildGunModel(key)` 改 `buildGunModel(key,team)`（唯一生产调用点 `10-viewmodel:56 vmEquip` 已透传）。
+2. **①.5 第三人称拿通讯仪显示步枪模型 + 播步枪动作**（radio-dev）：根因=`11-soldiers.gunKindOf(key)` 只按 rocket/mortar/atRifle/pistol/auto 分类，radio 的 def 是 `type:'tool'` ⇒ 一路落到末尾 `return 'rifle'`，于是 `worldGunModel('rifle')` 建出步枪、`GUN_MOUNT_BY_KIND/PRONE/CARRIED_FWD` 全走步枪档、玩家化身与 Bot 共用 `mountGunModel` 一起错。修=① `if(d.radio) return 'radio'` 前置档；② 四张表各补 radio 档（站姿 `{-0.17,0.40,0.30}` 胸前偏右、匍匐 `{x:-0.22,dy:0.12,dz:0.40}`、前推量 0.14 而非步枪 0.30）；③ 新 `GUN_HOLD_BY_KIND` 持握姿态单源（右手 IK 权重 1/左手 0/`noReload`/`noBrace` 旗标 ⇒ 姿态机整段跳过换弹与抵肩），判定只认 `gunKindOf()` 的 kind，姿态机不再写武器名硬编码。
+3. **② 队标与队员位置严重偏差/漂移**（Lead）：**根因不是坐标算错，是绘制/命中/选中环三处各写一份过滤口径**（`filter(b=>b.alive)` vs `filter(b=>b.alive&&!b.onVehicle)`）——组里有人上车时队标画在 A、点下去命中 B、选中环画在 C。收敛三单源：`cmdSquadShown(u)`（唯一显示口径 `alive&&!onVehicle`）、`cmdUnitCenter(u)`（唯一中心点）、`cmdUnits()`（唯一扁平顺序）；绘制/命中/选中环/滚轮/面板列表全只读这三个。
+4. **③ 集火**（Lead）：左键点地图空地 → `cmdFocusFire(x,z)` 给 `CMD_FIRE.R`(60m) 内全部己方单位挂 `unit.focus={x,z,until:nowT+CMD_FIRE.DUR(14)}`。**刻意不做第五个命令词汇**——把 `cmdFocusBonus(unit,x,z)` 加进既有目标打分（`14-bots.perceive` 与 `15-vehicles.tankPerceive` 两个消费点；圈内 +1e6 顶到最前、3 倍半径外 0 ⇒ 缺函数时零回归）；飞机在 `order.mode==='free'` 且有弹时转一次性 `strike`。地图画脉动红环 + 虚线杀伤圈 + 「集火 Ns」倒计时。
+5. **④ 指挥态交互重做**（Lead）：一次只**高亮**一个可指挥项（`CMD.hl`，发光/加粗描边/字号加大），其余项在列表里**压缩成 10px 色条**（旧版是满屏按钮）；**滚轮**在扁平表上循环切高亮（`cmdHlStep`，旧版滚轮是缩放已废）；**E**=光标处防守（`hold`）、**F**=光标处进攻（`attack_move`）/飞机「向此处投弹」（`strike`）、**R**=自由推进（`free`），三键统一走 `cmdMapKeyGate(code)` 单一分流（布势期与战斗期**同规执行**、关图期全 false —— 见 §一.76 的实机 bug 修正）；**左键**点己方单位=改高亮、点空地=集火；**右键**=退出指挥态（`cmdMapToggle`，布势期=确认开战）。面板美术对齐开始界面：`CMD_UI` 羊皮纸/黄铜色板。
+6. **⑤ 减速键 N→V，近战键 V→N**（Lead）：`CMD_TIME.KEY='KeyV'`；`19-input` 近战块改 `KeyN`、`24-main` 触控 `tMelee` 改 `KeyN`、`19b-gamepad` RS 键改 `KeyN`、i18n 与 index.html 帮助同步。**裁定理由**：V 在 WASD 手位，减速是**按住**的持续动作必须左手可及；近战瞬时且有手柄/触屏等价键位。
+7. **⑥ 局内指挥地图根本不显示 —— 根因**（Lead）：开图/关图/暂停三处各自写 `w.style.display=''`，而 `display:flex` **只存在于 `cssText` 里**，被 `display=''` 抹掉后 wrap 回落 `display:block` ⇒ 内层 `mc`（`flex:1`）高度塌成 0 ⇒ canvas 0×0 ⇒ 「地图开了但什么都没有」。修=新单源 `cmdMapWrapShow(on)` 只切 `.hidden` class（**永不碰 inline style**），四处调用点全改走它。同批 `cmdMapResize` 把 canvas 从铺满舞台改成**居中正方形**（`side=min(W,H)`+`left/top:50%`+`translate(-50%,-50%)`）——旧版方形地图只占舞台宽度 58%。
+8. **⑥ 布势可撤销 / 确认即锁**（deploy-dev + Lead）：`cmdDeployUndo()`（实现全在 `23-deploy`，26 的面板按钮以 `typeof` 守卫调它）= 收图 + 兵种配比复位成「按当前实际 cls 统计」+ `player.deployed=false` + **`CMD.lockedDir=null`（撤章）** + 清 `CMD.hl/sel/cursor/focusFire` 四份看图期临时账 + `showDeploy(false)` 回部署页；`player.deployed` 已 true 时直接 `return false`（落地后不许把人踢回未落地）。另一侧：`cmdDeployConfirm` 现在就是 R10 的**语义提交点**——收图后立刻 `cmdLockStamp(player.cls)` 盖 'in'/'out'，于是「确认了就不能再换兵种」在**落地之前**也成立（旧版要等 `deployPlayer` 才盖章，中间那段窗口能改）。盖章/撤章成对出现在同一条链上，单源仍是 `CMD.lockedDir`。配套：`23-deploy.syncClassCardLock()` 抽成单源、`22-hud.updateHUD` 在部署页开着且 `(lockedDir|deployed)` 签名变化时调它——修「确认后卡片样式还停在全部可选、点下去才说不能」。
+9. **⑦ 游戏说明**（Lead）：index.html 帮助面板 3 处键位改写（V 减速 / N 近战 ×2）+ 新增「指挥官兵种」整节（三命令键/集火/滚轮切单位/减速/布势撤销三段）；i18n 新增约 20 键（`防守此处`/`进攻此处`/`向此处投弹`/`自由推进`/`↩ 撤销布势 (重选兵种)`/`布势已撤销 · 可重新选择兵种`/`集火`/`集火: {0} 个单位 → 该点`/`滚轮切单位 · E=防守此处 · …` 等）。
+10. **判据**：新 `dev/verify-cmdui-20261027.js` **65/0**（`--neg` 38/27 对认，含 ③b 布势期三命令键段；显隐单源/高亮切换/集火半径/集火过期/队位同源/三命令键/减速键/确认盖章/画布正方形/14-bots 消费点/15-vehicles 消费点/近战键 ×2/19-input 转发与键位，15 条负控补丁全红）；`dev/verify-radio-20261027.js` **40/0**（`--neg` 19/21 对认，10 条文本补丁全红）；`dev/verify-deployundo-20261027.js` **47/0**（`--neg` 29/18）；`dev/probe-deployundo-20261027.js` **22/22**（真浏览器布势全链）、`dev/probe-cmdui-20261027.js` **27/27**（真浏览器交互：含 ①b 布势期真按 E/F/R 三条；局内地图真可见/真 wheel 切高亮/真 keydown E·F·R/真左键集火落点逐位对/真右键退出/真按住 V=0.2x 帧长）；`dev/verify-commander-20261026.js` 随批改锚 **146/0**（`--neg` 95/51）；`verify-text` 169 条静态文案闭环绿。五条新探针均已注册 `dev/run-all-verify.js`（两条走 `--browser` 浏览器段）。**锚随码走**：`verify-specthird` T7 的既有键清单把 `KeyV` 换成 `KeyN`（减速键改读单源 `CMD_TIME.KEY`、19-input 不再持有 `KeyV` 字面量，属本批有意语义变更）+ 补一条「减速键没有回退成硬编码」判据，改后 **59/0**。全量 run-all-verify **51/96 exit=0**，失败集与基线**逐条同名**（12 条稳定预存红：zombie / hudfix-20261007 / worldrestore / fire / fixbatch-20260926 / naval / animfix-20260926 / matseam-20260927 / airground-balance / phase4-7d / nade-trigger-20260930 + specthird 首次跑时锚未更新，改锚后 3/3 通过），**本批零新增**。
+11. **版本戳** `20261026b→20261027a`（index.html 50 处+`__sfStyleVer`+`dev/_game_files.txt` 46+verify-perf/verify-hudfix/verify-animfix-20261012/verify-commander-20261026 四探针钉）。**实机关注**：①第三人称举通讯仪应是台对讲机且不播拉栓/抵肩；②指挥地图上队标/点选/选中环三点重合不漂移；③左键点地图有红环+倒计时且附近单位真转火；④滚轮切高亮、E/F/R 三命令、右键退出；⑤V 减速按住有效、N 近战；⑥局内开图能看见地图且是居中的正方形；⑦布势里点撤销回部署页能重选兵种、点确认后其余卡立刻变灰。
+## 一.77 指挥官模式实机反馈七项修复批(2026-10-27, 待实机验收)
+承用户实机试玩七报：①指挥读条常驻显示且与占领条下方文字重叠；②布势期应取消右键退出；③同队队员应集中生成/相对集中的几人编为一队；④指挥官模式下玩家仍带私人小队跟随；⑤指挥官兵种卡应有新模式标识边框与说明；⑥战斗内右键开指挥地图「随机缺右边一块 + 原因不明地变明变暗」；⑦选中哪个队伍/载具只高亮哪个，其余队友加厚灰。
+1. **① 读条非常驻 + 避开占领条**（Lead）：病根=`cmdFocusHudTick` 无条件显示 wrap（`bottom:15.5%`≈167px @1080p，正压 `#capPanel`（bottom:110px、高 ~60px）顶缘）。修=**按需显隐三态**：读条消耗中(drain) / 减速中(slowOn) / 收费档恢复期(costly&&focus 未满) 才显示，免费档满格常速隐藏；位置 `bottom:186px` 让开占领面板。
+2. **② 布势右键退出取消**（Lead）：`cmdMapBind` 右键分支加 `if(CMD.mapDeploy) return;` —— 布势期右键无操作（退出布势唯一出口=确认/撤销两按钮，防误触丢整局布势）；战斗期右键关图不变；`cmdMapToggle` 的布势分支保留（触屏 tCmdMap 仍可达，语义=确认开战）。
+3. **③ 就近聚组 + 集中生成**（Lead）：`cmdOrbatBuild` 弃轮转平均（`foot.filter((_,i)=>i%g===gi)` 会把同街散兵分到对角组），改**贪心近邻聚类**：组容量=base+(gi<rem)，种子取离已分质心最远者、成员逐个取离组质心最近者。重生集中生成：14-bots `spawn()` 新钩（`cmdGrp.kind==='inf'` 且 `cmdIsCommander()`）调新单源 `cmdSquadSpawnNear(bot)`=向存活组员（车载取车位）质心 6~9m 环 6 次落点（`occBlocked`/`freeSpot`/`NAV.spawnSpot` 三门），全组阵亡回退原落点；`laneDx/laneDz` 透传不扰动 pickObjective 路线权重。
+4. **④ 私人小队互斥（解散收编）**（Lead）：指挥官局不再保留玩家私人小队（否则 3 名队友在编制图上不可令，且 `cmdOrbatBuild` 的 `!inSquad` 过滤会漏掉他们）。`cmdLockStamp` 盖 'in'：`cmdDisbandPlayerSquad()`（清 SQUAD.members+inSquad，账 `CMD._disbanded`）→ `cmdOrbatAdopt()` 收编进编制（优先填 <5 的组，否则新组）；盖 'out'：`cmdSquadRestore()` 还编（牌色复原+空组清理+重索引）。接线三处：`cmdDeployOpen` 进布势即解散收编（布势图第一帧即全编制）、`23-deploy.cmdDeployUndo` ④c 还编、`cmdResetMatch` 清 `_disbanded`。
+5. **⑤ 兵种卡金边 + 模式说明**（Lead）：22-hud 卡片 `i===5` 加 `cmdCard` class；css 金色边框+内发光；卡内新说明行「新模式 · 指挥官: 右键开指挥地图统一步/坦/空 · E/F/R 下令 · 左键集火 · V 减速」，i18n 入典。
+6. **⑥ 缺块 + 变明变暗 = 双病根**（Lead）：**变明变暗**=`cmdMapDraw` 单位循环 globalAlpha 泄漏——坦克分支 `if(!v) continue;`、飞机分支 `if(!v||!v.alive) continue;` 跳过循环底部的 alpha 复位，0.55 半透明漏给后续敌军点/选中环/指针，并**跨帧**带进下一帧底图/烘焙/蒙版（亮度脉动与飞机战损同步=「原因不明」）。修=单位循环整段去 globalAlpha，画笔入口+循环出口双复位。**缺右边一块**=战斗期视图窗（scale=1 → MH 米宽）在玩家贴边时探出烘焙世界 [-MH,+MH]，出界=黑虚空；修=新单源 `cmdViewClamp(S,k)`（窗≥世界时居中归零，否则钳在 ±(MH−hw)），布势整图不受影响。另 wrap 底 `rgba(10,14,8,.92)`→不透明 `rgb(10,14,8)` 杜绝战斗期枪口焰透图；D8 屏缘 2.2% 世界缝隙为有意设计不动。
+7. **⑦ 唯一高亮 + 厚灰**（Lead）：单位循环弃 alpha 压暗——非高亮单位体色 `#8f948b` + 灰晕底衬（步兵圆晕/坦克矩形晕/飞机大圆晕）、标签 `#a9aea5`；选中单位保留队色+白环/四角十字。厚灰与 alpha 卫生同一段落地，杜绝第二条泄漏路径。
+8. **判据**：新 `dev/verify-cmdbatch2-20261027.js` **35/0**（`--neg` 24/11 对认：读条门/布势右键/聚组 while/14-bots 钩/盖章接线/撤销还编/视图钳制/alpha 卫生/厚灰/卡 class/_disbanded 清账 11 补丁全红）；沙箱段含聚组双簇实验（两簇 4+4、簇内 <10m、簇间 >70m）、`cmdSquadSpawnNear`（近质心 <25m / 全灭 null / 无组 null）、解散-收编-还编全链幂等、读条三态显隐（含免费档）、视图钳制、换局清账。`dev/verify-commander-20261026.js` **判据跟走**：⑨ 段 BUG9 对照组原「找一个天然 inSquad 散兵」在 ③ 段盖章解散后已无对象（`squad=undefined/undefined`），改就地搭对照组（临时 inSquad=true+清 cmdGrp，用后还原），改后 **146/0**（`--neg` 按设计全红、25 锚点全命中）。全量 run-all-verify **52/103 exit=0**，失败集与预存红账**逐条同名**（12 稳定：zombie / hudfix-20261007 / worldrestore / fire / fixbatch-20260926 / naval / animfix-20260926 / matseam-20260927 / airground-balance / phase4-7d / nade-trigger-20260930 + nav 偶发 1/0/0；timestopfix 偶发 0/0/0），**本批零新增**。
+9. **版本戳** `20261027b→20261027c`（index.html 50 处+`__sfStyleVer`+`dev/_game_files.txt` 46+verify-animfix-20261012/verify-hudfix/verify-perf/verify-commander 四探针钉）。**实机关注**：①满格未减速时读条消失、减速/回条时出现且不再压占领条文字；②布势期右键无反应、战斗期右键仍退出；③编制图上同街散兵同组、组员重生落在队友附近；④选指挥官后私人小队跟随消失、撤销布势后跟随回来；⑤兵种卡金边+说明行；⑥战斗期贴边开图右侧不再缺块、飞机战损时地图不再忽明忽暗；⑦滚轮选中谁只有谁彩色，其余全厚灰。
+## 一.78 指挥官子系统内联逻辑自查五虫批(2026-10-27d, 待实机验收)
+承用户令「指挥官模式子系统的内联逻辑自行完成一轮 BUG/过于不合理之处的排查和修复」：全链通读 26-commander.js + 八个消费文件 + 三份既有探针，五虫全落地（详见《指挥官模式设计-2026-10-25.md》2026-10-27d 速查节）。
+1. **布势期 Esc 实际弹暂停不确认开战**（19-input）：`cmdMapUIOpen` 分支旧写嵌在 Esc 处理器 `player.deployed&&player.alive` 门内，布势期两值皆 false ⇒ 永远走不到确认单源，Esc 落进 else 变 `togglePause(true)`（三处注释宣称"布势 Esc=确认"，三键失效批修了 E/F/R 漏了 Esc）。修=分支上提门外 + `&&!gamePaused`（D20 暂停优先：暂停中 Esc 只解暂停，顺带修掉旧写"暂停中 Esc 会去关被藏起的战斗地图"）。
+2. **布势配比被"摘自己"扣减对抗**（26-commander `cmdRatioWantBot`）：唯一调用点（14-bots spawn 落装行）此刻 bot 必是死人（构造器/die 置 alive=false，落装行之后才置 true），have 统计天然不含它 ⇒ 旧"把自己从 have 摘掉"扣减凭空虚增旧兵种位 gap，死者总按旧兵种复活、玩家配比被永久拉回旧分布。修=删扣减（want 合计=全组人数，死人=待补空位，贪心天然收拢回 want）+ 两处引旧值注释剥离。
+3. **撤销布势不清初始令**（23-deploy `cmdDeployUndo` + 新单源 `cmdOrbatClearOrders`）：撤销复位配比/锁章/看图账/私人小队，唯独没清布势期 E/F/R 下的 hold/attack/strike ⇒ 撤销后改选普通兵种，全军按一份"没人能取消的幽灵令"打满整局。修=撤销链新增 ④b-2 步（全单位归 free + 飞机 strikePt/strikeT0 同清，静音幂等）。
+4. **集火标记过期永挂"集火 0s"**（`cmdMapDraw`）：unit.focus 由 cmdFocusOf 自行过期，显示账 `CMD.focusFire` 无人收 ⇒ 红圈+倒计时画到换局。修=画时过期当帧即清账。
+5. **布势重进门漏路径**（22-hud）：旧门含 `player.cls===5` 子条件 —— "撤销→改选步兵→再点指挥官卡"时布势不自动弹且无补进入口。修=去掉该子条件（凡未落地点指挥官卡都进布势；死亡不清 deployed 已核实，"死了等重生不许重进"的门不变）。
+6. **判据**：`verify-commander-20261026` **147/0**（+1 条"补差不被摘自己带偏"定案断言：分布已合 want 时死者按正差位 cls3 复活而非旧兵种 cls0；Z 负控锚随码走）；`verify-cmdui-20261027` **66/0**（+Esc 上提源码钉 + 阴性对照 P=恢复旧嵌套 ⇒ 钉红，`--neg` 28 红对认）；`verify-deployundo-20261027` **49/0**（+②b 段 2 条：撤销前初始令在账 / 撤销后全令归 free+strike 账同清）。全量 run-all-verify 失败集与预存红账逐条同名（11 条稳定红零新增）。
+7. **版本戳** `20261027c→20261027d`（index.html 50 处+`__sfStyleVer`+`_game_files.txt`+hudfix/perf/animfix/commander/cmdbatch2 五探针钉）。**实机关注**：①布势界面按 Esc 应直接确认开战回部署页（不再弹暂停）；②暂停中按 Esc 只解暂停、解冻后地图原样回来；③布势调好配比后故意让人阵亡几次，该组兵种构成应向配比收拢而非漂回旧分布；④布势确认→撤销→改选步兵开局的整局全军自由推进（无幽灵令）；⑤集火圈 14 秒后自动消失。
+## 一.79 指挥官子系统内联逻辑自查第二轮五虫批(2026-10-27e, 补登——该批此前只落设计文档速查节与记忆, PLAN/README 漏登)
+同一用户令「指挥官模式子系统内联逻辑自查」的第二轮独立排查（不与 27d 批共改动面），五虫全落地，详细论证见《指挥官模式设计-2026-10-25.md》2026-10-27e 速查节。
+1. **普通局 Bot 重生兵种被编制配比锁死（零回归红线破口）**（26-commander `cmdRatioWantBot`）：`cmdOrbatBuild` 挂 startMatch 尾无条件建编 ⇒ 普通局 Bot 同样带 cmdGrp，而本函数缺指挥官门 ⇒ 死者重生走"配比补差"，gap 恰落在死者旧兵种位 ⇒ 死者永远按旧兵种复活、CLS_POOL 每命重掷被静默替换。修=函数头补 `!cmdIsCommander()` 门（判据单源在 26 侧，14-bots 不长第二份）。
+2. **底图预热只接一半 + 布势入口同步整烘兜底（三审卡顿修复被架空）**（`cmdFrameTick`/`cmdDeployOpen`）：只有"推进"没有"起作业"，部署页期间作业根本不存在；cmdDeployOpen 旧 `cmdBake()` 同步整烘使进布势当帧僵死复发。修=cmdFrameTick 补起作业门（orbat 已建 + cmdClassAvailable + 非观战队列），cmdDeployOpen 降为"起作业"口径分帧续算。
+3. **观战减速词条三处 N→V 漂移 + 探针被注释喂绿**（22-hud 票数行/词典 EN/23-deploy fallback）：旧键名 `N=减速(不耗资源)` 使 t() 查表 miss；verify-commander 旧判据 `s23.includes('J=信息层 · N=减速')` 实为被 23-deploy 注释喂绿（运行期拼接串无整句）。修=22-hud 接 `cmdSpecHudKeys` 单源拼整句、EN 译文/fallback 纠正、判据改钉真实拼接行。
+4. **死代码**（26-commander）：`cmdFocusOfBot` 全库零调用（注释宣称的消费方式与事实不符）、`CMD.pick` 两步下令链退场后的只写残留。修=删除并留防复刻注释。
+5. **cmdDeployHint 裸调 showScorePop**：全文件唯一无 typeof 守卫站点。修=补守卫。
+6. **判据**：verify-commander 147/0（两条观战词条判据随码改锚）+ verify-cmdui 66/0 + verify-deployundo 49/0 + verify-cmdbatch2 35/0；全量 run-all 稳定红零新增。**版本戳** `20261027d→20261027e`。
+## 一.80 指挥官子系统内联逻辑自查第三轮三虫批(2026-10-27f, 待实机验收)
+同一用户令的第三轮独立排查。全链重读 26-commander.js + 九个消费文件 + 四条探针判据/阴性锚，三虫全落地（详见《指挥官模式设计-2026-10-25.md》2026-10-27f 速查节）。**三虫全是"注释宣称≠实现/设计承诺未兑现"型。**
+1. **拖拽平移从未接线（注释宣称的交互不存在）**（26-commander `cmdMapBind`）：`drag` 只在 mousemove/mouseup 出现，mousedown 从不给它赋值 ⇒ 首帧 `if(!drag||!CMD.view) return` 恒 bail，平移整链是死代码；`CMD._follow` 也从无交互置 false 路径（只有布势入口置过），与 cmdMapOpen 的 _follow 复暖注释块和滚轮注释"缩放另有两条现成路径（拖拽平移仍保留…）"直接矛盾——战斗期视图只能跟玩家走、滚轮已改派切人 ⇒ 玩家没有任何手段看战线别处。修=**中键按住拖动=平移**（左键=集火/右键=关图/滚轮=切人后唯一空闲键；中键语义与 19-input 的飞机锁定不冲突——地图开着时 stopPropagation 根本到不了那边），拖动起手置 `CMD._follow=false`（复位点=开图，既有语义）；开图弹报与战斗标题条补"中键拖动=平移"词条（i18n 两块×2 处 + index.html 帮助页同步）。
+2. **票尽清空未实现（设计 D 条款后半句落空）**（新单源 `cmdOrbatPrune`，挂 cmdFrameTick）：坦克 15-vehicles/飞机 16-aircraft/士兵 14-bots 的重生门都是 `tickets[team]>0` ⇒ 本队兵力票归零后阵亡单位永不再现，旧写无任何清账路径——面板永远多一行灰"全灭"、滚轮停靠死单位、E/F/R 能对永不能执行的载体下令、集火播报还把它们算进"n 个单位"。修=判据"单位已无任何可上阵成员 且 本队票尽"（坦克/飞机：veh 死+票尽；步兵组：全灭+票尽；**还有票的死车不动**=既有"战损灰显"档），裁剪即重排序号 + 高亮/选中账归零 + 载具 cmdOrder/strikePt 摘账（与 cmdResetMatch 同纪律）；tickets 未定义的极端沙箱整体 no-op（探针按下标读 orbat.tanks[0] 的既有断言不被裁剪打空）。
+3. **开图失败词条两路全错**（`cmdMapToggle`）：'指挥地图: 需步行于地面, 手持通讯仪' 的"手持通讯仪"在两条入口上都不成立——右键路径在调它**之前**已验过手里是通讯仪（失败原因不可能是没拿），触屏 tCmdMap 路径压根不需要。修=改'指挥地图: 需徒步于地面'（i18n 两块×2 处）。
+4. **判据**：`verify-commander-20261026` **151/0**（+3 正钉：中键拖动接线锚/票尽清空单源+接线/词条跟走，+1 条沙箱行为断言：死坦克+票尽=出编制且高亮清账、还有票=保留、全灭组+票尽=出编制；NEG 新增 AD/AE/AF 三补丁逐条亲见转红，`--neg` 52 红=27e 账 49+3 逐条对认；L 补丁"右键关图退场"锚随码走——旧锚以 mousedown 收尾 `});` 结尾，中键分支插入后不再命中，改锚到右键分支体本身）；`verify-cmdui-20261027` 66/0（战斗标题条词条键随码跟走）；`verify-deployundo-20261027` 49/0；`verify-cmdbatch2-20261027` 35/0。全量 run-all-verify **两轮 exit=0**（套件白名单对账零意外红；两轮 tail 视图差集逐一单跑归因：hudfix T4「Zombie.die 累计 +1」=在案稳定红、naval 红线7=在案偶发红、phase3 P1-i2=js/19-input.js 既有态缺 `Digit5&&cls===4` 锚——该文件本批未触碰、animfix run-all 环境性偶发而单跑 66/0）。`verify-perf` 34/0（升戳钉随走）。
+5. **版本戳** `20261027e→20261027f`（并发批随即将全库戳扫至 20261028a，本批七处探头钉随扫同步——27e 记忆"d→f 实录"同款并发场景，探针复验全绿）（index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+hudfix/perf/animfix/commander/cmdbatch2 五探针钉）。**实机关注**：①局内开图后**按住鼠标中键拖动**应平移视图、松手前视图不再跟人走，关图再开恢复跟随；②把一方兵力票打空后，其阵亡的坦克/飞机应从指挥地图面板与滚轮列表里消失（还有票时的灰车/灰机保留并显示重生倒计时）；③非指挥官普通局零回归（本轮三虫全部收在 26 一侧或地图 UI 层）。
+## 一.81 丧尸模式与随机地图指导文档复盘批 (2026-10-28a, 待实机验收)
+用户令: 核对《丧尸模式与随机地图-子系统深度重构与修复工程指导.md》所列问题是否仍存在, 存在则认真修复。逐条审计结论: **①胜负流/票数流失 (21-match updateFlags 丧尸专门流 + isTeamEliminated 单源 + zombieInfect 扣票重生) ②质心分队 (zAnchor/update 聚集点按队采样) ③副桥路网 connector (00c §2 二/三桥桥堍接巷) ④单队基地"守点旁 8m" ⑤菜单大厅单源+ZOMBIE_MODE 载入期常量化 ⑥BUILD_COST/ZP 商店 ⑦timeTxt 双钟消歧** 均已在 2026-10-07b/c/d/e 与 2026-10-11 批次落地, 零动作。**坦克驻车防扒车一条按 10-07d 用户裁定改口径为"停桩=车被慢慢拆掉", 不按指导档阶段三执行。** 本批修复仍在场的九项:
+1. **近战伤害延时脱离主时钟 + 无三维门 (红线2)** (25-zombies `zMelee` + 14-bots 刺刀): 双处 `setTimeout(380)` 改实例账 (`_pendAtk`/`_pendMelee`) 由 dt 积分驱动 (暂停/时停不再隔空掉血), 结算补 `dy<1.8` 高度门 (旧判据纯水平距离, 高台/楼板隔空抓杀病根); 14-bots 结算放 update 最前 (不受上炮/座位早退影响)。
+2. **自爆尸被杀不殉爆** (25-zombies `die`): 拆 `zBoomBlast` 单源 (爆圈 explodeAt + 载具直伤 + 尸群连锁), 引信到期 (zBoom) 与被杀/连锁炸死 (die) 共用; 被杀殉爆保留击杀者记账与 zStats, `_boomDone` 防双爆, alive 守卫保证链式殉爆有限步终结。
+3. **丧尸卡墙只会蹭墙滑步** (25-zombies update): `_blkT>1.0s` 且目标 >8m 时借 `NAV.findPath` 取前 2~3 路标充能拐过转角再切回直线冲锋; 冷却 6s/只 + **全局每帧 3 次预算** (nowT 换帧重置, 百尸同帧撞墙错峰); 寻路充能同 zAlertHorde 口径刷 `_zSeenT` 6s chase 窗。
+4. **人类 Bot 见丧尸贴脸仍切刺刀白送** (14-bots :954): 入口加 `!(this.target&&this.target.zombie)` 守卫, 尸潮局 Bot 保持枪械交战; 普通对战零变化。
+5. **水乡主河假性激流** (00c :1224/:1231): `d: 2.8→1.8` — 旧值落进 inRiverChannel "d>2=深谷激流" 档 (坦克误入熄火吃 VEH_RAPIDS_DMG/步兵被冲移受创); 1.8 关闭激流, `_waterStrip` 浅河支把水面钳到 SHALLOW_RIVER_MAX=1.15 ⇒ 中心水深 1.15m 全程涉渡 (SWIM_DEPTH=1.35 之下), 乡村小河口径。
+6. **支汊/鱼塘悬空浮水 (指导 §4.4(1) 病根实锤)** (03-terrain heightAt): procgen water 群系的水文只在 00c 产折线/圆表, hgrid 烘焙不含下切 ⇒ `_waterStrip`/鱼塘圆盘 (都按 heightAt 取位) 浮在未下切地面 ~8cm。修=补进 heightAt 修正链与 RIVER 同层 (支汊 -1.2 sstep(cw=DELTA.w) / 鱼塘 lotus -0.65·fish -0.85 sstep(r+1.2)), **hgridClear 早已把这两族记入带内特征** (半径逐位一致) ⇒ 快路/精修同源; 钉 `layout==='procgen'` 严禁淞沪 delta (rawHeight 内已有) 双份叠加; 附 procgen 塘底/汊滩泥滩色带 (镜像淞沪参)。
+7. **单队基地 30m 净空掏空广场** (00c `canTake`): solo 基地贴核心 8m ⇒ 30m 圆把钟楼/民居/围墙驱逐成荒地; 收窄到 **12m** (罩住出生点/弹药箱 ±3m 与部署站位), 广场肌理保留成"被围困的中心聚落"; 双队/普通模式 30m 不变。
+8. **丧尸局建造职业锁死 + 提示 undefined** (19-input KeyB/Digit5 + 06-engineering): 门改 `cls===4||ZOMBIE_MODE` (座位门不变); 丧尸基础件 sandbag/wire/hedge **全职业免费** (pendingBuild cost:0 ⇒ 落成扣款/拆除退款自然归零); 商店三件 ZP 价收 **`BUILD_ZP` 单源** (engBuild 扣款与 Digit5 弹窗同读, 旧版 tower/ammoc 查 BUILD_COST 落空 ⇒ "消耗undefined点"); i18n 词条键随参量同步。
+9. **选 1 队开局顶栏/结算穿帮 0 队** (22-hud tickets 左格 + 21-match 结算 bar): solo 右格被丧尸在场数占位 ⇒ 左格是玩家唯一队伍行, 旧硬编码 TEAM_NAME[0] 改读 `player.team` (teams/普通模式仍显 0 队)。
+10. **顺手修 (探针逼出)**: `zDefPosts`/`zVehPosts` 兜底补点从"盲推 rand"改过 occBlocked/深水门 (12 次尝试), 且**先取整再过门** — 实录浮点 .5 格边界翻格 (sin(5π/6)≈0.4999… ⇒ 原始点 390 行格空/存储点 391 行格被结构 ±0.6 边距堵死), 门对存储点自洽成为不变式 (Bot 落点=存储点)。
+11. **判据**: `verify-zombie` **47/0** (连续 6 轮; 判据跟走 10-11 批滞留: 初生免伤 `_riseT` 清窗/感染队列 `flushZombieInfections` 手动冲/ZCFG 分档形状+12min/`getZCurrentInterval` 等值钉 + T4 dt 账冲账 + 跑者摆 zw0 对侧去"连锁唤醒"偶发 + 防区点断言提前到 T6 造沙袋之前); `verify-zombie2` **全绿** (+T8b 新钉: 被杀殉爆爆圈 + 近战 Y 轴门 3m 高差不受伤/同面照常命中 + T7 主炮改环搜 32 方位"弹道三查全清"落点 — 10-24 田带批后庄稼参与开火预检, 固定方位被挡 0.6s 退避不出膛); `verify-fixes-20261011` 12min 跟走 (`ZCFG.solo.surviveT+1`); `verify-procgen` **535/0**; `verify-boot` 15 图 LOAD OK 零失败 (预设图逐位零漂移红线 5 守住 — 本批全部改动面钉 procgen/ZOMBIE_MODE/solo)。run-all-verify 结果见 README 2026-10-28a 行。
+12. **版本戳** `20261027f→20261028a` (index.html 50 处+`__sfStyleVer`+`_game_files.txt`+hudfix/perf/animfix/commander/cmdbatch2 六处探头钉随扫; 27f 批预告的并发扫戳即本批)。**实机关注**: ①单队生存选 1 队 (德军/日军) 开局: 顶栏左侧应显示所选阵营与真实人数, 结算页兵力条同; ②水乡群系: 鱼塘/支汊水面应镶嵌在下凹河床/塘底, 步兵涉水过主河全程涉渡无激流伤害, 坦克可低速涉过不再熄火掉血; ③非工程兵 (突击兵) 进丧尸局按 B/5 可建造, 沙袋/铁丝/拒马免费, 提示无 undefined; ④瞭望塔顶玩家不再被塔底丧尸隔空抓伤; ⑤射杀自爆尸应当场殉爆并波及周围; ⑥丧尸攻村应绕墙 rather than 集体卡墙挠墙; ⑦人类 Bot 遇尸潮应开枪射击而非拔刀冲锋。
+
+## 一.82 五项批：票尽观战部署放行 × 读条同键加速/双击打断 × 中性观战结算 × 迫击炮削弱 (2026-10-30, 待实机验收)
+承用户五项诉求 (讨论确认后一批落地): ①兵力票耗尽卡重部署页, 切观战后仍无法重部署 → 观战开关开着即可部署; ②读条中同键再按不应取消 → 改为略微加快 (每按 2.5%); ③读条中用其他动作打断需连按两下 (0.5s 窗口); ④观战结算应为观战专属 (中性化); ⑤迫击炮超模 → 半径 5.25/伤害 100/CD 标准档 (用户追加"伤害≤100")。
+1. **①票尽观战部署放行**: 新单源 `specWillBe()` (18-game) = **本次部署解决后**的观战态 (`typeof specWant==='boolean'?specWant:!!spectator`; specWant 是"待生效"意图, 要到 deployPlayer 才落进 spectator, 门必须问"解决后"而不是"现在"; `specWant=false` 显式关与未设都返回 false)。四处门全改 `tickets<=0 && !specWillBe()` 才禁用/拦截 (23-deploy 部署按钮 disabled + deployPlayer 早退 / 22-hud deployBtn onclick / 24-main 死亡页每帧 disabled 刷新); 部署页票尽双文案 (有观战意图→「⚠ 己方兵力已耗尽 · 部署将以观战身份入场」/ 无→原文案等待清场结算, i18n 新键)。正确性依据: `fieldCount()` 本就排除观战者 (21-match) ⇒ 清场判定/最后一人 30s 倒计时/双归零豁免均不受观战部署影响; 观战部署不扣票 (die 才扣)。
+2. **②同键再按=极少加快** (BAR_PRESS_BOOST=0.025 单源, 00-config): 包扎 H (**倒计时账+VM 动画账双账同步**推进 `player.bandaging-=BANDAGE_T×2.5%` 钳 0.01 交 tick 结算 + `VM.stateT+=stateDur×2.5%`) / 拆除 B·回收 6 (`demolish.t+=DEMOLISH_T×2.5%`) / 前摇 F (`useCast.t+=dur×2.5%`, 占位保留不取消) / 换弹 R (`VM.stateT+=stateDur×2.5%`); 举雷同键重按维持原语义 (无效果, 不是完成型读条)。
+3. **③双击打断** (BAR_ARM_WIN=0.5 单源): 新单源 `barStealArmed(key)` (18-game) — 无读条→直通放行并清账; 读条中首按→记键+时间戳返回 false (不抢); 0.5s 内**同键**再按→放行 (账清空)。**不代抢** — 抢占仍由调用方在"确认起步"处 `stealBar()` (attempt-then-steal 处第二次按目标消失/起步失败也不白丢读条); 键身份=e.code 或 'SW'+槽位 (换枪)。接线 **27 处**: 19-input 11 处 (近战 N/手雷 G/AT雷 3/烟雾 4/燃烧 6/迫击炮架设 6/包扎 H/建造拆除 B/换弹 R/换枪 SW+槽位) + 20-player tryInteract F 交互栈 14 处 (登舰×2/取物×5/上炮塔/登机×2/跳海/上迫击炮/上坦克/登艇) + 06-engineering 2 处 (迫击炮回收/建造); HUD 读条标签武装态 0.5s 窗内追加「▶ 再按一次打断」。X 键/左键取消 (举雷除外)/受击>25 打断/移动打断前摇保持**单击立即**; 「确认起步才抢」纪律原样保留。
+4. **账目卫生**: `barArmKey` 在 cancelReadBar (含 stealBar/受击/X/左键) 与四处**自然走完**点 (包扎 tick/前摇 finish/拆除回收/换弹 finishReload) 清账 — 旧键不得残留到下一条读条的双击窗里。
+5. **④中性观战结算** (21-match endMatch): 观战局判据与 recCommit **同源** `!REC.counted` (结算瞬间在观战态或本局观战态部署过); 图标 `END_SVG_SPEC` (钢灰"观战之眼") + 标题「对 局 结 束」(沿用平局灰色配色) + 副标题末段「胜方 · 某某军」/平局; 本局得分/战绩卡/兵力对比条/「不计入历史记录」说明全保留; 非观战局逐字节不变; i18n 三键 (对 局 结 束/胜方/平局)。
+6. **⑤迫击炮削弱** (13-combat nadeExplode 迫击炮分支): 爆炸半径 7.5→**5.25** / 步兵伤害 135→**100** / 结构伤害圈随爆径 7→5 (210 不动) / 玩家 CD 3.2→**4.5s** (20a-seats, heatFill 分母兜底同步) / Bot CD 4.2~6.5→**6~9s** (14-bots); 载具 150/射程 13~51m/连杀加速均不动; 00-config 爆圈注释更账; 两侧对称削弱 (同一份弹道/爆炸单源), 连杀 reloadMul 照旧生效。
+7. **判据**: 新 `verify-batch-20261030` **50/0** (源码锚四组 + 沙箱行为: barStealArmed 武装矩阵六态 / R·F 推进量逐位对 / specWillBe 四态矩阵+票尽拦截战报 / 迫击炮爆炸参数间谍 5.25·100·150·struct5·210); 阴性对照 **19 红/31 绿** (14 补丁逐条亲见转红)。判据跟走: `verify-nadecancel-20261025` **48/0** (R 重按判据从"stateT 原样"跟走为"推进 stateDur×BAR_PRESS_BOOST", 探针侧**从源码解析 BOOST 常量**不写第二份死值; tryReload/switchSlot/近战/包扎四条源码锚随新门; 行为测试 (a)(b) 改双击语义; NEG 补丁 G 拆两条随码走) 阴性 21 红; `verify-animfix-20261012` **66/0** (19-C「H 再按=取消包扎」锚跟走为同键加速锚: 旧取消写法断言不在+加速双账锚在); 戳钉五探头 (hudfix/perf/animfix-20261012/commander/cmdbatch2) 16 处随扫 20261030a。run-all-verify **两轮**: 首轮因并发升戳作废 (27d 教训重演), 次轮干净通过 — 失败集=预存红账逐条同名 (hudfix T4/worldrestore 植被2/fire 3项/fixbatch-20260926/animfix-20260926/matseam-20260927/airground-balance/phase4-7d/nade-trigger-20260930 稳定红 + naval/nav 在案偶发), **零新增** (nav-20260926 本轮通过; 其偶发性另有三连单跑绿在案)。
+8. **版本戳** `20261028a→20261030a` (index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+五探针钉)。**实机关注**: ①票尽+观战开关开着: 部署按钮可点、点部署以观战者入场 (免伤/不被索敌/幽灵坦克 F 可用), 关着照旧禁用, 开关从关到开后按钮下一帧亮起; ②包扎 H/回收 6/拆除 B/前摇 F/换弹 R 连按=略微变快不取消不重启 (每按≈快 2.5%); ③读条中按其他动作键一下不打断只亮「▶ 再按一次打断」, 0.5s 内再按才打断, 换键不共用确认; **F 交互栈也双击** (读条中上坦克/上艇/补给需连按两次 F, 紧急逃生多按一下属预期); ④观战局结算=「对 局 结 束」+灰眼图标+「胜方 · 某某军」, 普通局结算逐字节不变; ⑤迫击炮爆圈肉眼变小 (与手雷同级偏小)/满血兵中心命中不再必死 (100 伤+5.25m 衰减)/玩家连发 4.5s、Bot 6~9s; ⑥EN 下新文案全有英文。
+
+## 一.83 自查批：预存稳定红清理 × 云层快照翻倍真修 × 两栖车登陆三层修复 × 工作区清理 (2026-11-01, 待实机验收)
+承用户指令"自行排查+修复一轮 BUG，再清理工作区的无用文件/文件夹"。基线 run-all 定型 **10 条稳定红**（与一.82 登记的预存红账逐条同名），本批逐条根因定位：**1 条真游戏 BUG**（云层快照翻倍）+ **1 条真 AI 缺陷三层修复**（两栖车登陆，仍红如实登记）+ **8 条探针判据漂移跟走**；另完成工作区清理（未跟踪 3092 项 → 套件+点名工具+基线全保留，删 ~3120 件 ≈70MB）。
+1. **真修①云层快照翻倍** (02-scene + 23b-worldrestore)：病根链=世界快照 `WSN.sceneKids` 把云精灵当普通场景项收账 → `restorePristineWorld()` 先 `_wsnRestoreGraph(scene,…)` 把快照里的**旧一代云**原样带回 → 末尾 `applySceneEnvironment()` → `rebuildClouds()` 又建**新一代云**，而登记表 `_cloudSprites` 里攥着的旧代引用已被快照复原"复活"且换代后成孤儿移不掉 ⇒ **每轮回菜单云量稳态翻倍**（阴天档 20→40 个 Sprite，探针实测 56→76、extra=20 全 Sprite、gone=0）。修=云精灵打 `_isCloud` 标记（与 08-effects `_isPrecip` 同款先例）+ 快照过滤加 `||c._isCloud` —— **天气层不属于世界快照**（同降水口径），还原后由 applySceneEnvironment 按当档重建恰好一代；天体/灯只在 boot 建一次不重建，无同类风险，`_wsnRestoreGraph` 的整段 children 清零重建天然清掉旧云。判据：`verify-worldrestore` **10 组 0 失败全绿**（原"scene 台账 56→76"两条稳定红转绿；T7 幂等/T9 回菜单/T11 就地重开同步过）。
+2. **真修②两栖车 Bot 永不上岸三层修复** (14-bots，红线7 ③)：逐层探针取证（--ai 诊断 + 自建逐 5s 采样: 航路点/距点/前方船/沿岸台坎测绘/车头射线剖面）。**第一层=航道口插点陷阱**：`navAmphRoute` 无条件插"航道口"点，塔拉瓦南湾口点水深仅 0.28m < 涉水 0.55 ⇒ 车要朝浅口开而中间航点每条航向都过 `navSafeYaw(minDep=0.25)` 的前向水深门被掰向深水侧，**永远进不了 26m 换点圈** ⇒ "末段=直冲滩头"分支走不到。修=口点**水深门**（`navDepth(口)≥wade` 才插；设计 §5.2 自述"礁盘平台直穿可行，不为了走航道绕远"——浅口插点本身反设计）。**第二层=浪线拔河门**：`amphAI` 旧版 `depth<wade` 即切陆战层，但陆战层的推进/战术目标是**沿岸**旗点/掩体 —— 车还在浪里就被它带着沿岸开，水深一过 wade 又被海图航路拽回，浪线上永动拔河（实测 40s 停在离岸 10m/水深 0.55，上岸=0 开火=0）。修=接管门改判**真上岸**（`navShoreD≤0`），浪线最后一段仍归海图航路，与 §3.5"上岸复用坦克陆战层"本意一致。**第三层=滩头走廊**：`navBeachPt` 旧选点只做 findClearSpot 占用清障，不验"海→点"坡度走廊 —— 滩头堡地基平台（padHeight 台坎，实测 -0.33 海床→+2.45 平面一级跳）顶在浪线时履带态被 `slopeGateMove` 拒爬台坎顶死。修=候选滩头点**走廊验证**（离岸 10m→点 7 采样无 >1.2m 台阶跳变，挡道就沿岸切向 ±6..30 重找）+ `navAmphRoute` 末段插"滩头点正前方 12m 海上过渡点"（末跳=垂直登陆，与走廊验证同线）+ 过渡点换点半径收紧 7m（沿用 26m 会在离过渡点十几米处提前切向斜穿台坎）。**实测推进：红线7 ③ 终离岸 38m→20.3m、终水深 1.87→1.13**。**仍红如实登记**：剩余病根=礁盘浪线**散布**的反登陆大件/堡基台坎（探针实测 ≥3 处独立阻挡：台坎 [24,176]/[17,169] + 浮航硬阻挡体 [-4,198]），需"接近浪线时沿岸重扫最近干净登陆走廊"的运行时重定向，且哪些豁口是设计上的预定登陆通道要用户裁定（末段去避让试过=提前撞浮航硬阻挡，已回滚并留注释）。艇的两档用例（就近湾/远湾×3）本批前后均过。
+3. **探针判据跟走 8 条**（预存红账清账）：①`verify-fire` 4 红=10-05 天气批后沙箱战役（缅甸=storm 档）火伤 ×0.45/积热 ×0.35/燃烧 ×0.45 —— 火焰机制探针钉 `sf_weather='clear'` 回机制基线（蔓延段判据本就动态读 fireMul 不受影响）→ 全绿；②`verify-hudfix` T4=spawnZombie 自带 `_riseT=1.2` 起身免伤窗（10-28a 防同帧瞬杀设计），探针原地击杀须先清窗（与 verify-zombie 同款跟走）→ 37/0；③`verify-airground` R3=交战距离门 2026-10-05 起乘 `WX_CFG.rangeMul`（天气契约 R6 内联相乘钉死），写死米数的样点在阴天档（×0.9=126m）全体漂移 —— 样点改按当档公式 0.92×/1.15×eff 动态取位（hold 案相对炮位取距）→ 12/12；④`verify-phase4-7d` S4=flakShots 弹 B13 批加 `age:0`（舰体实体判定豁免窗），冻结正则跟走 → 11/11；⑤`verify-fixbatch` 15=命中柱构建 7c 批抽 vehHitCyl 单源后 `y1:t.pos.y+VEH_HIT_TOP` 字面量变赋值式，锚随码走 → 55/0；⑥`verify-animfix` 05b=棕榈叶性能批改 InstancedMesh 逐实例矩阵，下垂不变量同式迁移 `_pmE.set(p+HPI, a, 0,'YXZ')` → 39/0；⑦`verify-matseam`=02-scene 天体批 boot 期直建星空 Points（BufferGeometry+Float32BufferAttribute+Points+PointsMaterial），轻桩补四件 → 44/0；⑧`verify-nade-trigger` B3/B4 布局随机红（1~15 条，在案自 10-24）治理：净空扫描加"**走廊全程在图内+不落水**"（出图=heightAt 边缘哨兵 ⇒ 点串整段缺席）+ 选点 **6 选 1 就地全指标验收**（点串成形+落点环闭合+真投弹与预演同点+厨雷档三件）+ 厨雷档读数**就地捕获消费**（旧版断言二次重跑，预演模拟内的随机反弹散射让二次跑与验收分叉）+ B3/B4 环境不可测时显式「⚠ 跳过」不计数（预演有任何输出仍从严判）→ 连跑 6 轮全绿。
+4. **判据汇总**：run-all-verify **两轮**：基线轮 10 条稳定红（hudfix T4/worldrestore×2/fire 4项/fixbatch/animfix/matseam/airground/phase4-7d/nade-trigger + naval 红线7）→ 本批后 **两轮均 61/65** exit=0（唯一稳定红=naval 红线7 上述遗留，失败集逐条同名，**零新增**）；修复面 9 探针单跑全绿（worldrestore 10 组/fire/hudfix 37/0/airground 12/12/phase4-7d 11/11/fixbatch 55/0/animfix 39/0/matseam 44/0/nade-trigger 6 连跑）。
+5. **版本戳** `20261030a→20261101a`（index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+五探针钉随扫）。**实机关注**：①任意对局→结算/回主菜单→再开局：天上云量应恒为该天气档一代（阴天 20 朵），反复回菜单不翻倍；②塔拉瓦/珊瑚海实机看两栖车 Bot：应能推进到浪线附近并尝试登滩（较改前明显接近岸线），滩头堡附近仍可能顶住（已登记遗留）；③高炮 Bot 在雨/雪图的索敌开火距离应比晴天近（rangeMul 生效，非回归）；④火焰伤害/倒伏手感与 10-05 天气批一致（探针钉晴朗只影响沙箱）。
+6. **工作区清理**（用户令）：未跟踪 3092 项清到 45 项（套件 verify-*/probe-* 全保留 + PLAN/README 点名自检工具 5 件 `_pgbase-capture/_pgdump/_pgpng/_wmpg/_wmview` + `dev/_pgfarm-baseline.json` 基线 + 3 个游戏文件 + 设计文档/参考图）。删除 ~3120 件 ≈70MB：dev PNG 渲染产物 **3002**（tracked `render-model.js`/`render-aamodel.js` 随时可再出图）/ `dev/out/` 49MB（gitignored CDP 产物）/ `dev/tmp-tests/` 17MB（bak 残骸）/ `dev/*.log` 5 / `_fullsuite-*.txt` 3 / `_cmd-audit-*.md` 3 / `_pgsnap-*.json` 2 / 一次性草稿探针 **36**（含本批 `_wr-debug/_naval-debug/_mk-naval-debug`）。引用完整性核对：被 tracked 文件引用的未跟踪文件（引用对账脚本）全部保留；git 索引内 dev 136 文件不动；文档搬迁完整性核对：finished-docs 43 份与被删 docs/archive 32 份（9 月底旧档/被后批次取代稿，git 历史可寻回）为前批次有意行为，非丢档。
+
+## 一.84 判定自查批：玩家死亡播报爆头位透传 × 反坦克雷链爆挂游戏时钟 × 出生保护"开火即解除"补全 (2026-11-01, 待实机验收)
+承用户指令"自行排查+修复一轮**判定相关**的BUG，再清理工作区的无用文件/文件夹"（继一.83 通用排查轮之后的第二轮，定向"判定"面）。全量对账结论（逐面过堂，无新增缺陷）：21-match 终局判定（终局前奏哨兵/同归零豁免/1v1 对齐倒计时/丧尸专门流/丧尸票流失）、updateFlags/updateSpots 占领判定（争夺冻结/守方快回落/瘫舰旗退出/丧尸无意占领）、fireBullet 弹道裁决链（soldier→naval→plane→tank/truck→水→墙的最近者胜次序 + 友军豁免 + 水面遮蔽 + 收窄后 endD 终点钳制）、updateShells（时停逐发帧长/友军免疫/shPad 判定半径）、nadeStep 触发引信"武装+接触"双条件、Tank/Plane.die 乘员账（v3 三人车组/观战座驾豁免）、票务写入 15 处对账无失衡、specWillBe 四门、barStealArmed 四处自然走完清账、mmEnemyVis 敌显单源、recCommit/specUsed 盖章、换局复位链（specWant 作废/战绩五项复位）——均与在案契约一致。实锤 **3 处修复**；另 1 条既有偶发对账（verify-wipe T11 首跑红"矮障碍不阻挡 位移=0.589"，复跑 3 轮全绿=种子随机偶发非回归，与种子不可复现在案 1/20 偶发同类）。
+1. **修复①玩家死亡播报丢爆头位** (18-game die)：旧 `addKillfeed(attacker,this,false)` 硬编码 —— Bot die 链 (14-bots:548) 传 isHead，唯独"玩家被爆头击杀"时播报永远不出 ☠（被爆头杀与被普通杀在播报上不可辨，读作"爆头判定没生效"）。修=爆头位透传 `!!isHead`（die(attacker,isHead) 形参本就在手，行为面只有播报图标一行）。
+2. **修复②反坦克雷链爆挂浏览器时钟** (15-vehicles mineBlast/MINE_CHAIN + updateMineTriggers(dt) + 24-main 传参)：邻近链爆旧用 `setTimeout(120~300ms)` —— Esc 暂停 / K 时停期间照常到点，**冻结的战场里链爆照样炸人**（与 2026-10-28a 丧尸近战 setTimeout→dt 账同族病，本库第三例）。修=链爆改挂游戏时钟账 `MINE_CHAIN`（{m,t}），`updateMineTriggers(dt)` 逐帧消费（账消费排在 `!MINES.length` 早退**之前**——MINES 里 dead 项常驻不依赖底数），24-main 传世界帧长 ⇒ 时停/布势 dt=0 整列停住、Esc 暂停/菜单/结算整段不跑（冻结分支 return 之前），非时停逐位同延时（0.12+rand×0.18s）。
+3. **修复③出生保护"开火即解除"契约漏洞** (13-combat fireRocket/emplATFire/emplMortarShell + 15-vehicles Tank.fireCannon)：清账旧只挂 fireBullet（其注释宣称"玩家/Bot/炮位共用的**唯一出膛口**"），但火箭筒/坦克主炮/反坦克炮/迫击炮四条路**不走 fireBullet** ⇒ 部署落地 2s 保护期内照样开火——载具出生直接进车开主炮、落地掏火箭筒即打，都是"免疫输出"窗口（注释宣称≠实现病型）。修=四处同契约补 `if(shooter&&shooter.protUntil) shooter.protUntil=0`（fireBullet 原清账不动；炮位冷却"在炮上换人不重置"口径不受影响）。
+4. **判据**：新 `dev/verify-judgment-20261101.js` **18/0**（T1 爆头致死播报 ☠ + 普通致死 ✕ 不带 ☠ + 击杀数入账；T2 链爆账 dt=0 冻结不消费/dt>0 消费完/3m 圈入账 20m 外不连/旧 setTimeout 链串在 15-vehicles 绝迹；T3 四条直接出膛口开火即清保护 + 弹体入膛 + fireBullet 原账在位〔13-combat 清账 ≥4 处、15-vehicles ≥1 处〕）——已注册 run-all-verify。域邻探针单跑：verify-killattr 18/0 · verify-phase3-20260928 65/0 · verify-timestopfix 35/0 · verify-wipe 91/0（首跑 T11 偶发见上）· verify-batch-20261030 50/0。全量 run-all-verify **两轮均 64/69** exit=0（新判据探针 +1 入册后运行数 65→69；两轮唯一稳定红=naval 红线7〔一.83 遗留，红线7③"上岸并开火"仍不满足〕，失败集逐条同名**零新增**；两轮各有一个互不相同的偶发单败——首轮 verify-zombie / 次轮 verify-matseam，稳定性复核均 3/3 全绿=环境抖动非回归）。
+5. **版本戳** `20261101a→20261101b`（index.html 50 处 + `__sfStyleVer` + `_game_files.txt` 46 行 + 五探针钉随扫，旧值全库绝迹）。**实机关注**：①被 Bot 爆头击杀时右上角播报应出现 ☠（此前永远 ✕）；②草原雷区打爆一颗雷后立刻 Esc 暂停或 K 时停——邻近雷**不应**继续连环爆（旧版会冻结中照炸）；③部署落地 2 秒保护期内开火箭筒/坦克主炮/AT 炮/迫击炮后立即挨打应正常掉血（旧版这几条路上开火不破免伤）；④其余全无手感变化（修复①只动一个图标、②只动暂停期的雷、③只动 2s 窗口内）。
+6. **工作区清理（增量轮）**：一.83 大清后本轮全量对账——js/ 46 文件与 index.html 实载清单逐名一致（零死文件）；未跟踪 46 项=套件 + 点名工具 5 件 + 基线 + 3 游戏文件 + 设计文档/参考图全保留（`verify-judgment-20261101.js` 新增入册）；本轮新增删除=`dev/out/` 4 件本日探针 CDP 产物（gitignored，套件运行即重写）+ 空目录 `.zcode/tmp_crops/`；根目录 `诊断-UI显示.html` 经引用核对=README §8 在册的**用户侧一键诊断工具**（PLAN 验收清单"两步定位法"引用，非残留），`对讲机参考.jpg`/《指挥官模式设计》按一.83 口径保留。
+
+## 一.85 贴图/模型自查批:uvGeo 直构漏网收编 × 航母甲板贴片分层 × 三路审计对码再修十二组 × 工作区清理 (2026-11-01, 待实机验收)
+承用户指令"自行排查+修复一轮**贴图/模型相关**的BUG,再清理工作区的无用文件/文件夹"(继一.83 通用轮/一.84 判定轮之后第三轮,定向贴图/模型面)。取证=沙箱探针红账 + 离屏渲染目检(19 张,零新增缺陷) + **三路并行代码审计**(载具建模/建筑贴图/海战建模,共 25 条发现逐条对码核验——"审计词条不当圣旨",驳回留档见交付文档)。实锤 **17 组**(自查四 + 三路审计十三):
+1. **修复①贴图密度归一漏网 26 处**(05a-buildings + 05-world uvGeo 失败路径 + _structbase 桩):verify-uvscale 17/23 三红病根=uvGeo 归一只在帮手发生,05a 直接 `new Mesh(boxGeo)` 的 20 盒+9 圆柱+龙牙圆锥全裸奔(面 UV 恒 0..1,风车斜梁 vs 辐条密度差数十倍)。修=全部包 uvGeo;圆柱失败路径旧把"缺 position 的盒形克隆"**缓存顶替原几何**(桩 clone 翻 type 污染探针)→改直接返回原几何;桩 NonBoxGeo.clone 补类型保持。→ **23/23**。
+2. **修复②航母甲板贴片共面**(15g-capmodels):verify-surf coral/ironbottom 各 86 条"同单位残留"全为大舰甲板涂装/槽/索/框压甲板顶面(boot 消解器跑在舰体生成**之前**,此类无人管)。修=划线/槽/框落 **decal 档**(renderOrder 2);拦阻索=实体索不吃档、索心抬 d+0.055;弹射槽/升降机框抬 0.015/0.045 真分层。→ **22/22 全图 0 残留**。教训:decal 档只解"贴片 vs 结构",贴片 vs 贴片要真 3D 分层。
+3. **审计⑥tbBox UV 塌缩**(15-vehicles):手写盒几何对全六面统一传 (y旗,x旗)——±X 面 v 恒定/±Y 面 u 恒定=UV 塌成一条线;唯一调用点裙板 M.tone 带 grime 贴图 ⇒ 全阵营坦克侧裙拉丝条纹。修=按**面内两轴**取 UV(±X:u=z旗 v=y旗/±Y:u=x旗 v=z旗/±Z 不变)。
+4. **审计⑦uvGeo 圆柱缓存键缺形状参数**(05-world):键只含 r/h/θ ⇒ 同尺寸不同 radialSegments/heightSegments/openEnded/thetaStart 的圆柱**共享克隆=第二根被第一根几何顶替**(几何替换级)。键补四参数。
+5. **审计⑧⑨Canvas 兜底贴图两病**(02-scene):stone 列距 60 不整除 256=每贴右缘 2px 背景缝切花岗岩(修=列距 64 整周期+过缝对侧补**同色**副本,与 brick 同规);sandbag 行 22/列 44 不整除 128 + `rgb(randi,randi,randi)` 三通道各抖各的(修=与 SVG 版同规行 32×4/列 42.7×3 + shade() 只抖明度)。
+6. **审计⑩螺旋桨悬空**(16-aircraft):桨盘 z=0.50·FL+0.08s 悬在机鼻前 8cm(星型机头无桨毂锥最明显)。修=前移至 0.50·FL−0.02s 埋进桨毂锥/整流罩(`this.prop` 引用与自转链零改动)。
+7. **审计⑪观战名牌随残骸克隆**(16-aircraft Plane.die):`_specTag` 挂 grp 下,`grp.clone()` 带进残骸=depthTest:false+renderOrder 7 **隔墙冻结帧常显**(与 09-28 信标同族病——信标/夜航灯当年摘了,名牌是 10-24f 后的件漏摘)。修=clone 前摘除后挂回(全库 `grp.clone()` 仅此一处)。`_specLine` 挂 scene 无此病。
+8. **审计⑫两栖车双舵"绕艉中线公转"满舵扫进桨盘**(15e+15d,审计 P2):双舵总成挂在艉中线、15d 转**整组** ⇒ 满舵 0.5rad 一舷前掠 ≈0.24m 扫进桨盘——与 09-25 桨枢轴同族病(桨修了舵漏修)。修=每片舵挂 `nmRudderPivot` 子枢轴(照抄 nmPropPivot),15d 逐子枢轴施加同一偏转角(驱动入口仍 nodes.rudder 一个;艇单舵无 pivot 回退整组转)。
+9. **审计⑬⑭userData 红线两处**(15e/15d):nmLocal 存 V3 对象引用→纯数值三元组;残骸材质账 `mat0`(Material→map→canvas)只在还原不删→**还原即 delete**(死后再沉重捕获,零行为)。
+10. **审计⑮⑯大舰两处零体积贴合**(15g):舰桥翼台内面与塔身侧面严格共面(非 pagoda 档)→中心内移 0.06 真嵌入;主桅底与塔顶纯面贴合→圆柱加长 0.12 下探(顶位/横桁/雷达关系不动)。
+11. **审计⑰+驳回留档**:契约键注记两处(15e sight 仅艇+降级链在 / 15g funnels·masts·props 备用无填充);**驳回**:05a ~14 处直构=审计跑在①之前已包零残余;Torus 无 uvGeo 分支=口径如此;makeTex repeat×uvRef"双乘"=同一观感两半校准不盲改;truckTarpMat 单例=无写点即 MAT 纪律;同轴机枪/幽灵炮塔/翼挂架"缝隙"三条=逐点复算均嵌入非缝隙;测距仪命中盒上沿差 1.35m=10-04 命中胶囊刚收紧过,反向放宽属平衡域留实机;艇"桨叶↔舵 0.50m"注释 vs 复算 ~0.23~0.245=自检判据绿以其量法为准。
+12. **探针对齐四条**:svgtex 桩补 BufferGeometry/Float32BufferAttribute/Points/PointsMaterial 四件(10-05 星空批打崩五周,不在册无人知)+**收编 run-all**;uvscale A 段 cloth 判据与契约对齐(挂 05a 就地材质逐值校验);surf per-map 补**追赶消解**(舰体 boot 后进 world、沙箱无帧循环,174 对伪红→0;耗时上界 2000→4000ms);matseam CV_SEL.stone 56→60 跟码(石砌块随⑧变宽)。
+13. **判据汇总**:域内复跑全绿=uvscale 23/23 · svgtex 40 生成器 · surf 22/22 · matseam 44/0×3 · phase2 · tread 279/0 · vehmodels 10/0 · _naval-model-selfcheck 87 · _amph-parts · _wreck-selfcheck · phase5-capital 41 · surfmodel 11/0 · animfix-20260926 39/0。run-all-verify **两轮 64/68、65/71 均 exit=0**——唯一稳定红=naval 红线7(一.83 遗留,3/3 稳定复核,与本批零改动面);次轮一个 verify-zombie 单败=module load 环境崩(复核 0/0/1,单跑 47/0),失败集逐条同名**零新增**;在册 66=基线 64+收编 2。
+14. **版本戳** `20261101b→20261101c`(index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+五探针钉 19 处随扫=115 处,旧值全库绝迹;五枚钉探针复跑全绿)。**工作区清理**:删 56 件(一次性探针 14+闭案诊断 11+孤儿数据 3+渲染产物 23+本批一次性工具 5;tracked 18+untracked 15+产物 23),备份 tar 在系统 TEMP;dev/ 由 198→**151** 件;保留判定见交付文档 §七。
+15. **实机关注**:①带风车/水塔的图:构件贴图与同图构件同尺度(不再"一根杆上的纹突然变粗变细");②珊瑚海/铁底湾 200m 外看航母飞行甲板:划线/拦阻索稳定不闪,近看索悬在甲板上方几厘米;③坦克侧裙(四号/黑豹):磨损贴图正常颗粒,不再拉丝条纹;④侧视飞机:桨根装在机鼻上无悬空缝(零式等星型机头最明显);⑤观战信息层下击落敌机:残骸上无冻结名牌;⑥近看石墙:无每 1.5m 一道竖向细缝;沙袋工事无杂色袋;⑦两栖车满舵回转:尾舵各自绕舵杆偏转,舵叶不插进螺旋桨;大舰舰桥翼台/主桅根部无共面闪烁;⑧其余零行为改动。
+
+## 一.86 性能优化批:热循环零分配第二轮 × 灯链/Bot/载具/寻路/座位 HUD 全链 (2026-11-01, 待实机验收)
+承用户指令"自行排查+修复一轮**性能优化**相关的BUG/严重问题,注意一下光照渲染方面,其他方面也要注重"(继一.83~一.85 后同日第四轮,定向性能面,继一.66 后的零分配第二轮)。取证=逐文件热路径通读(灯链/Bot 感知与移动/载具物理/弹道裁决/寻路/座位与 HUD DOM 写点)+ 三项硬检查(①光照契约:灯池全部常驻 visible 开关、无运行期增删灯——灯数抖动⇒three r152 材质 getProgram 重选的病根在案;②热循环零分配军规;③每处复用槽的重入与生命周期逐点核对:每槽单一消费者/同步消费不跨调用持有)。全部改动=**行为逐位等价重构**(平方预门带 1.000001 余量,过门者仍走原 hypot;整数格启发式 hypot→sqrt 逐位同值;10Hz 节流两处沿用 updatePlayerTank._pipT/_rngT 在案口径),零手感改动:
+1. **光照渲染链(08-effects)**:①`_hlWorld` 车灯锚缓存——夜图灯光链每帧每车 tkSpec(3 对象)改 `veh._hlA` 首算缓存(tkSpec/dims 字段同源);②playerFlashlightTick `camForward()`→`_pfF/_pfR` 复用槽;③updateFireLights 0.2s 扫描 `new Set`+每次闭包数组→模块 `_fireFresh` 复用+`_fireTaken` 线性查重(≤4 个取用槽)。灯池滞回(大灯 60/75m·火源 85/110m+0.2s 扫描)/flashLight 常驻/阴影半频 shadowRefreshTick 在案契约零触碰。
+2. **Bot 层(14-bots)**:ikRes 由 toFixed 串舍入改 `Math.round(×10000)/10000`(数值逐位等价,verify-a21-j 只读显示);moveDir/flee 的 7 方向避障闭包提升为 `_botMoveProbe`+`MOVE_DA/FLEE_DA` 常量表(每帧每 Bot 每方向 1 闭包→0);perceive 外提 envLum/darkRatio+距离平方预门;batteryTargetFor(电池炮 Bot 索敌)0.3s 结果缓存(失效判据原样:alive/sinking/wreck/team)。
+3. **载具层(15-vehicles/15b/15d/15h)**:tankSurfH 静态查询 `_tsQ`+盒/圆柱两回调模块化;updateShells/15d/15h 弹方向 `copy().normalize()` 复用槽;vehHitCyl/truckHitCyl 查询槽(_shCyl/_shTrkCyl);vehiclePushSoldiers 参数对象 `_vpsOpts` 单源(坦克/卡车/两栖三写点,逐字段每调用前重写);navalHitCyl 加可选 out 参(**默认路径仍分配**——15f 返回并持有结果,只改 15d 推挤链即时消费点);capPush 角点阵提升 `_capCC/_capCS/_capCA/_capCB`;capPushBody IIFE 的 sup 查找去内层函数。
+4. **弹道/碰撞/火(13-combat/04-collision/04b-fire)**:fireBullet 圆柱槽+_fbPan(平移比每弹一 V3→0);loiterForward 复用槽(2 调用点串行已核);nadeStep 盒候选回调 `_ndBoxCtx` 上下文对象;raycastWorld 地面命中法线常量 `_rcGnd`(消费点即时读);buildSpatialIndex boxCells/cylCells 原地复用(length=0 替代整表重建);collideMove/standHeight 回调模块化;treeIgnitePass `_tiSeen` Set 复用+floraNear 回调提升。
+5. **寻路(07-nav)**:findPath 10 个闭包(_hSwap/_hUp/_hDown/push/pop/expand/settle/isSettled 等)提升至 IIFE 作用域(每次寻路 10 闭包→0,`_fpHLen/_fpPopDir` 游标随代重置);路径回溯去 toW 解构(每路标一数组→0);expand 启发式整数格 sqrt。verify-nav 8/0。
+6. **座位/HUD 层(16-aircraft/20a-seats/20-player/22-hud/21-match)**:①Plane.velVec/fwdDir 加可选 out 参(缺省仍新 V3,全库调用点兼容);②updatePlayerPlane 投影闭包提升模块 `_seatPrj/_seatPut`(+_seatPrjV 槽),扫射弹着点(74 次 heightAt/帧)与航弹 CCIP(60 步积分/帧)改 **10Hz 节流+世界命中点缓存逐帧重投影**(屏幕位置随相机连续,世界参考点最多滞后 0.1s——`updatePlayerPlane._pipT/_spH/_ccH`,updatePlayerTank._rngT 同款口径);airPip rel2 标量化+data-d 去重写;③updatePlayerAA 提前量圈标量化(每机一 V3→0)+lead 复用槽;④迫击炮 vo/海战 cdF·co·aimDir·dv/AT·岸防·MG 的 camForward() 换复用槽(每槽单一消费函数);⑤**heatFill 全座位写点 `_lw/_lb` 去重写**(坦克/飞机/迫击炮/AT/岸防/AA/MG/海战八写点同键=跨座位缓存一致;hudText/hudStyle Map 缓存因双写点不可用,元素挂键与 D6 纪律同源);⑥navalSeatHud 面板全字段元素挂 `_t/_lc` 去重写+display 按 DOM 实际值幂等写(hudHideReal 同款);⑦updateNadeArc 预演零分配(`_naSt` 状态槽+`_naPool` 点串池化裸 {x,y,z,bounce} 记录——st.pos.distanceTo 只读 x/y/z 不要求 V3 实例;首触地/爆点模块记录+置位旗;playerThrowOrigin/Dir 加可选 out);⑧updateHUD 部署页元素缓存(`_depEl`)+updateDirHits transform 按 `_lRot` 去重写+children 索引化。
+7. **放弃/暂缓留档**(逐条评估后不进本批):updateRagdolls 坡度早退(需"地形坡度有界"未证假设,动判断面);raycastWorld 地面步进格上限(桥面/地形 Lipschitz 无界,无法证明等价);drawMinimap 离屏底图重写(工程量大);updateCamera 飞机追尾分支 4 alloc(视角函数最高危,留下一批);planeAI 前瞻节流/capitalCapsule 缓存/坦克碰撞环闭包提升(可变捕获状态,槽别名风险)。
+8. **判据**:全 edited 15 文件 node --check 绿;域内探针=perf 34/34 · fire 全绿 · nav-20260926 8/0×4(首轮 7/1=种子偶发,与在案 1/20 布局随机同类) · hudfix 37/0 · animfix-20261012 66/0 · boot 绿 · nade-trigger **88/0(F1o/F1p/F1s 三条源码钉判据跟走:签名加 out 参/预演 st 换复用槽——钉随码走)** · aimassist 40/0(首轮 39/1 同为种子偶发) · killattr 18/0 · zombie 47/0 · airground 12/0 · sink 全绿;**phase5-capital 首跑 S3 红=`bot moveDir 水障放行` 源码钉仍钉旧内联字面量 `this.swim||this.onCapDeck`——避障探针提升 `_botMoveProbe(b,a)` 后字面量成 `b.swim||b.onCapDeck`(14-bots:57, 门本身单点未动),判据跟走修钉后 41/41**。run-all-verify 两轮:首轮 **63/71** exit=0(失败=naval 稳定红 + phase5 S3 钉,后者连跑 1/1/1 被套件判"稳定失败"实为判据漂移非回归——修钉单跑 41/41 后次轮套件内亦 0/绿)、次轮 **64/68** exit=0(**唯一失败=verify-naval 稳定红 1/1/1=一.83 遗留 naval 红线7,与预存红账逐条同名,零新增**)。
+9. **版本戳**:本批零升戳——一.85 已升 `20261101c` 且未实机验收,本批 JS 改动随同戳首载(实机首次加载 20261101c 即含本批)。
+10. **实机关注**:①夜图(ironbottom/nightsea)开手电/车灯/近火源的帧率与灯光稳定(灯数不抖=无材质重选顿挫);②飞机座舱 HUD:扫射/CCIP 落点 pip 世界点 10Hz 刷新(高速俯冲时参考点轻微滞后属预期),炮线准星与锁定框仍逐帧;③持雷预瞄:点串/落点圈/圈内人数与改前一致;④各座位装填条与海战面板读数正常,跨座位切换无残留错值;⑤Bot 移动/感知/丧尸行为不变;⑥其余零行为改动。
+
+承用户两报：①「很多动作仍然有左臂太靠右，看起来左臂是长在右肩上」（举例=补给箱取弹药、火箭筒换弹）；
+②「打绷带等读条动作进行的时候，会被取弹药等其他行动强行打断，但不要出现模型滞留；同时可以点击 X 取消」。
+1. **左臂朝向（10-viewmodel）**：病根=臂组枢轴在手腕、袖管沿手局部 +z 后延 0.25m，而各动作分支的 `handLOverride`
+   字面量是「腕位 + rotY=0」手调的（包扎更是 **+1.2** 反角），叠加根姿态 `HIP.pos.x=0.17` 把整个 inner 推到画面右侧
+   ⇒ 袖管（肩端）落在掌心**右侧**，读作「左臂长在右肩上」。2026-10-05 只在默认握位修过（rotY=-1.0），动作覆盖位姿漏改。
+   修法=新单源 `VM_LARM_Y=-0.95` + `vmHandLSnap(pose)`（掌心保点 = `vmPalmOf` 反解腕位 `vmWristFor`；已在带内则恒等返回）
+   + 其字面量入口 `vmHandLFix(pos,rot)`：**掌心逐位不变**（手不从道具上滑走，父坐标系偏差 ≤1e-16m）、只把袖管转到画面左下。
+   ①**七处字面量位姿**全部改走 `vmHandLFix`：grab / 火箭筒换弹 / 旧版换匣×2 / 建锤 / 举雷 / 包扎（实测肩端 x：grab +0.130→−0.150、
+   火箭筒 +0.114→−0.166、包扎 +0.279→−0.312）；
+   ②**第七处**（排查中发现的漏网）=下置弹匣的**物理**换匣（BAR / 百式，`vmHoldPose` 的 `side=1` 左手持匣路径）：它的 rotY 由
+   「枪系抓握角 × 收束插值」解算而来（中途段实测 −0.09~−0.24）⇒ 袖管落在画面**右**半（肩端 x=+0.13~+0.17），同款症状；
+   现在左手持匣也过 `vmHandLSnap`（端点=默认握位 −1.0，在带内 ⇒ 恒等，端点帧零漂移），逐相位肩端 x 全为负。
+2. **读条互斥（18-game / 20-player / 06-engineering 同规）**：`readBarActive()` / `readBarBusy()` / `cancelReadBar(msg,quiet)`
+   三件单源收口「包扎 bandaging / 拆除回收 demolish / 固定火力点前摇 useCast」三条读条：账目层清零+炮位占位交还，
+   模型层交 `vmAbortAction()`（绷带卷+左臂缠臂环+持刀左臂，幂等）。包扎 tick 改为与拆除读条同规的派生判据
+   （身体被上炮/上车/上艇/进炮位/驾巡飞弹/取弹占用，或 VM 动作态被抢走 ⇒ 按「被打断」收账，**不再一路 tick 到满照样回血**）；
+   前摇启动时反向收掉包扎；受击打断、死亡、再部署、换局复位全部改走同一出口。
+3. **读条取消（4 条路同一出口）**：① 屏下方读条条（22-hud `_demolishBar` 由「拆除专用」扩成通用读条）新增可点 **✕**
+   (`#castCancelBtn`，pointer-events:auto + stopPropagation，触屏/未锁指针可用)；② **X 键**（指针锁定时 DOM 点不到，键盘侧唯一总能按到的取消键）；
+   ③ **左键**（读条中左键=取消，且**吞掉这次点击**——取消后 VM 立刻回 idle，不吞就会顺势走火）；④ 原键再按（H 取消包扎 / 6 取消回收 / F 取消前摇 / B 取消拆除）。
+   读条时长收 `BANDAGE_T=2.6` 单源（00-config），新增 9 条 i18n 词条。
+4. **判据**：新 `dev/verify-animfix-20261012.js` **63/0**（含 `--neg` 阴性对照：把 `vmHandLSnap` 与互斥闸按文本还原 ⇒ 42/21 报红，
+   证明判据真的在测这两处；BAR/百式那组另带**页内**阴性对照「关掉归位」⇒ 肩端 x 由 −0.13 回到 +0.13）+ 新真浏览器探针
+   `dev/probe-animfix-20261012.js` **19/19**（真渲染器左臂两端坐标 + 布局事实 + 真 `Input.dispatchMouseEvent` 点 ✕ / 真 keydown X /
+   真主循环 rAF 下被抢走不留模型），两条均已注册 `dev/run-all-verify.js`。
+   版本戳 `20261010a → 20261012a`（css `20261010b → 20261012b`，48 处）。**基线说明**：本批前的既有失败（zombie/spec/specbatch/naval/
+   worldrestore/fire/matseam/hudfix T4·T6/nade-trigger/airground/phase4-7d/fixbatch VEH_HIT_TOP/animfix-20260926 05b 棕榈叶）与本批无关，
+   详见 README §8 2026-10-12 行；本批改动面相关探针 `verify-text`/`verify-phase3-20260928`(65/0 读条回收批)/`verify-fixes-20261010*`/
+   `verify-hudfb-20260928` 全绿。
+5. **实机关注点**：①六个动作的左臂是否都在画面左下（袖管出画或贴左缘）、手是否仍站在原来的道具位置上；②包扎/拆除/前摇读条时，
+   点 ✕、按 X、点左键、再按原键四种取消是否都干净（绷带卷与白环立刻消失、不再回血）；③读条中按 F 取弹药/上炮/上艇是否强行打断
+   且不留模型；④指针锁定期间 ✕ 点不到属预期，用 X 或左键。
+
+## 一.87 观战子系统五项批 × 真附身呈现层 × 实机修复轮 (2026-11-01~02, 待实机验收)
+承用户三项需求（①大灯两盏两道光+照明范围 ②观战终局横幅中性化 ③0 票可进观战+新「自由观战」模式）与两轮实机反馈
+（「附身全方位像两个人叠在一起」→ 全面重做呈现层；Ctrl+F5 复测七张截图再修）。用户裁定：附身交互=两套都要
+（视模式左键附身+Q/E 轮换+右键脱离；调试模式 Q/E 附身脱离）；观战终局横幅=中性文案；结算口径=按原阵营显示并计入
+历史（调试模式因能干涉战局才不计入）；**附身=只读借眼**——宿主击杀不进玩家记分链。
+1. **大灯真灯池双灯 (00-config/08-effects)**：旧池按台竞选（每台 1 盏 SpotLight）=「两盏大灯一道光」；改 `headRealN:2`
+   台×**左右灯口各 1 盏**（池容量 `headRealN*2`，竞选位逐灯轮换）＋用户实报照明范围小 `headRange` 36→52、假光锥
+   `headConeL` 26→40 同比放大。同屏真光源总数红线 ≤3 不变。
+2. **观战终局横幅中性化 (21-match)**：观战者不属于任何一方——「胜利在望/败局在即」改中性「胜方 X」（普通存活玩家原样保留）。
+3. **自由观战模式 (20-player/18-game/21-match/22-hud/23-deploy/24-main)**：票尽/死亡可进 MC 式旁观者——自由飞行
+   （WASD+滚轮调速+Space/Shift 升降，零碰撞零地形吸附）、左键准星射线附身 Bot（±5.7° 视锥内最近者，隔墙/登载具者不可）、
+   Q/E 距离序环绕轮换、右键原地脱离（相机位化作自由观战）；`specViewWillBe` 观战部署不耗票不清场（承一.82 specWillBe 门，
+   补 `!specView` 排除）；👁 状态徽标条；结算按原阵营显示并计入历史（recCommit 判据 !REC.counted 不变——自由观战非调试）。
+4. **调试模式 Q/E 附身 (20-player/19-input/15c-specveh)**：旧观战更名「调试模式」；Q 附身准星 Bot / E 脱离（观察位存还原），
+   本体冻结门（updatePlayer 对 specViewHost 早退）+ avatar 恒隐；F 召唤幽灵坦克朝向玩家视向（yaw+π 角系口径）。
+5. **真附身呈现层 (20-player/22-hud/23-deploy/19-input/00b-i18n)**：①**HUD 换宿主心**——血条/体力（Bot 无体力账⇒恒满）/
+   低血晕影/绷带行读 `_hv/_hhp`，弹药面板经 `player.curW` 镜像钉到宿主主武器（`_svCurW` 账四处还原）；②**反馈链不记分**——
+   宿主出膛=vmFireKick+微震镜（13-combat 调试附身门）、宿主命中三档白档（士兵/对空/装甲）、宿主受击=红闪+震镜+来向弧
+   （14-bots damage，die 判定前）、宿主击杀=红档+0.25s 节流音（`onHostKill` 单源，14-bots/25-zombies 两门，**不进
+   onPlayerKill**）；③**VM 动作镜像**——视角武器换宿主枪（vmEquip）、宿主换弹⇒VM 换弹动画/时长=宿主剩余（走玩家既有管线，
+   R 键已吞不会打架）；④**只读借眼**——附身中战斗/交互键一律吞（U/J/K 例外放行，keyup 不经过不留死账）；⑤战斗 HUD 全量
+   保留，只收本体动作类面板（雷弧/交互/镜筒/枪械热量）；顶栏观战词条附身中隐藏（「左键可开火」与只读矛盾）。
+6. **实机修复轮 2026-11-02（用户七张截图实证）**：★**病根=buildSoldierMesh 返回包装对象（root/headG/gunG…），上一轮五处
+   全写 `h.mesh.visible`=普通对象闲散属性，three.js 不读 ⇒ 宿主第三人称整套模型从未被藏掉**——两个身体/宿主 3P 枪怼脸
+   成巨物/相机钻进头盔黑屏（582/583/584/585/587 全为此病）。修=五处写点全改 `.root.visible`（调试逐帧按视角收纳·视模式
+   恒收·svHostModelRestore 单源·再部署·换局）+ **还原守卫**（阵亡不还原=布娃娃接管、登车登艇不还原=车内自管，14-bots
+   上车惯例 root.visible=false）；**姿态旗镜像** prone/crouch 随宿主（updateCamera 步行分支在 specViewTick 之后仍把
+   eyeH 往玩家自身姿态阻尼——旗不镜像则卧姿宿主眼高漂 0.2~0.5m；dbgSpecPossess 存/deployPlayer·换局·脱离四路还原）；
+   👁 指示条固定 top:84px 压罗盘条（顶栏高度随战况横幅浮动）→ 显示时按罗盘 `getBoundingClientRect().bottom` 实测重定位
+   到其下 10px；脱离键两模式分文案（视模式=右键/调试=E）+ i18n 词条同步。小队面板（#squadHUD top:214）与顶部无重叠
+   （小地图底 212px，设计间隙 2px——用户问询核实为指示条压罗盘的同一观感）。
+7. **判据**：新 `dev/verify-specview-20261101.js` **44/0**（源码锚 30+行为 14：假宿主矩阵=钉脚底/yaw+π/姿态旗/eyeH/FP 收纳
+   .root/U 第三人称还原/E 脱离全账还原/二次 Q 不覆盖观察位账/死亡·登车自动脱离+守卫不还尸/视模式眼位+恒收/换弹镜像/
+   HUD 显隐矩阵/svHostFireFx；阴性 13 补丁=22 红，含「.root 退回 h.mesh.visible」病根复现钉）入册 run-all。
+   **run-all 两轮 66/72、65/69 exit=0**（唯一稳定红=naval 红线7 一.83 遗留 1/1/1；r1 一个 matseam 偶发 1/0/0=在案环境抖动型，
+   失败集逐条同名**零新增**）。**判据跟走三件**：①specbatch T10 观战文案清单随更名批走「调试模式」新串（旧「观战模式」
+   系词条本批前已被更名替换，T10 未跟=2 红）；②版本戳钉清单补全——commander-20261026（7 处）与 cmdbatch2-20261027
+   （2 处）也钉戳字面量，随 20261101d 一起升；③★**行尾还原事件**：本仓库行尾混用实况（纯 LF：00b-i18n/08-effects/
+   13-combat/15c/18-game/19-input/21-match/24-main/25-zombies/css/index.html/_game_files；纯 CRLF：00-config/14-bots/
+   20-player/22-hud/23-deploy；混合：run-all-verify）——Edit 工具在 win32 会把**整文件**规一化为 CRLF，纯 LF 文件被编辑后
+   探针多行 `\n` 锚全崩（nadecancel/commander/phase3/animfix/specbatch 首轮 6 探针稳定红，逐根因=行尾非代码），node
+   整文件 `\r\n→\n` 还原后全绿。教训：**锚失配先查字节行尾**（`git show HEAD:file | node 查 \r\n 计数`；`cat -A` 经 sed
+   管道会被削 `\r` 误导——在案"sed 削 CRLF 坑"的又一变体）。
+8. **版本戳** `20261101c→20261101d`（index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+三探针钉随扫，旧值全库绝迹）。
+9. **实机关注**：①附身第一人称：屏上**只有一具身体**（视角武器=宿主枪），无头盔/枪体怼脸巨物、无黑屏；②血条/弹药/绷带/
+   低血晕影随宿主走，宿主开枪有后坐+枪口焰+震镜、命中出白档、击杀出红档+音（右上得分**不**增加）；③U 切第三人称=追尾宿主
+   单具身体；④宿主阵亡/登车自动脱离且不还尸体模型；⑤👁 徽标条在罗盘条下方不重叠；⑥夜图每台开灯载具左右各一道光锥、
+   照明范围明显变远；⑦观战局终局横幅「胜方 X」中性；⑧调试模式 Q/E 附身脱离、幽灵坦克面向玩家。
+
+## 一.107 载具烧毁漂移修复 × 纯海战地图整体下架 (2026-11-10, 待实机验收)
+承用户两令：①「现在载具在血量<10%然后自然掉血到损毁的时候，模型位置会发生一次漂移，原因不详，需要修复。」②「彻底去掉两个彻底失败破产的纯海战地图及其相关代码，移动到D:\Artifact\Battlefield Like\archive文件夹中。」
+1. **①病根=烧毁账 die() 后不 return**：hp<10% 起火→燃烧 dps 烧到 0 的那一帧 die() 播完后，同帧 update 余段（姿态/物理/位置积分）继续对已死车体写入 ⇒ 模型跳一次位。修=15-vehicles Tank / 16-aircraft Plane 燃烧账 `die(...); return;`+`if(!this.alive) return;` 守卫（15b-trucks/15d-naval 当年就带，坦克/飞机漏）。并发批「碰撞三蟲抓」(aircollide-20261110, 见其批次条目) 同日落地：坠地机毁人亡 `!crash` 档（碰撞系机毁一律走死亡链，跳伞不成立）+飞机撞楼 `damageStructures(_plSwHit,7,260,…)` 击落者归属 —— 两者使 vehburn die 接线钉与 structscore T10 计数钉需跟码（见第 6 条）。
+2. **②海战下架范围**：coral/ironbottom 两战役条目（00-config）+15g-capmodels+15h-capital 整文件+index.html 两条 script 标签+21 个 js 全链摘除（03 opensea 海床/05c 两图布局/04 舰体碰撞/13 大舰接触块与吃雷钩/14 Bot 大舰编队摆渡 19 处/15v capitalShellHit/15d 吃雷钩注记/16 停机弹射拦阻/18/19 座位门/20 ②b 甲板交互层+大海致命化/21 capFlagActive+capCrew 记分/22 大舰地图符号+弹药面板+锁夜/23 部署大舰/23b capitalReset/24 巡航 tick/25/26 capCrew）。战役 14→13。
+3. **归档**：`archive/naval-coral-ironbottom-20261110/` = 15g/15h 原文+两图条目史料摘录（00config 915-1026 行）+6 支海战探针（naval/navalcap/round4/round5/round6/phase5-capital）+3 支大舰 dev 工具（_probe-capdeck/_probe-capplayer/verify-seabatch）+归档 README（含保留件清单与恢复指引）。
+4. **保留件**（岛图河湖共用）：15d/15e/15f 小艇两栖车全家+onNaval+navalCraft+sfNavalMapSymbols+planeFloorY+planeTgtVel（原 capTgtVel 艇/机分支收编 16-aircraft）+ironbottom 标定史实注释。
+5. **dev 侧**：81 支探针载入清单批量摘 15g/15h 两项（r1 曾因 ENOENT 全线红——探针载入盲区教训的批量形态）；6 海战探针退册；vehburn 两支入册。
+6. **判据跟码 19 支全绿**：vehburn-20261109 三钉（!crash 门/大舰炮位行/详细操作开关 7→6）+r1 稳定红 16 支：旧戳钉×11（cmdbatch2/crushhead/fieldfix/fixbatch-20261104b/flyaim/loiterfreeze/loiterview/perfgfx/timestophud/parity/commander，20261109b→20261110b/50→48 处/46→44 行）+F 交互栈双击门 14→7 ×2（batch-20261030/nadecancel，大舰甲板层 7 处随下架）+commander D18 姿态门+自带脚本清单 46→44+19-input ADS 门 capitalGun 项（flyaim/touchpad）+parity 附身候选 capCrew+ffneutral T7/T8/锚4 coFfFire 座位排除+structscore T10 调用点 10→11（三蟲抓① 飞机撞楼新调用点漏跟=新增调用点必须跟计数钉的教训）。
+7. **run-all 两轮对账**：r1 首跑 65/81（16 稳定红+1 偶发）→ 跟码后 r2 **80/80 全部通过 ✔**（r2 含并发会话新登记 aircollide/willow 两支同绿）；nade-trigger r1 偶发（0/1/0）单跑 88/0=在案种子偶发族。
+8. **版本戳** `20261109b→20261110b`（index.html 48 处+`__sfStyleVer`+_game_files.txt 44 行+vehburn 戳钉判据跟码）。
+9. **实机关注**：①坦克/飞机残血起火烧毁瞬间模型不再跳位；②战役列表无珊瑚海/铁底湾，其余 13 图开局/旗点/票务正常；③岛图河道小艇/两栖车照常；④烧毁残骸照常燃烧冒烟、死亡掉雷/击杀播报不变。
+
+## 一.106 中立批: 投掷手雷中立 × 观战武器中立 (2026-11-09, 待实机验收)
+
+承用户两项: 「①所有投掷性手雷都应当是中立的, 会同时杀伤友军和敌军 ②观战模式下的所有枪械也应当都是中立的, 命中的时候会杀伤友军和敌军」。三条裁定: **仅爆炸伤害中立**(触发引信仍只认敌方——武装雷碰友军穿过去, 落地才炸); **击杀照常记分**(归因链不加同队门); **座位武器不含**(观战者坐真实载具开火维持原队伍口径)。
+
+1. **①投掷手雷中立**(仅爆炸面): frag 走 explodeAt 加第 4 参 `noFF`(13-combat)——手雷分支传 true 跳过同队×0(自炸 s!==attacker 例外不动); boomer 殉爆/航弹叠爆/钢水包/丧尸链不传=旧口径逐位不变(丧尸自爆不伤同队的行为依赖仍在)。反坦克炸药走 nadeExplode 溅射 team 传 **-1**(与地雷/油桶/巡飞弹手动引爆同约定; 连带溅射圈可及载具/艇舰/飞机, 与 mineBlast 同口径)。烟雾/燃烧无直接伤害(燃烧弹地面火本就无队伍判定); 烟雾/燃烧/AT 的**触发引信逐位不动**(nadeContactTarget+载具触发圈仍只认敌方=裁定 A, nade-trigger B2 友军阴性原样自绿锁定)。throwNade 弹体 team 字段不动(死亡掉雷 T1/敌雷接近警告/预演抛物线全不受扰)。
+2. **②观战本尊全步兵武器中立**: 判定单源 `coFfFire`(13-combat) 加 `shooter.spectator` 门——一处放开三处同源(raySoldiers 步兵弹道/子弹刮友军载具/naval+capital 射线门); 顶部注释整段重写(2026-09-20"只有观战连狙可打双方"口径被本批裁定取代)。**座位排除**: `spectator&&!onNaval&&!capitalGun` —— 艇机炮/大舰副炮走 fireBullet(shooter=player), 不排除就借门变无差别火力; 观战者可达的真实座位只有这两个(固定炮位被 tryInteract ③ 挡住, 真坦克/真飞机被"不得征用真载具"挡住; 幽灵坦克 ffAll 覆盖不依赖新门)。**观战本尊火箭筒**: fireRocket 盖章 `spectator?-1:team`(幽灵坦克 team:-1 同约定, 下游命中/溅射链全通)。**观战本尊手持迫击炮**: nadeExplode mortar 分支 `thrower.spectator?-1:team`——不在弹体上盖章(保住敌雷接近警告与迫击炮弹载具触发圈旧口径), Bot 迫击炮逐位不变。压制/惊动口径不动(观战开火本就不压制不惊动任何一方); 附身宿主开火=宿主 Bot 的弹不中立(表现层单向读零写点契约)。巡飞弹整链不动(既往裁定)。
+3. **瞄准吸附跟走**(吸附契约"吸附对象集=子弹可命中集"): 20-player 吸附 ff 门 `!!p.ffSpecSniper` → `!!(p.ffSpecSniper||p.spectator)`。刺刀摘旗注释改历史注记(新口径下观战刺刀伤友军由 spectator 门兜着, 摘旗不再阻断; 代码保留防锚漂移)。
+4. **击杀照常记分**(裁定 B): 归因链零改动——友军击杀照加 kills/score/killfeed(本批探针 T1b 钉死不加同队门); AI 反击链既有同队门+观战门(14-bots damage())保证友军误伤不引发还击锁定、观战开火不惊动任何人, 零改动。
+5. **判据**: 新 `dev/verify-ffneutral-20261109.js` **正向 40/0 ×3 轮**(T1 一颗炸三点/T1b 照记分/T2 AT 雷/T3 引信三态/T4 观战步枪+双阴性/T5 火箭盖章/T6 手持迫击炮三态/T7 coFfFire 矩阵/T8 座位不泄漏/T9 源码锚)+**NEG 七补丁 17 红逐名对认**。判据跟走: verify-specthird T2/T3 改写为新口径(观战普通步枪伤友军; 阴性对照换非观战态)修后 59/0; verify-batch-20261030 迫击炮 splashDamage 精确串锚(NEG 补丁+源码锚两处)跟新 50/0; verify-spec/specbatch/aimassist/nade-trigger/deathdrop/killattr/zombie-doublekill/fixbatch/nademap/sink/specview/specweapon/deathflight 十三件全绿零波及。**探针坑两录**: ①fireBullet 里坦/卡/艇是硬挡弹目标(先于士兵收窄 wallD)而 raySoldiers 只测士兵 ⇒ 摆位预检必须载具净空+射线前沿身份双校验重试环(_stageShot), 否则"观战打友军不掉血"假红; ②kill 精确计数断言须先把旁观单位搬出爆圈(部署场上别单位恰在 10m 内=多记一杀)。
+6. **版本戳** 20261109a→**20261109b**(index.html+__sfStyleVer+_game_files.txt+戳钉探针随升, node 整文替换)。
+7. **run-all**: r1 80/84 exit=0 —— 唯一稳定红=naval×4(在案预存红线7, 重试 1/1/1), **零新增红**; 本批探针 ffneutral 0 红; r2 用户裁定不跑(2026-11-10, 版本戳 20261109b 已落, 戳钉探针/hudfix/perf/animfix/text/boot 单跑见 r1 同款全绿)。
+8. **实机关注**: ①朝队友脚下扔普通雷/反坦克炸药: 友军掉血乃至炸死, 击杀播报照出、击杀数照加; 自己站圈里照炸; ②武装雷贴着队友身体飞过去**不炸**, 落地才炸; ③调试观战用主武器/火箭筒/手持迫击炮打友军: 掉血照杀; ④观战吸附可掰向友军(与可命中集一致); ⑤观战者上友军舰船/大舰炮位开火: 仍不打友军(座位武器不含); ⑥非观战正常作战: 枪/火箭/迫击炮/航弹照旧不打友军; Bot 误扔的雷现在也可能炸到队友与玩家。
+
+## 一.105 四项批: 载具残血起火 × 页签排序 × 详细操作开关 × 自动脱离载具 (2026-11-09, 待实机验收)
+
+承用户四项: 「①任何载具生命值低于10%的时候一段时间内自动掉血至0损毁(仍会正常受伤), 此时应当有显示警告。Bot AI 方面也要对齐 ②把"性能与画面"移到"游戏内容"和"language"选项卡之间 ③游戏内容设置增加"游戏中显示详细操作"(是/否), 关闭后不再显示"左键 开火"这类操作说明与"任意一方占满全部旗点"之类的局外说明 ④游戏内容设置增加"自动脱离载具"(是/否), 开启后载具被击毁自动下车脱离(飞机跳伞)」。三问裁定: 页签顺序=操作方式→语言→性能与画面→游戏内容(单块移动); 详细操作关=**保留单键交互入口**(F 进入坦克/F 补充弹药等, 多键明细才藏); 自动脱离**默认关**。
+
+1. **①载具残血起火**(四家族单源接线): 常量单源 `VEH_BURN_FRAC=0.10/VEH_BURN_TIME=10`(00-config) —— hp<maxHp×10% 点火, 燃烧账每秒烧 maxHp×1%/s ⇒ 自起火起 ≤10s 必烧毁; **点火单源 `vehBurnIgnite`**(04b-fire): 置 burning/burnBy(击杀归因=点燃者)+follow 火源(dps=0: 只做视觉+点燃植被, 车体伤害走 update 燃烧账直扣 hp 不走 takeDmg ⇒ 不刷红闪/lastDmgT/flood; follow 锚走 capAnchorWorld 通用位姿只读 pos+yaw 对坦克/卡车/舰艇通用; 载具 die 置 alive=false ⇒ follow 块当帧自动掐火, 残骸火源无缝接管); **飞机不带火源**(飞行拖火会沿航线点燃全图)改机体每 tick 喷火粒/烟(burnFxT 节拍)。四家族(坦克 15/飞机 16/卡车 15b/舰艇 15d) takeDmg 扣血后各插一行点火检查+update 各插燃烧账; **起火禁自修**(坦克闲置回血门加 !burning —— 无人车 +2.5%/s 若不门会盖过 -1%/s 燃烧; 舰艇无自修已核); respawn 三处复位 burning/burnBy/burnSrc(车体模型重生复用不得跨生死携带)。**排除项**: 大舰维持瘫痪不沉契约(已有 fireHp 0.25 起火先例)/火力点迫击炮无 HP/观战幽灵坦克 specRide 免伤。
+2. **警告**: `#vehBurnTip`(仿 #tbTip 持久红字条, index.html+style.css) — 22-hud updateHUD 载具血量条块旁驱动: player.onVehicle/onNaval 任一座驾 burning ⇒ 显「⚠ 载具起火! 即将损毁 —— 快脱离!」, 脱险/烧毁即隐(hudShow/hudText 指纹去重)。
+3. **Bot 对齐**: 14-bots 乘员同步块头部插 **坦克座驾 burning ⇒ dismountVehicle(true) 立即弃车**(bailing 档: noEnterT 12s 防复上+撤位滑步+压制值)+pickObjective 重选; **舰艇 Bot 起火 crewOut() 弃船落水**(玩家不弹, 留舰到沉没由既有弃船链接管); 飞行员 32% 跳伞先于 10% 起火线(既有, 零改动); 登车/登船 40% 血门天然挡住起火载具(既有, 零改动)。
+4. **②页签排序**: index.html #mSet 仅移动「性能与画面」块(268-271)插入「语言」之后 ⇒ DOM 序 操作方式→语言→性能与画面→游戏内容; 接线按 id 零 JS 改动零新词条。
+5. **③详细操作开关** `SHOW_CTL_HINTS`(sf_ctlhints 默认开, 即时生效不 reload): 隐藏面=**多键操作明细**(20-player updateInteractHint 的幽灵/舰艇/飞机/坦克/大舰炮位/迫击炮六明细行+右下 #clsTip 兵种常驻键位表整块; 22-hud #nadeN 五载具操作行——飞机行留"炸弹×N"存量、navalSeatHud 操作行; #braceInd '[X] 架枪' 键位态)+**局外说明**(#tickets modeLine 模式说明含"任意一方占满全部旗点"句; 观战键位行含 cmdSpecHudKeys)+**一次性键位提示**(23-deploy 部署页两 pop+调试模式 pop/26-commander cmdDeployHint/19-input 建造选择; 读条行"再按一次打断"后缀)。**保留面**(用户裁定): 单键交互入口(F 使用迫击炮/F 进入坦克/F 补充弹药/F 拿取绷带/F 跳海/登机弹射等)、'▙ 已架枪' 状态、wipeLine 实时战况、战报/得分/状态条; 19-input "观战模式·不指挥小队"两 pop 属按键反馈应答保留(非主动键位教学); 读条行 "X 收回" 属词典整句键不动(摘除需 churn i18n 收益趋零, 记录在案)。
+6. **④自动脱离载具** `AUTO_EXIT_VEH`(sf_autoexit 默认关): 20-player 新 `autoExitWreck(v,bail)` 单源 —— 坦克=occBlocked 五向探针车旁落位(复用 specRideEject 落位段)+座位态清账+VM 恢复; 飞机=与 F 离机跳伞逐字同口径(机下 2.5m+机头前向 6m/s+开伞 chute); Tank.die/Plane.die 玩家分支插 `else if(AUTO_EXIT_VEH&&player.alive)`(观战 specRideEject 旧链不动); **crewSlots 结算不变**(2 名额仍随车阵亡, 玩家是唯一逃生者); 舰艇弃船弹出是既有行为不受开关影响; 默认关=照旧车毁人亡(⑥-3 恢复类断言钉死)。
+7. **判据**: 新 `dev/verify-vehburn-20261109.js`(timestophud 同款真 three boot+开局; ②行为段直驱 takeDmg/update) **正向 39/0**: ①源码钉 15 条(四家族四件套/点火单源/Bot 弃车弃船/autoExitWreck/隐藏面清单/页签 idx 序/戳)+②点火阈值(≥10% 不点火/<10% 点火/burnBy 归因/follow 火源 dps=0)+③燃烧账(起火中无人车净掉血=自修被禁实钉/400 帧内烧毁/正常受创照常 hp=maxHp-100/respawn 复位)+④飞机烧毁+坦克乘员弃车+④b 海战图沙箱舰艇弃船(★★normandy 无 navalCraft ⇒ 海图单独 boot)+⑤警告显隐+⑥自动脱离四态(开=车毁存活落位≤7m/默认关=照旧死=恢复类/机毁跳伞)+⑦开关四态(modeLine 藏显/nadeN 藏显)。**★探针坑两新**: ①**顶层 const 词法绑定遮蔽 globalThis 属性** —— 探针沙箱里 `globalThis.ATK=...` 后裸 `ATK` 仍解析到 00-config `const ATK=CAMPAIGN.atk||0`(词法绑定优先) ⇒ attacker=0⇒burnBy=null 假红; 沙箱注入变量命名须避开游戏词法名(grep `^const X` 先查) ②跨 vm 边界两次 G() 取对象做 === 不可靠 ⇒ 恒等断言一律写成上下文内单表达式 `G('a===b')`。**NEG 8 补丁 13 红逐名对认**(全单行锚): N1 摘坦克点火⇒②-2/3/4+③-1/2/4 红; N2 燃烧账 hp-=0⇒③-1/2 红; N3 摘 Tank.die 自动脱离⇒⑥-1/2 红; N4 摘 modeLine 门⇒⑦-1 红; N5 警告恒隐⇒⑤-1 红; N6 摘 Bot 弃车⇒④-2 红; N7 摘舰艇弃船⇒④b-1 红; N8 页签钉反转(标签改名)⇒页签序红; 恢复类(②-1/③-3/⑥-3/⑦-3/4)NEG 下仍绿 ✓。**判据跟码修钉**: verify-specview-20261101 T22 顶栏观战词条源码钉跟新为带 SHOW_CTL_HINTS 门的新表达式(本批把该行纳管, 修后 **48/0**); run-all r1 80/89=naval×4(在案预存红线7)+specview×4(本判据跟走项, 修后单跑 48/0)+botai×1(在案偶发, 复核 0/0/0); r2 80/86=naval×4(预存)+matseam×1(在案偶发, 单跑 44/0; r1 的 botai 偶发未复现 53/0)——两轮偶发互不同同在案模式, **零新增红, 唯一稳定红=naval 红线7**。
+8. **版本戳** 20261108d→**20261109a**(index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+16 戳钉探针随升, node 整文替换; **_game_files.txt 最初漏扫** —— 戳钉对账清单除探针外必须含 _game_files.txt, 本批由 timestophud 探针的 46 行断言兜住补扫)。
+9. **实机关注**: ①坦克/两栖车被打到 <10% 血: 车体起火(火苗+点燃周围植被)+屏中红字警告, ~10s 内烧毁(其间照常可被打); 烧毁后转残骸火源照旧; ②飞机 <10% 冒火粒, ~10s 内坠毁; ③Bot 坦克残血起火后乘员应立刻下车跑路, 舰艇乘员落水弃船; ④游戏设置页序: 操作方式→语言→性能与画面→游戏内容; ⑤游戏内容设置两新钮: 「游戏中显示详细操作」关掉后 驾驶载具/炮位的键位明细行/右下兵种键位表/顶部模式说明/部署页键位提示全消失, 但"F 进入坦克""F 补充弹药"仍在; ⑥「自动脱离载具」打开后车毁瞬间应落在车旁存活(飞机=跳伞), 舰艇照旧弃船; 默认关时照旧车毁人亡; ⑦EN 界面两新钮+起火警告词条显示正常。
+
+## 一.104 性能与画面批: 主菜单新子面板 × 画质迁入 × 五性能旋钮单源落地 (2026-11-08, 待实机验收)
+
+承用户两问一令: 「现在画质的三个选项是否是实际上处于脑死亡的状态? 如果是的话, 就优化一下」「我希望有一个和"游戏内容设置…"同级的"性能与画面…"的选项卡, 先把画质选项放进去, 再另外加几个影响性能消耗和画质的选项」。**调查结论 (双探索子代理全库扫 + 关键链亲读核实): 画质三档不是脑死亡** —— `sf_qual→SETTINGS.quality` 共 11 处真实读取点: 02-scene `applyQuality`(像素比上限 1/1.5/2·阴影视锥 42/60/80·贴图 1024/1536/2048·软硬阴影·CSS 滤镜)+`dryFogFar`(雾距 240/340/420)+`shadowRefreshTick`(高画质逐帧/低中半频), 22-hud 水下雾 9/15/21, 04b-fire 燃烧火星 q≥1 门控, 08-effects 爆炸余烬/冲击波/滞留烟 q≥1/q2 分档, 05c/04b 植被树草密度(建图期)。**体感弱的真因**: 同 dpr 屏幕低/中档像素比无差 + 植被密度只重建地图后生效 + 面板零说明。本批把"优化"落在: 迁入新面板+逐项说明+新增五个真旋钮。
+
+1. **新面板 `#mPerfGfx`**(index.html 静态段, 照 mGameplaySet 抄): 「⚙ 性能与画面...」入口钮落 mSet 画质原位(与 🎮 游戏内容设置 同级同款); **画质三连钮整段迁入**(qualBtn class 不动 ⇒ 22-hud `querySelectorAll('.qualBtn')` 接线与暂停菜单 pauseQualBtn 同步链零改动); 六节各带 `data-i18n-html` 说明行(画质档影响面逐项列出+植被"重建地图后生效"注记); **showPanel 硬编码表(22-hud:1637)加 'mPerfGfx'**(不注册不显示); style.css 零改动(全用现成 .mSub/.secLabel/.rowFlex/.optBtn 类)。
+2. **五旋钮单源落地**(档位值单源=00-config 步进表 `RENDER_SCALE_STEPS/VIEWDIST_STEPS/FXMAX_STEPS/PRECIP_MUL_STEPS`; **存档存档位号非值**——步进值将来调整不破老存档; 载入三态=null 判没存过/合法写入/非法回落, 与 sf_aim 同规): ①**渲染缩放** `sf_rscale`(100/85/70/55%)→applyQuality `setPixelRatio(画质档上限×用户档)`(dpr2+中画质+85% 实测 1.275) ②**阴影刷新** `sf_shfrq`(跟随画质/逐帧/半频/¼频/关)→shadowRefreshTick mod-N 档位化(-1 跟随=旧行为逐位: q2 逐帧·q0/q1 半频); **"关"走新单源门 `sunShadowAllowed()`**——压住三处 `sun.castShadow` 重写点(02-scene 建灯/applySceneEnvironment/08-effects initWeather), 旧口径三处内联改一处漏一处就会被换天气复活 ③**视距** `sf_vdist`(标准/近×0.8/更近×0.6)→dryFogFar 末尾乘子(水下雾基准/雾色自动继承; AI 索敌不在此函数不受影响) ④**特效粒子** `sf_fxmax`(280/140/560)→PARTICLE_MAX const→let+新 `applyFxQuality()`(调低瞬间回收超出, spawnP 既有 per-spawn 上限照常兜底) ⑤**降水密度** `sf_pmul`(×1/×0.5/×0.25)→initWeather 雨/雪两分支 `n=round(precipN×mul)`, 点击重调 initWeather 重建池。五钮全走 aimAssistBtn 单钮循环模式(点按循环+即时落盘+apply+文案 t() 同步)。
+3. **判据**: 新 `dev/verify-perfgfx-20261108.js`(verify-perf 同款轻量 boot 不开局; renderer 桩窄扩展 setPixelRatio 记账+getPixelRatio 回读) **正向 48/0**: T0 载入对账/T1 源码防回退 16 钉/T2 戳/T3 存档三态/T4-a 缩放三态(含 dpr2 相乘)/T4-b 雾距比值/T4-c 节律计数(半频 8 帧 4 次·¼频 8 帧 2 次·castShadow=false 应落帧位不置)+关档门(sunVis 驱动不依赖沙箱图默认天气)+复活钉/T4-d 粒子调低立即回收(200→140→240 账)/T4-e 降水重建比值(**bootstub THREE 桩 position.count=数组长 3×, 比值断言免疫桩差**)/T4-f 五钮点击链三账同步+回绕。**NEG 6 补丁 18 红逐名对认**(全单行锚): N1 摘缩放乘子⇒T4-a2/a3/f1+钉红; N2 摘视距⇒b1/b2+钉; N3 节流恒逐帧⇒c1(次=8)/c2(次=0)+钉; N4 摘裁剪⇒d2(n=200)/d3(n=280, 既有 per-spawn 上限兜住≠240)+钉; N5 摘降水⇒e2/e3(恒 1260)+钉; N6 摘关档早退⇒c6/c7(换天气复活实锤)+钉; 恢复类全绿。**判据跟码修钉**: verify-perf T1 三钉+两行为断言跟新 shadowRefreshTick mod-N 新体+补夜间跳过行为钉(t1d), 修后 **35/35**。
+4. **排除项(裁定记录)**: AI 视距/感知频率**不进面板**(动 gameplay 平衡, 非画面旋钮); 灯池滞回 75/85/110 魔数收编+动态灯档**另批**(夜图限定+需先单源化); antialias/camera.far 不暴露(重建 WebGL context/牵动天穹与阴影投影)。
+5. **run-all 两轮**(在册 83 跑次): r1 **79/83**·r2 **79/83**, 唯一非零=verify-naval(在案稳定预存红线7, 两轮 3/3 复跑同账)——**零新增红**。verify-text(新增 27 i18n 键闭环)/verify-perfgfx/verify-perf 均 exit=0。
+6. **版本戳** 20261108c→**20261108d**(index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+14 戳钉探针随升, node 整文替换; **git grep 只搜已跟踪文件**——升戳清单须 `grep -rl` 全列, 本批 14 个戳钉探针多未跟踪, git grep 漏后 grep 补扫齐)。
+7. **实机关注**: ①主菜单 游戏设置→「⚙ 性能与画面...」: 画质三档+五旋钮逐档点按均即时生效(植被密度除外=下局生效); ②渲染缩放 55% 档画面变糊+帧数显著上升(低配机最大头); ③阴影刷新=关 后回战备大厅换天气, 影子不应回来; ④视距"更近"档大图远景提前入雾但 Bot 照常索敌; ⑤暴雨+降水密度"极简"雨丝明显变稀; ⑥EN 界面 PERFORMANCE & GRAPHICS 等新词条显示正常。
+
+## 一.103 瞄准吸附×爆头批: 双靶点判定×设置迁入游戏内容设置 (2026-11-08, 待实机验收)
+
+承用户两项(讨论确认后落地): 「把瞄准吸附的选项放入游戏内容设置」「优化一下吸附的判定, 现在总是无法爆头, 明明瞄的很准」。
+
+1. **②爆头判定修复(病根实锤, 本批核心)**: 吸附对每个士兵只有**胸口一个靶点**(y+1.10, r=0.45), 而爆头命中几何是头部球(站立 eyeY+0.06=y+1.68, r=0.26, raySoldiers 13-combat)——瞄准站立敌人头部时射线在胸球外 0.13m ⇒ over>0 ⇒ "已指着本体不动"守卫不生效 ⇒ **被向下掰 0.29k 米(与距离无关)**: 轻度 0.21~0.24m 逼近球半径 0.26(散布一抖即死)/标准档 0.28~0.33m 直接超出 ⇒ 站立敌人任何距离都爆不了头; 蹲/卧敌人的头在胸球内(0.65~1.55 罩住 1.21/0.56)反而没事——与用户体感"总是无法爆头"特指站着的人吻合。**修(B 方案, 两选项讨论后用户拍板)**: 士兵改**双靶点**(①爆头球, 与 raySoldiers 命中几何同位同径: 站1.68/蹲1.21/卧0.56, r=0.26 ②胸口旧行为)+**暂存槽末尾统一裁决**(gA/gO 六槽+aaOn 旗, 零分配; 必须暂存: 瞄胸时头球 over>0 会先抢注全局绕过守卫)——头/胸任一"已指着"(over≤0)⇒ 整兵不掰(吸附绝不与爆头瞄准对抗, 保"起点→准星命中点"契约即 specthird T6 口径); 差一点打中头 ⇒ 掰向**头部**(落点进球 35% 深=距球心 ~0.09m=真爆头); 差一点打中身体 ⇒ 掰向胸口(旧行为不变)。人体遮挡检查扩展 'solHead' 档(bTag 判据改双串)。业界口径佐证(GDC 主机辅助瞄准设计): 辅助瞄躯干但**绝不把瞄头的枪拽离头部**——旧实现恰好违反后半句。
+2. **①设置迁移**: 瞄准吸附档位钮从游戏设置(mSet)迁入「游戏内容设置」(mGameplaySet)面板顶部, 改面板同款**单钮循环**(🎯 瞄准吸附: 轻度, 点击 关→轻度→标准→关; sel 态=非关档; t() 词典键'瞄准吸附'/'关'/'轻度'/'标准'全在册); 22-hud 接线移入 initMenuUI 的游戏内容设置开关段(expBtn 同段, syncA 惯例), 旧 .aimBtn 三钮接线+初值同步两处删; 游戏说明"游戏设置内"→"游戏内容设置内"+补"已瞄着头或身体时绝不掰动 (不抢爆头)", i18n 两键(面板说明键串变更+说明键串变更)同步。
+3. **判据**: `verify-aimassist` **46/0**(原 40+新 T8 六条: ①瞄头守卫=正对爆头球心原样返回 assisted 不动(旧病根回归钉, 撤头球测试或守卫必红) ②瞄头直射 isHead 透传(damage 第三参 spy) ③差一点打中头(头顶 0.35m, over≈0.08°)⇒ lastTarget='solHead' ④落点对球心最近距离 0.196m<0.26 ⑤★★真伤害入口救援弹 isHead=true ⑥瞄胸照旧 lastTarget='sol' 头球不抢候选; 选点比 T2 多一道头高射线通查(openSpot 只保胸高)); T7 判据跟走: hud 钉 'aimAssistBtn'+html 钉面板位置(id 在 mGameplaySet 之后+旧 data-a= 绝迹); 本文件沿惯例无 NEG 桩, T8① 即回归钉。`verify-specthird` **59/0**(T6 轨迹契约守卫零波及)。**run-all 一轮 78/91 exit=0**: 红账四条全归因——①verify-spec=并发 specsniper 批(一.102, 免验证轮)滞留钉 rpm===300, 本批代跟走 300→600 后 **60/0**; ②verify-parity-20261103=本批升戳清单漏钉(20261108b→c 补扫)后 **51/0**(教训: 升戳清单必须按 `grep -rl` 全列逐个过, 不凭记忆列); ③verify-naval=在案稳定预存红线7; ④_audit-foliage-ref=在案偶发(复核 0/0/0)。**行为面零新增红**。戳钉七连检(hudfix/perf/animfix/loiterfreeze/timestophud/crushhead/fieldfix)全绿。
+4. **版本戳** `20261108b→20261108c`(index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+13 戳钉探针随升, node 整文替换——fixbatch 文件名注释型历史伪影同规随走)。
+5. **实机关注**: ①瞄准吸附开关在 游戏设置→游戏内容设置 面板第一位, 单钮点击循环三档, EN 界面显示 AIM ASSIST: Light 等; ②轻度/标准档瞄站立敌人头部开枪应能爆头(击杀播报 ☠), 标准档尤其(旧版任何距离都爆不了); ③瞄头时准星不应感觉"被拽向胸口"; ④瞄身体差一点时依旧被轻轻掰中(旧行为); ⑤蹲/卧敌人爆头与旧版一致; ⑥隔墙/队友挡道仍不吸(T3 口径)。
+
+## 一.102 观战连狙手感二改: 腰射散布×射速 (2026-11-08, 待实机验收)
+
+承用户实机:「不开镜散布太大太大, 射速只有我预想的二分之一」。specsniper 两数值: spreadHip 4.2→1.0(旧值居全库步枪带中游 2.5~6, 狙击枪腰射理应远紧; spreadAds 0.05 不动)+rpm 300→600(唯一消费点 20-player fireT=60/rpm, 无隐藏减半系数, 翻倍即实测翻倍)。用户令免验证轮, 仅 node --check+升戳。**版本戳 20261108a→20261108b**。
+
+## 一.101 时停HUD批: 时停中小地图/罗盘随观察者重绘 (2026-11-08, 待实机验收)
+
+承用户实机一项: 「现在时停状态下地图不会更新, 我觉得这不合适」。**病根**=updateHUD 的 10Hz 低频段(小地图/罗盘/顶栏票旗/大地图, 22-hud hudSlowT 节流)旧吃**世界 dt** —— 时停 dt=0 ⇒ `hudSlowT-=0` 永不归零, 段内一切停绘; 而观察者本人仍在走动/飞行(2026-09-27 裁定「冻的是战场不是观战者」), 小地图/罗盘恰恰是"跟着观察者转"的显示 ⇒ 冻结期导航全瞎。与 2026-09-27M 同族病的另一面: 当时把时停读数 #specTimeInd 从这段摘出来逐帧画(探针 T7), 这批把这段本身解冻。
+
+1. **修法两行**(零新增字段): 24-main `updateHUD(dt,pdt)` 传**观察者帧长**(pdt 已有单源: 时停=真实帧长/指挥超人档豁免减速, 非时停 pdt≡dt ⇒ 普通战斗零漂移); 22-hud 节流钟 `hudSlowT-=(pdt===undefined?dt:pdt)`(单实参旧调用/旧探针直调退化 dt, 与 T7 旧口径逐位兼容)。段内世界数据(兵力/旗点/时钟)冻结时值本就不变, 重绘走 hudText 指纹去重, 无副作用; 大地图 M 不涉(本就 alive 门, 观战者开不了)。
+2. **判据**: 新 `dev/verify-timestophud-20261108.js` **正向全绿**(②时停中转观察者 40 帧 小地图/罗盘各重绘 5 次·旧写 0 次/③非时停节流照常/④单实参 updateHUD(0) 依旧不重绘=旧口径零漂移/①源码钉+戳)+**NEG 3 补丁 5 红逐名对认**(N1 节流行还原 ⇒ ②行为级亲见 次=0; N2 主循环实参还原/N3 签名摘 pdt ⇒ 源码钉红, N3 兼 ②红; ③④恢复类在 NEG 下仍绿)。桩坑复踩复用 timestopfix 同款 patchStyle(hudStyle 自定义属性)。
+3. **回归**: verify-timestopfix 35/0(T7 时停读数逐帧口径不受影响)+hudfb 64/0(单实参调用全兼容)。**套件登记补漏**: run-all 系手工策展清单——上批 loiterfreeze 漏登(上批"72 探针"未含自家新探针), 本批 catch-up 补登+timestophud 随批登记 ⇒ 在册 80 条。**run-all 两轮**(80 条): r1 82/88=naval×4(稳定预存红线7)+nav×1/botai×1(偶发, 复核各 3/3 绿, 均在案)+两新探针 0; r2 78/82=仅 naval×4——**预存红账零新增**。**版本戳 20261107a→20261108a**(index.html ×50+__sfStyleVer+_game_files.txt ×46+13 戳钉探针随升)。
+
+## 一.100 巡飞弹操控定身批: 本体冻结×退场吞空格×小地图弹体中心 (2026-11-07, 待实机验收)
+
+承用户实机四项: ①「悬浮状态下操纵巡飞弹时按空格加速会使得本体上升。如果在地上会让本体不停跳跃」②「H键飞行+按空格加速的情况下发射巡飞弹, 巡飞弹视角内自己一个人向前飞出」③「操作巡飞弹的时候玩家无法行动(无法转向、移动等, 仍会正常受伤和受重力影响下落, H键飞行自动切换为悬停)」④「不按M展开大地图时仍能显示巡飞弹; 操作巡飞弹时小地图以巡飞弹为中心」。**①②同根**=updatePlayer 制导分支旧写 `spectator&&flying` 继续跑 specFlightMove 消费同一份输入(悬停空格=本体上升/气动空格=沿视线40m/s前飞); **③在地上连跳的真身=操控退场瞬间仍按着空格**(诊断探针实测: 操控中弹活着时步行态不起跳, 弹死/引爆后残空格在步行态反复起跳 vel.y=+4.6 循环)。裁定③落地为**操控定身**: 输入全灭只冻操作不冻结算。
+
+1. **定身冻结**(20-player 制导分支): 悬停态(flying)原地悬停——三轴速度阻尼归零/无重力/不积分位移, 步行态走既有重力链照常下落(受伤/回血/回体照常); 旧 specFlightMove 机动分支删除。
+2. **气动→悬停就地切换**(13-combat fireLoiter): `shooter.flying&&shooter.flyAero` ⇒ 切悬停+vel 清零+_aeroSpd 清零(退场后再按 H 从巡航 13 起步)。**退场吞空格边沿**(detonate+despawn 两处清账行): `player._ltSpace=!!keys.Space` —— 退场瞬间按住的空格, 松开前不吃残跳/残升/残加速; `_ltSpace` 清零上提到 updatePlayer 帧首(原在制导分支内, 退场后没人清); 三处消费点加 `!p._ltSpace` 门: 跳跃(1165)/悬停升+自由飞行升(specFlightMove+specViewMove ty+=1)/气动加速(40 档)。**C/Z/X 姿态键**(19-input)加 `!player.loiter` 门(撑枪/蹲/趴=身体动作; 武器键不动)。
+3. **小地图弹体中心**(22-hud drawMinimap+海军包装层同布两处): 操控中 cx/cz/rot 跟弹体(pos/yaw); 弹体菱形标记(#3ee8d8, 与大地图同款缩配 9px)**常显**(不开 M 也可见); 本体箭头从钉死 (half,half) 改 toMap 实际位置+`rotate(rot-player.yaw)` 相对朝向(未操控时位移/旋转均零=逐位等价); 机器箭头 rot 消费改单源 rot 变量。面板提示追加「本体定身」(i18n 键随更)。
+4. **判据**: 新 `dev/verify-loiterfreeze-20261107.js` **正向 29/0**(②悬停 90 帧 Δy=0.00 旧写+12.96/③气动发射即 flyAero=false+|v|=0+60 帧位移 0.00m 旧写 36.43m/④引爆后按住空格 90 帧不起跳+松开重按恢复/④b 悬停残升同构/⑤普通跳·悬停升·气动加速三回归 0 漂移/⑥drawMinimap 操控中冒烟/①源码钉+戳)+**NEG 9 补丁行为级亲见转红**(N1 Δy=12.96/N2 d=36.43/N3+N4 jumped=true/N5 松开跳不了/N6 Δy=9.75/N7-N9 源码红)。**判据跟码修钉三处**: loiterview N2 锚(清账行加吞边沿)、flyaim 气动加速行锚+面板/i18n 两判据、**verify-spec T2**「气动飞行延续」→「悬停延续」(气动中发射即切悬停是裁定直接结果, T 弃弹延续悬停态)。
+5. **run-all 两轮同账 72 探针**: 失败各 2=verify-spec×1(旧判据, 修后 60/0×3)+naval 红线7×1(预存, 复核对认一致)——**预存红账零新增**。**版本戳 20261106b→20261107a**(index.html ×50+__sfStyleVer+_game_files.txt ×46+12 戳钉探针随升, 旧戳全库绝迹)。诊断探针两枚(悬停上升/气动前飞/地上连跳三症状复现)用毕即删。
+
+## 一.99 巡飞弹退场朝向二次裁定批: 引爆/消失后本体=发射时朝向 (2026-11-06, 待实机验收)
+
+承用户二次实报（一.96 ③的补全裁定）：「现在巡飞弹引爆/消失后玩家的朝向仍然是巡飞弹最后的朝向，而非发射时的朝向。」一.96 批按"退出画面不跳"旧意实现的**退场一次性对齐**（loiterDetonate/loiterDespawn 清账时把本体角对到弹体末态）被本裁定推翻——**本体朝向不被弹体污染**优先。修=两处清账行拆到只剩 `player.loiter=null`（13-combat detonate+despawn 两处）：制导中不回写（一.96 ③）+ 退场也不写（本批）⇒ 本体角自发射起纹丝不动，引爆/静默消失/T 弃弹三路退场一致停在**发射时朝向**；退场瞬间视角从弹体末向跳回本体 = 裁定直接结果（有意为之）。specTeleportToLoiter 注释同步改口径（视角朝向=发射时朝向，位置传送/速度清零/落地保护语义不动）。
+
+1. **判据跟码修钉两探针**：verify-loiterfix L1 `exitAligned`→`exitKept`（detonate 后本体角仍逐位=发射时 bodyYaw0/bodyPitch0）；verify-loiterview T2 退场断言 `yawAligned/pitchOk`→`keptYaw/keptPitch`（走 loiterDespawn 静默消失路；L1 走引爆路 ⇒ 两退场路径都有判据）。**N2 阴性补丁反转成注入式**——旧"拆除式"在拆无可拆后必须反转：把 11-05 病灶行原样注回两处清账行 ⇒ keptYaw/keptPitch 翻红 + 绝迹钉 ×2，`--only=N2` 单补丁亲验恰 2 红对认（NEG 补丁语义=病灶复现，不是机械取反）。T5 绝迹钉升级为全 13-combat 绝迹（`player.yaw=d.yaw` ×0）。
+2. **探针脆化修复三则（12 连跑 0 红的代价）**：①**前置采样点**：旧版 T1 在窗口末尾才采 player.loiter ⇒ 窗口内被清账时前置假红，改**出膛即采样** + 诊断字段（loiterEnd/dDead/dPos/aliveEnd/mouseEnd，假红自辨）；②**探针围栏必须在 fireLoiter 之前**：`d.pos=origin.clone()` 出膛即定 + **弹道=shooter.yaw/pitch（fireLoiter 忽略 dir 参）** ⇒ 围栏放 fire 之后防不住首帧；**OOB 出界分支不受 grace 豁免每帧都查**（MAP_SIZE=320 ⇒ 边界 158），随机部署点贴图缘 + 朝外随机朝向 ⇒ 弹体出界被静默清账（T1 观战 despawn ×4 红）/静默引爆（T3 detonate→damageStructures→ragInit 桩缺 CANNON.World 崩 EXC，实录各一）——修=T1 贴缘钳制 / T2·T3 图心传送全部前移到 fire 之前 + grace=9999/life=9999；③弹道方向真相：fireLoiter 的 dir 参不决定飞行方向，探针不能假设"朝 -Z 飞"。
+3. **并发协同实录**：另一会话 一.98（飞行瞄准×改键批）与本批同树并行——升戳 20261106a→b、单写者行纳入 lz 开镜门（布尔方向 `(!loiterView||lz)`=一.98 教训②）、灵敏度跟 fov；本批 T5 单写者钉/N4b 阴性锚两度跟码修钉。**verify-loiterview 正 34/0 ×12 连跑 · NEG 5 补丁 13 红对认 · --only=N2 单补丁 2 红亲验 · verify-loiterfix 18/0**。**run-all 两轮=合并树（含 一.98 改动）**：首轮 80/86 exit=0（naval ×4 稳定预存红线7；zombie ×1 偶发=module load 环境崩在案模式 + fieldfix ×1 偶发，均套件复核 0/0/0）；次轮 78/86 exit=0（naval ×4 稳定复核 1/1/1；fieldfix/botai 偶发各 ×1 复核 0/1/0）——**稳定红唯一=naval 红线7，预存红账零新增**（86 项含 一.98 新探针与失败项自动复核连跑；一.98 item9「待填」同读此合并树两轮）。
+4. **实机验收关注**：TV/背追视角里转向全程本体纹丝不动（WASD 移动也按发射朝向走）；引爆/出界静默消失/T 弃弹三路退场后玩家朝向都=发射时朝向（视角从弹体末向跳回本体——有意设计）；T 弃弹的落点保护/速度清零语义不变。
+
+## 一.97 实机反馈三虫批: 第三人称手电光锥锚定 × 巡飞弹TV视角本体在场 × 圆柱顶端站立 (2026-11-05, 待实机验收)
+承用户实报三件：①「开着手电筒的时候切换第三人称，会使得光锥漂移到某个地方去」②「在巡飞弹视角中无法看到玩家本体」③「现在很多圆柱体的顶端无法被站立，一上去就会被挤开」。三修全单源、不动既有契约：
+1. **手电光锥前漂 11m（①病根=fz 实参语义误读，一.95 批新写的士兵锥两处调用全中）**：`truncateConeMesh(cone,baseL,occD,fz)` 的 fz 是**锥父空间里灯口的前向偏移**（车灯链传 `veh._hl.fz`=灯口在 grp 前方的偏移量），锥体几何以中点居中 ⇒ 内部 `position.z=fz+effL/2` 恰使顶点落在灯口。士兵灯体就是 flGrp 原点 ⇒ 应传 **0**；一.95 批新写的 20-player 玩家 avatar 与 14-bots Bot 两处调用把"满长静止位 position.z=baseL*0.5"误当 fz 传入 ⇒ 顶点恒被抬到灯口前 effL/2、满长整体前漂 baseL/2=11m（flConeL=22）且截断时"起点悬空+长度不缩"双错——第一人称的 VM 锥（08-effects 自带锚定）是对的，所以只有切第三人称才看见"光锥漂到别处悬空"（用户截图：锥体悬在坡外半空）。修=两处实参改 0（truncateConeMesh 单源语义不动）。判据=运行期不变量 `|position.z−scale.x·baseL/2|≈0`（对任意遮挡档位成立，旧写法恒差 baseL/2=11 必红），玩家/Bot 双调用方各测。
+2. **巡飞弹TV制导视角本体消失（②病根=显示链单点漏接）**：updateCamera 顶部每帧 `playerAvatarHide()`（防所有提前 return 分支留残影），而 `updatePlayerAvatar` 只在步行第三人称分支（thirdPersonCamera）被调 ⇒ TV制导分支提前 return 后本体在世界里恒隐，弹体回看发射位只剩空地（调试观战悬停引导时尤常用）。修=loiter 分支 return 前补 `updatePlayerAvatar(dt)`：本体照常摆姿态钉在发射位、TV 相机仍在弹体上、TV 画面取向零变化；附身视模式（specViewHost）在 updatePlayerAvatar 内部自门仍恒隐，与第三人称分支同一套纪律。
+3. **圆柱顶端站不住（③病根=圆柱只挂横推账、缺跨步豁免与支撑账）**：`_cmBoxCb` 有纵重叠 slack + `maxY−pos.y≤0.56` 跨步豁免两道门，`_cmCylCb` 只有纵重叠门 ⇒ 跳上桶/草垛/筒仓/水塔顶后脚下沉 0.2m 横推立即接管=被侧面挤飞；且 `standHeight` 只查盒（_shBoxCb）不查柱 ⇒ 圆柱顶面从无脚下高度，站上去也随即下陷。修=两处对齐盒语义：`_cmCylCb` 补 `c.y1−pos.y≤0.56` 跨步豁免；`standHeight` 补 `_shCylCb`（采样点在圆内 r+0.05 且顶面 ≤curY+0.55 ⇒ h=顶面）+ eachCylNear 接线。高柱（烟囱/水塔帽）跨步档外照常是墙、圆外采样不支撑（双对照断言钉住，豁免不误放行）；玩家借 standHeight curY=脚+0.6 的既有跨步档可跳上草垛档（与箱类同手感）。
+**判据**：新 `dev/verify-fieldfix-20261105.js`（受控时钟直驱 loop()，桩与 一.95 探针同源）**正向 26/0**（T1 手电锥不变量玩家/Bot 双调用方+3P 灯组在场；T2 fireLoiter 后 avatar 在场/钉发射位/TV 相机在弹体；T3 跨步档不横推+柱顶支撑+圆外不支撑+跨步档外与高柱照常横推双对照；T5 源码钉 6+顺序钉+载入清单 46 项同序+戳）+ **--neg 5 补丁 11 红逐一对应**（对照组保持绿）。**run-all 两轮同账 76/81 exit=0**：唯一稳定红=`verify-naval` 红线7（预存，本批零海战改动）；偶发各一次且互不相同——r1 `_audit-foliage-ref`（复核 0/0/0+补跑 5 连绿；该审计自述"运行期碰撞走 BOXES/CYLS 与植被无关"，~1/20 采样偶发在案）、r2 `verify-botai-20261103`（复核 0/0/0）——预存红账零新增。**版本戳 20261105a→20261105b**（index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+九戳钉探针同步）；**并发批（一.96，同夜另一会话）随后按纪律升 20261106a 并对本批新探针同步重钉**——合并树复测：本批探针 26/0+NEG 11 红、一.96 探针 35/0、animfix 66/0、nightgear 41/0，两批零冲突（一.96 与本批同改 updateCamera loiter 分支：本批补本体显示、彼批删弹体 visible 双写改单写者，正交互认）。探针坑两则：**NEG 多行锚在混行尾文件必失配**（20-player 实测 CRLF/LF 混存，改单行锚）；**活战场上钉"开灯 Bot"须逐帧回血+重开灯+任一可见帧采样**（交战/阵亡会写 flashlight=false，die() 摘灯组）。
+
+## 一.96 巡飞弹背追三虫批: 背追光柱锚弹体 × 弹体全视角可见 × 制导本体不随转 (2026-11-06, 待实机验收)
+承用户 2026-11-05 深夜实报三件（附背追档截图）：①「手电筒打开状态下的背视角下的巡飞弹，光柱会保持在第一人称的相对位置，我希望把光柱的起点位置改为巡飞弹本身的位置」②「现在巡飞弹在其他视角下可见吗？我希望是可见的」③「现在巡飞弹视角内转向会带着本体一起转向，需要修复」。逐项落地：
+1. **①病根=手电链不分档全按相机锚**：`08-effects playerFlashlightTick` 把真 SpotLight/近景溢光/丁达尔光柱全部钉在 `camera.position`+持枪偏移上、光柱朝向 `camera.quaternion` —— 而巡飞弹 F 背追档（`loiterView=1`，机位在弹体后上方 ~6.8m）下 `thirdPersonOn()` 被 `!p.loiter` 互斥门排除（返回 false）⇒ `tp=false`，光柱照常显示但起点/朝向全跟背追相机走（截图：光锥悬在弹体左上方，与弹体朝向脱钩）。修 = **ltBack 档**（正在操控巡飞弹 `player.loiter` 且 `loiterView` 真值）：手电整链锚弹体本身 —— 起点=弹体+弹鼻光学头罩前 0.4m、朝向=`loiterForward(lt)`（共享槽 `_loF` 立即拷入 `_pfF` 不跨帧持有）、光柱姿态 `rotation.set(lt.pitch,lt.yaw,0)`（锥体绕光轴旋转对称 roll 恒 0）、遮挡射线/SpotLight 照点/溢光全部从弹体起算。**TV 弹头档（loiterView=0）相机就钉在弹体上，维持相机锚零变化**（第一人称观感不变）。vm 灯 `vml.visible=!tp&&!lt`（制导中 viewmodel 整体是隐的，vm 灯同步熄）。
+2. **②病根=弹体可见性三处零散写**：`fireLoiter` 出膛写 `mesh.visible=false`，全库唯一能翻回来的是 `updateCamera` loiter 分支（TV 藏/背追显），而那道分支的门是 `p.loiter&&p.alive` ⇒ **真观战（alive=false，票尽观战）自由视角与死亡镜头里弹体永隐**（fireLoiter 的 false 无人解）。F 背追档本来就可见（用户截图为证）。修 = **可见性收拢单写者**：`updateLoiters` 末尾 `d.mesh.visible=!(player.alive&&!player.loiterView)` —— 唯一隐藏态 =「镜头真的在弹鼻上」（玩家活着 + TV 档），其余一切视角（F 背追/本体第三人称/真观战自由视角/死亡镜头）一律可见；`fireLoiter` 初始值改同式（`!(shooter.alive&&!player.loiterView)`，真观战出膛即可见）；`updateCamera` loiter 两分支的 visible 写删除（20-player 绝迹钉）。
+3. **③病根=制导期持续回写本体角**：`13-combat updateLoiters` 制导段 `player.yaw=d.yaw; player.pitch=...`（旧注释口径"本体姿态跟随弹体⇒退出 TV 视角画面不跳"）= 鼠标每转一点，发射者本体就跟着转一点 —— 本体第三人称/附身呈现层里看得见原地转圈，WASD 移动方向也被弹体朝向带跑。用户裁定推翻该口径（`verify-loiterfix-20260928` L1 旧正向断言"本体姿态跟随弹体"同批**判据跟码修钉**为 notFollowed+exitAligned 两条）。修 = 制导段回写两行删除；**"退出画面不跳"原意改为退场一次性对齐**：`loiterDetonate`/`loiterDespawn` 在 `player.loiter===d` 清账时把本体角对到弹体末态（`player.yaw=d.yaw; player.pitch=clamp(d.pitch,-1.45,1.45)`）—— 制导中本体纹丝不动，退场那一瞬才转一次（观感是一刀切不是持续跟转）；T 键弃弹传送的"视角朝向不变"语义不变（旧口径下"不变"的实际值就是弹体朝向，退场对齐等价实现，13-combat 定案注释已改写）。
+4. **判据**：新 `dev/verify-loiterview-20261106.js`（复用 _bootstub 桩+受控时钟直驱 24-main loop）**正向 35/0**（T1 夜图调试观战：TV 档光柱贴相机 ≤1.0m 行为不变钉 → 背追档光柱起点距弹心 ≤0.6m 且距相机 >3m + 真 SpotLight ≤0.6m + 溢光随弹 ≤2m → 回 TV 再贴相机；T2 普通兵：3000px 增量掰弹体 |Δyaw|=0.0418/|Δpitch|=0.0318 恰为角速度上限截断值 + 本体角逐位不动 + loiterDespawn 退场对齐 player.yaw===d.yaw；T3 TV 藏/背追显/回 TV 再藏/alive=false 显四态；T5 单行钉 8+绝迹钉 3（updateLoiters 制导段无本体角回写/退场对齐恰两处/updateCamera loiter 分支无 mesh.visible 写）+清单 46 项同序+版本戳）+ **--neg 五补丁 13 红逐一对应**（N1→T1 背追四红/N3→T2 本体红/N4a+b→T3 两红+静态两红/N2→静态两红；累积应用时 N2 的行为级红被 N3 掩盖 —— 跟随行插回后退场前 player.yaw 本来就===d.yaw，故加 `--only=N2` 单补丁模式亲见转红 yawAligned=false ✓）；旧 `verify-loiterfix-20260928` 18/0（新判据下）。
+5. **run-all 两轮对账**：首轮 **75/79 exit=0**（唯一失败=verify-naval ×4，稳定性复核 1/1/1=稳定失败，与 2026-11-01 起各批同一预存红红线7，本批零海战改动）；次轮 **76/82 exit=0**（naval ×4 同上 + **verify-fieldfix 偶发 ×1**——套件自复核 1/0/0 后两连过 + 单体连跑 4/4 绿：其 T1 是活战场采样（交战/阵亡摘灯组），与前批"r1 foliage-audit/r2 botai 偶发互不同"同一在案模式；本批改动不触其判据面——T1 无巡飞弹、T2 仅 TV 档相机锚路径本批零改动）。**预存红账零新增**。
+6. **版本戳** 20261105b→**20261106a**（index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+十戳钉探针随升，老戳全库绝迹；本批新探针负向钉用 `!includes('20261105b')` 未随 sed——旧戳负向检查保真）。
+6. **实机关注**：①夜图调试观战开手电发巡飞弹按 F 背追：光柱应从弹体鼻锥发出、随弹体转向而转向、不再悬在镜头前；②TV 弹头档光柱观感应与改前完全一致；③制导中持续大幅转向：本体（第三人称回看/附身画面）不再跟着转，WASD 仍按发射时朝向移动；④弹体引爆/T 弃弹传送/触物消失的瞬间视角切回本体时朝向=弹体末向（一刀切，不跳回发射时旧向）；⑤票尽真观战发巡飞弹：自由视角里弹体模型应可见（旧版隐身）。
+
+## 一.98 飞行瞄准×巡飞弹改键批: 观战飞行右键可瞄准 × 气动/巡飞弹加速改空格 × 巡飞弹 F→U+右键开镜 (2026-11-06, 待实机验收)
+
+承用户两件需求（讨论轮四项裁定后定稿）：①「我希望H键飞行和双击空格键的飞行的时候，右键也能瞄准。同时将H键飞行时的加速功能从鼠标右键改为空格键」②「将巡飞弹飞行时的加速键也改为空格，切换视角的按键改为U，右键功能改为画面局部放大（方便瞄准），局部放大时固定为第一人称（机制类似于玩家第三人称时瞄准）」。四项裁定：放大形态=**全屏开镜式**（非画中画，与步兵 ADS 同款 fov 链）；放大交互=**按住右键**（松开恢复）；气动中双击空格切悬停**保留**（用户自选，接受快速连按补加速的 300ms 双击窗误触）；开镜画面配套=**保持现有 TV 滤镜+准星**（不加十字分划）。键位终局表：气动飞行=右键瞄准/空格加速；悬停飞行=右键瞄准/空格上升不变；巡飞弹=空格加速/右键开镜+强制第一人称/U 切视角/左键自爆不变/F 无操作；步行全不变。
+
+1. **观战飞行右键=瞄准（病根=ADS 门写死 `!player.flying`）**：`19-input mousedown` 右键 ADS 门、触屏 `24-main tAds`、手柄 `19b padAds` 三处同门摘 `!player.flying`（保留 `!player.loiter`——制导中右键=开镜不是武器 ADS）。瞄准链零新增代码：`thirdPersonOn()` 本就排除 `p.ads` ⇒ 飞行中 U 开了第三人称时按右键自动切第一人称、松开自动回第三人称（与步行同机制）；fov 收窄走 updateViewModel 既有 `lerp(74, curW.adsFov)` 链、灵敏度走 `lookZoomMul` 既有单源；观战连狙（副武器）4x 镜在飞行中照常可用。悬停飞行 Space=上升与双击开关语义不动（用户裁定保留气动中双击切悬停）。
+2. **气动加速 右键→空格**：`20-player specFlightMove` aero 分支 `(mouse2Down?40:13)` → `(keys.Space?40:13)`（13→40 dampF 参数不动）。触屏跳跃钮/手柄 A 键本就走 `kd('Space')` 键盘同链 ⇒ 两平台**自动获得加速**，零适配代码。
+3. **巡飞弹加速 右键→空格 + `_ltSpace` 吞边沿**：`13-combat` boost 判定 `mouse2Down&&!player._ltRClick` → `keys.Space&&!player._ltSpace`；`fireLoiter` 置 `player._ltSpace=!!keys.Space`（发射瞬间空格按住——跳跃中发射场景——不继承加速，完整松开一次后生效，与 `_ltRClick`「按住右键机瞄发射」同构）；清账点=制导分支 `if(!keys.Space) p._ltSpace=false;`（与 `_ltRClick` 清零同点同构）。**零新增状态字段的清账义务**：退出制导后残留旗无害（boost 判定门 `player.loiter` 短路，下次发射重置）。
+4. **巡飞弹视角切换 F→U**：`19-input` KeyU 行插 loiter 门（`if(player.loiter){loiterView 翻转+AudioSys.click} else if(player.onNaval) navalCycleView(); else toggleThirdPerson();`——loiter 与座位互斥，门序放最前保险）；KeyF 摘 loiter 分支恢复纯 `tryInteract()`——其第一行 `if(!player.alive||player.loiter) return` 恒吞制导中按键，无任何误交互（补给箱/上炮/登舰全在 tryInteract 内部，逐条核过）。
+5. **右键=全屏开镜放大（复用旧 boost 判据位，零新增状态字段）**：开镜判定 `lz = mouse2Down && !player._ltRClick`（与旧加速判定完全同构——天然吞掉「按住右键机瞄发射」的边沿：机瞄中发射不进开镜，完整松开再按才开镜）。`updateCamera` loiter 分支：视角档 `third = lz?0:p.loiterView`（**放大强制第一人称**，机制同步兵第三人称 ADS），fov 目标 `tgtFov = lz?LOITER_ZOOM_FOV:(third?70:85)`（新常量 `LOITER_ZOOM_FOV=30`≈2.8x，与 NAVAL_SCOPE_FOV 同区），两档 dampF 平滑过渡、松开恢复原档；**弹体可见性单写者判据纳入开镜态**（13-combat `d.mesh.visible=!(player.alive&&(!player.loiterView||lz))`——否则第三人称档开镜时弹体模型在相机前 0.5m 糊脸；一.96 批单写者契约保持，隐藏态从「TV 档」扩为「TV 档或开镜中」）；TV 灵敏度 `sens` 从写死 `*(85/74)` 改 `*(camera.fov/74)`——开镜收窄时灵敏度等比缩放，fov 阻尼过渡中手感连续。左键自爆/触碰引爆/寿命/T 弃弹传送全不动；开镜时 TV 滤镜+中央准星照常（用户裁定不加十字分划）。
+6. **观战飞行+制导并存自洽**（观战气动飞行中发射巡飞弹的既有能力）：空格=本体气动加速+弹体加速同时（与改前右键同时加速行为对齐）；右键=开镜优先（ADS 门保留 `!player.loiter`）；U=切弹视角优先（loiter 门在 KeyU 首位）；相机=loiter 分支在 updateCamera 最前。
+7. **文案全库同步**（grep 盘清 13 处）：气动飞行弹窗/顶栏观战+调试提示（含 EN 侧）/实验模式说明（i18n :345 + index.html :373）/调试+观战模式说明段补「两种飞行中左键都能开火 · 右键都能瞄准」/巡飞弹弹药面板提示 →「空格 加速 · 右键 开镜 · U 切换视角」（22-hud :1086 + i18n :100）；中文原文即键——新键配新 EN 条目、孤儿旧键清理。
+8. **判据**：新 `dev/verify-flyaim-loiterkey-20261106.js`（verify-parity 同款 boot+**注入可记录 addEventListener/dispatchEvent 桩走真键鼠处理链**——keydown/mousedown/mouseup 事件级测试；弹体与玩家全程抬高空 heightAt+80 避开命中检测干扰）**正向 32/0**（源码防回退 17：三门无 flying/KeyU 门序/KeyF 纯交互/fov 双写点 tgtFov/boost+吞边沿三行/灵敏度/可见性/i18n 新旧键/戳；行为 15：Space 45 帧 aeroSpd 13→34.8 而右键恒 13/dispatch 飞行右键 ads=true+mouseup 复位/thirdPersonOn 门/KeyU 翻转 0→1→0/KeyF 无操作/巡飞 Space 45 帧 spd→34.8/发射瞬间按住空格吞边沿 45 帧恒 13/updatePlayer 真实清账路径松开恢复/开镜 fov 70→30.2/相机贴弹鼻 0.50m/开镜中弹体隐藏/松开恢复第三人称档 loiterView 不被改写）+ **--neg 14 补丁 24 红**（红名逐条对认：源码 13+行为 11；恢复类断言 ⑥-4/⑥-8/③-2/i18n/戳在 NEG 下保持绿=对照组）。**探针教训**：①本批实锤「Edit 批量多连发漏一处」——19-input ADS 门 Edit 漏发，探针 ①/③-1 红+用户实机「飞行中右键无效」三方互相印证后补发；②可见性判据布尔方向写反（`!(loiterView||lz)` 与 `(!loiterView||lz)` 语义相反）被 ⑥-7 抓出当场修；③⑤ 清旗账在 updatePlayer 制导分支而非 updateLoiters——只跑 updateLoiters 的探针测不到「松开恢复加速」，改走 updatePlayer(1/60) 真实路径。
+9. **run-all 两轮**：首轮 **78/83 exit=0**、次轮 **78/83 exit=0**（同账同数）——稳定失败仅 `verify-naval` ×4（复跑 1/1/1，2026-11-01 起各批同一预存红红线7，本批零海战改动）；两轮偶发各一次且互不相同（r1 `_audit-foliage-ref` / r2 `verify-aimassist`，各自复核 3 连 0/0/0=在案环境抖动型，与 一.97 批"r1 foliage/r2 botai 互不同"同一模式）；本批新探针入册两轮均 [0] 全绿 32，**预存红账零新增**（与 一.96 会话同树并行，run-all=合并树口径）。
+10. **版本戳** 20261106a→**20261106b**（index.html ×50+`__sfStyleVer`+`_game_files.txt` ×46+13 戳钉探针文件 node 整文替换随升——含 parity/loiterview/crushhead 等上批同日戳钉全量，旧戳全库绝迹；node utf8 整文替换保行尾，规避 sed 行尾坑）。
+11. **实机关注**：①观战气动/悬停飞行中按住右键=开镜瞄准（武器机瞄/观战连狙 4x 随武器），U 第三人称飞行中右键=瞬间切第一人称、松开回第三人称；②气动飞行按住空格=加速（松开回落 13），右键不再加速；③巡飞弹：空格按住=加速、右键按住=开镜放大且强制弹头第一人称（第三人称档下开镜→弹鼻视角+画面收窄，松开→回背追档）、U 切弹体视角、F 无操作；④机瞄状态下发射巡飞弹：出膛不进开镜（吞边沿），完整松开右键再按才开镜；⑤机瞄状态下按住空格发射：出膛不加速；⑥触屏跳跃钮/手柄 A 按住=气动/巡飞弹加速。
+
+## 一.95 时停照明弹 × 调试模式 L 键装备批 (2026-11-05, 待实机验收)
+
+承用户报两件：①「为调试模式也添加 L 键手电筒/大灯等相关机制，现在人身上没有手电筒和 L 键相关内容，坦克上的大灯则没有实际效果」②「现在时停不会影响点位的周期照明弹释放，这是一个 BUG」。落地五件：
+1. **时停照明弹真修（战斗钟单源）**：实证病根不在照明弹自身 —— `24-main` 的 nowOff 记账单位是**秒**而 `nowT=(now-nowOff)/1000` 表盘是**毫秒**，差 1000 倍 ⇒ 时停/指挥减速期间游戏时钟 nowT 实际只被拖慢 ~0.1%（沙箱受控时钟逐帧插桩实锤：`frozen:true, consume:0` 而 nowT 3 帧 +0.05s 照走），一切 nowT 基相位都在"冻结"里继续动，照明弹只是被看见的那一个。修 = **08-effects 夜战装备全部换战斗钟**：`_ngT`（nightGearTick 首行 `+=dt`，只吃世界帧长）供照明弹相位/缓降/飘移与探照灯扫掠；`_fireT`（updateFireLights 双入口经 `_lastT` 去重只累一次）供火光 flicker/抖动 —— 时停 dt=0 全冻结、指挥减速 ×0.2 同步慢放，非时停零漂移。**24-main 单位错位本身本批不修**（修了会波及观察者链上混用 nowT 的门：体能回充/观战补给节流/HUD 指纹节流，需专项批逐处对账），已在 24-main 病根行留已知问题注记。
+2. **照明弹/探照灯 isDark 门**（随第 4 件新增）：大灯 L 键现在能把 nightGearTick 在晴天白天也拉起来，照明弹/探照灯是暗光装备 —— 亮环境不建不跑（`if(isDark)` 包裹照明弹段，bestFlare 提到门外=亮环境灯池恒走全灭分支），雨天昼行为不变，晴天开车灯不会凭空长出照明弹。
+3. **调试模式战术手电**（用户实报"人身上没有手电筒和 L 键相关内容"病根）：旧版两道 spectator 门把调试观战（spectator=true 但 alive，正常作战单位）的手电全锁死 —— `19-input` L 键步行分支 `!player.spectator` 删除（票尽真观战 alive=false 天然排除）；`08-effects playerFlashlightTick` 的 `on` 判据同删 `!player.spectator`。夜图部署自动持电（23-deploy 既有单源不变）+ L 键开/关 + 提示语照常。
+4. **幽灵坦克大灯**（用户实报"坦克上的大灯没有实际效果"病根）：幽灵坦克是 15c 单例，**不在 tanks/trucks/navalCraft 任何一张表里** ⇒ 大灯候选/真灯池竞选/假光锥防穿墙三段全扫不到它，按 L 只亮假光锥、真 SpotLight 永远轮不到 ⇒ 地面照不亮。修 = nightGearTick 候选收集尾补一行（`SPECVEH && alive && lightsOn` 入 cands，收车 SPECVEH=null 自动退出）；`24-main` 门再放宽一档 `_hlRideOn`（玩家当前座驾开着大灯也拉起 nightGearTick，晴天白天按 L 才有真光）。挂点走 tkSpec 缺省档 —— TB_TK_DEF 默认 hullW2.6/hullY1.0/hullH0.95 与幽灵车体几何同参，无需特判。
+5. **文案与词典**：部署提示补 `· L=手电/大灯`（23-deploy 与 00b-i18n 词条键同步）；游戏说明「调试模式」段补 `<b>L</b> 战术手电(步行)/载具大灯(含幽灵坦克, 夜晚照明)`（index.html 与 00b-i18n 长词条 726 字键全文一致已验）。
+**判据**：新 `dev/verify-nightgear-20261105.js`（受控时钟直驱 24-main loop()，不直调 nightGearTick —— 时停账只在主循环生效）**正向 41/0**（T1 时停照明弹/探照灯扫掠冻结+解冻恢复；T2 观战部署自动持电+L 开关；T3 幽灵坦克假光锥+真灯池竞上贴车头；T4 晴天真灯照样亮+照明弹/探照灯恒空；T5 源码钉 15+i18n 键全文对账+载入清单 46 项同序+版本戳）+ **--neg 5 补丁 12 红逐一对应**；`verify-daynight` T4 拨相判据跟走 2 处（`fl.t0=nowT-X` → `_ngT-X`）后其 10 条红经**全量回退副本对照实证为本批之前既有**（T5/T6 八条=探针字面量被 2026-10-05 天气批等未提交旧批改掉+载入清单 43 过期，T1/T3 四条两树逐名一致；daynight 不在 run-all 注册表）；`verify-timestopfix` 35/0 不受扰。**run-all 两轮逐字一致 73/77 次 exit=0**，唯一稳定失败=`verify-naval` 红线7（海战 AI 导航，与 2026-11-01 各批同一预存红，本批零海战改动）——预存红账零新增。**版本戳 20261104b→20261105a**（index.html ×50 + `_game_files.txt` ×46 + 八戳钉探针同步）。桩补齐：`_bootstub` Object3D.quaternion 补 copy/set/setFromEuler（手电光锥 `quaternion.copy` 本批起真跑）。
+
+## 一.94 碾压/头盔批: 坦克碾压 99/80 分档 × 碾而不死宽限挤开 × 四盔方头四角穿模修复 (2026-11-03, 待实机验收)
+
+承用户两条: ①「坦克的碾压伤害改为 99, 日本鬼子的小坦克和缴获版本改为 80, 而且最好被碾一下之后像被友方坦克挤开一样挤开 (防止连续碾压导致体感上没有改动)」 ②「全部 Bot 士兵等, 头是方形, 头盔是球体切一部分, 方形脑袋上边四个角总是穿模探出来」(附两截图)。逐项落地:
+
+1. **①病根=逐帧重复结算**: 旧 320 不止"一击必杀"——`vehiclePushSoldiers` 的前沿带 (frontalBand 1.5m+入射余量) 内**每帧都判碾**, 坦克 8m/s 碾过一条 1.88m 深的带 ≈ 14 帧连续结算 ⇒ 只把 320 改 99, 第二帧照样死, 体感零变化 (用户点名要防的正是这个)。
+2. **分档单源** (00-config): `TANK_CRUSH_DMG=99` / `TANK_CRUSH_DMG_CHIHA=80` / `TANK_CRUSH_CD=1.2`; Tank 构造器按 `def.tk.shape==='chiha'` 分档 (键=剪影形**非 wc 车重**): jp 九七式中战车/一式中战车 + cpc 九七式(缴获)/一式(缴获) 四车 80; 谢尔曼/潘兴/四号/黑豹/T-34/KV-1/**维克斯6吨(light)**/T-26 全 99 (维克斯是轻坦也 99 ⇒ 探针实证分档键不是车重)。调用点改 `_o.crushDmg=this.crushDmg`。**范围护栏**: 卡车 300 / 两栖车 320 不动 (用户口径只说坦克)。
+3. **幸存宽限+挤开**: `vehiclePushSoldiers` 每兵挂 `s._crushCd` **墙钟账** (逐车逐帧衰减): 门 `!(s._crushCd>0)` 挡宽限期内重复结算, 碾而幸存即发 1.2s; **推挤不设门** —— 既有侧向限幅推挤 (与友军挤开**同一支代码**) 照常把人清出车壳 OBB+0.38m (实测 ~0.1s 出壳), 宽限走完若仍贴车前才再吃一次 (宽限≠免死金牌, 站坦克前不动照样被连续碾死)。
+4. **平衡注记** (丧尸局): walker 100 血 → 碾后 1 血存活需二次接触; brute 380 → ~4 次接触 (1.2s 间隔); "机动碾压/甩落可清丧尸"仍成立, 但不再是逐帧秒清; 玩家被 AI 坦克碾 = 1 血 + 被挤开 ("碾一下"体感本尊)。
+5. **②病根=几何必穿**: 头盒半宽 0.1 ⇒ 上四角离轴 **0.1414**; 旧盔在头顶高度的截面半径仅 0.134~0.142 (pot 恰好零裕量相切), 10 段球冠多面体化再内缩 ~4% (45° 方位弦因子 0.963) ⇒ 四角必然穿出。修=四盔统一放大球冠+冠高微调 (pot .15→.162/y.154; stahl .155→.165/y.145; ssh .152→.167/y.153; jp .142→.165/y.146), **多面体化后**盔面在 [盔沿,头顶] 全程压住四角, 真裕量 4.1~5.1mm; 头盒与爆头命中球 (13-combat r=0.26) 不动, 剪影位移 ≤8mm。**单点修复全量生效**: Bot/玩家第三人称/丧尸/观战镜像全走 `buildSoldierMesh` 一处。
+6. **顺带修两枚隐性埋没徽章**: 日军星徽 (旧 z=0.135) / 国军青天白日徽 (旧 0.148/0.15) 在旧盔同高度截面半径 (0.142~0.177) **内侧 = 从未露出过** (有盔阵营的徽章一直是埋的); 按新盔面重排 (星 0.1535 / 蓝 0.1755 / 白 0.1775), 前缘出面 ~1mm、后缘埋入固定。
+7. **判据**: 新 `dev/verify-crushhead-20261103.js` (island=us vs jp 真开局, 阵营换挂 TEAM_FACTION[0] 实测全六阵营) **正向 26/0**: 源码钉 8 + Tank 分档实测 3 + 测试坦克清场还原 + 碾压行为 5 (99→1 血发宽限 / 30 拍贴带零二次结算 / 侧挤出壳 |x|≥2.42 / 宽限走完 1 血必死 / 友军零掉血护栏) + 头盔几何 7 (**真 built mesh 的 geometry.parameters 重算弦多面体压角裕量**: pot 4.95 / stahl 5.12 / ssh 4.08 / jp 5.02mm; 布帽=盒不在修复面; 两徽章出面+埋入) + 版本戳; **--neg 7 补丁 13 红**逐一对应 (旧盔负裕量实测 −7.4/−3.8/−9.0/−19.4mm 与手算穿模方向一致; 宽限拆掉 30 拍即尸; 友军护栏/布帽/范围护栏阴性下保持绿=分辨力)。
+8. **版本戳** 20261103b→c 本批首升; **死亡掉雷批 (一.93) 并发顺延 c→d 并同步本批探针钉** (全树 d 零残留, 本批采纳 d 随行) —— 升戳并发首见"第三方把我新写的探针钉也一起扫了", run-all 对账时按全树现值口径即可。
+9. **实机关注**: ①坦克慢速碾过满血步兵: 应见 99/80 一次伤害 (1 血幸存) + 人被履带侧向"挤开"滑出车旁, 而非原地消失; ②站在坦克正前不动: 1.2s 一次持续掉血, 仍会死 (宽限不是无敌); ③日军/缴获轻坦碾同一个人伤害明显低一档 (80 vs 99 的击杀数差异可在结算复核); ④任意阵营士兵近看: 头盔四沿下方不再露出方头四角; 日军头盔正面有星徽、国军 (KMT) 盔正面有青天白日徽 (此前从未显示过)。
+
+## 一.93 死亡掉雷批: 死亡掉落手中雷 × 引信继承读条 (2026-11-03, 待实机验收)
+
+承一.91 排查批遗留口径的用户裁定: 「死亡时手里捏的雷要'掉落在原地'，并继承读条时间」。快速落地:
+
+1. **病根闭环**（承一.91: 手里雷=全游戏唯一真"原地消失"的弹体）三条路径: ①玩家 >25 受创打断 (damage 内 cancelReadBar 收雷不消耗) ②死亡清账 (die 内 cancelReadBar) ③**出手弧中阵亡** (updateViewModel 随 alive 停摆 ⇒ 弧永不走出手帧; vmAbortAction 明确不收弧="不属于可中止段")。Bot 侧=三问批打断网把前摇 nadeAnimT 清零。
+2. **dropHeldNade 单源 (13-combat, throwNade 之后)**: 死亡瞬间手里雷就地脱手 —— 胸口微抖 ±0.15 + 小抛落 (照常翻滚/弹跳), 弹种/归属/队伍/击杀账与出手件完全同链 (死者照记击杀, 与死亡弹道留存同规); 载具/大舰内保险丝不落。
+3. **引信继承读条**: 玩家普通雷 = **nadeFuse 余值直带** (厨雷账举起即烧 20-player; 烧到 0=已武装 ⇒ 掉地即炸, 与持雷"武装+接触"双条件一致); 烟雾/燃烧/反坦克 = 各自标准引信 (1.8/1.6/1.6), **哨兵 99 绝不带走** (否则引信到点永不武装=哑弹); Bot 前摇 = 3.4×(nadeAnimT/0.8) **按剩余比继承** —— 越接近出手被杀, 尸体上的雷越烫。
+4. **接线三点**: ①玩家 damage >25 打断点: hp≤0 (已扣减) ∧ nadeHeld ⇒ 掉雷代替收回 (随后的 cancelReadBar 只收玩家侧账/模型, 碰不到已入账弹体); ②玩家 die() 钩: nadeHeld ∨ (VM 'nade' ∧ nadeThrowT≤0) ⇒ 掉落+**收弧** (VM 回 idle + nadeM 隐 + 枪还原 —— 防复活后残留弧走出手=双雷); ③Bot damage >25 打断点: hp≤0 ⇒ 前摇中掉雷 (清账前)。die() 钩兜非打断路径 (≤25 致命/出手弧)。
+5. **口径**: 受创<致命照旧收回不消耗 (2026-10-25 打断网语义零改动); 丧尸尸变早退不掉 (人没死透); 载具/大舰内不掉; 空手死亡零掉落。
+6. **判据**: 新 `dev/verify-deathdrop-20261103.js` 正向 **25/0** (T1 真实哨兵态持雷半程: 掉落引信精确 2.0 + 距尸 1.16m + 账旗摘 + VM 收回 + 40 步 ≈2.0s 引爆时序独立印证; T2 全熟 0.60s 触地即炸; T3 烟雾哨兵 99→掉落 1.8; T4 出手弧阵亡照掉+收弧; T5 Bot 前摇 0.2→引信 0.85=3.4×0.25; T6 AT 掉落即武装; T7 空手死亡零掉落对照) + **--neg 六补丁 6 红** (两处打断点掉雷拆/die 钩拆/引信继承断/比例断/哨兵带走病, T7 保持绿=分辨力); deathflight 探针复跑 14/0 (die() 改动守护)。
+7. **版本戳** 20261103c→d (index.html 50 处+`__sfStyleVer`+_game_files.txt+七探头钉随升, 老戳清零; 并发预瞄批 c 后顺延)。
+8. **实机关注**: ①贴脸击杀正在举雷的 Bot/玩家, 尸体旁应有一颗短引信雷很快爆; ②举满 3.8s 全熟雷死亡=落地即炸; ③死亡镜头里雷从尸体位置弹出翻滚; ④复活后手里不残留雷模/出手弧。
+
+## 一.92 手雷预瞄批: 贴地圈可见弧段(厨雷小圈病根) × 弹跳段预瞄点提亮 × 预瞄地图标记(小/大地图落点圈+圈内黄边+设置开关) (2026-11-03, 待实机验收)
+
+承用户两条: ①「预瞄线在地图上也要有呈现, 就用一个小圈就行; 范围内的目标红点/蓝点/绿点等再加一层黄色边(可见预瞄线同款黄色); 再加一个『游戏内容设置』里的选项来开关」 ②「爆炸范围显示在计时归零后就变成一个小圈了, 而且似乎不显示第一次弹射开始的预瞄线」(附第一人称厨雷截图: 引信 0.0s, 屏上只剩 0.45m 弹着点小圈)。逐项落地:
+
+1. **②病根=贴地圈的"整环作废"口径** (`22-hud nadeGroundRing`): 旧版 36 个采样点**任一点投影落在相机身后即整圈作废**(宁可不出圈不画假圈)。厨雷 (引信烧到 0) 预演引信钳 `max(0.1,0)`, 落点就在本体前 3~4m, **10m 杀伤圈的后半弧全在相机身后** ⇒ 整圈被裁, 屏上只剩 NADE_ARC_SPOT_R=0.45m 的弹着点小圈——正是截图工况 (满引信时落点 15~25m, 圈完整在身前, 所以只有厨雷档看得见)。修=**画可见弧段**: 身后/贴面点断路 (`seg=0`, 下一可见点 `M` 重起笔), 只画真在面前的弧——几何上诚实 (不把裁掉的半边硬连成假圆), 玩家站进圈里也能凭前弧+弹着点小圈读出"自己在圈内"。返回值 `{d,full}`: full=整环可见 (闭合 `Z`, 照旧填充); **开放弧去填充只留描边** (SVG 开路径的隐式闭合填充会横穿屏面) —— 经 `naSet` 新增 `sfill` 档走**内联 style.fill** (style.css 类样式压不过 setAttribute, 只能内联; 还原写空串把控制权交还类样式)。配套 `nadeProj` 加 `near` 参 (圈用 0.4m): 擦着相机平面的采样点会投影到极远屏坐标、与邻点连线在屏上扫出假线, 宁可断弧。`nadeGroundRing` 签名不变, 同族探针锚零漂移; 满环 37 点闭合与 `verify-nade-trigger` B3 的 `ringPt>=30` 判据兼容。
+2. **②b"第一次弹射开始的预瞄线不显示"** (`css/style.css .na.na-bounce`): 弹跳/滚动段点串**一直在画** (updateNadeArc 点串 `rec.bounce` 分流), 但旧样式 4px/.45α/**无投影**/0.65 不透明度在亮草地上有效可见度不足三成 ≈ 隐形。提亮一档: 5px/`rgba(255,195,85,.9)`/带投影 `0 0 3px rgba(0,0,0,.55)`/opacity .9 —— 仍与空中实心段 (6px/.85α) 保持主次之分。
+3. **①预瞄地图标记** (`22-hud`): 预演激活帧把落点/圈半径/圈内目标挂进模块账 `_naMapMark={on,x,z,r}` + `_naMarks[]` (对象/数组复用零分配, 20261101 性能批同规)。账源与提示条**同一遍圈同一份判据** (`d3<=blastR || (d2<=blastR && |dy|<=3)`)——计数 ("圈内 N 人") 与地图黄边读同一份 `_naMarks`, 两处永不漂移; 黄边**不问 mmEnemyVis** (夜/雨显形规): 圈内计数本就无视能见度, 即将挨炸的目标标黄同理。消费两处: `drawMinimap` 第 4 层 (顶层, 蒙版之上——夜/雨档第 2 层蒙版会压暗远处点位本身, 黄边在顶层才读得清) 画落点小圈 (半径=杀伤圈×`invRangeHalf` 按图比例, 心=落点, 中心一枚小点) + 圈内目标黄边环 (r=4.4 于点位外圈); `drawBigMap` (M 键) 同款 (全域比例 `r/MH*(S/2)`, 黄边 r=5.5)。黄色=`rgba(255,205,90,.95)` 与世界预瞄圈 naBlast 描边同款。预演早退 (停瞄准/阵亡/换弹) 同步清账, 图上不得残留。
+4. **①开关** (`00-config`+`index.html`+`22-hud initMenuUI`+`00b-i18n`): `let NADE_MAP_MARK=localStorage.getItem('sf_nade_map')!=='0'` (默认开; 单源 00-config 与 MAP_ALL_INTEL 同区)。「游戏内容设置」子面板新增 `#nadeMapMarkBtn` (🎯 手雷预瞄地图标记: 开/关 + 说明行), `initMenuUI` 接线**实时生效不重载** (地图全图信息口径): 关掉即停画地图侧标记, 世界内预瞄线不受影响。i18n +2 键 (标题/说明)。
+5. **判据**: 新 `dev/verify-nademap-20261103.js` **48 过 / 0 红** (S1 源码锚 26: 可见弧段口径/`{d,full}`/sfill 档/账单源+清账两处/两图消费/设置三件套/i18n/CSS 新旧值/run-all 自注册; B1 行为: 近环 (环心 4m) partial `M×2 L×22` 多子路径 / 远环 (30m) full 37 点 `Z` 闭合 / **整环在身后=null 阴性** / sfill 内联 none↔空串; B2 端到端厨雷复现: fuse=0 + `player.vel` 反向削速 (预瞄出手式 `addScaledVector(player.vel,0.4)` 单源, 落点 3.5m ∈ 圈内) ⇒ naBlast 照画+`style.fill==='none'`+`M×2`+账挂上; B3 小地图: 落点圈心/半径逐位对 (10.6px)+圈内敌黄边 (4.4)+**圈外敌无黄边阴性**+**开关关=黄色绝迹阴性**+按钮 onclick 翻转+`sf_nade_map` 记账; B4 大地图: 15.3px 落点圈+黄边 5.5)。**A/B 亲见转红**: 翻回旧 nadeGroundRing (`return null` 整环作废)/旧 CSS/关掉小地图标记块 ⇒ F3h/F3i/B1 近环×2/B3 两判据**六条精确转红**、阴性对照全绿 ⇒ 复原复跑 48/0。run-all 两轮失败集与预存红账逐条相同 (naval 红线7 稳定红 ×4 + aimassist 种子偶发 1+3 次复核全过) = **零新增**。
+6. **探针坑 (新账三笔)**: ①`_bootstub:55` 桩 **已有 no-op `applyMatrix4/project`** (`return this`) ⇒ 旧条件补丁 `if(!VP.applyMatrix4)` 形同虚设、投影全程哑掉——`verify-nade-trigger` B3/B4 的"6 选 1 全 0 点 envSkip"长期假绿与此同根 (本批以**无条件覆写真公式**修本探针, 未动他探针与他桩); ②录制型 2D 桩方法必须返回**代理自身**——裸 target 上 `.addColorStop` 无 trap 断链 (drawBigMap 蒙版 `createRadialGradient(...).addColorStop(...)` 实测崩; drawMinimap 因晴档跳过蒙版而漏现); ③录制桩 `findArc` 必须返回**参数数组**——返回调用条目则断言取错下标 (数据逐位对上、断言全红的迷惑象); 另: 沙箱 `camForward` 走 Object3D 桩 position-only matrixWorld ⇒ `setCam` 俯仰**不驱动**瞄准方向, 厨雷近落点用 `player.vel` 削速驱动而非俯角。
+7. **版本戳** `20261103a→20261103b` (index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+六探头 hudfix/perf/animfix/commander/cmdbatch2/parity 钉随升, 全库老戳清零)。
+8. **实机关注点**: ①厨雷 (引信烧到 0) 瞄准: 爆炸圈应显示为本体前方的**虚线弧段** (离圈沿越近弧越短, 站进圈里=看得到前弧+弹着点小圈), 不再只剩一个小圈; ②持雷瞄准期左上小地图: 预计落点处一个黄色小圈 (大小=爆炸范围按图比例) + 圈内目标点位外圈描黄边 (敌红点/友蓝点/小队白点/丧尸绿点都描, 与"圈内 N 人"同账); ③M 大地图同样呈现; ④游戏内容设置→「🎯 手雷预瞄地图标记」开关**实时生效** (关=只留世界内预瞄线, 下次进设置重开即回); ⑤弹跳/滚动段的预瞄点串 (第一次弹射之后) 应明显可见 (比空中段略小略淡但不再隐形); ⑥开放弧档 (玩家在圈内/圈沿) 的爆炸圈只有虚线描边没有淡黄填充——这是去假填充的有意口径。
+
+## 一.90 三问批: Bot 打断网接入 × 弹药账对齐+弹尽补给 × 真附身呈现层全量镜像 × 火力点命中体 parity × 丧尸追击双 bug (2026-11-03, 待实机验收)
+
+用户三问: ①Bot 是否受打断机制影响? 附身时为何看不到宿主消耗弹药/换弹等大批动作, 请优化 ②固定火力点上的 Bot 似乎有类似减伤的加成? 如果有的话给玩家也加上 ③丧尸对固定火力点上的 Bot 士兵完全忽视 (不索敌不攻击, 例: 操作迫击炮的 Bot 丧尸从旁边过都不打)。三个探索子智能体并行取证后逐项落地:
+
+1. **调查结论 (三问各答)**: ① Bot 完全不在打断网——换弹=独立 `reloadT` 计时器、举雷=0.8s `nadeAnimT` 硬直、包扎=计时器, `Bot.damage` 重写版没有任何打断门; "附身看不到动作"三层根因=Bot 槽位账只在出生/换弹完成写 (开火只扣 `this.mag` ⇒ 附身面板两次换弹间是冻结旧值) + 备弹从不扣减 (恒满) + 视模式附身 VM 整层不做 (`updateViewModel` 门只放活人 + `specViewPossess` 视模式不换枪 + `svHostFireFx` 只对调试附身)。② 全库**不存在任何 gunner 减伤乘区** (dmgCut/dmgMul/减伤 全库仅连杀增益/伞降/难度表/空对地四类, 均与火力点无关)——"打不动"= AT/AA 炮碰撞圆柱物理挡弹 (`fireBullet` 的 `raycastWorld` 在 `raySoldiers` 之前截短 wallD) + 配套沙袋墙 + `emplMGFire` 持续压制攻击者 (散布×(1+suppression)) + 迫击炮手蹲姿小命中体; 玩家当 gunner 走同一条 `raySoldiers`/受击路径且额外吃难度 pDmg 列+连杀减伤 (同一门炮上玩家比 Bot gunner 更硬)。**唯一真实不对称=迫击炮位: Bot 蹲 (`14-bots:1785 crouch=true`) 玩家站**——补齐即"给玩家也加上"。③ 丧尸候选过滤只排 `onVehicle`/`zombie`/`spectator`——gunner 本是合法候选; "完全忽视"的两个真 bug 在感知锁定层 (见 4)。
+2. **Bot 打断网 (14-bots `Bot.damage`)**: `amt>READBAR_DMG_GATE(25)` 打断 换弹 (reloadT/pReloadT 清零, 不结算) / 举雷·AT雷前摇 (`state='combat'`+nadeAnimT=0, 雷不消耗) / 包扎 (bandageT=0, 不回血不耗绷带) / 上炮前摇 (emCast 清+g.user 交还, 与 die():616 同式) / 弹尽贴箱补给 (supplyT=0); 25 与刮伤不断; 死亡清账仍由 die() 收。与玩家 `18-game:196` 同一常量同一门槛语义。
+3. **弹药账对齐 (14-bots)**: 开火五处同步槽位账 (`aimShot` 主/副武器、AT 枪、迫击炮曲射、舰船反坦克枪——`slots[0/1].mag` 随 `this.mag/pMag` 逐发同步); 换弹完成真扣 reserve (主/副双账三写: mag/槽位mag/reserve; 无槽位=丧尸子类维持旧满仓); 换弹起手全部过 `canReload()` 门 (备弹尽不再起永久 reloadT 循环); **弹尽寻补给** `drySeekSupply()`: 最近岸上 AMMO_CRATES ≤45m → `state='toSupply'` 步行 → 贴箱 1.7m 站 1.2s 补满 (reserve=上限+一匣 + 投掷物照补, 与玩家 `doGrabResolve` 同账) → 弹匣空自然起换弹; 无箱 10s 战地搜刮保底 (就地补一个弹匣备弹, 防无箱图/丧尸局永久哑火); decide() 承诺期不抢状态; 近敌 (<14m 可见) 弃补给转身接战; die/spawn 跨命清账。
+4. **丧尸追击双 bug (25-zombies 感知锁定层)**: ①脱见宽限: 旧 `nowT-(this.zTgt?0:this._zSeenT)>6` 在 zTgt 存活时恒为 `nowT-0>6` (页面墙钟开局 6s 后恒真) ⇒ 追击中**一拍**没看见立即丢恨回游荡 (注释宣称"脱见 6s"实际宽限=0s) → 改 `nowT-this._zSeenT>6` 真 6s; ②同目标重锁定门: 旧 `if(this.zTgt!==best&&...)` 前置让"重见**同一个**目标"永远救不回 chase——钉死在炮位、蹲姿低轮廓的 gunner 一旦被丢, 丧尸带着 zTgt 在游荡分支里径直从旁边走过 (会动的 Bot 靠频繁重暴露走"更近目标/受击迁怒"等旁路自救, gunner 没有这条命) → 摘前置, 视野有人即回 chase; ③视线保持刷新 aggroT (否则 aggroT 到期先在 zTgt 分支掉、只靠 0.22s 后的重锁续命)。顺手: 附身候选排除丧尸 (`specViewPickHost`/`specViewCycle` 加 `b.zombie`——Zombie extends Bot 同在 soldiers, 旧版可附身丧尸)。
+5. **真附身呈现层全量镜像 (20-player/24-main/13-combat/18-game/10-viewmodel/22-hud)**: ①`specViewPossess` 两模式统一换装 (视模式不再收枪, VM 挂宿主主武器); ②`24-main` updateViewModel 门放宽到 `specViewHost`; ③**`svHostActionMirror` 单源**: 宿主换弹→VM 换弹动画+读条 (`reloadT` 归零而弹匣未满=被打断→`vmAbortAction` 同帧收, 弹药不结算语义与玩家一致)、举雷/AT雷前摇→持雷哨兵镜像 (`nadeHeld` 承接 hold 姿态, 离岗即收不重放出真雷)、包扎→bandage 镜像 (bandageT 驱动, 容差 0.12s 防掐自然收尾); ④`13-combat` 出膛反馈钩子放开到视模式附身 (`svHostFireFx`: VM 后坐+枪口焰/枪口灯+微震镜); ⑤`18-game finishReload` 镜像让位 (specViewHost 时 return——换弹镜像是宿主账, 防玩家侧跨账写); ⑥`10-viewmodel` 包扎打断判定 `VM.mirrorHost` 旁路 + 换弹走完清账 + 出真雷兜底门; ⑦`22-hud` 读条门放宽到附身 + 宿主举雷/包扎镜像条 + ✕附身守卫 (镜像读条不可被玩家掐) + 投掷物行带宿主雷账 (旧"只显绷带"口径); `VM.mirrorHost` 标记="当前 VM 动作是镜像, 不吃玩家账"; 两条 detach 链收镜像账。
+6. **火力点命中体 parity (20-player/20a-seats)**: `mountMortar` 玩家蹲姿 (`crouch=true`, `updatePlayerMortar` 逐帧兜底) + `mountMG/mountAT/mountAA` 站姿 (清附身上炮前的蹲姿) + 下炮还原——与 Bot 逐位同规; 其余"减伤感"为物理挡弹双方同享, **不新增任何减伤乘区** (用户问句是条件式"如果有的话", 结论=无显式减伤, 只补真实不对称一项)。
+7. **判据**: 新 `dev/verify-parity-20261103.js` 正判 **51/0 ×6 轮稳定** (①源码防回退 22 锚含旧写法绝迹; ②normandy 真开局行为 13 断言: 开火扣槽位账主/副/换弹扣备弹/打断五类/25·6 门槛/canReload 门/弹尽必有出路/贴箱补给两支路+搜刮保底全链; ③蹲站 parity 3; ④procgen·solo 真开局丧尸 4: 同目标重见回 chase/aggroT 刷新/3s 宽限不掉/7s 掉——nowT=墙钟 ⇒ 宽限判据同步驱动下确定; ⑤附身镜像 7) + **阴性 31 红/20 绿** (15 处单行补丁逐一对上红名; CRLF 文件一律单行锚)。
+8. **run-all-verify 两轮对账**: 首轮 **69/83 次运行 exit=0** (5 红名逐条归因零行为回归: foliage+audit=一.89 遗留"恰好1处"护栏已修钉为"全在 perceive 内"/nadecancel+batch-20261030=换弹走完行加 mirrorHost 锚跟码/touchpad T1g=一.88 遗留 specViewHost 门锚跟码/naval 红线7=预存稳定红同名; 修钉探针定跑全绿 specview 48/0·nadecancel 48/0·batch1030 50/0·touchpad 28/0·foliage·audit) / 次轮 **69/74 exit=0, 唯一稳定红=naval 红线7 (预存, 1/1/1 与红账同名) + nade-trigger 单次偶发 (套件复核 3/3 绿+单跑 88/0×2, 在案种子偶发型), 零新增红名**。
+9. **版本戳** `20261102b→20261103a` (index.html 50 处 + `__sfStyleVer` + `_game_files.txt` 46 行 + 七探头 hudfix/perf/animfix/commander-20261026/cmdbatch2-20261027 跟升, 全库 grep 老戳清零; PLAN/README 历史行文保留旧戳字样不动)。
+10. **实机关注**: ①死后观战 LMB 附身现在能看到: 宿主第一人称枪+开火后坐/枪口焰+换弹动画与读条条+举雷持雷+包扎+弹药面板**实时递减**、备弹随换弹扣减 (弹药账对齐后 curW 镜像读数即宿主真账); ②Bot 换弹/举雷中吃大伤会当场打断 (观感=收枪/收雷, 不再"硬直挨打照走完"); ③Bot 弹尽会跑去弹药箱补给 (可见的"没弹了去拿弹"), 无箱图 10s 后就地搜刮续弹; ④丧尸不再无视炮位 gunner——被丢后重见即扑、丧尸炮击溅射的迁怒不再"冲一下就散"; ⑤玩家上迫击炮位是蹲姿 (被弹面积与 Bot 相同), MG/AT/AA 位强制站姿。
+
+文件: js/14-bots.js, js/25-zombies.js, js/20-player.js, js/20a-seats.js, js/24-main.js, js/13-combat.js, js/18-game.js, js/10-viewmodel.js, js/22-hud.js, dev/verify-parity-20261103.js(新), dev/run-all-verify.js, index.html, dev/_game_files.txt, dev/verify-{hudfix-20261007,perf-20261024,animfix-20261012,commander-20261026,cmdbatch2-20261027}.js, PLAN.md, README.md
+
+## 一.91 排查批:射手死亡与在飞弹体——"一死弹体原地消失"证伪 × 死亡弹道留存契约入册 (2026-11-03, 零游戏代码改动)
+承用户报「似乎玩家/Bot 一死, 扔出的手雷、发射的巡飞弹、子弹等就原地消失了?」(期望口径: 巡飞弹→原地爆炸, 其余→按原轨迹运动)。**排查结论: 问题基本不存在, 现状已是该口径, 无需修复**:
+1. **逐弹种审计** (详细证据表见《排查-射手死亡与在飞弹体-2026-11-03.md》): ①手雷/烟雾/燃烧/反坦克炸药/迫击炮弹/航弹=出手即入全局 `nades[]` 账, `updateNades` 无投掷者存活门 (移除仅 引爆/入水哑火/换局还原 三处); ②坦克主炮/火箭筒/反坦克炮/舰炮/岸炮=全局 `shells[]`, `updateShells` 无 owner 存活门; ③子弹=`fireBullet` 即时射线, 不存在"在飞的子弹"; ④高炮弹 `flakShots[]`/鱼雷 `torpedoes[]` 同样无门; ⑤**巡飞弹=玩家 die() 内既有 `loiterDetonate(this.loiter,...)` 原地起爆行** (基线期既有代码; Bot 无巡飞弹兵种)。唯一会"消失"的手雷=死时还在手里/举雷读条中 (未出手) ——死亡打断读条是 2026-10-25/11-03 批的既有打断设计, "死亡掉落手中雷"属新游戏内容待裁定, 本批未动。
+2. **契约回归探针** `dev/verify-deathflight-20261103.js` (真创建路径+真死亡链, 弹体按引用追踪): T1 手雷 Bot 出手→击杀射手→死后 1s 仍在账仍积分→武装后触地引爆离账; T2 `fireRocket`→击杀射手→死后照飞 25.5m/life 照衰减 (6 方位重试防环境撞物); T3 `fireLoiter` 真发射→击杀玩家→loiterDetonate 原地起爆 (d.dead/回收/摘网格/溅射结算 ×1)。**正向 14/0 绿; --neg 注入式阴性** (死后清 nades/死后清 shells/die() 静默弃弹三病注入) **6 红**各被对应判据抓到=判据具备分辨力。已入 run-all 名册——今后任何人在弹体更新循环加"射手存活门"或动 die() 巡飞弹引爆行, 套件当场报红。
+3. **改动面**: 仅新探针 + run-all 名册一行 + 文档登记; **零游戏代码改动, 版本戳零升 (20261103a 维持)**。用户观测解释: ①死亡时 TV 制导视角收回, 巡飞弹在死亡镜头外远处起爆 (爆炸链真实发生); ②死亡打断手里雷/读条 (既有设计)。
+
+
+## 一.92 附身武器镜像单源 × 第三人称手枪差异化 × 火箭筒换弹 2/3 (2026-11-04, 待实机验收)
+
+用户三问 (原话): ①附身观察发现"Bot 手上的实际武器和模型外观显示武器不同"的严重系统性 BUG——附身看到宿主手持火箭筒却连续打出枪械子弹 ②第三人称下突击兵切换副武器外观无变化, 副武器建模动作疑似照搬冲锋枪 ③火箭筒换弹时间缩减至现在的 2/3。
+
+1. **修复①病根链 (三层叠加, 非单点)**: ①槽位层——Bot 无 curW 概念, 当前武器由各开火分支自决 (AT/迫击炮兵对人员目标**永远打副槽手枪自卫** 14-bots:2258-2266, 主槽火箭筒只对装甲开火; "手里那把"的既成事实台账是 `heldWpnKey`); ②附身层——`specViewPossess`/`specViewTick` **钉死 slots[0]** (主武器槽) ⇒ 附身瞬间宿主已持副武器或附身中切枪, 视角永远停在主武器; ③动作层——`svHostActionMirror` 只镜像主武器 reloadT (副武器 pReloadT 不镜像) + `fireRocket` 无出膛反馈钩。**用户看到的"拿火箭筒打枪械子弹"=Bot 自卫行为 (设计如此) + 呈现层不跟随 (真 BUG)**。
+2. **修复①落地 (两单源五接线)**: `svHostCurSlot(h)` (台账→槽位单源: heldWpnKey≠wpnKey 且 slots[1].key===heldWpnKey ⇒ slots[1], 否则退 slots[0] = 旧假宿主结构逐位兼容) + `svHostWeaponMirror(h)` (curW 钉定 + VM 换枪, 门=VM.key≠w.key 且 VM.state∈{idle,draw} —— 镜像动作中不抢, 打断归位下一帧补换)。接线: specViewPossess 同源换装 / specViewTick 两分支×2 / svHostActionMirror 插副武器分支 (pReloadT 镜像+打断 vmAbortAction 同帧收; **主武器分支逐字不动**=verify-specview 源码锚) / 22-hud 弹药面板同源 / 13-combat fireRocket 出膛钩 (svHostFireFx 同款, 宿主打火箭也有后坐+枪口焰)。**边界已核**: fireGate 要求 reloadT≤0 才进开火分支 ⇒ 主武器换弹中不可能切枪; fireRocket 打在 pReloadT 期下一 tick 自愈; vmFireKick 读 WPN_DEFS[VM.key] 对任意枪成立; 全链零写宿主账 (只读借眼)。
+3. **修复②三枪族造型 (用户裁定"三款枪族造型")**: `gunKindOf` pistol 独立档 (旧 `return 'smg'` = 第三人称拿冲锋枪模, 病根) + `worldGunModel` pistol 分支三族: **colt 柯尔特式** (m1911/p38/tt33: 套筒+短握把+小弹匣) / **broom 驳壳枪** (c96: 方机匣+前置弹匣+扫帚柄) / **nambu 南部十四年式** (细长管+斜握把), 与第一人称 buildGunModel 族谱一一对应; 坐标系同各枪 (原点≈扳机, +z=握把端), 抓握点由 gunGeomStations 按几何现算。**双手持枪** (用户裁定)=不加 GUN_HOLD_BY_KIND.pistol 表项, 走默认机械+armIK, 通信仪单手表不受影响。`CARRIED_FWD.pistol=0.06` (枪短, 沿用步枪 0.30 会把手枪推出手外)。
+4. **修复②挂点重定位 (a21-j 全量复测定位, 本批最大暗礁)**: 首版挂点落地后 `dev/verify-a21-j.js` 当场抓出几何回归 (④′ 匍匐左手到枪面 0.184/0.199 > 0.06, ①″ +3 组)。**A/B 归因** (内存还原旧 pistol→smg 映射, sha256 校验复原) 证实系本批引入非既有账。**根因** (沙箱包 armIK/gunForePoint 逐帧实测): 匍匐枪角 rx≈−1.5 把 0.078m 护木站位旋到躯干正前, 挂点又收胸前 ⇒ 左肩到目标纯横向 0.469m, 超两连杆弯肘横向包络 hy(0.475)≈0.372m —— 直距 0.475≤臂长 0.62, 既有 gunAxisPoint 走 t 回退判据 (只测直距) 测不出这种失效。**定位扫描** (5 键×4 姿态×双路径全组合): 站姿 **{−0.17,0.42,0.33}** + 匍匐 **{−0.24,dy0.12,dz0.62}** 全绿 —— 手枪无枪托, **零接触**优于抵肩接触 (①″ 四姿态×双路径躯干盒 0 相交); 匍匐 dz≈步枪档 0.545=双臂前伸自然姿态。南部式握把斜置盒世界 AABB 超柯尔特族 2mm (蹲姿 2mm 侵盒) ⇒ 握把 0.05→0.04 收齐。**修后 a21-j**: ④′ Bot 0.005/0.056·玩家 0.000/0.037 (**与旧映射基线逐位同**), ①″ 25/29 回基线数, ①′ Bot 0/玩家 2 (预存)。
+5. **修复③火箭筒换弹 2/3**: 09a-defs `WPN_DEFS.reload` 单源 (玩家 tryReload/Bot ×6 换弹点/VM 动画归一全链自动跟随): **bazooka 3.6→2.4 / schreck 3.8→2.5**。Bot 侧 fireT=3.6 再射击间隔是另一本账不随动 (注释在案); garand 2.4/thompson 2.5 金丝雀防批量替换误伤 (探针钉)。
+6. **判据**: 新 `dev/verify-specweapon-20261104.js` **正向 38/0** (源码锚 16: 附身单源 7+手枪 6+换弹 3; 行为 22: 假 AT 宿主 heldWpnKey='m1911' ⇒ 附身瞬间 VM 即换 m1911+首帧 tick 钉 curW+零写账+pReloadT=1.8 镜像精确+打断同帧收+火箭出膛反馈+脱离还原+**无台账旧宿主兼容守卫**; 5 键 kind/三族指纹互异+同族一致/Bot switchVisualGun 端到端含换回原枪逐位复原/**玩家第三人称 thompson→m1911 挂枪模型真变** (0.5→0.252m 盒)+金丝雀) + **--neg 13 补丁 26 红** (附身三层各拆+手枪五拆+换弹两拆全串锚, 12 绿=守卫项不依赖被拆行为)。既有探针**锚跟码修钉两件**: verify-specview (PATCH 锚+正则计数跟新写法, 48/0) / verify-radio (CARRIED_FWD 新键+kind 判据跟码, 40/0)。**run-all 两轮对账**: 首轮 **76/88 次运行 exit=0**, 失败集全归因: naval ×4=预存稳定红红线7 / zombie ×2+matseam ×3=在案偶发名 (ledger 2026-11-01) / **deathflight ×1=探针 T3 判据环境盲区** (updateLoiters 逐步 1.1m 前瞻命中不分敌我, T1/T2 残留朝向若近距有静体/士兵 ⇒ 弹体在裹 splash 探针前早起爆, d.dead/released/meshOut 全过而 splash×0 = run-all 稳定性复核自判"偶发 0/1/0"; 修=T3 补 T2 同款六方位重试, 修后 8/8 绿) / **specweapon ×1=新探针自身判据 bug** (spawn 兵种随机可滚到短枪 thompson 自有模型 0.5m, 旧判据 zlen>0.7 钉长度误判; 修=对初值逐位复原 zlen===初值, 修后 12/12 绿)。两修均零游戏代码改动。次轮 **72/76 exit=0, 唯一失败=naval ×4 (预存稳定红红线7), 零新增红名** (本批两探针及全部既有探针次轮全绿)。
+7. **版本戳** `20261103d→20261104a` (index.html ×50 + `__sfStyleVer` + _game_files.txt ×46 + 七戳钉探针 ×28 逐文件计数断言, 老戳清零; 升戳与 run-all 无并发, 升后 hudfix/perf/parity 三探针当场回绿)。
+8. **实机关注**: ①Q 附身 AT 兵——对人员目标时视角武器是**手枪**且有手枪后坐/枪口焰, 对装甲才换火箭筒 (火箭出膛同样有反馈); ②附身看宿主副武器换弹也有动画与读条, 宿主受创打断则同帧收; ③附身中弹药面板跟宿主手里那把; ④步兵切副武器第三人称**三种造型肉眼可辨** (柯尔特/驳壳/南部), 趴姿双臂前伸持枪双手都在枪上; ⑤火箭筒换弹读条约 2.4/2.5s (旧 3.6/3.8), Bot 再射击间隔不变。
+
+文件: js/20-player.js, js/11-soldiers.js, js/13-combat.js, js/22-hud.js, js/09a-defs.js, dev/verify-specweapon-20261104.js(新), dev/verify-specview-20261101.js, dev/verify-radio-20261027.js, dev/verify-deathflight-20261103.js(T3判据修钉), dev/run-all-verify.js, index.html, dev/_game_files.txt, dev/verify-{hudfix-20261007,perf-20261024,animfix-20261012,commander-20261026,cmdbatch2-20261027,parity-20261103,crushhead-20261103}.js, PLAN.md, README.md, finished-docs/交付文档-附身武器镜像×手枪差异化×火箭筒换弹-2026-11-04.md(新)
+## 一.89 Bot AI 机制优化批: 隔墙开火 × 挤堆卡死 × 兵挤坦克上不了车 (2026-11-02, 待实机验收)
+
+用户附身观战实报三项: ①好几个人挤在一起、卡在一起, 不知道在干什么 ②总是隔着墙对目标开火 (可破坏与不可破坏墙都有) ③士兵在坦克面前向坦克挤但就是上不去 (注意平衡性)。三症状各查出真根因, 全部单点修复, 零手感损伤口径。
+
+1. **A·perceive 当前目标优先复核 (14-bots, 隔墙开火主根因)**: RAY_BUDGET (12 发/帧全 Bot 共享) 被排前的 Bot 吃干时, 循环内对「当前目标」走 isCur 分支**零检测直接沿用旧通视状态** ⇒ lastSeenT 每周期照常刷新 ⇒ 开火门 (`nowT-lastSeenT<0.6`) 永远开着, 人缩到墙后仍朝其实时坐标泼弹。修: perceive 循环外先对当前目标做带优先权的通视复核 (世界遮挡 -0.6m 裕量 + 烟/庄稼/植被/潜水四门, 与循环内逐位同口径; 超预算也照发 —— 每次 perceive 至多 +1 发, 22 人表 ≈ +2.3 发/帧, 换「不隔墙开火」), 循环内 isCur 分支只消费 `_curBlk` 结论; lastSeenT 停止刷新 ⇒ 0.6s 后开火门自然关上、转压制, 3s 后 isCur 失效回落正常索敌, 8s 记忆清账不动。
+2. **B·机枪座开火预检+断视压制 (14-bots mgUse 分支)**: 旧版 engaged 门 (<4s) 内始终朝 target **实时坐标**开火且无开火瞬间 LOS 预检 ⇒ 目标缩进掩体后最长 ~3.4s 隔墙扫射。修: `mgVis=lastSeenT<0.6` (与步枪开火门同源) 才打活人坐标且开火瞬间预检 (被挡 `mg.fireT=0.12` 短退避, 不烧每帧预检射线); 刚丢失 (<2.5s) 改压**最后目击位** (压制弹, 弹道自己撞墙, 与步枪 supFireT 同语义); 射速间隔在炮上/散热档/俯仰同源等既有口径零触碰。
+3. **C·火箭筒预检收紧 (14-bots)**: 旧版 `raycastWorld(eye,dir,65)` 定长+`chk.dist>50` 放行, 与目标实际距离脱钩 —— 墙在 50m 外就是隔墙发火箭 (一次性弹药还可能自伤)。修: 射线打到目标实际距离 dTk、`chk.dist>dTk-3` 才放行 (与下方反坦克枪分支同款)。反坦克枪分支原本就对, 零改动。
+4. **E·士兵间软分离 (14-bots `_soldierSep`, 挤堆/卡死主根因)**: 全库此前**没有任何士兵-士兵推挤** (collideMove 只推静态世界) ⇒ 选中同一掩体点/旗心的 Bot 全部叠进同一格, 叠死后又各自触发脱困侧蹿 (观感=反复横移打摆)。修: 每人只推**自己**离开邻居 (对称分离由双方各跑一遍、各推一半保证), 分离半径 0.85m、单帧限幅 0.22m、推完过一次 collideMove 防顶进墙 + 就地重站高 (驻停 Bot 没有 moveDir 的逐帧 standHeight); 参与名单与命中管线同口径 (raySoldiers): 死人/在车/大舰炮手/观战者不推, |dy|>1.6 (楼上下/桥上下) 不推, 任一方俯卧推力减半, **玩家只被让路不被推**; 调用点在 update 移动段前, 上炮/前摇/包扎/乘员/伞降/下车跨出/近战各自早退或显式排除。O(n)/人·帧, 22 人表 ≈ 500 次平方距离/帧, 零分配。
+5. **F·驻点占用账 (14-bots `coverCrowdAt`, 挤堆第二根因)**: 掩体/驻守点「谁评谁上」没有占用概念 —— 一窝 Bot 对同一批 coverPoints 评出**同一个**最优解, 全队先后叠进同一格。修: 数同队活人里「打算去/已站在」该点 1.7m 内的个数 (意向=coverPt/defendPt/pushPt 三落点字段 + 现位, 同一人只计一次), 评分时逐点加罚: defendPt 选择 ×9 / findCoverFrom ×5 / findCoverToward ×5。不预约不锁点 (死亡/改主意自动失效), 只作评分偏置; 单源就是本函数。
+6. **H·目标粘滞防抖 (14-bots objHoldT, 「不知道在干什么」)**: 旧版每拍 6% 概率随机 `pickObjective()` ⇒ Bot 走到半路掉头往返。修: pickObjective 选定即 `objHoldT=rand(4,7)` 承诺期, 期间 6% 门不生效 (计时在 update 定时段衰减); **紧急例外**: 己方旗正被敌方占领 (`owner===team&&capTeam!==-1&&capTeam!==team`) 立即重选不受粘滞约束 (四种 objective 形状——FLAGS/攻防合成/clash 合成/convoy 合成——都显式带 capTeam 字段, 判据安全)。
+7. **I·上车触达改贴壳判定+顶壳超时拉黑 (14-bots toVehicle, 兵挤坦克上不了车根因)**: 旧门 `d<VEH_BOARD_R(2.7, 以车心为准)` 而 vehiclePushSoldiers 把步兵挡在「车壳 OBB+0.38m」之外 —— 车体半长+0.83 > 2.7 对**所有坦克**成立 (hullL 最短 4.6 ⇒ 3.13m), 从首尾方向接近的 Bot 被永久顶在前装甲上够不到判定圈 (侧向接近 1.68~2.98m 偶尔能进 = 实机「时灵时不灵」)。修: 改按**车壳表面距离**判 (与 15-vehicles:998 的推挤几何同源同参: 横向 |lx| 比 halfW、纵向 |lz| 比 hullL/2+0.45), 贴壳 ≤0.55m 即上 —— 可见的人永远贴着车壳消失 (2026-09-20 闪现修复「消失点贴车壳」原则不变), 任何车长/任何方向都成立; 贴壳带 (<1.6m) 却上不去的兜底: 顶壳 6s 放弃认领归建 + 该车个人拉黑 12s (vehFailV/vehFailT, decide 认领循环跳过 —— 否则下一拍又认领同一辆, 在坦克前无限 yo-yo)。平衡: 认领纪律不变 (每车同时仍只有一人认领/8s 窗)、无新全局冷却、必须物理贴壳才上。
+8. **判据**: 新 `dev/verify-botai-20261103.js` **53/0 两轮稳定** (46 文件全链真开局, 与 verify-commander-20261026 同款桩; 行为断言: T1 预算耗尽+墙 lastSeenT 冻结 / 耗尽+无墙照常刷新 / 优先射线超发证据 · T2 墙+全场饥饿 20 拍零刷新端到端 · T3 机枪拦截+0.12 退避+断视压制 · T4 58m 目标+53m 墙不发 (旧口径 dist>50 放行) / 无墙照发 · T5 旧推挤边界 0.45m 一帧上车 (旧门 4.35>2.7 永远够不到) / 远处不上不计时 / 顶壳 6s 超时+拉黑 12s+decide 不再认领 · T6 对称分离收敛/死人·观战·楼上下·俯卧减半·玩家只让路五阴性/update 全链生效 · T7 占用账意向/现位/同一人只计一次/敌队不计+三消费点源码 · T8 粘滞 300 拍零换/归零恢复 6% 门/己方旗被夺紧急重选 · T9 源码防回退 11 锚含旧写法绝迹) + **阴性 17 红** (--neg 七补丁各有目标断言转红: A→T1×2+T2+T9A / B→T3×2 / C→T4+T9C / I→T5+T9I / E→T6+T9E / F→T7 / H→T8×2+T9H×2)。**★探针抓出首版轴配对反了**: `_surf` 初版把横向比 hullL/2、纵向比 halfW ⇒ 假坦克 debug surf=2.3 (实际贴壳 0.45) 永不上车 —— 轴口径对齐 vehiclePushSoldiers (hx=halfW/hz=hullL/2) 后 53/0; 又: T4 场2 初版把场1 的靶车留在场上以 0m 抢走 eTank, T1 场3 初版 Δt=4s 已超 3s 记忆门走不进复核分支 —— 都是探针自身几何/窗口错, 与实现无关。
+9. **run-all-verify 未跑完** (用户裁定立即收尾让出并发, 第一轮中途终止未出结果): 待补两轮回归对账 + probe-bots 行为验收; 定向探针 verify-botai-20261103 正反两轮已绿 (53/0×2 + 阴性 17 红)。
+10. **版本戳** `20261102a→20261102b` (index.html 50 处+`__sfStyleVer`+`_game_files.txt` 46 行+五探头 hudfix/perf/animfix/commander/cmdbatch2, 全库 grep 老戳清零; PLAN/README 的历史行文保留旧戳字样不动)。
+11. **实机关注**: ①乱斗里 Bot 不再朝墙/烟后泼弹 (枪响后目标进掩体 ≤0.6s 停火转压制, 压制弹打的是最后目击位); ②同点汇聚显著减少——掩体/旗圈周围 Bot 自然散开, 不再一坨叠着左右打摆; ③步兵接近任何坦克从任何方向贴壳即上车, 卡住时 6s 后自动放弃归建; ④机枪座目标进掩体后很快转为朝原目击位压制而非扫墙; ⑤火箭筒兵不再对 50m 外有墙的坦克浪费火箭。
+
+文件: js/14-bots.js, dev/verify-botai-20261103.js(新), dev/run-all-verify.js, index.html, dev/_game_files.txt, dev/verify-{hudfix-20261007,perf-20261024,animfix-20261012,commander-20261026,cmdbatch2-20261027}.js, PLAN.md, README.md
+
+## 一.88 观战实机反馈第二轮: 鼠标吞键 × 指示条全屏层门 (2026-11-02, 待实机验收)
+
+用户实机反馈三项: ①附身时右键仍触发瞄准动作 ②Esc 重部署/Esc+Esc 暂停时观战信息条压在图层上方 ③附身不得影响宿主行动。
+
+1. **鼠标吞键门 (19-input mousedown)**: 上批 keydown 侧已有吞键门 (Q/E/U/J/K 白名单), 但**鼠标是独立监听器**——调试附身 (player.alive=true) 走不到视模式分支, 右键照旧 `player.ads=true` ⇒ FP 视角里宿主的枪做出瞄准动作 (用户实报)。修=视模式分支后插 `if(player.specViewHost) return;` (在读条取消分支之前): 左/中/右键一律吞掉, 不进 ADS、不 cancel 读条; 左键 mouseDown 本就因 updatePlayer 冻结 (20-player:799) 打不出去, 现在连账也不置。手柄 (19b padAds) / 触屏 (24-main tAds) 的 ADS 门补 `!player.specViewHost` 同门。
+2. **👁 指示条全屏层门 (22-hud)**: 指示器挂 body 上 z-index:40, 高于全屏层 .screen (z-index:20) ⇒ 重部署页/暂停罩/结算页开着时它压在图层上方 (用户实报)。修=`_svOverlayOpen()` (.screen 四件=menu/deploy/end/pauseOv 静态缓存表逐帧查 hidden 类 + gamePaused 旗双判据, 零分配纪律) 任一开着即收起, 关闭后下一帧 `_svIndShow()` 单源复显 (带罗盘实测重定位——定位逻辑从进位 show 分支提出, 复显走同一条); 面板收起账 (_svHudOn/_svHudPos) 不动——#ui 内 HUD 本就被 .screen 盖住。
+3. **宿主行动不受影响 (全库审计)**: specViewHost 全部读点过堂——13-combat×4 (出膛火光/命中白档×3) / 14-bots×2 (受击/die 击杀门) / 25-zombies / 21-match (onHostKill) / 22-hud×5 (换心/顶栏/复位/脱离) / 23-deploy——全是**表现层单向读**; 宿主 AI 无任何 specViewHost 读点, 宿主侧唯一写点仍是 `mesh.root.visible` 显隐 (呈现, 不改行为); curW 指针镜像在输入吞净后无玩家侧写者 (开火链 updatePlayer 冻结 / tryReload 键吞 / vmReloadRestore 纯视觉)。
+
+**探针**: verify-specview-20261101.js **48/0** (新增 4 断言: 鼠标吞键门位置序 / 手柄+触屏同门 / _svOverlayOpen+_svIndShow 单源; ⑦ 行为=gamePaused⇒👁收起·恢复⇒复显·脱离⇒收起——**探针坑: getElementById('specViewInd') 对 createElement+appendChild 建的真身会另造 byId 新壳, 须走 document.body.children 找**) + **阴性 26 红/22 绿** (新增 4 锚全转红; ⑦ 阴性 paused:"block" 亲见病根复现)。**run-all 未跑 (用户裁定电脑没电不重复验证; 定向探针正反两轮已绿)**。**版本戳 20261101d→20261102a** (index.html 50 处+_game_files.txt 46 行+五探头 hudfix/perf/animfix/commander/cmdbatch2, 全库 grep 老戳定增量)。
+
+文件: js/19-input.js, js/19b-gamepad.js, js/24-main.js, js/22-hud.js, dev/verify-specview-20261101.js, dev/run-all-verify.js, index.html, dev/_game_files.txt, dev/verify-{hudfix-20261007,perf-20261024,animfix-20261012,commander-20261026,cmdbatch2-20261027}.js, PLAN.md, README.md
+
+## 一.66 性能优化与架构缺陷重构工程 (2026-10-08a, 待实机验收)
+严格依据《性能优化与架构缺陷重构工程指导-20261007.md》Phase 0~3 落地四阶段重构与治理：
+1. **Phase 0 阻断缺陷与显存泄漏修补**：
+   - 任务 0.1 (20-player): 下车状态机重置（tankView=false, navalGun=false, scopeOv 隐藏, fov=74 复原），下车候选点受阻时安全回退上方。
+   - 任务 0.2 (02-scene, 22-hud, 23b-worldrestore): 建立 WebGL 资源递归释放器 disposeActorHierarchy(obj)，设 _SHARED_MATS 白名单；换局 retireMatchActors 彻底释放 Mesh/材质/几何体。
+   - 任务 0.3 (10-viewmodel): vmEquip 换枪前递归遍历释放 VM.inner 子级非白名单独占几何体，根除换枪显存持续攀升。
+   - 任务 0.4 (16-aircraft): 防隧穿 3D 点到线段扫掠检测 distSqPointToSegment；严格保留 f.age > 0.02 出膛自爆豁免。
+   - 任务 0.5 (18-game, 21-match, 22-hud): MATCH_TIMERS 异步定时器安全池，阵亡/换局/结算集中清理 clearMatchTimers()。
+2. **Phase 1 物理与寻路热循环减负**：
+   - 任务 1.1 (12-ragdolls): 布娃娃与碎块 Cannon 刚体掩码置零（collisionFilterGroup: 0, collisionFilterMask: 0），消除无意义狭相计算；积分步长上限保护与迭代限制。
+   - 任务 1.2 (07-nav): A* 寻路退化治理（_heapTouched O(K) 清理替代 3.3 万项全图清零；expand 邻树收集 meetCandidates 规避 16,641 次全图双向兜底扫描；compFreeList 递归回收分量 ID）。
+   - 任务 1.3 (14-bots): 全局帧射线预算器 RAY_BUDGET (每帧上限 12)；perceive 视距粗筛与预算约束；probe 避障依赖 2D occBlocked，仅卡死 (stuckT > 0.25s) 且有预算才发 3D 射线。
+   - 任务 1.4 (01-audio): WebAudio 瞬态节点自动断开解绑 scheduleNodeRelease，避免 AudioContext 节点幽灵滞留。
+   - 任务 1.5 (06-engineering, 04-collision): 工程兵建造碰撞网格增量刷新 spatialIndexAddBox，消除每造工事全图重建开销。
+3. **Phase 2 渲染 Draw Call 治理与地形重构**：
+   - 任务 2.1 (05a-buildings, 05-world): 静态建筑不可毁（非 destr）同材质构件几何合并 (bldBatchBegin/bldBatchEnd)，大幅削减独立 Mesh 与 Draw Call，保留碰撞注册与 NAV_CLEARS。
+   - 任务 2.2 (05b-props): 塔拉瓦椰树叶片与构件使用 THREE.InstancedMesh 实例化，保留 rec.meshes = [grp] 契约与倒伏/沉入/燃烧机制。
+   - 2.3 (03-terrain, 05c-layouts): 地形 4x4 分块（16 块）绑定包围球视锥裁剪，保持 refreshTerrainMesh 接口不变。
+   - 2.4 (05-world): 阴影通道轻量化裁剪，mesh() 默认 castShadow = false，主体显式开启，装饰细碎构件关闭阴影。
+4. **Phase 3 HUD 与数学槽优化**：
+   - 任务 3.1 (22-hud): 60 FPS 直写 DOM 迁移为 hudText/hudStyle 等去重包装，载具/座位切换清理对应缓存槽。
+   - 任务 3.2 (22-hud): 小地图朝向 sin/cos 计算外提。
+   - 任务 3.3 (11-soldiers, 15-vehicles, 03-terrain): camForward(out), camRight(out), vehHitCyl(t, out), rayCyl 槽位复用，消除每帧垃圾回收压力。
+- 判据与全量回归：verify-buildings (15 图 PASS), verify-destruct-20260927N (50/0), verify-worldrestore (10/0), verify-spec (60/0), verify-specbatch (79/0), verify-hudfix-20261007 (37/0), verify-foliage (全绿), verify-procgen (259/0), verify-zombie (46/0), verify-fire 11 (全绿), verify-boot (15 战役 LOAD OK), verify-text (全绿)。
+- 版本戳升级: 20261007e -> 20261008a (全量 48 处同步更新)。
+
+## 一.65 随机地图生成算法改造 · 群系化(2026-10-07e,待实机验收)
+承裁定④后半"群系化(下批)"+ 收尾 2026-10-07d 遗留的随机图生成缺陷。**群系表**(00-config `PG_BIOMES`: farm 农村平原/town 城郊镇集/water 水乡河网; 键序=哈希取模序; `PG.biome` 由 splitmix32(seed) 独立哈希抽取**不占 PG 随机流** ⇒ farm 同种子逐位=2026-10-07b 基线, `dev/_pgfarm-baseline.json` 钉 12 种子, verify-procgen 每次逐位比对)。**town**(病根: 旧版按主街折点比例取锚, 62~82m 主街折点全落广场 22m 净空内 ⇒ 105 图 73% 只 2 旗)=主街加长 96~124 + "离核心 ≥26m 折点"锚点制 → 支巷×3(向外放射)+次街×2(法向 46~60, 新类 `cls='sub'`)+排屋采样(次街步距 5.0~6.6 恒建)+铁路货线(核心 66~80m 外, 05c railLine 逐段铺+小地图/部署图折线)+旗点 广场/东街/西街(次街端外延 20/30m 接巷 或 街内端点回溯)/站前(货线 ±14 顶点窗口×两侧法向×半径 15/19/23 共 84 候选, 预筛广场净空后取"与既有旗间距最大"), 无农田+林地 0~2。**water**(病根一: 滨河街沿**主桥切线**直铺, 河湾处街尾滑到对岸/入水 ⇒ 19/125 图带跨河路面; 病根二: 旗点极坐标抽样 74~95m 半径带半数落水/被广场净空拒 ⇒ 63% 图只 2 旗)=主河 9 顶点三级中点位移折线(端点钉半径 178)+石桥 2~3(kind stone)+徒涉滩(距桥 ≥55 外围顶点)+支汊 1~2 出图缘+鱼塘 2~4+水田 rice+**滨河街沿岸线偏移**(`bankPt`, 街心=主桥头核心/对岸堍)+**growClear 四级阶梯**(直连→远河 via→沿本岸绕→**拦河截断 growCap** 逐步判跨河遇河即停, 折线终点=本岸临水点)+**岸别单源** `bankOf/bankNrm/bankPt` 同为左法向口径(+1 侧=`CORE_BANK`; 符号写反=本岸街铺到对岸, seed 100350 实测固化为红线⑥)+旗点=**路网折点**(广场=主桥头堍/二桥=非主桥本岸桥堍 `WATERWORKS` 锚点/渡口=滩头接巷端点/对岸·上村=两案路顶点打分"间距最大 − 0.5×|环距−84|") ⇒ 旗数 4~5 恒真。**建造阶段**(05c/05-world)=铁路铺装 + 水乡桥头工事(每桥两岸桥头沙袋, footFree 门) + `placeAt` 新增 `noWater` 门(滨河地块 8 次抖动 ±2.5m 可能入水; 手摆图不传 ⇒ 零漂移) + **桥面旗弹药箱修**(旧版硬编码主桥 `bridgePt(-4,1.4)`: 水乡 2~3 桥时二桥旗箱摆到主桥 ~90m 外 + 桥头旗箱位与主桥旗箱**完全重合**=道具互斥破坏; 现"旧位 ≤16m 逐位沿用, 否则距旗最近桥 + 桥面内夹取贴旗点")。判据: **verify-procgen 重写为群系感知 259/0**(通用 21 条×3 群系×4 种子 + farm 基线逐位 + town/water 专属 + 同种子全同 + 非 procgen 零写入 + **240 种子统计段**: 分布均衡/旗数达标率/town 次街排屋恒 ≥2 均 ≥4/water 跨河违规 0·桥 2~3 恒真·滩 ≥25%·塘均 ≥2)+layouts **ALL PASS**(含 procgen 全链)+boot/zombie/zombie2/text 等全绿; 实测统计 farm 85/town 84/water 71, 旗数 farm{3:10,4:20,5:55}(3 旗为**基线原样**, 不追改以免动随机流)/town{3:4,4:80}/water{4:42,5:29}, 跨河违规 **0**, 桥{2:31,3:40}, 滩 31/71, 塘均 2.8, 次街排屋均 5.3。自检工具(临时脚手架): `dev/_pgdump.js`+`dev/_pgpng.py` 平面图渲染(farm/town/water 出图核对: 村舍沿街/次街垂直/滨河街随河湾/桥位/鱼塘/水田形态)。**已知边界**: "镇集地块总量 > 农村"未达(33.7 vs 33.5, 镇集身份改由结构断言承载: 次街/铁路/无农田/排屋线密度); 讨论稿 E 其余候选群系(丘陵密林/黄土沟壑/雪原冻土/山地隘口)未实现, 追加键须置于**键尾**并同步 `dev/_pgbase-capture.js` 哈希表(否则既有随机图群系归属全变)。验收清单: ①同种子三群系观感(farm 田野/town 街区+铁路/water 河网+桥+鱼塘); ②镇集次街排屋与站前货栈巷战手感; ③水乡"桥=咽喉"(桥头沙袋/渡口滩); ④小地图·部署图铁路折线; ⑤每图 30~37 地块在低画质档帧率。版本戳 20261007d → **20261007e**(49 处)。**全量回归**: run-all-verify 50 条沙箱探针 **45/61 次运行 exit=0**, 最终 4 条红**全为既有预存红账**(sink #13 ironbottom queueSink / naval 红线7 两栖车上岸开火 / airground R3 / phase4-7d S4), 与本批零交集; 顺带修探针盲区: `dev/verify-sink.js` 载入清单缺 `js/00c-procgen.js`(2026-10-07 批新增 00c 时漏补) ⇒ 跑到 procgen 图即 `PGDATA is not defined` 整篇崩溃、被误记进"同一条预存红" —— 补入后 procgen 沉没链 8 项全绿, 该探针只剩 #13。建造阶段逐群系开机: `SF_PSEED=100001`(town)/`SF_PSEED=12345`(water) 各 `verify-boot 14` LOAD OK; layouts 的 procgen 通路本就跑 42=water/7=town 两种子。EN 词条: 群系卡名×3 + 群系名×3 + 新旗点名×7 + sub 模板键(动态种子串走 `campSubT` 模板, 22-hud 两处)。
+## 一.64 丧尸压力重构 × 幻影旗修复 × 主基地居中与附属建筑 × 预设图入口(2026-10-07d,待实机验收)
+承五条反馈(四裁定, 见讨论稿)+中途追加四条+实机两报。**反坦克压力链**(裁定①扒车+自爆尸)=25-zombies cling 扒车(12m 扫车/2.8m 贴车/免装甲直伤 walker 3·runner 2.5·brute 12 每秒+lastDmgT 断边打边修)+车速>4.5 持续 0.6s 甩落自伤 15+vehiclePushSoldiers clingVeh 豁免+Tank._zClingN 减速(≥2 层×0.78/≥4 层×0.55)+turretAI 3.4m 机枪贴身死角(仅丧尸)+主炮 bruteOK(20m 外重尸 worth HE)+自爆尸 boomer 变体(180s 解锁/0.8s 引信冲刺/explodeAt R7+9m 车 vehDmg 180×(1−d/12)+6m 尸链/击杀 ZP25)。**节奏**(裁定②+追加提量 75+全域散布)=ZCFG.ramp cap 42→75·every1 1.15→0.85s+常规刷 60% 全图远域(均匀打分, 包围主题)/40% 近场环+L4D 事件波 FSM(静默 75~110s→预警 6s 播报"远处传来嘶吼"→连刷 8~16 只 0.35s/只, 波内 runner ×1.6·移速 ×1.25; 首波 90s, zombieMatchStart zSurgeT=0 修正首波被拖 180s 的 bug)。**绕行智能**(追加③)=卡 0.55s 侧向绕(±90° 挑 occBlocked 放行侧 0.8s, zDir() 单点注入不双移)+卡 1.6s 砸工事兜底; moveDir 一线避障分层不动。**火力支援索敌**(追加①)=14-bots 迫击炮无目标时轰最近尸群心(9m 簇≥3 只, 26~130m)+16-aircraft 飞机巡逻候选加尸潮密度分(9m 簇×16); 仅 ZOMBIE_MODE 内。**幻影旗修复**(裁定③前半)=applyFlagOwnership 尾部 solo 早退(旧版就近拆分兜底把最远 2 旗分给 1 队); 旗=中立 ZP 资源点(占旗+100)。**主基地居中**(裁定③后半)=00c procgen solo 双基地改写为村镇核心(baseAng 偏 8m, 路网从核心生长=环形路)+05c buildWorld 入口预设图取距原点最近旗外侧 7m(诺曼底=教堂旁)+营区布景 solo 只画一套。**基地附属建筑**(追加④全局要素)=基地**外侧**(背向中心; 第一版沿用帐篷 sgn 朝内=火制走廊/主街/基线走廊所在, 全量回归抓到三条真回归: 淞沪迫击炮弹道被民居拦截 killattr T3·城市图侵街 layouts·雾林守线路标穿墙 nav——翻外侧后全绿, 教训入交付文档)民居+木屋各一, placeAt 失败弃置, 海图除外。**预设图入口**(裁定④前半)=迷你大厅「战场地图」选择器(随机战场+全部陆地预设, Z_EXCLUDE canyon/coral/ironbottom)+ZOMBIE_MODE 放开(opensea/canyon 不开放)。**实机两报**=①startNewGame 丧尸页清 sf_zsub+写 sf_mzstart 直达键+整页重载(ZOMBIE_MODE 载入期常量+基地居中已烙进世界, 就地翻不回来); ②攻防守方票数 ×1.25 改 ×(ZOMBIE_MODE?1:1.25)(尸潮=共同威胁, 不再纯粹两队对抗)。判据: verify-zombie2-20261007 **63/0**(T1~T18 全链, 含 T17/T18 双修指纹)+verify-zombie 46/0(参数钉同步 cap75/every0.85/全域散布上限放开)+killattr 18/0+layouts ALL PASS+nav 8/0 回归修复; 群系化(裁定④后半)**见一.65 本批已落地**。验收清单: ①坦克停桩被尸群围拆/移动甩尸/自爆尸炸车有预警腹鼓; ②全图到处有丧尸(包围感)+预警播报后大波冲击; ③丧尸撞墙会绕不傻撞; ④迫击炮/飞机炸尸群不炸空点; ⑤solo 无敌旗/占旗+100ZP; ⑥诺曼底丧尸局基地在教堂旁+基地后有民居木屋; ⑦迷你大厅可选预设陆地地图; ⑧丧尸局点「新游戏」回标准征服; ⑨攻防丧尸局两军票数相同。
+## 一.63 随机图无UI根因补刀 × 丧尸solo结算页 × F1 HUD开关(2026-10-07c,待实机验收)
+承实机三报: ①**任意模式进随机地图整场无战斗HUD**(部署页可见能开打能结算, #ui 整局被压)——根因=**2026-10-07b 只把 24-main 的 inMenu 复核块前移到 initMenuUI 之前、旧位置的同一块没删**: mzstart 直达开局时 startGame 刚摘 inMenu, loop() 之后的旧块又按 `!inMenu&&!player.deployed&&!matchOver` 盖回去(部署页在 #ui 外故能玩)。修=删残留旧块只留前移块; verify-hudfix T1 三判据+植回旧块的阴性对照。②**丧尸solo结算页严重不合理**("德军 330票·0在场"无中生有+副标题"征服")——endMatch: solo 局兵力条第二行改 ☣丧尸战果行(已消灭 zStats/场上存活, 绿条=清剿进度), endSub modeName 位改"丧尸模式·单队生存/双队对抗"; 25-zombies 新增 zStats.killed 单源(die 累计/开局复位)。③**F1 隐藏/显示战斗HUD**(用户提案采纳)=body.hudHide 与 inMenu/inDeploy 同构整体压 #ui+#touchUI, 19-input 仅已部署响应+preventDefault, 提示条挂 body(挂 #ui 会跟着消失), 不进存档刷新回显; 帮助行+词条同步。判据: verify-hudfix-20261007 37/0(已注册 run-all-verify)。验收清单: ①随机图三入口(随机征服/丧尸solo/teams)落地后 HUD 全在; ②普通战役卡零回归; ③solo 结算两行=我方+☣丧尸、无第二队伍名、副标题含"丧尸模式·单队生存"; ④F1 战斗中隐藏/恢复、部署/暂停/结算页不受影响、刷新回显; ⑤EN 词条。
+## 一.62 丧尸模式二次实修 × 随机战场 v3(2026-10-07b,待实机验收)
+四报根因与修法: ①**UI 不显示**=24-main inMenu 复核块跑在 initMenuUI 之后把直达开局刚摘的 HUD 盖回去 → 复核块前移(复核先于自动开局); mzstart 顺带清 sf_openplay。②**撤三大波**(用户点名)=ZCFG.phases 删除改 ZCFG.ramp 连续爬坡(every 4.2→1.15s/cap 10→42/rampT 540s/runner 100s·brute 260s 解锁), 刷点环绕人类质心 38~62m(旧边缘环 228m 步行 2.5min 不进画=见不到丧尸根因), 候选偏好视线遮挡; zAnchor/zNearestHuman 单源。③**Bot 守基地**=zDefPosts(team) 防区单源(基地 9~22m 12 方位槽)+14-bots 虚拟旗 {id:'守',_zp} 不进 FLAGS 不触发占领。④**随机图 v3**=380 图全参数重标+加密(间距 6.5~10.5/旗环 3~5·2~3 栋/院落 50%/散居 6~9)+footFree 足迹回避(算法道具不进 B_FOOT)。验收清单: ①迷你大厅两入口进局后**有 HUD 有部署界面**(inMenu 修复的直接证据); ②丧尸局 30 秒内见到丧尸从遮挡后出现、持续有压力(再无"三大波空窗"); ③Bot 全程守基地不跑旗(solo/teams 两档); ④空种子连开两局图不同/钉种子复现; ⑤新图 380 尺度建筑密度/丘陵/围栏观感(多试几个种子)。
+## 一.61 迷你游戏大厅 × 丧尸模式实机修复 × 随机战场 v2(2026-10-07,待实机验收)
+
+> 承用户首轮实机六报:①迷你面板全空白(showPanel 漏 mMini)+按钮位次;②种子固定(00c 回写 sf_pseed 根因)且无输入;③从战役卡进随机图=无丧尸无UI还两队(根因:卡路清 sf_zsub);3.1 单队模式凭空两队(own:1 旗+敌票条);3.2 Bot 照常征服推进;3.3 无阵营/天气/昼夜选择;④图大/空/平、建筑公式化、夺点一条线。裁定:**随机地图作战整体撤出战役列表,只从迷你游戏大厅进**(大厅=丧尸模式+随机战场·标准征服两入口,共享种子/阵营/昼夜/天气选项)。
+> 落地: 大厅重构(index.html mMini+22-hud initMiniPanel)/种子语义(空=每局随机,数字=钉死)/单队生存真实化(05c 清 own+票条显 ☣ 丧尸数)/14-bots 守势评分分支/procgen v2(地图 520+三层噪声高度场网格 105×105+沿路·核心·旗圈压平+地基坡度门+村舍簇·院落·散居·临街围栏·路旁树+旗点极坐标散布吸附路面/接短巷)。
+> 判据: verify-procgen 122/0(贴路/非一条线/不回写/高度场/压平新判据)·verify-zombie 38/0(T2 摆尸射线门逐字复刻感知公式+归位清节流)·verify-boot procgen 全链启动·verify-nav/navspots HEAD 清单补 00c/25-zombies 后 8/0。版本戳 20261007a(49 处)。**待实机验收清单**: ①迷你大厅两入口+选项齐(阵营名随种子变化)②空种子连开两局图不同/钉种子复现③单队生存: 无第二队伍·旗全中立·票条 ☣ 计数·撑过10分钟胜利·全灭失败④双队: Bot 守旗不远征·丧尸照常⑤新图观感: 丘陵起伏·村舍簇·围栏·密度·旗点不一条线(多试几个种子)⑥昼夜/天气在丧尸局生效。
 
 ## 一.60 本轮平衡批:体能回体 × 出生朝向 × 生成/补给箱平衡 × F 键准星锁定 × 难度标准档(2026-10-06,待实机验收)
 
-> 承用户五报(同日四项裁定经 AskUserQuestion):①巡飞弹/固定火力点不回体 + 跑步开枪掉速且体能异常加快;②难度太高"精英总被秒杀",要求综合全局降难;③补给箱露天乱摆+生成点无避敌,落地/拿补给即被秒(要兼顾 Bot);③.5 补给箱与迫击炮贴近时 F 选中歧义,要求"准星对准谁 F 就锁谁"的通用机制;④出生面朝最近敌人。裁定:**屏息只降耗**(激活逻辑不动)/**难度只削 Bot 对玩家**(互殴烈度不变)/**标准档力度**/**生成软惩罚+保护延长**(非硬门)。详见 `docs/交付文档-平衡批-体能生成出生难度交互-2026-10-06.md`。
+> 承用户五报(同日四项裁定经 AskUserQuestion):①巡飞弹/固定火力点不回体 + 跑步开枪掉速且体能异常加快;②难度太高"精英总被秒杀",要求综合全局降难;③补给箱露天乱摆+生成点无避敌,落地/拿补给即被秒(要兼顾 Bot);③.5 补给箱与迫击炮贴近时 F 选中歧义,要求"准星对准谁 F 就锁谁"的通用机制;④出生面朝最近敌人。裁定:**屏息只降耗**(激活逻辑不动)/**难度只削 Bot 对玩家**(互殴烈度不变)/**标准档力度**/**生成软惩罚+保护延长**(非硬门)。详见 `finished-docs/交付文档-平衡批-体能生成出生难度交互-2026-10-06.md`。
 
 ### ① 体能(20-player)
 - **回体单源 stamRegenTick**("1s 冷却窗+0.16/s"):主步行链与**八处早退分支**(巡飞弹 TV 制导/坦克/飞机/onAT/onAA/onMG/onBattery/onMortar/onNaval/大舰炮位)共用——旧版这些分支在体能结算前 return ⇒ 体能冻结(不耗也不回)。观战飞行分支补 `p.stamina=1`(旧版连恒满都到不了)。
@@ -293,7 +934,7 @@
 ## 一.50 本轮修复：海战实机反馈第四轮 = 阵营栏图标 id 撞车 + 观战者甲板搬运/绕行 + 舰桥旗点出塔 + 艇↔艇推挤去 0.5m 限幅 + Bot 让路预折（2026-10-02，待实机验收）
 
 > 承用户对 2026-10-01d 的五条复报。
-> 落地细节见「docs/交付文档-海战实机反馈第四轮-20261002.md」；本批探针 `dev/verify-navalround4-20261002.js` **20/20 全绿**（T1 图标 id 唯一+旧方案撞车阴性 / T2 观战搬运+绕行+空旷阴性 / T3 甲板旗"杆+旗面"双判据+旧坐标判红阴性 / T4a 对开不换位 / T4b 让路+净空阴性+镜像）。
+> 落地细节见「finished-docs/交付文档-海战实机反馈第四轮-20261002.md」；本批探针 `dev/verify-navalround4-20261002.js` **20/20 全绿**（T1 图标 id 唯一+旧方案撞车阴性 / T2 观战搬运+绕行+空旷阴性 / T3 甲板旗"杆+旗面"双判据+旧坐标判红阴性 / T4a 对开不换位 / T4b 让路+净空阴性+镜像）。
 
 ### 根因与修法（要点）
 
@@ -313,7 +954,7 @@
 ## 一.49 本轮修复：海战实机反馈第三轮 = 双 OBB SAT 舰-舰碰撞 + capPushBody 双门（挤人下海根治）+ 超射塔炮座 + 炮手随炮/多联装建模 + 瞄准圈 aaAimR 分档 + 残血钉零 + 巡飞弹甲板空域收窄 + 停机抬量 plParkLift（2026-10-01d，待实机验收）
 
 > 承用户对 2026-10-01c 的七条复报 (附三张观战截图)。
-> 落地细节见「docs/交付文档-海战实机反馈第三轮-20261001d.md」；`dev/verify-navalcap-20261001.js` 49→**58 断言全绿**（新增 S19–S26）；verify-phase5-capital 41 全绿（R12 随 SAT 重写、R17/R19/R20 随 plParkLift 重钉）。
+> 落地细节见「finished-docs/交付文档-海战实机反馈第三轮-20261001d.md」；`dev/verify-navalcap-20261001.js` 49→**58 断言全绿**（新增 S19–S26）；verify-phase5-capital 41 全绿（R12 随 SAT 重写、R17/R19/R20 随 plParkLift 重钉）。
 
 ### 根因与修法（要点）
 
@@ -334,7 +975,7 @@
 ## 一.48 本轮修复：海战实机反馈第二轮 = 炮位支撑足迹/接管链位置化 + 甲板炮手 + 大海致命化 + Bot 扎堆根治 + 手雷/巡飞弹对舰实体 + 跳帮放行（2026-10-01c，待实机验收）
 
 > 承用户对 2026-10-01b 的五条复报 + 一条设想（"大海应该十分危险: 上浮迅速耗体力条, 耗尽只能下沉"）。
-> 落地细节见「docs/交付文档-海战实机反馈第二轮-20261001c.md」；`dev/verify-navalcap-20261001.js` 41→**49 断言全绿**（新增 S12–S18, 含阴性对照）；verify-phase5-capital S6 锚收窄（`this.respawnT`——炮手 `b.respawnT=1e9` 是 Bot 实体钉, 非舰重生计时）、Obj3 桩补 quaternion.copy、R8 票务期望按"Bot 死亡各扣 1 票"口径重钉（瘫舰 = spec.ticket + 炮手数），41 全绿。
+> 落地细节见「finished-docs/交付文档-海战实机反馈第二轮-20261001c.md」；`dev/verify-navalcap-20261001.js` 41→**49 断言全绿**（新增 S12–S18, 含阴性对照）；verify-phase5-capital S6 锚收窄（`this.respawnT`——炮手 `b.respawnT=1e9` 是 Bot 实体钉, 非舰重生计时）、Obj3 桩补 quaternion.copy、R8 票务期望按"Bot 死亡各扣 1 票"口径重钉（瘫舰 = spec.ticket + 炮手数），41 全绿。
 
 ### 根因与修法（要点）
 
@@ -354,7 +995,7 @@
 ## 一.47 本轮修复：海战系统性大修 = 旗点/补给箱跟随同账 + 甲板平台收口 + 大舰互撞 + 分炮塔血量与玩家接管 + 瘫舰灰色中立化 + 鱼雷/航弹对舰接线 + 载入期生成舰队（2026-10-01b，待实机验收）
 
 > 承用户 2026-10-01 实机反馈: 八条系统性 BUG（旗帜漂移/甲板无碰撞/补给箱失效/人不随船/物件浮空/船互相穿过/两栖车意义不明/起始界面无船）+ 三条期望（分炮塔血量与操控 / 瘫舰=灰色中立陆地 / 大炮巨舰+空战+轰炸的影响力）。
-> 落地细节见「docs/交付文档-海战系统性大修-20261001b.md」；沙箱判据 `dev/verify-navalcap-20261001.js`（**29 断言全绿**, 含 3 处阴性对照, 已登记 run-all-verify）。
+> 落地细节见「finished-docs/交付文档-海战系统性大修-20261001b.md」；沙箱判据 `dev/verify-navalcap-20261001.js`（**29 断言全绿**, 含 3 处阴性对照, 已登记 run-all-verify）。
 
 ### 根因与修法（要点）
 
@@ -377,7 +1018,7 @@
 ## 一.39 本轮修复：阶段三 P1 平衡首轮批 = 兵种 8→5 合并 + 武器生态位 + 迫击炮/火箭弹反草丛 + 出生保护/伤害对称化 + 工事读条回收（2026-09-28，待实机验收）
 
 > 承《缺陷登记与路线图-2026-09-28.md》§五 阶段三（P1 平衡首轮）。
-> 落地细节见「docs/交付文档-阶段三P1平衡首轮批-20260928.md」；沙箱判据 `dev/verify-phase3-20260928.js`（55 断言，登记 run-all-verify）+ `dev/_farm-block-probe.js`（农田取证）。
+> 落地细节见「finished-docs/交付文档-阶段三P1平衡首轮批-20260928.md」；沙箱判据 `dev/verify-phase3-20260928.js`（55 断言，登记 run-all-verify）+ `dev/_farm-block-probe.js`（农田取证）。
 
 ### 用户裁定（会话内问定，7 项）
 
@@ -443,7 +1084,7 @@
 ## 一.46 本轮修复：手雷 = 触发引信双条件 + 投掷起点右手化 + 举雷待发常驻 + 总画地面落点圈（2026-09-30l，待实机验收）
 
 > 承同一日手雷批（触发引信 + 四弹种建模 + 贴地预瞄）后用户的**五条复报**。落地细节见
-> docs/交付文档-手雷触发引信与投掷起点与举雷待发-20260930l.md；沙箱判据 dev/verify-nade-trigger-20260930.js
+> finished-docs/交付文档-手雷触发引信与投掷起点与举雷待发-20260930l.md；沙箱判据 dev/verify-nade-trigger-20260930.js
 > （**107 断言**，本批从 63 扩到 107）。
 
 ### 用户裁定（会话内问定，三项）
@@ -495,7 +1136,7 @@
 
 ## 一.45 本轮修复：接管飞行员低空交战 + 航弹锁定制导/反坦克化 + Bot 对空微削（2026-09-30k，待实机验收）
 
-> 承一.44 的四条用户实机反馈。落地细节见 docs/交付文档-接管低空交战与航弹锁定制导-20260930k.md。
+> 承一.44 的四条用户实机反馈。落地细节见 finished-docs/交付文档-接管低空交战与航弹锁定制导-20260930k.md。
 
 ### 病根与修复
 
@@ -535,7 +1176,7 @@
 
 > 用户实机反馈原话："AI 接管后总是过度躲避，等到队友击败了锁定敌人，躲还躲不好总是被击中，窝囊且废物"。
 > 全部改动在决策层（aiPilotFly / takeDmg 玩家分支），flightStep 积分零改动；落地细节见
-> docs/交付文档-接管飞行员破转反咬与冷却3秒-20260930j.md。
+> finished-docs/交付文档-接管飞行员破转反咬与冷却3秒-20260930j.md。
 
 ### 病根与修复
 
@@ -575,7 +1216,7 @@
 
 ## 一.43 本轮修复：缠斗低空保护（Bot 飞机低空晃悠/动作生硬）+ 防空炮散架修复（2026-09-30i，待实机验收）
 
-> 承一.42（7a~7d）两条用户实机反馈。落地细节见 docs/交付文档-缠斗低空保护与防空炮散架修复-20260930i.md。
+> 承一.42（7a~7d）两条用户实机反馈。落地细节见 finished-docs/交付文档-缠斗低空保护与防空炮散架修复-20260930i.md。
 
 ### 病根与修复
 
@@ -620,7 +1261,7 @@
 ## 一.42 本轮新特性：P3 阶段四空战重写 7a~7d 收官 = 飞行模型重写 + 空战 AI 全重写 + 锁定/AI 接管 + 空对地平衡 + 对空命中单源/轻武器对空 + 高炮分摊账本 + 防空炮四联20定稿（2026-09-30，待实机验收）
 
 > 承《设计盘点-P3空战重写-20260930.md》§5/§6（子批 7a → 7b-甲乙丙 → 空对地平衡批 → 7c → 7d-甲乙丙）。
-> 各子批落地细节：docs/交付文档-阶段四7a飞行与火控批-20260930.md · 交付文档-阶段四7b甲反空热修批-20260930.md ·
+> 各子批落地细节：finished-docs/交付文档-阶段四7a飞行与火控批-20260930.md · 交付文档-阶段四7b甲反空热修批-20260930.md ·
 > 交付文档-阶段四7b乙丙-AI重写与锁定接管-20260930.md · 交付文档-空对地平衡批-地面火力与跳伞保护-20260930.md ·
 > 交付文档-阶段四7c对空命中单源与7d甲分摊账本-20260930.md（判据 verify-phase4-7a/7b/airground-balance/7c/7d 全登记 run-all-verify，**40/40 全绿**）。
 
@@ -684,7 +1325,7 @@
   探针侧四坑（未部署/CANNON 裸全局/水网+双高射线+方位轮转/**出生保护 SPAWN_PROT=0 整批豁免**）已记档。
 - 既有回归：verify-wipe **81/0**（T12/T14 原红=出生保护后旧探针未豁免，补两行即绿，非本次引入）；
   phase3 65/0；timestopfix 35/0（批跑偶发一次 23/10，单跑三连绿）；naval 9/0；fire 全过。
-- 版本戳 `20260928k → 20260929a`（41 处）。详见 `docs/交付文档-击杀归因与方向弧-2026-09-29.md`。
+- 版本戳 `20260928k → 20260929a`（41 处）。详见 `finished-docs/交付文档-击杀归因与方向弧-2026-09-29.md`。
 
 ## 一.40 本轮追补：P1 首轮追补① = 爆头封顶只认 Bot 射手 + headMul 爆头倍率分档 + 瞄准加成（散布/后坐）梳理（2026-09-28k，待实机验收）
 
@@ -736,7 +1377,7 @@
 ## 一.38 本轮修复：阶段二 重立案清算批 = D1 观战击落浮空 + D3 贴图不一致 + D9 第三人称隐身 + D10 观战指向线（2026-09-28，用户实机验收通过 ☑）
 
 > 承《缺陷登记与路线图-2026-09-28.md》§五 阶段二（批次③ D3 诊断批 + 批次④ D1 诊断批，实际合并落地，另顺带清账 D9/D10）。
-> 落地细节见「docs/交付文档-阶段二重立案清算批-20260928.md」；沙箱判据 `dev/verify-phase2-20260928.js`（登记 run-all-verify）+ `dev/_d1spec.js` 观战复现链。
+> 落地细节见「finished-docs/交付文档-阶段二重立案清算批-20260928.md」；沙箱判据 `dev/verify-phase2-20260928.js`（登记 run-all-verify）+ `dev/_d1spec.js` 观战复现链。
 
 ### 病根（四条，全部实锤）
 
@@ -794,7 +1435,7 @@
 ## 一.37 本轮修复：阶段一「轻量速赢」HUD/反馈批 = D2+D5+D6+D7+D8（2026-09-28，待实机验收）
 
 > 承《缺陷登记与路线图-2026-09-28.md》§五 阶段一（批次① 操控与准星 + 批次② 命中/受击反馈），五项互不踩、一次实机验收。
-> 落地细节见「docs/交付文档-阶段一HUD反馈批-20260928.md」；沙箱判据 `dev/verify-hudfb-20260928.js`（63 断言，登记 run-all-verify）。
+> 落地细节见「finished-docs/交付文档-阶段一HUD反馈批-20260928.md」；沙箱判据 `dev/verify-hudfb-20260928.js`（63 断言，登记 run-all-verify）。
 
 ### 落地（五项）
 
@@ -919,7 +1560,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 
 > 检查一下触控模式是否一切正常,再加上手柄支持。—— 2026-09-28 第六报
 
-### 落地(逐条证据见「docs/archive/交付文档-触控审计与手柄支持-20260928D.md」)
+### 落地(逐条证据见「finished-docs/archive/交付文档-触控审计与手柄支持-20260928D.md」)
 
 - **触控审计 8 项修复**:①触屏 TV 制导补记账分支(旧版输入被弹体覆写 = 完全无效,与键鼠 2026-09-28B 同源);②移动端 pointerLocked 恒真 + touchmove 无条件 preventDefault ⇒ 打过一局后面板滚动/设置滑条失灵(捕获门补 alive+deployed、preventDefault 只拦已捕获触摸);③bindBtn 补 touchcancel(系统手势打断不再卡死开火键);④开镜灵敏度单源 `lookZoomMul()`(旧触屏写死 0.5:狙击镜过快、炮手镜不收窄;键鼠/触屏/手柄三入口共用);⑤触控按钮 EN 残留(全量 data-i18n + 词典 22 键,tSkill 变更才写);⑥竖屏 tFire2 与"趴"重叠(CSS 避让);⑦岸防炮位 ADS 门补 onBattery(键鼠+触屏);⑧tJump 改走 kd/ku(观战双击空格触屏可达)。
 - **手柄子系统**(新增 `js/19b-gamepad.js`,主循环逐帧轮询):与触控同一套合成输入架构(只写 keys/mouseDown/yaw/tvDX 单源,消费端零改动);Xbox 标准键位(RT 开火/LT 瞄准/双摇杆/A 跳/B 蹲/X 互动/Y 换弹/LB 疾跑/RB 手雷/LS 切枪/RS 近战/Back 战况/Start 暂停/十字键投掷物);右摇杆 rad/s 模型 + 径向死区 0.22 + TV 制导满杆记账;断开即释放全部按住态、非战斗帧逐帧归还;说明页新增「手柄操作」节(双语)。
@@ -941,7 +1582,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 > 这是另外一张材质不一致的参考图。/ 这是另外一张材质不一致的纺织厂参考图。
 > —— 2026-09-28 追报（附实机截图×2：诺曼底灰白楼 / 淞沪砖构大厂房）
 
-### 落地（逐条证据见「docs/archive/交付文档-巡飞弹与材质不一致-20260928B.md」）
+### 落地（逐条证据见「finished-docs/archive/交付文档-巡飞弹与材质不一致-20260928B.md」）
 
 - **① 巡飞弹 TV 制导 = 鼠标直控**（`13-combat.updateLoiters` + `19-input` mousemove + `18-game` 新字段
   `tvDX/tvDY`）：旧版鼠标增量写**本体** yaw/pitch、弹体以 1.9 rad/s 有限角速度"追角" ⇒ 甩镜时弹体落后
@@ -985,7 +1626,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 第二次把盒子的 ±X 面喷成装甲侧板并把轮子外移 6cm。症结是盒体本身：一个从地面砌到车体下缘的实心块，
 侧面**只能**是一整块板，轮子要么被挡住、要么穿模凸出。）
 
-### 落地（逐条证据见「docs/archive/交付文档-行走机构带环-20260928A.md」）
+### 落地（逐条证据见「finished-docs/archive/交付文档-行走机构带环-20260928A.md」）
 
 - **① 履带 = 绕全部轮子的闭合带**（`15-vehicles.trackBandGeo`）：侧视轮廓 = 接地段直线 + 两端圆弧
   （绕主动轮/诱导轮）+ 回程段直线（+端轮抬起时的切线段）；内外两条轮廓**同构等长**（直线外移 `TB_TH`、
@@ -1045,7 +1686,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 > 现在坦克的履带是水平方向布置和运转的，和现实情况的位相呈垂直，需要修复。
 > —— 稍等一下，坦克的轮子侧面处仍有履带！可以是裙甲之类的，不能是履带。
 
-### 落地（逐条证据见「docs/archive/交付文档-材质与行走机构-20260927Q.md」）
+### 落地（逐条证据见「finished-docs/archive/交付文档-材质与行走机构-20260927Q.md」）
 
 - **① 观战结算判定收窄**（用户实报"选了一下又取消 ⇒ 判成观战局不予计量"）：`specUsed` 的**唯一盖章点**
   从兵种卡开关（点开即盖、永不回退）收进 `23-deploy.deployPlayer()` 的意图结算之后 ——
@@ -1084,7 +1725,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 
 > 开工修复。   ← 用户原话（承接 §一.30 的时停问题清单）
 
-### 落地（逐条证据见「docs/archive/交付文档-时停修复批-20260927M.md」）
+### 落地（逐条证据见「finished-docs/archive/交付文档-时停修复批-20260927M.md」）
 
 - **帧长单源**（`22b-speclayer` 新增 `specTimeShotDt(owner,rdt,dt)`）：非时停一律返回世界帧长（**零行为漂移**）；
   时停时只有 `owner.isPlayer` 的投射物走真实帧长 —— 判据与 `fireBullet` 的"非玩家吃难度分档"同一个字段，
@@ -1126,7 +1767,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
   index.html 静态文案 98 条闭环含新增的 `#specTimeInd`）。
 - 全家桶 `node dev/run-all-verify.js`：**26/26 次运行 exit=0 · 全部通过 ✔**（含本批新登记的第 26 条
   `verify-timestopfix`，桶内 35/0）；12 个改动 js + index.html + css 逐文件 `node --check` 全过。
-  逐条读数记在「docs/archive/交付文档-时停修复批-20260927M.md」§3。
+  逐条读数记在「finished-docs/archive/交付文档-时停修复批-20260927M.md」§3。
 
 ## 一.30 本轮：观战时停子系统审计（清单待裁定）+ 瞄准吸附特性（2026-09-27，吸附已实现待实机验收）
 
@@ -1135,7 +1776,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 > 自行深度思考和查找一下时间停止相关子系统设计方面有哪些大问题/BUG或者不合理之处，列出一个清单来。
 > 另外我希望给瞄准模式（包括开镜和普通瞄准）和载具火力瞄准增加一个轻度的自动吸附。
 
-### 落地（② 已实施；逐条证据见「docs/archive/交付文档-时停审计与瞄准吸附-20260927.md」）
+### 落地（② 已实施；逐条证据见「finished-docs/archive/交付文档-时停审计与瞄准吸附-20260927.md」）
 
 - **② 瞄准吸附单源**（`13-combat` 的 `AIM_PROFILES` / `aimAssistTier` / `aimAssistDir` + 只读视图 `AIM_ASSIST`）：
   **只掰"差一点打中"的那一枪** —— 逐目标算角半径 `rAng`，仅当弹道擦不到本体（`over=ang-rAng>0`）且
@@ -1180,10 +1821,10 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 
 ### 起因
 
-> 上一批《docs/archive/交付文档-共面闪烁渲染管线重写与破坏子系统审计-20260927.md》§2 的 19 条破坏清单 + 用户裁定：
+> 上一批《finished-docs/archive/交付文档-共面闪烁渲染管线重写与破坏子系统审计-20260927.md》§2 的 19 条破坏清单 + 用户裁定：
 > 「开工修复、完善。**C类C1~C3不动**。」
 
-### 落地（详见 `docs/archive/交付文档-破坏机制批-20260927N.md`）
+### 落地（详见 `finished-docs/archive/交付文档-破坏机制批-20260927N.md`）
 
 - **A1 命中判据**：组心平面距 → **到最近成员碰撞盒的三维距离**（盒内 0）+ 一层楼高的竖直门限（`vGate 3.4`）；
   新增 `boxDist3` / `structBounds`（包围盒廉价早退，永远保守）。成员盒正中落点空放 **9.3%/10.2% → 0**；
@@ -1356,7 +1997,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 > 自行深度思考和查找一下破坏与可破坏物相关子系统设计方面有哪些大问题/BUG或者不合理之处，列出一个清单来。
 > 另外存在系统性问题：现在当两个面重合的时候，图层会打架使得显示的材质一闪一闪的，你能重写一下这方面的渲染管线来解决这个问题吗？
 
-### 落地（② 已实施；逐条证据见「docs/archive/交付文档-共面闪烁渲染管线重写与破坏子系统审计-20260927.md」§1）
+### 落地（② 已实施；逐条证据见「finished-docs/archive/交付文档-共面闪烁渲染管线重写与破坏子系统审计-20260927.md」§1）
 
 - **① 覆盖层阶梯 `SURF_LANES`**（`05-world` 深度块，全库 polygonOffset 仅此一张表）：`base 0/0` · `pavement −1/−4` ·
   `decal −1/−6` · `patchWater −2/−8` · `surf −3/−12`；最小档 4 LSB = 深度噪声地板（1~2 LSB）的 2~4 倍
@@ -1398,7 +2039,7 @@ perm→offset 链式克隆，源头同此）。原材质与 depthVariant 直挂�
 
 > 注意到当前做的很不彻底，观战模式仍能选几个海战相关载具、时停等对海战载具完全无影响、时停的时候玩家也不能动……时停之外的时间流速控制建议直接删了！
 
-### 落地（4 项；逐条证据见「docs/archive/交付文档-观战修复批-20260926H.md」§6）
+### 落地（4 项；逐条证据见「finished-docs/archive/交付文档-观战修复批-20260926H.md」§6）
 
 - **I1 出生闸门扩到全类**：`23-deploy buildSpawnList` 的 `specBlocked` 由 `tank||plane` 改为 `!!player.spectator`（本表每一项都是真载具：tanks+planes+navalCraft）⇒ **舰艇/两栖车也置灰**并注明「观战不可征用」；
   `deployPlayer` 的结构闸门同步为"删掉一切 `V<n>` 选中项"（旧版只挡 tank/plane，正是用户实报的口子）。想开艇仍可走近按 **F** 现场上艇（干预权不变）。
@@ -1440,7 +2081,7 @@ A1..A4=1..4 · B1..B9=5..13 · C1..C3=14..16 · D1=17 · E1=18（“C.14 = 观�
 “B.13 = 入口唯一且隐蔽”两条各自落在 C/B 段的平铺第 14/13 项）。
 ⇒ 本轮修复 = **A1·A2·A3·A4·B6·B7·B8·C2·D1**（观战挡弹/出生闸门/开关生效点/座驾保护/信息层/时间控制/游泳/不指挥小队/文案 i18n）。
 
-### 实现要点（逐条 file:行证据见「docs/archive/交付文档-观战修复批-20260926H.md」）
+### 实现要点（逐条 file:行证据见「finished-docs/archive/交付文档-观战修复批-20260926H.md」）
 
 - **A1**：`13-combat raySoldiers` 候选过滤补 `s.spectator` —— 一处生效即覆盖全部弹道调用方。
 - **A2**：`23-deploy buildSpawnList` 对观战者把 tank/plane 置灰 + 注明「观战不可征用」（舰艇保留 = 2026-09-22 裁定② 的唯一上艇路）。★**已由一.26/I1 取代**（舰艇/两栖车一并置灰）。
@@ -1493,7 +2134,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
   该套件 55/0 ✅; ② `verify-spec` T3 的 `bloodMat.clone is not a function` 是该探针**材质桩缺 `clone()`**（血贴片走每贴片克隆,
   仅推演中真出现血贴片时命中, 实测 1/8）——已给桩补 `clone()`（只补桩能力、不动断言）, 8 连跑 8 绿 ✅。
 
-### 观战子系统审计清单（18 条，**未修复** —— 等裁定后另批开工；逐条证据见「docs/archive/交付文档-破坏得分与观战审计-20260926G.md」§2）
+### 观战子系统审计清单（18 条，**未修复** —— 等裁定后另批开工；逐条证据见「finished-docs/archive/交付文档-破坏得分与观战审计-20260926G.md」§2）
 
 - **BUG / 结构性缺陷（4）**：① 观战者身体是"**幽灵掩体**"（子弹/炮弹在他身上就停，自己不掉血）·
   ② 观战者能从部署界面直接坐进**真坦克/战机**（拿走 AI 载具，与"常规载具一概不用"的明写口径冲突）·
@@ -1515,7 +2156,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 ### 起因
 用户 2026-09-26「全部开工修复。」—— 承接上一批交付的 **41 条水域/水战审计清单**（P0 4 / P1 12 / P2 25）。
 
-### 落地（41/41；逐条细节、数字与复现命令见「docs/archive/交付文档-水域水战审计修复-20260926F.md」）
+### 落地（41/41；逐条细节、数字与复现命令见「finished-docs/archive/交付文档-水域水战审计修复-20260926F.md」）
 - ✅ **P0**：① **舰艇车组复配**（`navalCrewFill` 可重入单源 + `15d._respawnTick` + `14-bots.pickIdleNaval` 三条补人路径，与坦克同规）
   ② **艇上玩家座位装甲豁免**（`seatShielded(s)` 单源替换 5 处只认 `onVehicle` 的清单）
   ③ **淞沪水网网格/判定同源**（水面查询改"条带段 + 沿段插值"：覆盖 928 点无洞、索引等价 10404 点全同）
@@ -1553,7 +2194,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 > 用户 2026-09-26 两件事：「自行深度思考和查找一下**水域和水战相关子系统设计方面**有哪些大问题/BUG或者不合理之处，列出一个清单来。」
 > +「另外**枯树和椰子树没有普通树那样被炸到后立马向爆炸[反]方向倒下**的机制，请添加。」
 
-### 落地：② 枯树/椰树倒伏（逐条细节见 `docs/archive/交付文档-枯树椰树倒伏与水域水战审计-20260926E.md`）
+### 落地：② 枯树/椰树倒伏（逐条细节见 `finished-docs/archive/交付文档-枯树椰树倒伏与水域水战审计-20260926E.md`）
 
 - ✅ **口径**：`explosionFlora` 把 `dead`(枯树)/`palm`(椰树) 从"炸没"并入乔木的**倒伏**口径 —— 近距（`0.75R+0.9`）立即向**背离爆心**方向翻倒，
   中距（`R+2.6`）累积伤害、第二次爆炸才倒；倒向/时长/触地扬尘/残骸停留 16~22s 后 3.6s 沉入**与乔木同源**。
@@ -1584,7 +2225,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 ### ① 水域/水战子系统审计清单（**本轮一行代码未动**，等裁定）
 
 四路并行通读（水域地形/游泳 · 海战载具本体 · 战斗·编制·部署链 · 水面渲染/音效），合并去重后 **41 条**（P0 4 / P1 12 / P2 25），
-逐条带 `文件:行` 证据与可观察后果，清单与复核结论见 `docs/archive/交付文档-枯树椰树倒伏与水域水战审计-20260926E.md` §5。
+逐条带 `文件:行` 证据与可观察后果，清单与复核结论见 `finished-docs/archive/交付文档-枯树椰树倒伏与水域水战审计-20260926E.md` §5。
 
 - **P0 四条**：① **舰艇车组一去不返** —— 全库唯一配车组的地方是 `startMatch`；沉没 `crewOut()` 与玩家上艇都把人摘走且不返还，
   重生 `respawn()` 只清空；而"闲置载具重新配组"只扫 `tanks`（14-bots `pickIdleDeployVehicle` / `decide` 上车分支）。
@@ -1607,7 +2248,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 ### 起因
 用户 2026-09-26「自行深度思考和查找一下地图和载具设计方面有哪些大问题/BUG或者不合理之处，列出一个清单来」→ 我出 **19 条清单**（P0 5 / P1 8 / P2 6）→ 用户「穿模是真的。全部开工修复。修复完了之后再审查一遍，确保不会越修越坏！」
 
-### 落地（19/19；逐条细节、数字与复现脚本见 `docs/archive/交付文档-地图与载具缺陷批-20260926.md`）
+### 落地（19/19；逐条细节、数字与复现脚本见 `finished-docs/archive/交付文档-地图与载具缺陷批-20260926.md`）
 - ✅ **P0-1 断崖公路伏击点被挖成 2.87~5.66m 的坑**（`03-terrain`）：出生平台削深上限 2m，高地改取"当地高 −0.4m"浅台（其余图逐位不变）。
 - ✅ **P0-2 柏林/莫斯科守方工事摆进攻方开局旗圈**（`00-config`+`05c`+`23-deploy`）：`attackerFlagPicks` 单源，布局端与归属端共读；工事命中 0/2 攻方旗。
 - ✅ **P0-3 草原强点死袋（本批最重）**：①`07-nav` 判据改"同一条走廊"（格开放=格心空或四象限≥3空；边=中线或其 ±1.5m 并行线贯通）②强点工事环外推 9.5~11.5m + 散布 10m 净空（`spawnKeepClear`）+ `17-emplacements` 炮位外推 10m ③麦田农庄院口敞开（南/西成院门）。**13 次 boot 判罪 0**（修前多次 1~3）。
@@ -1647,7 +2288,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
    `(this.pilotWaitT+=dt)`）⇒ 改查"按 `dt` 每帧累加 + 到期清零回退"，且**先去行注释**再查旧写法不在（注释里刻意留旧写法
    作对照，否则判据会被自己的注释绊倒）。行为断言实测 **10.0s**；`_audit-fixes-verify` 顺带踩到"它下半截是模板串、
    串内不能写反斜杠"的坑（`split('\n')` 会被模板求值吃掉）⇒ 改 `String.fromCharCode(10)` + `indexOf('//')` 现算。
-逐条细节与量测见 `docs/archive/交付文档-地图与载具缺陷批-20260926.md` §9。
+逐条细节与量测见 `finished-docs/archive/交付文档-地图与载具缺陷批-20260926.md` §9。
 
 ### 待实机验收（请按现象看，详见交付文档 §7）
 1. 断崖公路伏击点**不再是坑**（浅台，能看见公路）；2. 柏林/莫斯科攻方开局旗圈**没有**守方工事；
@@ -1665,7 +2306,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 （冻结级 3 / 帧级 2 / 渲染端 4 / 物理·冗余·回收 5）→ 用户「全部开工修复。修复完了之后再审查一遍，确保不会越修越坏！」
 → 落 **9 条改 + 5 条实测驳回/复核订正**，另顺带修掉 3 处（含我自己第一版写错、复查时发现的一个真漏洞）。
 
-### 已改（逐条实测，详见 `docs/archive/交付文档-性能批-20260926.md`）
+### 已改（逐条实测，详见 `finished-docs/archive/交付文档-性能批-20260926.md`）
 - ✅ **① `NAV.refresh()` 全量重烘焙**（`03-terrain` `07-nav`）：静态地貌层缓存 + 脏矩形增量重烘焙。
   胡康 **1177 → 11 ms**、断崖 726→1、塔拉瓦 577→7、莫斯科 302→17、淞沪 291→5、百团 254→9、
   雾林 175→7、柏林 140→8、草原 146→4。局部改动（塌墙/点火/碾网/造工事）增量 0~2ms vs 全量 130~150ms。
@@ -1772,7 +2413,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 > 用户 2026-09-25：「自行深度思考和查找一下有哪些BUG，列出一个清单来。」→ 我通读 `js/` 全部 34 文件 +
 > `index.html` + `css/style.css`，交 **30 条**清单（A 功能 / B 建模 / C UI·i18n / D 泄漏·死代码 四类）→ 用户「开工」。
 
-### 落地（24 条，逐条细节见 `docs/archive/交付文档-通读缺陷批-20260925.md`）
+### 落地（24 条，逐条细节见 `finished-docs/archive/交付文档-通读缺陷批-20260925.md`）
 
 | 类 | 条目 | 一句话 |
 |---|---|---|
@@ -1878,7 +2519,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
   （steps 自下而上建）。修好后判据第一次真正执行，并把接地判定改成按**梯脚盒 footprint 地形区间**
   （island 6 座：5 座恰好 −0.05 = 设计值，第 6 座 −0.0643 是 footprint 下地形 3.1cm 起伏造成的零余量问题）。
 
-### 验收清单（请逐项试并反馈；详见 `docs/archive/交付文档-观战F冲突与两栖车重做-20260922A.md` §4）
+### 验收清单（请逐项试并反馈；详见 `finished-docs/archive/交付文档-观战F冲突与两栖车重做-20260922A.md` §4）
 
 **A. F 键（均需在观战模式下）**
 - [ ] 幽灵坦克上按 F ⇒ 下车且**车立刻消失**
@@ -2652,7 +3293,7 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 - **2026-09-27M 观战时停修复批**（已实现，待实机验收）：时停中 AI 的弹丸整发冻住，**你自己打出的**照飞照回收
   （定点打一发 → 按 K 把它停在空中；或先按 K 再打 → 弹道照常飞出去并照常结算 —— 观战特权口径不变）；
   制导巡飞弹时也能按 K；顶部栏常驻「⏸ 时停中 (K 继续)」；回主菜单 / 战局结束自动解除时停；
-  海战音频只剩自己在开的那条艇在响。清单与证据见 PLAN §一.31 + docs/archive/交付文档-时停修复批-20260927M.md。
+  海战音频只剩自己在开的那条艇在响。清单与证据见 PLAN §一.31 + finished-docs/archive/交付文档-时停修复批-20260927M.md。
   实机关注点：① 时停中把一发炮弹打向人群附近，确认它**不会**隔空引爆冻结点旁的人（旧版会，实测 404 血）；
   ② 幽灵坦克连射几十发后控制台读 `tracers.length`/`shells.length` 不再线性增长（旧版每条曳光一个新 Mesh）；
   ③ 海战图开时停：除自己在开的艇外应听不到破水/履带周期声；④ 制导巡飞弹时按 K 应立刻停/走（旧版按了没反应）；
@@ -2717,4 +3358,15 @@ C1 第三阵营（**刻意为之**: 测试需求包含对战局无上限的干�
 - **布局指纹**：本批仅莫斯科条目/布局函数改动；verify-layouts 新增莫斯科专项断言 6 条；verify-sink 结构选取跳过 onDead 组（修钢水包钩子干扰碎石堆计数断言）。
 - **本轮（雾林许特根批 2026-09-13）已跑**：9 个改动 JS `node --check` 全过 ✅ · verify-layouts 13/13（woodline fp 120499→285421 本体；12 图与改前工作树指纹逐字节一致=零漂移）✅ · verify-boot 13/13（woodline assault 330→413）✅ · verify-buildings/rooffall/roof2/sink/fire/firecap/fallstam/wipe(61)/svgtex(31) ✅ · probe-bots/planes/empl/slope/ragdoll/metro/factory/hukawng/songhu-fix ✅ · probe-match woodline 2 局（初始 [0,0,1,1,1,1,1], 旗权 2,5↔6,1 往复健康, 20.3/20.4 分钟美军胜）✅ · 雾林专项断言阴性验证 2 组全红（沙箱副本谷深 8.5→3 红"谷深不足"/走廊内单颗龙牙红"走廊被堵"——借阴性验证把走廊断言从"只抓横跨墙"修正为"走廊内任何高度>0.4 实体盒"）✅
 - **布局指纹**（当前树基线, 2026-09-13 雾林批后）：normandy 224445 / stalingrad 184535 / berlin 382950 / songhu 222293 / baituan 315037 / burma 71675 / moscow 546674 / hukawng 401167 / steppe 109848 / woodline 285421 / canyon 23848 / xuefeng 195355 / taihang 316007。
-- **工作区清理（2026-09-28，无游戏代码改动，verify-text 全过）**：dev/ 283→105 —— 一次性探针/-tmp 变体/_patch*.py/输出产物（dev/out/、*.txt/log/png）共 171+203 项已删；保留集 = run-all-verify 注册表 ∪ 记忆契约点名工具 ∪ 被保留代码点名者（依赖检查脚本自动把关）；备份 tar 在系统 TEMP（sf-cleanup-backup-20260928.tar.gz），tracked 删除可 git checkout -- 还原。31 份历史交付/审计/设计文档移入 docs/archive/（本文档与 README §8 的 33 处文件名引用已同步改写）。今后约定：交付文档写 docs/；一次性探针收批即删，长期工具才进 run-all-verify 注册表或记忆契约。
+- **工作区清理（2026-09-28，无游戏代码改动，verify-text 全过）**：dev/ 283→105 —— 一次性探针/-tmp 变体/_patch*.py/输出产物（dev/out/、*.txt/log/png）共 171+203 项已删；保留集 = run-all-verify 注册表 ∪ 记忆契约点名工具 ∪ 被保留代码点名者（依赖检查脚本自动把关）；备份 tar 在系统 TEMP（sf-cleanup-backup-20260928.tar.gz），tracked 删除可 git checkout -- 还原。31 份历史交付/审计/设计文档移入 finished-docs/archive/（本文档与 README §8 的 33 处文件名引用已同步改写）。今后约定：交付文档写 finished-docs/；一次性探针收批即删，长期工具才进 run-all-verify 注册表或记忆契约。
+- **本轮（巡飞弹TV遮罩加点料×跳跃头顶钗制批 2026-11-10）已跑**：**①TV遮罩 OSD**：#tvOv 由光秃扫描线扩为 FPV 风格视讯（四角标×4／顶栏 ●REC 闪烁+TV制导·TV GUIDANCE+时间码 T+mm:ss.d+▂▄▆█ LINK 信号条／中央分划刻度+中心框／底栏 离地(AGL)·速度／右栏 离机距离／存续条 280px 按 life/lifeMax 排空／存续<4s 整框红脉冲 tvOv.low+填充条转红（与 magN 同阈值）／右键开镜显 ZOOM ×2.8 标——与 updateCamera 同判据 mouse2Down&&!_ltRClick）；逐帧驱动全走 hudText/hudStyle 去重缓存；弹体存续上限出膛记账 d.lifeMax=24（HUD 兜底 ||24）；i18n 三字码词条 离地ALT/速度SPD/离机DST。**②跳跃头顶钳制**：病根=竖直只有 standHeight 落地支撑无「天花板」概念——上升段头(pos.y+1.7)探进上方盒/柱纵带 ⇒ collideMove 横推接管，楼板正下方 d≈0 走「最近边」整只横向甩出=实报穿模穿墙。修=两件套缺一不可：headCeilClamp 单源（04-collision，零分配槽 _hcS，底面穿越窗=(上帧头顶,本帧头顶]，XZ 半径 0.42 与横推同口径，命中取最低底面钳 pos.y=底面-1.7）+ HEAD_GRAZE=0.06 擦碰容差进 _cmBoxCb/_cmCylCb 纵带门（钳停那帧 pos.y+1.7 与底面仅差浮点尾数，无容差横推仍接管；底面低于该档的肩高障碍照常横推）；接线=20-player 两条步兵积分路径（步行+TV制导本体），Bot 竖直 dampF 贴地永不上升不接线。**判据**：新 dev/verify-tvosd-headbonk-20261110.js 正向 27/0+NEG 4 补丁 13 红对认（N1 摘步行钳制 ⇒ 连跳 maxY=0.783 探入楼板+被横推甩出 2.42m=病灶精确复现；负对照 桌沿不误钳/落地墙照推/测试盒卫生恒绿）。**探针坑四新**：①测试盒以世界原点为中心没罩住出生位=全链假绿（盒须以玩家为准）②天花板压 3.0m 档假绿——自由跳高仅 4.6²/26≈0.814m 根本撞不到，须压 2.0m 档并双断言（≤上限 且 >0.2m 证真撞过）③NEG 多行锚撞 22-hud CRLF 必失配（单行锚）④探针卫生勿写 BOXES.length=idx（截断数组），逐个 indexOf+splice。**并发**：大舰下架批同树并行——戳 20261110a→b 由并行会话升 index.html/_game_files.txt，本批补钉 5 戳钉探针；verify-vehburn 3 红（die 接线/SHOW_CTL_HINTS 行数/大舰面板行）属并行批进行时漂移非本批引入。run-all 未跑（用户裁定尽快收尾），待实机验收
+　详表见 README ⑧八同日行与 finished-docs/批-巡飞弹TV遮罩OSD×跳跃头顶钗制-2026-11-10.md。
+- **本轮（淞沪垂柳修复×实例批化×交互接入批 2026-11-10）已跑**：**①连接重写（05b willowTree）**：旧病=三根主枝盒中心硬摆离干轴 0.5m 半空（干顶实际只随 tilt 歪 ±0.17m）+冠片/垂条各自独立散布=枝不接干/冠不裹枝/条不挂冠；修=主枝根**钉干顶**（干顶世界位+枝向×0.58−0.12 下嵌，顺干倾斜）+冠片 7 片蓬进枝梢高度带 [3.0,4.0]+垂条 12 条顶**锚进冠带** [3.3,3.9] 水平钳进冠幅（中心=条顶+q·(0,−L/2,0)，微摆只偏下摆）；部件姿态全程手算四元数（_wqAxis/_wqMul/_wqRotV，不调 THREE 方法=轻沙箱桩无 set/multiply 纪律），建模期与运行期读同一份部件表（wt/wb/wl）永不漂移。**②实例批化**：WILL_BATCH+flushWillows()（buildWorld 末尾 flushTreeBatch 之后）→ 干/枝/叶冠 3 张 InstancedMesh（WLOW_IM），淞沪 ~79 棵×23 件 ≈1800 draw call→3；实例索引 干=wi/枝=wi*3+k/叶=wi*19+k（前 7 冠后 12 条，04b 同序）；instColorInit 白初始化+frustumCulled=false 三张全关。**③交互接入（旧版纯摆设根因=不入 TREE_LIVE/FLORA_HASH/燃料表）**：05b 登记四件套（TREE_LIVE.push kind:'willow'+floraHashAdd+fuelAdd(1.0)+CYLS foliage:true 三虫批①口径）+04b 五处门（treeIgnitePass 认柳 3.2m 邻域/explosionFlora 认柳 obj=false 走实例批矩阵/floraCrushTank 认柳车体接触即撞倒/格烧尽排除柳不 vanish/烧尽焦黑=19 叶零缩放+干枝 4 实例染 _charCol）+willowInstanceMatrices(tr,th,dy) 单源（Rodrigues 手算绕根轴旋转+冠锚跟随；倒伏/沉入 th=1.5+dy=−3.6k/焦黑叶冠跳过三态全走它）+沉入与乔木同口令（16~22s+3.6s 匀速，全沉 23 实例零缩放+dead 出账）+23b snapIM 三张批快照还原（倒伏/焦黑/沉入态随世界快照走）。**④wr 流保序**：每棵柳 135 次 wr 消耗顺序逐位保持（1+3×2+7×8+12×6）——79 调用位与改前 golden 采集逐位一致；拒绝采样（propFree/freeSpot）在消耗 wr 之前 early-return ⇒ 接受位=调用序**保序子列**（本轮 75/79 拒 4），golden 钉子列而非等长逐位（PROPS Math.random 泄漏下拒哪几棵可跨轮波动，子列判据对任何拒绝组合成立）。**判据**：新 dev/verify-willow-20261110.js（vehburn 同款真 three boot，战役钉 songhu+天气钉 clear=柳图默认 rain 压火）**正向 39 绿/0 红×3 稳定**（源钉 7+登记 9+连接性 5〔探针侧手算四元数复算：枝根≤0.35m 实测 max0.237/条顶锚冠带/条挂冠 1.35m 实测 max1.256〕+燃烧链 5+爆炸掀倒 4+碾压 4+地面火链 2+golden 子列钉 1）+**NEG 9 补丁 --only 单钉逐个亲见转红**（N1 登记降级 kind→②-1/②-6/⑧-1 · N2 枝脱锚→③-1 · N3 条顶脱锚→③-3/4/5 · N4 点火不认柳→⑦-2 · N5 爆炸不认柳→⑤-1~4 · N6 碾压不认柳→⑥-1/2/4 · N7 叶不隐藏→④-3 · N8 沉入不分派→④-5 · N9 flushWillows 摘除→②-6/7/8+④-3/4/5+⑤-4+⑥-4；累积模式 N1 让 W1~W4 全缺互相掩盖故加 --only）。**受影响既有探针**：verify-sink（选择器补 kind==='tree'——柳入 TREE_LIVE 后首个 alive 可能是柳）/fire/foliage/layouts 全过。**run-all 两轮**：r1（柳探针注册前进场）80/82 exit=0 唯一红 aimassist 偶发（3× 复核 1/0/0，后连跑 5 绿归因）；r2（柳探针进册首秀）84/86 exit=0 **柳探针 39/0 全绿**+两偶发 _audit-foliage-ref/verify-fieldfix（各 3× 复核 0/0/0，r1 皆绿）——两轮合计 164/168 **稳定红=0**（历史 naval 红线7 随海战图下架消失）。**探针坑五新**：①willowN 陷阱=采集脚本 __wtLog.length 是调用数(79) 而 TREE_LIVE 接受数=75（拒绝在 wr 消耗前 early-return）②沉入断言不能拿"沉前 y>0.5"（全沉终态=零缩放平移分量也归 0）须下沉增量双采样+终态零缩放+标死三段式③NEG 整行替换 if 留孤儿 else=语法错，用 if(false) 门（乔木空路径 setMatrixAt(NaN) 是静默 no-op 不炸）④NEG 摘 flushWillows ⇒ WLOW_IM=null，所有直读 G 表达式与 sim 循环（焦黑分支/倒伏分派）都会抛 TypeError——阴性轮要红名不要崩溃，全部 !!WLOW_IM 短路+try/catch⑤N1 让 W1~W4 全 undefined ⇒ 各行为段 [skip] 守卫。**升戳 20261110b→c**（node 整文替换：index.html 48+_game_files.txt 44+16 戳钉探针 72=164 处，代码零残留，18 戳钉探针复跑全绿；b 值由并行海战移除批所升）；并发多会话同树（海战移除/巡飞弹TV/空情三虫）全程重 grep WLOW_IM/flushWillows/kind:'willow' 确认零覆盖。**实机关注**：①淞沪沿河/村口/草原村柳枝干冠条连贯无悬空枝盒②燃烧弹或沿岸火烧进柳下→0.4s 内树冠起火→6~8.5s 烧倒→焦黑停留 16~22s→沉入③爆炸近距掀倒（背离爆心）/坦克撞柳即倒（×0.94 减速）④柳 draw call ~1800→3⑤世界还原含柳三态。**范围裁定**：柳软遮蔽（floraLosBand 加柳档）会改 Bot 感知+verify-foliage bandOf 交叉验证需跟走——超出"修复连接+交互"范围记后续项。
+　详表见 README ⑧八同日行与 finished-docs/批-淞沪垂柳修复实例批化交互接入-2026-11-10.md。
+### 2026-11-11 实机回归修复：淞沪柳全消失（compose 普通对象四元数 NaN）
+用户实机报「我注意到，现在的情况是柳树全都消失了。」（昨日批收尾探针 39/0×3 全绿——实机专属路径漏检）。**病根两处同型（皆批内新代码）**：vendor three.min.js 的 Matrix4.compose 读四元数 ._x/_y/_z/_w 私有字段（minified 实证 compose(t,e,n){…r=e._x…}），05b flushWillows _q（:275）与 04b willowInstanceMatrices _wlQ（:556）却是普通对象 {x,y,z,w}（注释误信「compose 只读分量」）→ 旋转+缩放分量全 NaN → 75 棵×23 实例顶点被 GPU 整批丢弃=实机隐形；平移分量 te[12..14] 不受影响 ⇒ 探针 ②-9 平移钉+③ 探针侧复算+④ 沉入平移增量钉全漏检（沙箱照绿）。**修**：两处改 new THREE.Quaternion() 真实例+按分量赋值走 setter 落 _x（不调 .set/multiply 纪律保持；bootstub Quaternion 可构造/compose no-op=桩无感；flushBushes/flushTreeBatch 既有先例同款）。**判据升级**：verify-willow 增 ②-10 初始矩阵全量 NaN+零旋转列扫描/②-11 旋转分量数学期望逐位钉/④-6 交互态扫描 → 正向 42/0×3（bug 在场时三钉全红=回归钉亲验）；NEG 锚未动映射不变；sink/fire/foliage/layouts 四桩探针全过；run-all 两轮：r1 78/95（窗口内含并行批升戳+脚本清单 44→45 变动：firecap 红=**本批首版修复自引入回归**（04b 顶层 new THREE ⇒ 无 THREE 装载器加载期 ReferenceError，当场修=fireTmp 懒初始化纪律，复跑 exit=0）+commander/fieldfix/loiterview 稳定红=并行批载入钉（归并行批）+matseam 偶发）；r2 82/102（柳探针/firecap 全绿；稳定红仅 commander/fieldfix/loiterview/achieve-20261111 四支全数并行批在途面〔含其当日新探针〕，nav/aimassist/deathflight 偶发单次）——**本批 owns 面（柳/firecap/sink/fire/foliage/layouts）两轮全绿**；升戳 20261110c→d（并行批 2026-11-11 00:26 所升——时序在本批代码修复之后、扫描不含本批文件，恰好一并 cache-bust 本批修复；本批未另升戳）。**新律三条**：①compose/实例矩阵路径禁普通对象四元数（真实例+分量赋值）；②矩阵类断言必须含全量有限性扫描——只钉平移的矩阵钉漏检 NaN 旋转；③模块顶层禁 new THREE——无 THREE 装载器（verify-firecap 单文件隔离装载）加载期即 ReferenceError（本批首版修复实录；改走 04b fireTmp 懒初始化纪律后 exit=0）。
+　详表见 README ⑧八同日行与 finished-docs/批-淞沪垂柳修复实例批化交互接入-2026-11-10.md 实机回归节。
+
+### 2026-11-11 成就系统批 + 实机反馈批（数据成就双页签 / 四成就 / 连跳修复 / 弹框加料+位置双形制 / 观战可达成 / 清除游戏数据 / 终身统计）
+主令：「将主页面"战绩数据"改为"数据成就"，增加成就系统…（四示例成就）…观战模式无法达成成就」；实机反馈：「达成一次成就之后就会导致成就不停跳出来」「弹出框显示过于简陋，需要多加料」+ 改令「观战模式也可以达成成就」+「设置页再增加一个按钮：清除游戏数据」+「数据统计里增加总共击毁载具数、总共击杀数、总共死亡数、总共胜利数、总共失败数、总共占领旗点数等」；追加令：「游戏内容设置里控制成就提示是从右上部分还是正下方跳出来。两个地方跳出来的时候形制应当不太一样，但都要多加料。」设计文档《成就系统设计-2026-11-11.md》（R1 轮询普查账/R2 状态制否决归因/R3 七账口径/R4 判据/R5 观战〔后撤销〕/R6 sf_ach/R7 弹框〔后加料+双形制〕/R8 新文件兼容/R9 UI/R10 升戳 + §6 实机反馈批增补）。**实现**：新文件 js/27-achievements.js（普查账+0.5s 轮询+四成就+弹框+面板，顶层零 DOM）+三接线 typeof 守卫+双页签 UI+i18n+CSS；实机反馈批：ACH_TOASTED 会话闩+achToastPump shift 修复+加料 DOM（头章/🏆脉动/名称/描述/进度 achProgText 单源/高光扫过）+sf_ach_pos 位置双形制（posTR 右上竖卡/posBC 正下横匾，achPosBtn 单钮循环即时生效）+R5 观战门撤销（achIsSpec 删除）+clearGameData（sf_rec_*/sf_best_*/sf_ach/sf_stats 四类全清设置保留，clearDataBtn 两段式确认）+sf_stats 终身累计（statsAccumulate(winner) 挂 endMatch recCommit 后 winner 同源，观战局 counted 门不累计，vehKills 四处 die 链钩〔岸炮不计〕，recLifeHTML 六格）。**判据**：verify-achieve-20261111 正向 **69 绿/0 红**+NEG 10 补丁全开 47绿/22红全数对认（N1↔②-1~5+①接线/N2↔⑦-1+⑨-3 连带/N3↔⑥-5+①/N4↔①判据/N5↔③-3/N6↔①改名/N7↔⑨-1~3/N8↔①四处钩/N9↔⑪-3/4/N10↔⑫-1/2/5）+--only=N1/N2/N4 亲见转红；verify-text 全过。**探针坑五新**：①⑧-1 假红=四段各自 RESET 后采样存档只剩单成就 ⇒ 字面量 seed 与段序解耦；②ctx.setTimeout 同步执行 ⇒ 弹框链同帧顶掉内容，缩账须防 better_yiling 同帧双解锁（③⑩ 只缩烧账留植被/结构账）；③NEG 行中 // 注释三连坑（N3 吃 ") achUnlock"/N5 吃单行 try/catch 的 "}catch"/N10 吃 for 行尾 " }"）⇒ 整语句锚+块注释；④vm 裸名读未定义全局=ReferenceError ⇒ globalThis._x 读；⑤bootstub localStorage 原无 length/key ⇒ clearGameData 遍历需枚举能力（桩+探针 boot 双补）。**升戳 20261110d→20261111a**（index 49+_game_files 45+17 戳钉探针；d 值已被用户实机测试消费过=缓存风险，必须升）。**run-all 两轮**：r1 78/90——唯一 ✗ 面 commander×4/fieldfix×4/loiterview×4 = **本批插入 27-achievements 造成的判据漂移**（commander 载入位钉「26 紧跟 24」、fieldfix/loiterview FILES 清单 44 缺 27），跟码修钉三处（commander 载入位断言改 26→27→24 链、两探针 FILES 表插 'js/27-achievements.js'）后单跑全绿（151/0 · 34/0 · 26/0，fieldfix 的 T2 ragInit EXC 系偶发当场复跑绿）；本批新探针 verify-achieve r1 即 **69/0 exit=0**。r2 82/84——唯一红 _audit-foliage-ref ×2 = 柳批在案偶发族，3× 复核 0/0/0。**两轮合计稳定红 = 0**。
+　详表见 README ⑧八同日行与 成就系统设计-2026-11-11.md §6。

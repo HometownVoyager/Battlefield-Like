@@ -3,45 +3,78 @@
 // 源: Index.original.html 第 8531-8765 行
 // ─────────────────────────────────────────────
 'use strict';
-let lastT=performance.now(), fpsAcc=0, fpsN=0, fpsShow=0, deployRefreshT=0;
+var lastT=performance.now(); let fpsAcc=0, fpsN=0, fpsShow=0, deployRefreshT=0;
 function loop(){
 requestAnimationFrame(loop);
-if(document.hidden) return;
+const now=performance.now();
+if(document.hidden){
+if(gamePaused||matchOver||menuHold) nowOff+=now-lastT;
+// 指挥减速的冻结期自愈 (2026-10-26 指挥官批修复): 本分支 return 在 cmdFrameTick (末段) 之前 ——
+//   按住 V 时按 Esc 暂停, 松手后没有任何 tick 会去读 CMD.slowOn, 它会一直挂 true (恢复战斗即凭空慢放)。
+//   这里按同一判据就地回常速 (单源 cmdSlowFreezeHeal, 26-commander)。
+if(typeof cmdSlowFreezeHeal==='function') cmdSlowFreezeHeal();
+lastT=now;
+return;
+}
 // 部署期 HUD 隐藏的**权威对账** (2026-09-20 第6条): 隐藏战斗 HUD ⟺ 部署界面正在显示。
 // 放在主循环最前 (冻结分支之前): 主菜单(menuHold)/暂停/结算期间同样要对账 —— 万一还有别的路径收起 .screen
 // 而忘了同步, 一帧内就纠正。单源函数在 22-hud (setDeployHudHidden/syncDeployHud), 稳态零 DOM 写入
 // (只在状态真的不同时才 toggle); 分步调用点 showDeploy/deployPlayer/returnToMenu/resumeBattle/resumeBtn/
 // togglePause/endMatch 已就近对账, 这里兜的是"以后新增的收起路径"。
+// ★2026-11-04b 时停音频批 (用户实报: 时停期间发动机引擎仍有声音, "应该还有其他类似的问题"):
+//   时停的 dt=0 只冻住了战场物理, WebAudio 的连续振荡器 (坦克/飞机/舰艇/幽灵坦克引擎)、风噪雨声环境层、
+//   以及 setInterval/setTimeout 周期声 (远处机枪/鸟鸣/雷暴远雷/弹夹落地) 全走墙钟 ⇒ 画面停了声音没停。
+//   这里每帧把 specTimeFrozen() 的单一事实喂给 01-audio 的 setTimeFrozenMute 单源 (内部有状态, 稳态零
+//   WebAudio 写入); 放在冻结分支 return 之前, 保证暂停/结算/菜单期也能把残留的时停账复位。
+if(typeof AudioSys!=='undefined'&&AudioSys.setTimeFrozenMute)
+AudioSys.setTimeFrozenMute(typeof specTimeFrozen==='function'&&specTimeFrozen());
 if(typeof syncDeployHud==='function') syncDeployHud();
-const now=performance.now();
 const rdt=Math.min((now-lastT)/1000,0.05);          // 真实帧时间 (本帧世界推进的**上限**)
 // 观战时停 (2026-09-26H 观战批 B7; 2026-09-27I 收敛为"只留时停"): 单源在 22b-speclayer specTimeConsume ——
 // 非观战/未时停原样返回 rdt (零行为漂移), 时停返回 0。未被消费的时间同样计进 nowOff ⇒ 游戏时钟 nowT 与
 // 世界同速冻结 (射速/引信/重生倒计时/旗点进度一起停, 不是"只有动画停"的假冻结)。
-const dt=(typeof specTimeConsume==='function')?specTimeConsume(rdt):rdt;
+const dt0=(typeof specTimeConsume==='function')?specTimeConsume(rdt):rdt;
+// 指挥官层帧长门 (2026-10-26 指挥官批, 单源 = 26-commander cmdDtGate): 帧长三态化 —— 布势冻结=0 /
+// 指挥减速=×0.2 / 常速原样。K 时停优先 (D14): dt0<=0 (时停/暂停) 时原样放行, 减速不把冻结"复活"。
+// 慢掉/冻掉的差量由下方既有 nowOff 账吸收 ⇒ 游戏时钟 nowT 与世界同速慢放/冻结 (时停管道同款语义)。
+const dt=(typeof cmdDtGate==='function')?cmdDtGate(rdt,dt0):dt0;
 // 观察者例外 (用户 2026-09-27: "时停的时候玩家也不能动"是缺陷): 时停冻的是**战场**, 不是观战者 ——
 // 本体链 (updatePlayer/相机/信息层/视角武器) 用 pdt = 真实帧时间; 座驾由 specTimeRideDt 逐台判定
 // (specRide 单源: 只有观战者正在开的那一台跟本体同速, 含幽灵坦克)。非时停时 pdt≡dt ⇒ 普通战斗零漂移。
-const pdt=(typeof specTimePlayerDt==='function')?specTimePlayerDt(rdt,dt):dt;
-// 载具帧长解析 (时停: 观战者座驾拿 rdt, 其余载具拿 dt=0 ⇒ 冻结); 缺 22b (探针/部分沙箱) 时退化为 dt
-const vdt=(v)=>(typeof specTimeRideDt==='function')?specTimeRideDt(v,rdt,dt):dt;
+// 2026-10-26 指挥减速: cmdPlayerDt 在此之上再叠 "对我无效"超人档 (R9/D4, 默认关 = pdt≡dt 零漂移)。
+const pdt0=(typeof specTimePlayerDt==='function')?specTimePlayerDt(rdt,dt):dt;
+const pdt=(typeof cmdPlayerDt==='function')?cmdPlayerDt(pdt0,rdt):pdt0;
+// 载具帧长解析 (时停: 观战者座驾拿 rdt, 其余载具拿 dt=0 ⇒ 冻结); 缺 22b (探针/部分沙箱) 时退化为 dt;
+// 指挥减速的超人档同豁免玩家正在开的那一台 (cmdRideDt, 26-commander)
+const vdt0=(v)=>(typeof specTimeRideDt==='function')?specTimeRideDt(v,rdt,dt):dt;
+const vdt=(v)=>(typeof cmdRideDt==='function')?cmdRideDt(v,vdt0(v),rdt):vdt0(v);
 if(gamePaused||matchOver||menuHold) nowOff+=now-lastT;
-else if(dt!==rdt) nowOff+=rdt-dt;
+else if(dt!==rdt) nowOff+=rdt-dt;   // ★已知问题 (2026-11-05 时停照明弹批留档, 未修): rdt/dt 是**秒**, 下方 nowT 表盘是**毫秒** —— 本行差了 1000 倍, 时停/指挥减速期间游戏时钟 nowT 实际只被拖慢 ~0.1% (注释宣称的"nowT 同速冻结/慢放"不成立)。dt 基系统 (战场更新) 不受影响照常冻结; nowT 基相位 (照明弹/探照灯/火光已改 08-effects 战斗钟 _ngT/_fireT) 与 nowT 基门限 (各类 nowT-X 比较账) 时停里继续走。整体修法 = `(rdt-dt)*1000`, 但会波及观察者链上混用 nowT 的门 (体能回充/观战补给节流/HUD 指纹节流等), 需专项批逐处对账, 不随本批。
 lastT=now;
 nowT=(now-nowOff)/1000;
 fpsAcc+=1/Math.max(rdt,0.001); fpsN++;   // FPS 表按**真实**帧时间统计 (时停 dt=0: 旧写法会显示 1000 FPS)
 if(fpsN>=30){ fpsShow=Math.round(fpsAcc/fpsN); fpsAcc=0; fpsN=0; el('fps').textContent=fpsShow+' FPS'; }
 // 暂停/对局结束/返回主界面(menuHold): 战斗、移动、天气、旗点等全部冻结, 仅维持画面渲染
 if(gamePaused||matchOver||menuHold){
+// ★指挥减速冻结期自愈 (2026-10-26 排查轮): 本分支 return 在 cmdFrameTick (末段) 之前, 按住 V 时按 Esc
+//   暂停 → 松手也收不到任何 tick, CMD.slowOn 会一直挂 true, 一恢复战斗就凭空 0.2x 慢放且读条继续扣。
+//   旧写只挂在上面 document.hidden 分支 (= 切后台标签页), 而 Esc 暂停走的是**可见**的这条分支 ⇒ 等于没修。
+//   同源自愈 (单源 cmdSlowFreezeHeal) 挂在这里, 与 nowOff 同帧回常速。
+if(typeof cmdSlowFreezeHeal==='function') cmdSlowFreezeHeal();
+// ★2026-10-26 排查轮二审 修复 (D20 暂停菜单优先于指挥地图): 布势版地图挂在 body 上且 z-index 500,
+//   暂停面板 #pauseOv 是 css .screen 的 z-index 20 ⇒ 暂停面板确实打开了却被地图整块盖住, 玩家看到
+//   的是"按 Esc 没反应 + 世界越来越像卡死"。暂停期本分支 return 在 cmdFrameTick (末段) 之前, 而
+//   地图的显隐对账挂在 cmdMapTick 里 ⇒ 必须在冻结分支也跑一次同源对账 (单源 cmdMapPauseGate)。
+//   解冻当帧由 cmdMapTick 再对账一次把地图放回来 (两处共读同一布尔账本 CMD._pauseHid)。
+if(typeof cmdMapPauseGate==='function') cmdMapPauseGate();
 // 主菜单期改用无 UI 航拍动态 (2026-09-17 用户插话): 冻结分支只渲染不更新相机, 于是打完一局返回主界面时画面
 // 停在"结束前那一帧"(用户反馈: 静态的结束前视角)。菜单期显式驱动同一圈航拍环绕 (20-player updateMenuCamera,
 // 用真实帧时间推进相位 —— 冻结期 nowT 不前进); 暂停面板(gamePaused)保持冻结的战场视角, 不动相机。
 const menuCam=menuHold&&!gamePaused;
 if(menuCam&&typeof updateMenuCamera==='function') updateMenuCamera(dt);
-// 大舰菜单巡航 (2026-10-01b): 航拍背景里的编队照常沿航线慢慢开 —— 只有"海"没有"船"的画面是本批
-//   用户点名的问题; updateCapital 内部有 menuHold 停战守卫 (巡航/搬旗照跑, AI 火控/玩家接管不跑)。
-if(menuCam&&typeof updateCapital==='function'&&typeof capitalShips!=='undefined'&&capitalShips.length) updateCapital(dt,dt);
+// (2026-11-10: 大舰菜单巡航 updateCapital 钩随大舰子系统下架摘除)
 if(typeof updateSea==='function') updateSea(dt); // 主菜单航拍背景里海面照旧起伏/碎波滚动 (纯视觉)
+if(menuCam&&typeof updateWeather==='function') updateWeather(dt); // 主菜单航拍背景里雨雪照旧飘落 (纯视觉)
 // ★2026-09-26E (审计 35): 本分支在 updateWeather / flashTimer 之前 return ⇒ 雷暴白幕 (stormFlash) 与
 //   爆炸闪光灯 (flashLight) 会**冻在菜单航拍里** (23b 只覆盖了 matchOver 一条路径, menuHold 不还原 ——
 //   它自己那段注释就写着"作者知道该残留")。这里按**真实帧时间**把这两项衰减掉 (与 updateMenuCamera 同理:
@@ -54,6 +87,7 @@ const sov=document.getElementById('stormOv'); if(sov) sov.style.opacity=stormFla
 // 水下滤镜的离场复位 (2026-09-25): 本分支在 updateUnderwaterFx 之前 return —— 潜水时返回主界面,
 // 菜单航拍会用同一台相机带着水下近雾渲染 (整片蓝绿)。菜单期先把水下三态还原 (22-hud clearUnderwaterFx)。
 if(menuCam&&typeof clearUnderwaterFx==='function') clearUnderwaterFx();
+if(typeof shadowRefreshTick==='function') shadowRefreshTick(); // 阴影半频刷新 (2026-10-24 性能批, q0/q1 30Hz)
 renderer.clear();
 renderer.render(scene,camera);
 // 菜单航拍是无 UI 背景: 第一人称武器模型不参与渲染 (结算/暂停的冻结帧仍照旧渲染)
@@ -81,6 +115,7 @@ if(MOBILE&&window.updateTouchVis) updateTouchVis();
 if(typeof updateGamepad==='function') updateGamepad(pdt);   // 手柄轮询 (19b-gamepad; 未加载该文件的沙箱静默跳过)
 if(mortarMarker.visible&&!(player.alive&&player.onMortar)) mortarMarker.visible=false;
 updatePlayer(pdt,dt);   // 第二实参 = 世界帧长 (2026-09-27M 时停: 海战音频逐艇判定该跟谁, 见 20-player 注释)
+if(typeof specViewTick==='function') specViewTick(pdt);   // 自由观战视模式每帧: 附身眼位/自由飞行 (20-player 单源; updatePlayer 对死者早退, 视模式走这条旁路)
 updateCamera(pdt);
 updateUnderwaterFx(pdt); // 水下滤镜/憋气 HUD (22-hud; 相机没入水面即生效) — 必须在 updateCamera 之后
 updateSea(dt);          // 海面动效: 碎波滚动/水面细流/浮标起伏 (05c; 非环礁图内部直接短路)
@@ -92,10 +127,15 @@ if(SQUAD.marker&&SQUAD.marker.visible){
 SQUAD.marker.position.set(SQUAD.pos.x,heightAt(SQUAD.pos.x,SQUAD.pos.z)+2.1+Math.sin(nowT*2.4)*0.18,SQUAD.pos.z);
 }
 updateWeather(dt);
-if(NIGHT_MODE&&typeof nightGearTick==='function') nightGearTick(dt); // 夜档照明装备: 大灯灯池/旗点照明弹/探照灯扫掠 (N2, 昼夜设计 §4)
+// ★2026-11-05 调试模式装备批: 门再放宽一档 —— 玩家当前座驾开着大灯 (L 键, 含幽灵坦克) 也要把
+//   nightGearTick 拉起来, 否则晴天白天按 L 只有假光锥, 真灯池 (SpotLight) 永远不上 (用户实报
+//   "坦克上的大灯没有实际效果")。照明弹/探照灯是暗光装备, 08-effects 内已加 isDark 门兜住,
+//   晴天不会因这档放宽凭空长出照明弹。AI 载具的灯由夜档/暗光自动管理, 晴天本就全灭, 不受影响。
+const _hlRideOn=!!(player&&((player.onVehicle&&player.onVehicle.lightsOn)||(player.onNaval&&player.onNaval.lightsOn)));
+if((NIGHT_MODE&&typeof nightGearTick==='function')||((typeof isDarkEnvironment==='function'&&isDarkEnvironment()||(player&&player.flashlight)||_hlRideOn)&&typeof nightGearTick==='function')) nightGearTick(dt); // 夜档/暴雨暗光/照明开启: 大灯/手电/照明弹/探照灯
 updateSmokes(dt);
 for(const s of soldiers){
-if(s.capCrew) continue;   // 大舰甲板炮手 (2026-10-01c): 不跑 AI/动画 —— 位姿由 15h capCrewTick 随舰钉住, 阵亡倒伏也在那边收
+// (2026-11-10: 旧 s.capCrew 大舰甲板炮手 skip 随大舰子系统下架摘除 —— 该兵种不再生成)
 // AI LOD: 远处降低更新频率(隔帧), 但把跳过的时间累积补回, 保证移动速度不变
 s.tickAcc+=dt;
 s.tickSkip--;
@@ -107,6 +147,7 @@ const d2p=s.pos.distanceTo(camera.position);
 s.tickSkip=d2p>110?3:d2p>60?2:1;
 }
 }
+if(ZOMBIE_MODE&&typeof zombieFrameTick==='function') zombieFrameTick(dt); // 丧尸模式: 刷怪导演/胜负/ZP-HUD (2026-10-06)
 if(typeof BotDebug!=='undefined'&&BotDebug.on) BotDebug.update(dt);
 updateMedCrates(dt);
 updateBloodDecals(dt);
@@ -119,15 +160,13 @@ if(typeof updateSpecVeh==='function') updateSpecVeh(vdt(typeof SPECVEH!=='undefi
 // 进水沉没与乘员落水、鱼雷在途。放在炮弹判定管线 (updateShells) 之前 —— 命中管线要拿到当帧位置。
 // 第二个实参 = 观战者座驾帧长 (2026-09-27I): 时停下整片海战场静止, 只有你在开的那条艇跟着你走。
 if(typeof updateNaval==='function') updateNaval(dt,pdt);
-// 大舰 (2026-09-30 阶段五 P4, 15h-capital): 巡航 / 甲板移动平台乘员搬运 / 舰炮火控 / 瘫痪链 / 甲板旗跟随。
-// 同样排在炮弹判定 (updateShells) 之前 —— 命中管线必须拿到当帧位姿 (与上行 updateNaval 的理由逐字相同)。
-// 无大舰的战役 capitalShips 为空 ⇒ 函数首行即返回 (零开销)。
-if(typeof updateCapital==='function') updateCapital(dt,pdt);
+// (2026-11-10: 大舰 updateCapital tick 随大舰子系统下架摘除)
 // 反舰炮位 (15f-battery): 海面索敌/提前量/弹药节奏; 与 atGun 的陆战更新相互独立 (用户裁定"1+3")
 if(typeof updateBatteries==='function') updateBatteries(dt);
 for(const pl of planes) pl.update(vdt(pl));
+updatePlaneCollisions(dt); // 空中撞机 (2026-11-10 三虫批③): 全体位姿推进完再判机-机实体碰撞 (die crash 档双机同毁); dt<=0=时停/布势冻结不判
 updateTrucks(dt); // 劫道车队: 在炮弹判定前推进, 命中管线拿到当帧位置
-updateMineTriggers(); // 反坦克雷: 车辆碾压触发 (15-vehicles, 草原雷区)
+updateMineTriggers(dt); // 反坦克雷: 车辆碾压触发 + 链爆账消费 (15-vehicles, 草原雷区; ★2026-11-01 判定批: 链爆改挂世界帧长, 时停/暂停不再照爆)
 updateSupplyPoints(dt); // 劫道方临时补给点: 限时失效
 // 火焰蔓延/树木燃烧倒伏/倒伏动画 (04b-fire)
 updateFires(dt);
@@ -135,6 +174,7 @@ updateTreeBursts(dt); // 环境炮击: 许特根树爆(空爆) / 草原炮火犁
 updateWindRotors(dt); // 草原风车磨坊风叶慢转 (05a, 纯视觉)
 updateFallingTrees(dt);
 updateBurningTrees(dt);
+if(typeof ACH!=='undefined'&&ACH.update) ACH.update(dt); // 成就轮询账 (2026-11-11 成就批): 0.5s 低频按普查账复核, dt<=0 (时停/布势冻结) 不评
 updatePlaneWrecks(dt);
 updateWreckSinks(dt); // 被毁模型(载具/草木/房屋)残骸: 停留→沉入→删除 (08-effects)
 updateRagdolls(dt);
@@ -157,18 +197,21 @@ updateSpots(dt); // 遭遇战强点占领 (21-match, 草原库尔斯克改版)
 // 帧长跟本体 (pdt): 时停下你仍在走动/飞行, 名牌的远近取舍与 4Hz 重绘要跟着你走 (2026-09-27I)。
 if(typeof updateSpecLayer==='function') updateSpecLayer(pdt);
 if(flashTimer>0){ flashTimer-=dt; if(flashTimer<=0) flashLight.intensity=0; }
-if(player.alive&&player.curW&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery&&!player.loiter&&!player.capitalGun){   // 2026-09-26E 审计 5: 艇上不跑步兵视模型 (会把海战 fov/炮手镜拉回 74); 2026-10-01b 大舰炮位同理
+if((player.alive||player.specViewHost)&&player.curW&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery&&!player.loiter){   // 2026-09-26E 审计 5: 艇上不跑步兵视模型 (会把海战 fov/炮手镜拉回 74); ★2026-11-03: 真附身 (specViewHost) 也跑 —— 视模式附身的换弹/举雷/包扎/开火反馈镜像 (20-player svHostActionMirror); 2026-11-10 capitalGun 支摘除
 updateViewModel(pdt,player);
 // 第三人称视场过渡 (2026-09-20 第三人称批): updateViewModel 每帧按第一人称档 (74/开镜档) 写 camera.fov,
 // 而 updateCamera 在它**之前**跑 —— 第三人称视场只能在其后补一次, 否则两边互相拉扯 (见 20-player thirdPersonFovTick)。
 if(typeof thirdPersonFovTick==='function') thirdPersonFovTick(pdt);
-} else if(player.alive&&!player.loiter&&(player.onMG||player.onAT||player.onAA||player.onBattery||player.capitalGun)){
+} else if(player.alive&&!player.loiter&&(player.onMG||player.onAT||player.onAA||player.onBattery)){
 camera.fov=dampF(camera.fov,74,10,pdt);   // 视角链跟本体同速 (时停下开镜/离镜照常, 2026-09-27I)
 camera.updateProjectionMatrix();
 }
 player.mouseDX*=Math.pow(0.0001,pdt*3);
 player.mouseDY*=Math.pow(0.0001,pdt*3);
-updateHUD(dt);
+updateHUD(dt,pdt);   // 第二实参 = 观察者帧长 (2026-11-08 时停HUD批): 低频HUD段 (hudSlowT 10Hz 节流) 吃它 —— 旧版只传世界 dt, 时停下 dt=0 ⇒ 小地图/罗盘/顶栏在时停里彻底停绘, 而观察者本人还在走动/飞行 (2026-09-27 裁定"冻战场不冻观察者"的 HUD 侧推论)。非时停 pdt≡dt ⇒ 零漂移。
+if(typeof specViewHudTick==='function') specViewHudTick();   // 自由观战视模式 HUD (2026-11-01): 战斗 HUD 收起+附身指示器, 与 updateHUD 同频
+if(typeof cmdFrameTick==='function') cmdFrameTick(rdt);   // 指挥官层帧 tick (26-commander): 读条收支+减速态+指挥地图重绘 (真实帧长, UI 不吃减速 D4)
+if(typeof shadowRefreshTick==='function') shadowRefreshTick(); // 阴影半频刷新 (2026-10-24 性能批, q0/q1 30Hz)
 renderer.clear();
 renderer.render(scene,camera);
 if(player.alive&&!player.onMG&&VM.root.visible){
@@ -181,7 +224,17 @@ if(!player.alive&&player.deployed&&!matchOver){
 respawnCd=Math.max(0,respawnCd-dt);
 el('respawnTxt').textContent=respawnCd>0?`(${Math.ceil(respawnCd)})`:'';
 const btn=el('deployBtn');
-btn.disabled=respawnCd>0||tickets[player.team]<=0; // 己方兵力归零后按钮保持禁用 (2026-09-04)
+// ★2026-11-01 逐帧保活: 票尽未开调试观战 ⇒ 按钮恒可用且标签是「观 战」(与 23-deploy showDeploy 同一套
+// 换字代码 —— 部署页每 0.5s 才重刷, 而票数在页开着时也可能归零, 这条保证按钮态即时跟随)。
+if(tickets[player.team]<=0&&!player.specWillBe()){
+btn.disabled=false;
+const _sp=btn.querySelector('[data-i18n]');
+if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='观 战'){ _sp.setAttribute('data-i18n','观 战'); _sp.textContent=t('观 战'); }
+}else{
+btn.disabled=respawnCd>0; // 己方兵力归零后按钮保持禁用 (2026-09-04); 观战开关开着放行 (2026-10-30, specWillBe 单源见 18-game)
+const _sp=btn.querySelector('[data-i18n]');
+if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='部 署'){ _sp.setAttribute('data-i18n','部 署'); _sp.textContent=t('部 署'); }   // 调试观战中途打开 ⇒ 标签从「观 战」还原「部 署」
+}
 }
 // 部署界面打开期间(死亡等待/存活按Esc查看): 载具重生冷却/占用状态/旗点归属实时刷新 (0.5s 一次),
 // 冷却走完的载具按钮即刻亮起可选 (2026-09-01 用户指定)
@@ -297,7 +350,7 @@ bindBtn('tFire',()=>{ mouseDown=true; },()=>{ mouseDown=false; });
 bindBtn('tFire2',()=>{ mouseDown=true; },()=>{ mouseDown=false; });
 bindBtn('tAds',()=>{
 mouse2Down=true;
-if(player.alive&&!player.loiter&&!player.flying&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery) player.ads=true;   // 2026-09-26E 审计 6: 触控 ADS 同门; 2026-09-28C 补岸防炮位
+if(player.alive&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery&&!player.specViewHost) player.ads=true;   // 2026-09-26E 审计 6: 触控 ADS 同门; 2026-09-28C 补岸防炮位; 2026-11-02 附身中不进 (借眼只读, 与键鼠/手柄同门); 2026-11-06 飞行瞄准批: 去 !player.flying (两种观战飞行中瞄准钮=ADS, 同键鼠)
 },()=>{ mouse2Down=false; player.ads=false; });
 bindBtn('tJump',()=>kd('Space'),()=>ku('Space'));   // 2026-09-28C: 改走 kd/ku 与键盘同链 —— 旧版直写 keys.Space, 绕过了 keydown 处理器 ⇒ 观战"双击空格=悬停飞行"在触屏永远不可达
 bindBtn('tCrouch',()=>kd('KeyC'),()=>ku('KeyC'));
@@ -315,11 +368,24 @@ el('tSprint').classList.toggle('on',sprintLock);
 bindBtn('tSkill',()=>kd('KeyB'),()=>ku('KeyB'));
 bindBtn('tBuild5',()=>kd('Digit5'),()=>ku('Digit5'));
 bindBtn('tMortar',()=>kd('Digit6'),()=>ku('Digit6'));
-bindBtn('tMelee',()=>kd('KeyV'),()=>ku('KeyV'));
+bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));   // 2026-10-26 交互重做批: 近战键 V→N (V 让给减速)
 	bindBtn('tSmoke',()=>kd('Digit4'),()=>ku('Digit4'));
 	bindBtn('tIncin',()=>kd('Digit6'),()=>ku('Digit6'));
 	bindBtn('tATN',()=>kd('Digit3'),()=>ku('Digit3'));
 bindBtn('tSquad',()=>kd('KeyT'),()=>ku('KeyT'));
+// ── 指挥官触控键 (2026-10-26 排查轮二审 修复 B-8: 移动端没有任何开图/减速入口) ──
+// tCmdMap: 点按 = 开/关指挥地图。走 cmdMapToggle 单源 (姿态门 D18/布势 D21/暂停 D20 全在它内部把关),
+//   而不是派发 contextmenu —— 触屏没有右键, 且 cmdMapToggle 的布势首分支语义 (跳过布势=确认开战) 只有
+//   直调才能拿到。桌面端这两个键在 body.mobile 之外不可见 (css #touchUI 门), 零回归。
+// tSlow: **按住**减速 (与键盘 N 同一条 keys[CMD_TIME.KEY] 消费链) —— 旧版移动端连减速都没有入口。
+bindBtn('tCmdMap',()=>{
+if(typeof cmdMapToggle==='function') cmdMapToggle();
+},null);
+bindBtn('tSlow',()=>{
+if(typeof CMD_TIME!=='undefined') keys[CMD_TIME.KEY]=true;
+},()=>{
+if(typeof CMD_TIME!=='undefined') keys[CMD_TIME.KEY]=false;
+});
 bindBtn('tFollow',()=>kd('KeyY'),()=>ku('KeyY'));
 // 第三人称触控入口 (2026-09-20 三人称批): 移动端没有 KeyU, 触控键**直调**切换单源 toggleThirdPerson (19-input),
 // 而不是像其它键那样派发 KeyboardEvent —— 派发会被 `!pointerLocked` 闸门挡住 (触屏无 Pointer Lock),
@@ -332,7 +398,9 @@ sb.style.display=on?'block':'none';
 if(on) updateScoreboard();
 },null);
 bindBtn('tMenu',()=>{
-if(player.deployed&&!matchOver) showDeploy(false);
+if(player.deployed&&!matchOver){
+if(typeof togglePause==='function') togglePause(true);
+}
 },null);
 // 按兵种/装备动态显示技能按键
 window.updateTouchVis=function(){
@@ -359,6 +427,11 @@ show('tFollow',base);
 // 第三人称键只在"步战"下有意义 (载具/巡飞弹/跳伞/游泳各有自己的视角键, 见 20-player thirdPersonOn),
 // 所以与 tMelee 同口径: 已落地且未上任何载具/阵位时才出现 —— 避免移动端给了按钮却按了没反应。
 show('tView',base&&noMount);
+// 指挥官两键 (2026-10-26 排查轮二审): 只在"本局是指挥官"时出现 —— 普通兵种看到这两个键按了也没反应,
+// 属于同一纪律 (tView/tMelee 的注释: 避免移动端给了按钮却按了没反应)。
+// cmdIsCommander 自带 typeof/CLASSES 守卫, 22-hud 缺 cmdIsCommander 的极端沙箱里 show 恒 false。
+show('tCmdMap',base&&(typeof cmdIsCommander==='function')&&cmdIsCommander());
+show('tSlow',base&&(typeof cmdIsCommander==='function')&&cmdIsCommander());
 };
 resetMove();
 homeStick();
@@ -388,23 +461,16 @@ const _p=markPermPieces();
 if(typeof console!=='undefined'&&console.log) console.log('[破坏] 结构血量归一: '+_n+' 组 (名→实 见 STRUCT_HP) · 永久件标记: '+_p+' 件 (B5 提亮已按 2026-09-28 用户裁定取消, D3)');
 }
 if(typeof resolveCoplanarConflicts==='function') resolveCoplanarConflicts();
-// 大舰编制载入期生成 (2026-10-01b, 用户报"起始界面不显示舰船, 只有一片海"): 全海图的舰队是世界的
-//   一部分 —— 生成排在 capturePristineWorld **之前**, 舰体网格进开局快照 (世界还原时复位不摘除),
-//   主菜单航拍里就是编队巡航的画面。startMatch/就地重开走 capitalEnsureOrbat 复位复用, 不再重建。
-//   非海战图 capSpawnList 为空 ⇒ 零对象、零行为变化。菜单期不开火 (updateCapital 的 menuHold 停战守卫)。
-if(typeof capitalSpawnOrbat==='function') capitalSpawnOrbat();
+// (2026-11-10: 大舰编制载入期生成 capitalSpawnOrbat 随大舰子系统下架摘除)
 if(typeof capturePristineWorld==='function') capturePristineWorld();
-// 说明 (2026-09-13 修刷新闪 UI): 战斗 HUD 的隐藏由标记本身承担 —— index.html 的 <body class="inMenu">,
-// 浏览器解析到 <body> 第一个元素起 #ui 就不进渲染树 (不是"先画出来再藏"); 本文件在脚本链末尾才执行,
-// 若只在这里挂 class, 前面已解析的 #ui (弹药/血条/小地图/罗盘/记分板) 会先画一帧再消失。
-// 此处保留为保持语句 (两条路径结果一致, 切面板/结算复用同一个类)。
-initMenuUI();
-loop();
-window.__sfBooted=true; // 供 index.html 末尾兜底判断: 主脚本链正常跑完 (未置位=中途抛错, 解除首屏隐藏让报错可见)
 // 启动末尾的状态机权威 (2026-09-13): 菜单期必须隐藏战斗 HUD —— 不依赖"标记上的类没被动过"这一假设。
 // 走完整条脚本链后复核一次: 若此刻不在战斗/部署中却缺 inMenu, 就地补挂; 并检测"页面上存在多个 #ui"
 // (内容被粘过两次 / 打开的是拼接过副本时会出现第二份 HUD, 那一份不在 CSS `body.inMenu #ui` 的覆盖内)。
 // 正常路径零副作用, 只在必要时写 DOM; 有修正时在控制台留一条可复制的诊断行。
+// ★2026-10-07b 修 (实机"丧尸局无UI"根因): 本块原来跑在 initMenuUI **之后** —— 迷你游戏直达路径
+//   (sf_mzstart) 的 startGame() 在 initMenuUI 里执行并已摘掉 inMenu, 此处复核条件
+//   `!inMenu && !player.deployed && !matchOver` 成立 ⇒ 把刚摘掉的战斗 HUD (含部署界面, 都在 #ui 里)
+//   又盖了回去, 玩家面对裸世界。复核必须先于 initMenuUI: 自动开局路径可能在其中摘 inMenu。
 {
 const uis=document.querySelectorAll('#ui');
 if(!document.body.classList.contains('inMenu')&&!player.deployed&&!matchOver){
@@ -416,3 +482,15 @@ console.warn('[HUD] 菜单期隐藏自检: #ui 节点数='+uis.length+', body.cl
 +(window.__sfHudRepaired?', 已就地补挂 inMenu':''));
 }
 }
+initMenuUI();
+// 说明 (2026-09-13 修刷新闪 UI): 战斗 HUD 的隐藏由标记本身承担 —— index.html 的 <body class="inMenu">,
+// 浏览器解析到 <body> 第一个元素起 #ui 就不进渲染树 (不是"先画出来再藏"); 本文件在脚本链末尾才执行,
+// 若只在这里挂 class, 前面已解析的 #ui (弹药/血条/小地图/罗盘/记分板) 会先画一帧再消失。
+// 此处保留为保持语句 (两条路径结果一致, 切面板/结算复用同一个类)。
+loop();
+window.__sfBooted=true; // 供 index.html 末尾兜底判断: 主脚本链正常跑完 (未置位=中途抛错, 解除首屏隐藏让报错可见)
+// ★2026-10-07c 修 (实机"随机图整场无HUD"根因): 本文件尾部原有一份**同样的复核块**没随 2026-10-07b
+//   的搬家一起删掉 —— 迷你大厅直达路径 (sf_mzstart → initMenuUI 内 startGame) 已摘掉 inMenu 打开部署页,
+//   尾块在其后照跑, `!inMenu && !player.deployed && !matchOver` 成立 (此刻人还在部署页, 未落地) ⇒ 把
+//   inMenu 又盖了回去。部署页 (.screen, 在 #ui 外) 照样可见能开打, 但 #ui 里的整套战斗 HUD 被
+//   `body.inMenu #ui` 压住整局不显示。复核块只保留 initMenuUI **之前**那一份 (见上方 2026-10-07b 注)。

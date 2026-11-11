@@ -14,7 +14,7 @@
 //   wheels   THREE.Mesh[] —— 每项 userData{sx,lz,vy,baseY} (与 Tank.wheels 同口径); 艇 = []
 //   muzzles  main 必给; secondary/mg/torpedo 按 spec 给 (spec.secondary/mg 为 null 则不给该键)
 //   nodes    pontoon(カミ 前后浮筒, Object3D[]) / propeller(尾部螺旋桨组) / rudder / flags(队旗)
-//            + sight(炮塔观瞄镜心 Object3D —— 挂 turretG 下 ⇒ 世界坐标即炮手镜机位) / barrel(炮管 Mesh)
+//            + sight(炮塔观瞄镜心 Object3D —— 挂 turretG 下 ⇒ 世界坐标即炮手镜机位; 2026-11-01 审计注: 现仅艇登记, 两栖车消费侧走 20-player 的 dims.sightY/spec.sightH 降级链) / barrel(炮管 Mesh)
 // ── 本工厂额外返回 (冻结签名的补充键, 原键一个不动) ──
 //   mainG    主炮回旋组 (两栖车 === turretG; **艇同样 === turretG** ⇒ 15d 只转 turretG 一条路径即可)
 //   pitchG   主炮俯仰组 (转它做俯仰; 世界炮口 = muzzles.main.getWorldPosition())
@@ -584,13 +584,19 @@ pm.name='nmPropBlade'; pv.add(pm);
 PG.add(pv);
 }
 R.nodes.propeller=PG;
-// 舵 ×2 (各自在桨后 NM_RUD_AFT) + 横梁; 整体挂在一个组里 ⇒ 15d 转 nodes.rudder 时两片同步偏转。
+// 舵 ×2 (各自在桨后 NM_RUD_AFT) + 横梁; 15d 转 nodes.rudder 驱动口不变 —— 逐片 nmRudderPivot 子枢轴偏转。
 //   舵前缘正好压住桨轴尾端 (轴从舵中间穿出 ⇒ 舵-轴体积咬合 ≥NM_JOINT), 不再需要艉鳍那类额外连接件。
 const RG=new THREE.Group(); RG.name='nmRudderG';
 RG.position.set(0,propY+S.boxH*NM_RUD_CZ,rudZ);
 g.add(RG);
-for(const sx of[-1,1])
-nmBox(RG,W*NM_RUDW_A,S.boxH*NM_RUDH_A,NM_RUD_T,M.dark,sx*xn,0,0).name='nmRudder';
+// ★2026-11-01 修: 每片舵挂"原点落在自己舵杆上"的 nmRudderPivot 子枢轴 (照抄上面 nmPropPivot 修法) ——
+//   旧式两片舵直接挂在艉中线上的 RG 里, 转整组 = 两片舵**绕中线公转**, 满舵 0.5rad 时一舷前掠
+//   xn·sin(0.5)≈0.24m 越过自定 NM_RUD_AFT 桨前净空、AABB 扫进桨盘 (与 2026-09-25 桨枢轴同族病, 舵漏修)。
+for(const sx of[-1,1]){
+const pv=new THREE.Group(); pv.position.set(sx*xn,0,0); pv.name='nmRudderPivot';
+nmBox(pv,W*NM_RUDW_A,S.boxH*NM_RUDH_A,NM_RUD_T,M.dark,0,0,0).name='nmRudder';
+RG.add(pv);
+}
 nmBox(RG,xn*2-NM_PLATE*0.3,NM_RUD_T*0.9,NM_RUD_T*0.9,M.dark,0,NM_RUD_T*0.25,0).name='nmRudderBar';
 R.nodes.rudder=RG;
 }
@@ -821,7 +827,7 @@ if(S.kind==='amph') navBuildAmph(spec,S,M,R); else navBuildBoat(spec,S,M,R);
 // 炮口/管口的 grp 局部静止坐标 (userData.nmLocal: 供 15d 取用, 不依赖父级矩阵)
 for(const k in R.muzzles){
 const v=R.muzzles[k];
-(Array.isArray(v)?v:[v]).forEach(m=>{ if(m) m.userData.nmLocal=navLocalize(R.grp,m); });
+(Array.isArray(v)?v:[v]).forEach(m=>{ if(m){ const p=navLocalize(R.grp,m); m.userData.nmLocal={x:p.x,y:p.y,z:p.z}; } }); // ★2026-11-01: 存纯数值三元组 —— userData 禁对象引用红线 (V3 虽无环, 纪律按序列化链立)
 }
 R.grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=false; } }); // 全件投影 (与 Tank.buildMesh 同口径)
 // ── 炮塔增量 (2026-09-21 冻结): barrelPivot === pitchG; turretHit/dims 增量只给炮艇 ──

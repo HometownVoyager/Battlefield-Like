@@ -550,9 +550,23 @@ default: // ★ 五角星 (美军)
 return `<path d="M20 3L24.8 14.4L37 15.2L27.6 23.2L30.6 35L20 28.4L9.4 35L12.4 23.2L3 15.2L15.2 14.4Z"/>`;
 }
 }
+// 获取当前选择战役/随机种子的动态阵营数据 (避免死锁在 boot 期 TEAM_FACTION)
+function getActiveCampFaction(team){
+  const camp = (typeof CAMPAIGNS !== 'undefined' && typeof hubCampIdx !== 'undefined' && CAMPAIGNS[hubCampIdx]) || (typeof CAMPAIGN !== 'undefined' ? CAMPAIGN : null);
+  if(!camp) return (typeof TEAM_FACTION !== 'undefined' && TEAM_FACTION[team]) || (typeof FACTIONS !== 'undefined' && FACTIONS.us);
+  let fKeys = camp.f || ['us', 'ger'];
+  if(camp.id === 'procgen' && typeof calcPGInfo === 'function'){
+    const s = (typeof el === 'function' && el('hubSeedInp') && el('hubSeedInp').value.trim()) || localStorage.getItem('sf_pseed') || String((typeof PG !== 'undefined' && PG.seed) || '194406');
+    const pinfo = calcPGInfo(s);
+    fKeys = pinfo.f || fKeys;
+  }
+  const fk = fKeys[team] || (team === 0 ? 'us' : 'ger');
+  return (typeof FACTIONS !== 'undefined' && FACTIONS[fk]) || (typeof TEAM_FACTION !== 'undefined' && TEAM_FACTION[team]) || (typeof FACTIONS !== 'undefined' && FACTIONS.us);
+}
+
 // 单枚盾徽: 盾形 + 旗色场 + 斜分带 + 徽记 + 头盔 + 底部列队色带
 function menuFactionSVG(team){
-const F=TEAM_FACTION[team];
+const F=getActiveCampFaction(team);
 const id='mf'+team;
 const bg=F.flagBg||'#3a5f9e';
 // 阵营服饰色 (与 3D 士兵同源): 用作盾面斜带与色条
@@ -592,21 +606,44 @@ const facBox=document.getElementById('menuArtFac');
 if(!mapBox||!facBox) return;
 mapBox.innerHTML=menuMapSVG();
 let html='';
-for(let t=0;t<2;t++){
-const on=(SETTINGS.team===t);
-html+=`<div class="facCard${on?' on':''}${on?'':' dim'}" data-t="${t}">${menuFactionSVG(t)}</div>`;
+const activeTeam = (typeof SETTINGS!=='undefined'&&SETTINGS.team!==undefined)?SETTINGS.team:(typeof hubTeam!=='undefined'?hubTeam:0);
+for(let teamIdx=0;teamIdx<2;teamIdx++){
+  const on=(activeTeam===teamIdx);
+  const F=getActiveCampFaction(teamIdx);
+  const camp=(typeof CAMPAIGNS!=='undefined'&&typeof hubCampIdx!=='undefined'&&CAMPAIGNS[hubCampIdx])||(typeof CAMPAIGN!=='undefined'?CAMPAIGN:null);
+  const isAtk=(camp&&camp.mode==='assault'&&camp.atk===teamIdx);
+  const isDef=(camp&&camp.mode==='assault'&&camp.atk!==teamIdx);
+  const roleTxt=isAtk?t('进攻'):(isDef?t('防守'):(teamIdx===0?t('红方'):t('蓝方')));
+  const titleTxt=`${t(F.name)} (${roleTxt})`;
+  html+=`<div class="facCard${on?' on':''}${on?'':' dim'}" data-t="${teamIdx}" title="${titleTxt}">${menuFactionSVG(teamIdx)}</div>`;
 }
 facBox.innerHTML=html;
-// 点盾徽 = 选阵营 (与开局面板 teamBtn 同义, 存档 sf_team 一致; 只绑本层, 防重复绑定)
+// 点盾徽 = 选阵营 (与战备大厅 hubTeam 同步，存档 sf_team 一致)
 facBox.querySelectorAll('.facCard').forEach(d=>{
-d.onclick=()=>{
-const t=+d.dataset.t;
-SETTINGS.team=t;
-try{ localStorage.setItem('sf_team',String(t)); }catch(e){}
-const us=document.getElementById('teamUS'), ger=document.getElementById('teamGER');
-if(us&&ger){ us.classList.toggle('sel',t===0); ger.classList.toggle('sel',t===1); }
-renderMenuArt();
-};
+  d.onclick=()=>{
+    const t=+d.dataset.t;
+    if(typeof SETTINGS!=='undefined') SETTINGS.team=t;
+    if(typeof hubTeam!=='undefined') hubTeam=t;
+    try{ localStorage.setItem('sf_team',String(t)); }catch(e){}
+    if(typeof AudioSys!=='undefined'&&AudioSys.click) AudioSys.click(700,0.2,0.05);
+
+    // 同步战备大厅的阵营选择分段按钮
+    const facSeg=document.getElementById('hubFactionSeg');
+    if(facSeg){
+      facSeg.querySelectorAll('button').forEach(btn=>{
+        btn.classList.toggle('active',+btn.dataset.team===t);
+      });
+    }
+
+    // 若在已挂起的战局中切换了阵营，同步给玩家，使继续战斗/部署生效到新队伍
+    if(typeof player!=='undefined' && player.team!==t && typeof isMatchSuspended==='function' && isMatchSuspended()){
+      player.team=t;
+      player.alive=false;
+      player.deployed=false;
+    }
+
+    renderMenuArt();
+  };
 });
 }
 // 只在"开始游戏/主菜单"面板显示 (设置与说明面板保持左侧干净): 22-hud showPanel 调用

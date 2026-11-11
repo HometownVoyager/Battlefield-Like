@@ -354,7 +354,7 @@ function runCampaign(idx){
 const THREE=makeThreeStub();
 const sandbox={
 console,Math,JSON,location:{search:'?seed='+seed},
-localStorage:{_s:{sf_campaign:String(idx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=v;}},
+localStorage:{_s:{sf_campaign:String(idx),sf_weather:'clear'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=v;}},   // ★2026-11-01 钉晴朗: 本探针验的是火焰机制 (伤害 5.2/跳·倒伏时长·烧尽退场), 天气批 (2026-10-05) 后 map 缺省会让雨图火伤×0.45/倒伏拖慢 —— 判据整体跟天气档漂移; 钉 sf_weather=clear 回机制基线 (蔓延段的 fireMul 判据本就动态读档, 不受影响)
 navigator:{},
 document:{createElement:(t)=>t==='canvas'?({width:0,height:0,getContext:()=>Ctx2D()}):({})},
 };

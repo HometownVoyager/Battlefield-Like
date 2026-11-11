@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>钢铁前线 · 战役合集</title>
-<link rel="stylesheet" href="css/style.css?v=20261006b">
+<link rel="stylesheet" href="css/style.css?v=20261111a">
 <script>
 // 首屏引导 (必须在 <body> 内容之前执行):
 // ① 语言: EN 存档时给 <html> 加 lang-en, 配合 CSS 把中文原文先藏起来等 applyI18n() 盖章, 消除"先中文后英文";
@@ -14,7 +14,7 @@
 //    (菜单期 HUD 不隐藏即是)。这里在 DOMContentLoaded 后实测新样式是否生效 (#menuArt 的计算 display
 //    在新版是 flex、旧版是 block), 没生效就换一个 URL 把样式表重新载入一次。
 //    ④ 本文件所有 css/js 引用统一带 ?v=<版本>; 改样式或脚本后把下面的版本号与引用一起 +1。
-window.__sfStyleVer='20261006b';
+window.__sfStyleVer='20261111a';
 // ⑤ boot 异常屏上可见 (2026-09-30 Ctrl+F5 事故教训): three/cannon 曾走 CDN, 硬刷新时 CDN 拉不到 ⇒
 //    脚本链首用 THREE 处即抛 ⇒ 页面只剩页尾 bootFail 兜底摘 inMenu (HUD 全裸+黑屏), 报错只在控制台。
 //    这里把全局错误尽早记进 __sfErrs, 页尾 bootFail 分支负责把它们写到 #bootErr 浮层上 ——
@@ -56,6 +56,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <body class="inMenu">
 <div id="ui">
 <div id="crosshair"><span class="chl t"></span><span class="chl b"></span><span class="chl l"></span><span class="chl r"></span><span class="chdot"></span></div>
+<div id="nadeChargeTip"></div>
 <div id="hitmark"><span></span><span></span><span></span><span></span><b class="hmF"></b></div>
 <div id="nadeArc"><svg id="naSvg" xmlns="http://www.w3.org/2000/svg"><path id="naBlast" d=""></path><path id="naSpot" d=""></path><circle id="naDot" r="2.6"></circle><circle id="naAir" r="12"></circle></svg></div>
 <div id="dmgOv"></div><div id="supOv"></div><div id="lowOv"></div><div id="vig"></div>
@@ -71,6 +72,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div id="tickets"><span class="tl">盟军 280</span> &nbsp;·&nbsp; <span class="tr">280 德军</span></div>
 <div id="flagIcons"><span id="fiA">A</span><span id="fiB">B</span><span id="fiC">C</span><span id="fiD">D</span><span id="fiE">E</span></div>
 <div id="timeTxt">15:00</div>
+<div id="zHudEl" class="zombie-hud-pill hidden"></div>
 <canvas id="compass" width="460" height="26"></canvas>
 <div id="specTimeInd" data-i18n>⏸ 时停中 · K 继续</div>
 </div>
@@ -81,10 +83,11 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div id="interact"></div>
 <div id="coldTip"></div>
 <div id="tbTip"></div>
+<div id="vehBurnTip"></div>
 <div id="oxyWrap"><div id="oxyBarWrap"><span id="oxyFill"></span></div><span id="oxyTxt" data-i18n>憋气</span></div>
 <div id="braceInd"></div>
 <div id="nadeWarn">⚠ 手雷 ⚠</div>
-<div id="tvOv"></div>
+<div id="tvOv"><i class="tvC tvTL"></i><i class="tvC tvTR"></i><i class="tvC tvBL"></i><i class="tvC tvBR"></i><div id="tvTopL" class="tvOsd"><span id="tvRec"></span><span id="tvTag">TV制导 · TV GUIDANCE</span><span id="tvClock"></span></div><div id="tvTopR" class="tvOsd"><span class="tvSig">▂▄▆█</span> LINK</div><div id="tvReticle"><i class="tvRk t"></i><i class="tvRk b"></i><i class="tvRk l"></i><i class="tvRk r"></i><i class="tvRc"></i></div><div id="tvZoom" class="tvOsd">ZOOM ×2.8</div><div id="tvBotL" class="tvOsd"></div><div id="tvBotR" class="tvOsd"></div><div id="tvLifeWrap"><div id="tvLifeFill"></div></div></div>
 <div id="leadPip"></div>
 <div id="gunPip"></div>
 <div id="airPip"></div>
@@ -126,6 +129,8 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="tbtn" id="tATN" data-i18n style="display:none">AT雷</div>
 <div class="tbtn" id="tSquad" data-i18n>小队</div>
 <div class="tbtn" id="tFollow" data-i18n>跟随</div>
+<div class="tbtn" id="tCmdMap" data-i18n>指挥</div>
+<div class="tbtn" id="tSlow" data-i18n>减速</div>
 <div class="tbtn" id="tView" data-i18n>视角</div>
 <div class="tbtn" id="tScore" data-i18n>战况</div>
 <div class="tbtn" id="tMenu">≡</div>
@@ -141,71 +146,126 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="gameLogoSub" data-i18n>STEEL FRONT · 第二次世界大战</div>
 <div class="subtitle" id="menuSub">—— 战役 ——</div>
 <div class="menuNav">
-<button class="bigBtn navBtn" id="newGameBtn" data-p="mPlay" data-i18n>新 游 戏</button>
+<button class="bigBtn navBtn" id="newGameBtn" data-p="mCombatHub" data-i18n>战 备 大 厅</button>
 <button class="bigBtn navBtn" id="continueBtn" data-i18n>继 续 游 戏</button>
-<button class="bigBtn navBtn" data-p="mData" data-i18n>战 绩 数 据</button>
+<button class="bigBtn navBtn" data-p="mData" data-i18n>数 据 成 就</button>
 <button class="bigBtn navBtn" data-p="mSet" data-i18n>游 戏 设 置</button>
 <button class="bigBtn navBtn" data-p="mHelp" data-i18n>游 戏 说 明</button>
 </div>
 <div id="menuVer">STEEL FRONT · WWII CAMPAIGNS</div>
 </div>
-<div id="mPlay" class="mSub hidden">
-<h2 class="mSubTitle" data-i18n>开 始 游 戏</h2>
-<div class="secLabel"><span data-i18n>战役</span> <span style="opacity:.55;font-weight:400" data-i18n>点击卡片选择战役</span></div>
-<div class="rowFlex" id="campRow" style="flex-wrap:wrap;justify-content:center"></div>
-<div class="secLabel" data-i18n>选择阵营</div>
-<div class="rowFlex">
-<button class="optBtn teamBtn" id="teamUS">盟军</button>
-<button class="optBtn teamBtn" id="teamGER">德军</button>
-</div>
-<div class="secLabel" data-i18n>BOT 难度</div>
-<div class="rowFlex">
-<button class="optBtn diffBtn" data-d="0" data-i18n>新兵</button>
-<button class="optBtn diffBtn sel" data-d="1" data-i18n>老兵</button>
-<button class="optBtn diffBtn" data-d="2" data-i18n>精英</button>
-</div>
-<div class="secLabel" data-i18n>昼夜</div>
-<div class="rowFlex">
-<button class="optBtn dnBtn" data-dn="day" data-i18n>白天</button>
-<button class="optBtn dnBtn" data-dn="night" data-i18n>黑夜</button>
-<span id="dnLock" style="display:none;opacity:.55;font-size:12px;align-self:center" data-i18n>本图固定为黑夜</span>
-</div>
-<div class="secLabel" data-i18n>天气</div>
-<div class="rowFlex">
-<button class="optBtn wxBtn" data-wx="map">跟随地图</button>
-<button class="optBtn wxBtn" data-wx="clear">晴朗</button>
-<button class="optBtn wxBtn" data-wx="overcast">多云</button>
-<button class="optBtn wxBtn" data-wx="rain">小雨</button>
-<button class="optBtn wxBtn" data-wx="storm">暴雨</button>
-<span id="wxHint" style="display:none;opacity:.55;font-size:12px;align-self:center"></span>
-</div>
-<div class="secLabel" data-i18n>在场人数</div>
-<div class="rowFlex">
-<button class="optBtn sizeBtn sel" data-s="0" data-i18n>标准 11v11</button>
-<button class="optBtn sizeBtn" data-s="1" data-i18n>加强 16v16</button>
-<button class="optBtn sizeBtn" data-s="2" data-i18n>史诗 22v22</button>
-<button class="optBtn sizeBtn" data-s="3" data-i18n>超编 30v30</button>
-</div>
-<div class="secLabel" data-i18n>兵力票池</div>
-<div class="rowFlex">
-<button class="optBtn hmulBtn" data-h="0.5">×0.5</button>
-<button class="optBtn hmulBtn" data-h="1">×1</button>
-<button class="optBtn hmulBtn sel" data-h="2">×2</button>
-</div>
-<div class="center" style="margin-top:22px">
-<button class="bigBtn" id="startBtn" data-i18n>进 入 战 场</button>
-<button class="bigBtn backBtn" data-i18n>返 回</button>
-</div>
-<div class="secLabel" style="opacity:.55;font-weight:400;text-align:center;letter-spacing:1px" data-i18n>开始新游戏会放弃当前未决出胜负的战局</div>
+<div id="mCombatHub" class="mSub menu-subpanel hidden">
+  <div class="mode-tabs">
+    <button class="tab-btn active" data-mode="campaign" data-i18n>历史战役</button>
+    <button class="tab-btn" data-mode="zombie" data-i18n>丧尸生存</button>
+  </div>
+
+  <div class="hub-body">
+    <div class="hub-left">
+      <div class="theater-filter" id="hubTheaters">
+        <button class="filter-chip active" data-theater="all" data-i18n>全部</button>
+        <button class="filter-chip" data-theater="weur" data-i18n>西欧</button>
+        <button class="filter-chip" data-theater="eeur" data-i18n>东欧</button>
+        <button class="filter-chip" data-theater="pac" data-i18n>太平洋</button>
+        <button class="filter-chip" data-theater="asia" data-i18n>远东</button>
+      </div>
+      <div class="map-grid" id="hubMapGrid"></div>
+      <div id="hubProcgenPage" class="hub-subpage hidden">
+        <button type="button" id="hubPgBack" data-i18n>‹ 返回地图列表</button>
+        <div class="secLabel" data-i18n>战场推演模式</div>
+        <div class="segmented-control" id="hubProcgenModeSeg" style="margin-bottom:8px">
+          <button data-pmode="known" class="active" data-i18n>已探明种子 (公开演练)</button>
+          <button data-pmode="unknown" data-i18n>未知遭遇 (战争迷雾)</button>
+        </div>
+        <div class="secLabel" data-i18n>战场规模</div>
+        <div class="segmented-control" id="hubPgSizeSeg" style="margin-bottom:8px">
+          <button data-psize="300" data-i18n>小 · 300m</button>
+          <button data-psize="380" class="active" data-i18n>中 · 380m</button>
+          <button data-psize="480" data-i18n>大 · 480m</button>
+        </div>
+        <div class="secLabel" data-i18n>地图种子 · 同种子同图</div>
+        <div class="rowFlex" style="gap:6px;align-items:center">
+          <input id="hubSeedInp" type="text" inputmode="numeric" placeholder="种子 (留空=每局随机)" style="flex:1;padding:6px 10px;background:#161a14;color:#dfe6d8;border:1px solid #4a5a3a;border-radius:4px;font:13px sans-serif">
+          <button class="optBtn" id="hubSeedRnd" style="white-space:nowrap" data-i18n>随机新种子</button>
+        </div>
+        <div id="hubFavWrap" style="margin-top:8px">
+          <div style="font-size:12px;color:#a8a48c;margin-bottom:4px" data-i18n>我的种子收藏：</div>
+          <div id="hubFavList" style="display:flex;gap:6px;flex-wrap:wrap;max-height:80px;overflow-y:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hub-right">
+      <div class="briefing-card" id="hubBriefing">
+        <h3 id="briefTitle">战役名称</h3>
+        <p id="briefDesc">战役简报与胜利目标...</p>
+      </div>
+      
+      <div class="rules-form">
+        <div class="form-row" id="hubZombieSubRow" style="display:none">
+          <label data-i18n>生存目标</label>
+          <div class="segmented-control" id="hubZombieSubSeg">
+            <button data-zsub="solo" class="active" data-i18n>单队生存 (撑过10分钟)</button>
+            <button data-zsub="teams" data-i18n>双队对抗 (活到最后)</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label data-i18n>作战阵营</label>
+          <div class="segmented-control" id="hubFactionSeg"></div>
+        </div>
+
+        <div class="form-row">
+          <label data-i18n>战场规模</label>
+          <div class="segmented-control" id="hubSizeSeg">
+            <button data-size="11">11v11</button>
+            <button data-size="16" class="active">16v16</button>
+            <button data-size="22">22v22</button>
+            <button data-size="30">30v30</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label data-i18n>战斗难度</label>
+          <div class="segmented-control" id="hubDiffSeg">
+            <button data-diff="0" data-i18n>新兵</button>
+            <button data-diff="1" class="active" data-i18n>老兵</button>
+            <button data-diff="2" data-i18n>精英</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label data-i18n>战场昼夜</label>
+          <div class="segmented-control" id="hubDayNightSeg">
+            <button data-dn="day" class="active" data-i18n>白天</button>
+            <button data-dn="night" data-i18n>黑夜</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label data-i18n>战场天候</label>
+          <div class="segmented-control" id="hubWeatherSeg">
+            <button data-wx="map" class="active" data-i18n>史实推荐</button>
+            <button data-wx="clear" data-i18n>晴朗</button>
+            <button data-wx="overcast" data-i18n>阴天</button>
+            <button data-wx="rain" data-i18n>小雨</button>
+            <button data-wx="storm" data-i18n>暴雨</button>
+          </div>
+        </div>
+      </div>
+
+      <button id="hubLaunchBtn" class="launch-btn" data-i18n>开 始 战 斗</button>
+      <button class="bigBtn backBtn" id="hubBackBtn" style="margin-top:10px;width:100%" data-i18n>返 回</button>
+    </div>
+  </div>
+  <div style="display:none">
+    <div id="mPlay"></div>
+    <div id="mMini"></div>
+    <button id="startBtn"></button>
+  </div>
 </div>
 <div id="mSet" class="mSub hidden">
 <h2 class="mSubTitle" data-i18n>游 戏 设 置</h2>
-<div class="secLabel" data-i18n>画质</div>
-<div class="rowFlex">
-<button class="optBtn qualBtn" data-q="0" data-i18n>低画质</button>
-<button class="optBtn qualBtn sel" data-q="1" data-i18n>中画质</button>
-<button class="optBtn qualBtn" data-q="2" data-i18n>高画质·滤镜·软阴影</button>
-</div>
 <div class="secLabel" data-i18n>操作方式</div>
 <div class="rowFlex">
 <button class="optBtn ctrlBtn" data-c="auto" data-i18n>自动</button>
@@ -218,27 +278,119 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <button class="optBtn langBtn" id="langZh">中文</button>
 <button class="optBtn langBtn" id="langEn">English</button>
 </div>
+<div class="secLabel" data-i18n>性能与画面</div>
+<div class="rowFlex">
+<button class="optBtn" id="perfSetBtn" data-i18n>⚙ 性能与画面...</button>
+</div>
+<div class="secLabel" data-i18n>游戏内容</div>
+<div class="rowFlex">
+<button class="optBtn" id="gameplaySetBtn" data-i18n>🎮 游戏内容设置...</button>
+</div>
+<div class="sliderRow"><span data-i18n>鼠标灵敏度</span> <input type="range" id="sensRange" min="20" max="200" value="100"><span class="val" id="sensVal">1.0</span></div>
+<div class="sliderRow"><span data-i18n>音量</span> <input type="range" id="volRange" min="0" max="100" value="80"><span class="val" id="volVal">80</span></div>
+<div class="sliderRow"><span data-i18n>触控按键大小</span> <input type="range" id="tsizeRange" min="70" max="150" value="100"><span class="val" id="tsizeVal">100%</span></div>
+<div class="secLabel" data-i18n>数据</div>
+<div class="rowFlex">
+<button class="optBtn" id="clearDataBtn"></button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>清除全部战役战绩记录、本图历史最高分、成就与终身累计统计；语言/画质/灵敏度等设置保留。此操作不可撤销。</div>
+<div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
+</div>
+<div id="mGameplaySet" class="mSub hidden">
+<h2 class="mSubTitle" data-i18n>游 戏 内 容 设 置</h2>
+<div class="secLabel" data-i18n>瞄准吸附</div>
+<div class="rowFlex">
+<button class="optBtn" id="aimAssistBtn">🎯 瞄准吸附: 轻度</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>普通瞄准/开镜/载具火力的弹道, 在<b>差一点点打中</b>时会被轻轻掰向目标; 明显打偏时不起作用, 隔墙/穿过队友一律不吸。点击循环 关→轻度→标准, 改档即时生效。</div>
 <div class="secLabel" data-i18n>实验模式</div>
 <div class="rowFlex">
 <button class="optBtn" id="expBtn">⚙ 实验模式: 关</button>
 </div>
-<div class="secLabel" data-i18n>瞄准吸附</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>反坦克兵替换为巡飞弹兵，副武器配燃烧弹；可在兵种卡开启调试模式。</div>
+<div class="secLabel" data-i18n>地图全图信息</div>
 <div class="rowFlex">
-<button class="optBtn aimBtn" data-a="0" data-i18n>关</button>
-<button class="optBtn aimBtn sel" data-a="1" data-i18n>轻度</button>
-<button class="optBtn aimBtn" data-a="2" data-i18n>标准</button>
+<button class="optBtn" id="mapAllIntelBtn">🗺 地图全图信息: 关</button>
 </div>
-<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:6px" data-i18n-html>普通瞄准/开镜/载具火力的弹道, 在<b>差一点点打中</b>时会被轻轻掰向目标; 明显打偏时不起作用, 隔墙/穿过队友一律不吸。改档即时生效。</div>
-<div class="sliderRow"><span data-i18n>鼠标灵敏度</span> <input type="range" id="sensRange" min="20" max="200" value="100"><span class="val" id="sensVal">1.0</span></div>
-<div class="sliderRow"><span data-i18n>音量</span> <input type="range" id="volRange" min="0" max="100" value="80"><span class="val" id="volVal">80</span></div>
-<div class="sliderRow"><span data-i18n>触控按键大小</span> <input type="range" id="tsizeRange" min="70" max="150" value="100"><span class="val" id="tsizeVal">100%</span></div>
-<div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>开启后无论天气与时间均显示全图士兵与丧尸动态点位；关闭后在低能见度天气/夜间仅在角色视野圆内透视点位。</div>
+<div class="secLabel" data-i18n>手雷预瞄地图标记</div>
+<div class="rowFlex">
+<button class="optBtn" id="nadeMapMarkBtn">🎯 手雷预瞄地图标记: 开</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>持雷瞄准期间，小地图与大地图显示预计落点圈（半径=爆炸范围），并为圈内目标点位加黄色描边。</div>
+<div class="secLabel" data-i18n>成就弹窗位置</div>
+<div class="rowFlex">
+<button class="optBtn" id="achPosBtn">🎖 成就弹窗位置: 右上</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>达成成就的提示框弹出位置：右上 = killfeed 下方竖卡（从右滑入）；正下 = 屏幕底部居中横匾（从下升起）。改档即时生效。</div>
+<div class="secLabel" data-i18n>游戏中显示详细操作</div>
+<div class="rowFlex">
+<button class="optBtn" id="showCtlHintsBtn">💡 游戏中显示详细操作: 开</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>关闭后不再显示多键操作明细（如“左键 开火 · C 换炮位”）、顶部模式说明与部署页键位提示；保留“F 进入坦克”这类单键交互入口提示与血量/战报等状态信息。改档即时生效。</div>
+<div class="secLabel" data-i18n>自动脱离载具</div>
+<div class="rowFlex">
+<button class="optBtn" id="autoExitVehBtn">🪂 自动脱离载具: 关</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>开启后己方载具被击毁的瞬间自动下车脱离（飞机=跳伞），代替与载具一同阵亡；舰艇弃船机制不受影响。默认关。</div>
+<div class="secLabel" data-i18n>指挥官减速</div>
+<div class="rowFlex">
+<button class="optBtn" id="cmdFocusBtn">📻 减速消耗读条: 开</button>
+<button class="optBtn" id="cmdSelfBtn">⚡ 减速对我无效: 关</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>指挥官兵种技能：按住 V 时间减速。关闭读条消耗=无限减速（观战级玩具档）；开启“对我无效”=减速中自己行动如常（超人档）。</div>
+<div class="center" style="margin-top:20px"><button class="bigBtn" id="gameplaySetBackBtn" data-i18n>返 回</button></div>
+</div>
+<div id="mPerfGfx" class="mSub hidden">
+<h2 class="mSubTitle" data-i18n>性 能 与 画 面</h2>
+<div class="secLabel" data-i18n>画质</div>
+<div class="rowFlex">
+<button class="optBtn qualBtn" data-q="0" data-i18n>低画质</button>
+<button class="optBtn qualBtn sel" data-q="1" data-i18n>中画质</button>
+<button class="optBtn qualBtn" data-q="2" data-i18n>高画质·滤镜·软阴影</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>画质档影响: 渲染分辨率上限、阴影视锥与精度、滤镜、雾距、水下视距、爆炸火星与烟; 树木/草丛密度随档, 重建地图后生效。</div>
+<div class="secLabel" data-i18n>渲染缩放</div>
+<div class="rowFlex">
+<button class="optBtn" id="rscaleBtn">🔬 渲染缩放: 100%</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>整体渲染分辨率在画质档上限之上再乘的百分比: 低配设备降此档收益最大, 画面变糊但帧数显著提升。</div>
+<div class="secLabel" data-i18n>阴影刷新</div>
+<div class="rowFlex">
+<button class="optBtn" id="shfrqBtn">🌘 阴影刷新: 跟随画质</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>阴影每帧重绘的频率: 跟随画质=高画质逐帧/低中档半频(30Hz); 1/4 频再省一半; 关闭=完全无影子, 收益最大。</div>
+<div class="secLabel" data-i18n>视距</div>
+<div class="rowFlex">
+<button class="optBtn" id="vdistBtn">🌄 视距: 标准</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>雾距乘子: 调低后远处提前入雾, 同屏可见物体减少, 大地图/夜景收益明显, 不影响 Bot 索敌距离。</div>
+<div class="secLabel" data-i18n>特效粒子</div>
+<div class="rowFlex">
+<button class="optBtn" id="fxmaxBtn">✨ 特效粒子: 标准</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>全屏粒子(烟/火星/尘土/水花)的总量上限: 爆炸密集时精简档最省, 增强档特效更满。</div>
+<div class="secLabel" data-i18n>降水密度</div>
+<div class="rowFlex">
+<button class="optBtn" id="pmulBtn">🌧 降水密度: 标准</button>
+</div>
+<div class="center" style="opacity:.55;font-size:12px;line-height:1.5;margin-top:4px" data-i18n-html>雨雪粒子数量乘子: 暴雨/暴风雪档收益最大, 标准档=各天气设计粒数。</div>
+<div class="center" style="margin-top:18px"><button class="bigBtn" id="perfGfxBackBtn" data-i18n>返 回</button></div>
 </div>
 <div id="mData" class="mSub hidden">
-<h2 class="mSubTitle" data-i18n>战 绩 数 据</h2>
+<h2 class="mSubTitle" data-i18n>数 据 成 就</h2>
+<div class="mode-tabs" id="dataTabs">
+<button class="tab-btn active" data-dt="rec" data-i18n>战绩数据</button>
+<button class="tab-btn" data-dt="ach" data-i18n>成 就</button>
+</div>
+<div id="dataRecPane">
+<div class="secLabel" data-i18n>终身累计</div>
+<div id="lifeStatsWrap"></div>
 <div class="secLabel" data-i18n>各图历史最佳成绩</div>
 <div id="recWrap"><div id="recList" class="recGrid"></div></div>
-<div class="recNote" data-i18n>箭头 ↓ = 该项越少越好 · 观战模式的对局不计入历史记录</div>
+<div class="recNote" data-i18n>箭头 ↓ = 该项越少越好 · 调试模式的对局不计入历史记录</div>
+</div>
+<div id="dataAchPane" class="hidden"></div>
 <div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
 </div>
 <div id="mHelp" class="mSub hidden">
@@ -250,21 +402,21 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="secLabel" data-i18n-html>基础操作</div>
 <div class="helpDoc">
 <div data-i18n-html><b>WASD</b> 移动 · <b>Shift</b> 疾跑(机瞄时为屏息稳枪) · <b>空格</b> 跳跃</div>
-<div data-i18n-html><b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填 · <b>1/2</b> 切换武器 · <b>V</b> 近战</div>
-<div data-i18n-html><b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度) · <b>Q/E</b> 左右侧身探头</div>
+<div data-i18n-html><b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断) · <b>1/2</b> 切换武器 · <b>N</b> 近战</div>
+<div data-i18n-html><b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消) · <b>Q/E</b> 左右侧身探头</div>
 <div data-i18n-html><b>U</b> 第三人称: 开/关 (步行可用; 开镜或上车时自动回到第一人称)</div>
 <div data-i18n-html>蹲下/卧倒/架枪都会显著降低枪口晃动; 疾跑后停下稍等呼吸恢复再开枪更准。</div>
-<div data-i18n-html><b>瞄准吸附</b>(游戏设置内, 默认「轻度」): 差一点点打中的那一枪会被轻轻掰向目标 —— 普通瞄准/开镜/载具火力(主炮·机枪·炮位)都生效, 明显打偏时不起作用, 隔墙或穿过队友一律不吸。</div>
+<div data-i18n-html><b>瞄准吸附</b>(游戏内容设置内, 默认「轻度」): 差一点点打中的那一枪会被轻轻掰向目标 —— 普通瞄准/开镜/载具火力(主炮·机枪·炮位)都生效, 明显打偏时不起作用, 隔墙或穿过队友一律不吸; 已瞄着头或身体时绝不掰动 (不抢爆头)。</div>
 </div>
 <div class="secLabel" data-i18n-html>投掷物与医疗</div>
 <div class="helpDoc">
-<div data-i18n-html><b>G</b> 手雷(可按住烹饪引信) · <b>3</b> 反坦克雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带包扎(+45生命, 受击会打断)</div>
+<div data-i18n-html><b>G</b> 手雷(可按住烹饪引信, 举雷中按<b>X</b>收回; 单次受创>25或改做其他动作会打断) · <b>3</b> 反坦克雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹 · <b>H</b> 绷带包扎(+45生命, 单次受创>25会打断)</div>
 <div data-i18n-html>燃烧弹: 红色烈焰烟云, 同样遮蔽视线, 云内步兵持续灼烧(突击兵/巡飞弹兵携带)。</div>
 <div data-i18n-html>医疗箱: 工程兵建造菜单第5件(按<b>5</b>选到后<b>B</b>建造), 放下后队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
 </div>
 <div class="secLabel" data-i18n-html>载具与固定武器</div>
 <div class="helpDoc">
-<div data-i18n-html>靠近载具/重机枪/反坦克炮/防空炮/迫击炮/弹药箱按 <b>F</b> 使用。</div>
+<div data-i18n-html>靠近载具/重机枪/反坦克炮/防空炮/迫击炮/弹药箱按 <b>F</b> 使用。弹药箱/补给点补满投掷物与绷带; 子弹进弹袋——备用弹顶到「上限+一个弹夹」(有意超上限), 弹夹要自己按 <b>R</b> 装填。</div>
 <div data-i18n-html><b>坦克</b>: WASD 驾驶 · 左键主炮(圆环为落点) · 右键同轴机枪 · <b>C</b> 炮手镜 · F 下车; 车速够快可撞塌砖墙</div>
 <div data-i18n-html><b>夜战</b>(选图时可选「黑夜」): <b>L</b> 车辆大灯开关 —— 照亮路面也暴露自己; 旗点上空有周期照明弹, 被探照灯照中会招致远距离集火; 黑夜里小地图只显示近距/开火的敌人。</div>
 <div data-i18n-html><b>飞机</b>: W/S 油门 · A/D 压坡转向 · 鼠标拉杆 · 左键机枪 · 右键/B 投弹 · F 跳伞</div>
@@ -280,12 +432,19 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="helpDoc">
 <div data-i18n-html>步枪兵 / 突击兵 / 狙击手 / 反坦克兵 / 工程兵, 各带不同主武器与投掷物; 武器还决定移速(手枪最快)与远距离伤害衰减。落地有 0.5 秒出生保护, 开火立即解除。</div>
 <div data-i18n-html>工程兵 <b>B</b> 建造 · 靠近自己工事 <b>B</b> 读条拆除(退点) · <b>5</b> 切换工事(沙袋墙/铁丝网/拒马/MG42/医疗箱) · <b>6</b> 架设/回收迫击炮 · 架好的迫击炮全员可 <b>F</b> 操作</div>
-<div data-i18n-html><b>实验模式</b>(游戏设置中开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 弹上TV制导: <b>F</b> 切换第一/第三视角, 左键自爆, <b>右键加速冲刺</b>(松开回落巡航); 触碰目标/地面即爆, 额外携带燃烧弹(按<b>6</b>)。</div>
-<div data-i18n-html><b>观战模式</b>(实验模式下, 在兵种卡「巡飞弹兵」上再点一次开关): 免伤 · 不被索敌 · 弹药无限, 本局不计入历史记录(只在兵种卡上点开开关又取消的不算)。战斗中开启会先确认, 且<b>下一次部署才生效</b>(关闭立即生效)。<b>双击空格</b>悬停飞行 / <b>H</b> 气动飞行, 两种飞行中<b>左键都能开火</b>; 副武器位换成 <b>观战连狙</b>(半自动·4x, 可开镜); 操控巡飞弹时按 <b>T</b> = 弹体立刻消失并把自身传送到弹体位置。观战者<b>不指挥小队</b>(T/Y 关闭), 出生列表里的坦克/战机/舰艇/两栖车<b>一律标注「观战不可征用」</b>(想开艇请走近按 <b>F</b> 上艇); <b>F</b> = 按需召唤<b>幽灵坦克</b>(全白 · 免伤 · 弹丸穿透 · 可对双方开火, 开场不预置)。观战工具: <b>J</b> 信息层(名字/队属/血量/交火指向线) · <b>K</b> 时停(冻结整个战场与游戏时钟; 你本人 · 正在开的座驾 · 你自己打出的弹丸都不受影响 —— 可以走到任何位置慢慢看, 也可以定点打一发再按 K 把它停在空中; 顶部栏常驻「⏸ 时停中」读数, 回主菜单或战局结束自动解除)。</div>
+<div data-i18n-html><b>实验模式</b>(游戏设置中开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 弹上TV制导: <b>U</b> 切换第一/第三视角, 左键自爆, <b>空格加速冲刺</b>(松开回落巡航), <b>右键开镜放大</b>(按住强制第一人称); 触碰目标/地面即爆, 额外携带燃烧弹(按<b>6</b>)。</div>
+<div data-i18n-html><b>调试模式</b>(原「观战模式」; 实验模式下, 在兵种卡「巡飞弹兵」上再点一次开关): 免伤 · 不被索敌 · 弹药无限, 本局不计入历史记录(只在兵种卡上点开开关又取消的不算)。战斗中开启会先确认, 且<b>下一次部署才生效</b>(关闭立即生效)。<b>双击空格</b>悬停飞行 / <b>H</b> 气动飞行(空格加速), 两种飞行中<b>左键都能开火 · 右键都能瞄准</b>; 副武器位换成 <b>观战连狙</b>(全自动·4x, 可开镜); 投掷物<b>四种全配</b>(<b>G</b> 手雷 · <b>3</b> AT雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹, 持雷有弹道预演, 自动回满); 操控巡飞弹时按 <b>T</b> = 弹体立刻消失并把自身传送到弹体位置。观战者<b>不指挥小队</b>(T/Y 关闭), 出生列表里的坦克/战机/舰艇/两栖车<b>一律标注「观战不可征用」</b>(想开艇请走近按 <b>F</b> 上艇); <b>F</b> = 按需召唤<b>幽灵坦克</b>(全白 · 免伤 · 弹丸穿透 · 可对双方开火, 开场不预置)。观战工具: <b>Q</b> 附身准星Bot(只读借眼, <b>E</b> 脱离还原观察位) · <b>J</b> 信息层(名字/队属/血量/交火指向线) · <b>K</b> 时停(冻结整个战场与游戏时钟; 你本人 · 正在开的座驾 · 你自己打出的弹丸都不受影响 —— 可以走到任何位置慢慢看, 也可以定点打一发再按 K 把它停在空中; 顶部栏常驻「⏸ 时停中」读数, 回主菜单或战局结束自动解除) · <b>L</b> 战术手电(步行)/载具大灯(含幽灵坦克, 夜晚照明)。</div>
+<div data-i18n-html><b>观战模式</b>(票数归零后, 重部署页的「部署」按钮会变成「观战」; 点它进入): 类 MC 旁观者 —— 无碰撞 · 无法攻击 · 无有效交互 · 创造式飞行(<b>滚轮</b>调速度, Space 升 / Shift 降); <b>左键</b>附身准星下的 Bot 借他的视角看战局(只读), <b>Q/E</b> 轮换附身目标, <b>右键</b>脱离回自由飞行, <b>Esc</b> 呼出部署页。战局在观战中结束时按<b>开局阵营</b>结算胜利/战败并<b>计入历史记录</b>(与调试模式的区别: 本模式不能干涉战局)。</div>
 </div>
 <div class="secLabel" data-i18n-html>小队与指挥</div>
 <div class="helpDoc">
-<div data-i18n-html><b>T</b> 标记进攻位置 · <b>Y</b> 令小队跟随 · <b>M</b> 战场大地图 · <b>Tab</b> 战场记分板</div>
+<div data-i18n-html><b>T</b> 标记进攻位置 · <b>Y</b> 令小队跟随 · <b>M</b> 战场大地图 · <b>Tab</b> 战场记分板 · <b>F1</b> 显示/隐藏战斗HUD</div>
+</div>
+<div class="secLabel" data-i18n-html>指挥官兵种</div>
+<div class="helpDoc">
+<div data-i18n-html>选兵种时选「指挥官」: 主武器是<b>通讯仪</b>(无火力), 全局指挥己方步兵小队 / 坦克 / 飞机。首次选中会先进入<b>布势</b>界面(战场冻结): 滚轮切单位、E/F/R 下初始令、右侧调每组兵种配比, 点<b>✚ 确认开战</b>即按此方案开打, 点<b>↩ 撤销布势</b>可退出并重选兵种。确认之后本局兵种锁定, 不可再换。</div>
+<div data-i18n-html>步行于地面时<b>右键</b>开/关指挥地图(手持通讯仪): <b>滚轮</b> 切换当前高亮的可指挥单位(其余单位在右侧列表里压缩成细条) · <b>E</b> 令它到光标处防守 · <b>F</b> 令它进攻光标处(飞机=向该点投弹) · <b>R</b> 恢复自由推进 · <b>左键点地图</b> 集火该点(半径内己方火力 14 秒内优先打这里) · <b>中键拖动</b> 平移视图 · <b>右键</b> 退出指挥态。开图期间人物定身, 关图才恢复行动。</div>
+<div data-i18n-html>按住 <b>V</b> 时间减速(战场流速 0.2 倍): 消耗底部「指挥读条」, 满格约 7 秒, 松开后按消耗量的 1/3 速度恢复; 读条耗尽会自动回到常速, 需回到 1/4 才能再次使用。游戏设置里可关闭读条消耗(无限减速)或开启「对我无效」(减速中自己行动如常)。</div>
 </div>
 <div class="secLabel" data-i18n-html>战局目标与胜负</div>
 <div class="helpDoc">
@@ -347,76 +506,123 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div id="endScore">0</div>
 <div id="endBestLine"><span id="endBest"></span><span id="endNewRec" class="hidden" data-i18n>新纪录!</span></div>
 </div>
-<div id="endSpecNote" class="hidden" data-i18n>观战模式 · 本局不计入历史记录</div>
+<div id="endSpecNote" class="hidden" data-i18n>调试模式 · 本局不计入历史记录</div>
+<div id="endSeedLine" class="hidden" style="font-size:13px;color:#d8c894;margin:8px 0;text-align:center">
+  <span data-i18n>本局地图种子</span>: <b id="endSeedNum" style="color:#ffe9b0"></b>
+  <button id="endSeedFavBtn" class="optBtn" style="margin-left:8px;padding:3px 10px;font-size:12px" data-i18n>☆ 收藏种子</button>
+</div>
 <div id="endGrid"></div>
 <div id="endTickets"></div>
 <div class="center"><button class="bigBtn" id="againBtn" data-i18n>返 回 主 界 面</button></div>
 </div>
 </div>
 <div id="pauseOv" class="screen hidden">
-<div class="panel" style="text-align:center">
-<div class="gameLogo" style="font-size:34px" data-i18n>已 暂 停</div>
-<div class="subtitle" data-i18n>战斗冻结 · 按 ESC 继续</div>
-<div class="center"><button class="bigBtn" id="pauseResumeBtn" data-i18n>继 续 战 斗</button></div>
-<div class="center"><button class="bigBtn menuBackBtn" id="pauseMenuBtn" data-i18n>返 回 主 界 面</button></div>
-</div>
+  <div class="panel pause-box" style="text-align:center;max-width:480px;margin:auto">
+    <div class="gameLogo" style="font-size:32px" data-i18n>游 戏 暂 停</div>
+    <div class="subtitle" style="margin-bottom:12px" data-i18n>战斗已冻结 · 按 ESC 继续</div>
+    <div id="pauseSeedLine" class="hidden" style="font-size:13px;color:#d8c894;margin-bottom:14px">
+      <span data-i18n>本局地图种子</span>: <b id="pauseSeedNum" style="color:#ffe9b0"></b>
+      <button id="pauseSeedFavBtn" class="optBtn" style="margin-left:8px;padding:3px 10px;font-size:12px" data-i18n>☆ 收藏种子</button>
+    </div>
+    <div id="pauseMainBtns">
+      <div class="center" style="margin:8px 0"><button class="bigBtn p-btn primary" id="pauseResumeBtn" style="width:260px;white-space:nowrap" data-i18n>继 续 战 斗</button></div>
+      <div class="center" style="margin:8px 0"><button class="bigBtn p-btn" id="pauseSettingBtn" style="width:260px;white-space:nowrap" data-i18n>战 斗 设 置</button></div>
+      <div class="center" style="margin:8px 0"><button class="bigBtn p-btn" id="pauseHelpBtn" style="width:260px;white-space:nowrap" data-i18n>键 位 说 明</button></div>
+      <div class="center" style="margin:8px 0"><button class="bigBtn menuBackBtn danger" id="pauseMenuBtn" style="width:260px;color:#ff9c8a;white-space:nowrap" data-i18n>返 回 主 界 面</button></div>
+    </div>
+    <div id="pauseSettingPanel" class="hidden" style="text-align:left;padding:10px 16px">
+      <h3 style="margin-top:0;text-align:center;color:#e8dcb0" data-i18n>战 斗 设 置</h3>
+      <div class="secLabel" data-i18n>鼠标灵敏度</div>
+      <div class="rowFlex" style="align-items:center;gap:10px">
+        <input type="range" id="pauseSensRange" min="10" max="400" value="100" style="flex:1">
+        <span id="pauseSensVal" style="width:40px;text-align:right;color:#e8dcb0">1.0</span>
+      </div>
+      <div class="secLabel" data-i18n>主音量</div>
+      <div class="rowFlex" style="align-items:center;gap:10px">
+        <input type="range" id="pauseVolRange" min="0" max="100" value="100" style="flex:1">
+        <span id="pauseVolVal" style="width:40px;text-align:right;color:#e8dcb0">100</span>
+      </div>
+      <div class="secLabel" data-i18n>画面质量</div>
+      <div class="rowFlex" style="justify-content:center;gap:8px">
+        <button class="optBtn pauseQualBtn" data-q="0" data-i18n>低画质</button>
+        <button class="optBtn pauseQualBtn" data-q="1" data-i18n>中画质</button>
+        <button class="optBtn pauseQualBtn" data-q="2" data-i18n>高画质</button>
+      </div>
+      <div class="center" style="margin-top:16px">
+        <button class="bigBtn" id="pauseSettingBackBtn" style="width:160px;white-space:nowrap" data-i18n>返 回</button>
+      </div>
+    </div>
+    <div id="pauseHelpPanel" class="hidden" style="text-align:left;padding:10px 16px;font-size:13px;line-height:1.7;color:#cdd8c8">
+      <h3 style="margin-top:0;text-align:center;color:#e8dcb0" data-i18n>操作与键位说明</h3>
+      <div><b>WASD</b> 移动 / <b>空格</b> 跳跃 / <b>Shift</b> 冲刺</div>
+      <div><b>鼠标左键</b> 开火 / <b>右键</b> 瞄准机瞄 / <b>滚轮/1-4</b> 切枪</div>
+      <div><b>R</b> 换弹(读条中<b>X</b>取消) / <b>C</b> 蹲下 / <b>Z</b> 卧倒 / <b>N</b> 近战刺刀</div>
+      <div><b>M</b> 战场大地图 / <b>F</b> 载具操控 / <b>L</b> 车灯·手电</div>
+      <div><b>Esc</b> 战局整备与重部署 / 再按 <b>Esc</b> 暂停游戏</div>
+      <div><b>Tab</b> 战场记分板 / <b>F1</b> 开关HUD</div>
+      <div class="center" style="margin-top:14px">
+        <button class="bigBtn" id="pauseHelpBackBtn" style="width:160px;white-space:nowrap" data-i18n>返 回</button>
+      </div>
+    </div>
+  </div>
 </div>
 <!-- 2026-09-30 Ctrl+F5 事故修复: three/cannon 原走 jsdelivr CDN 且不带版本戳 —— 硬刷新会连同 CDN
      一起绕缓存重拉, CDN 抽风 (国内常态) ⇒ THREE 未定义 ⇒ 脚本链首用即抛 ⇒ bootFail (HUD 全裸+黑屏)。
      现收编进仓库 lib/ (three r152 + cannon 0.6.2, 与 dev/vendor 探针副本同源), file:// 离线可用。
      版本戳与 js/ 同纪律统一 ?v= (verify-spec T8 把守), 且禁止改回外链 (T8 有 cdn 断言)。 -->
-<script src="lib/three.min.js?v=20261006b"></script>
-<script src="lib/cannon.min.js?v=20261006b"></script>
+<script src="lib/three.min.js?v=20261111a"></script>
+<script src="lib/cannon.min.js?v=20261111a"></script>
 
-<script src="js/00-config.js?v=20261006b"></script>
-<script src="js/00b-i18n.js?v=20261006b"></script>
-<script src="js/01-audio.js?v=20261006b"></script>
-<script src="js/02-scene.js?v=20261006b"></script>
-<script src="js/03-terrain.js?v=20261006b"></script>
-<script src="js/04-collision.js?v=20261006b"></script>
-<script src="js/04b-fire.js?v=20261006b"></script>
-<script src="js/05-world.js?v=20261006b"></script>
-<script src="js/05a-buildings.js?v=20261006b"></script>
-<script src="js/05b-props.js?v=20261006b"></script>
-<script src="js/05c-layouts.js?v=20261006b"></script>
-<script src="js/06-engineering.js?v=20261006b"></script>
-<script src="js/07-nav.js?v=20261006b"></script>
-<script src="js/08-effects.js?v=20261006b"></script>
-<script src="js/09a-defs.js?v=20261006b"></script>
-<script src="js/09-weapons.js?v=20261006b"></script>
-<script src="js/10-viewmodel.js?v=20261006b"></script>
-<script src="js/11-soldiers.js?v=20261006b"></script>
-<script src="js/12-ragdolls.js?v=20261006b"></script>
-<script src="js/13-combat.js?v=20261006b"></script>
-<script src="js/14-bots.js?v=20261006b"></script>
-<script src="js/15-vehicles.js?v=20261006b"></script>
-<script src="js/15b-trucks.js?v=20261006b"></script>
-<script src="js/15c-specveh.js?v=20261006b"></script>
+<script src="js/00-config.js?v=20261111a"></script>
+<script src="js/00b-i18n.js?v=20261111a"></script>
+<script src="js/00c-procgen.js?v=20261111a"></script>
+<script src="js/01-audio.js?v=20261111a"></script>
+<script src="js/02-scene.js?v=20261111a"></script>
+<script src="js/03-terrain.js?v=20261111a"></script>
+<script src="js/04-collision.js?v=20261111a"></script>
+<script src="js/04b-fire.js?v=20261111a"></script>
+<script src="js/05-world.js?v=20261111a"></script>
+<script src="js/05a-buildings.js?v=20261111a"></script>
+<script src="js/05b-props.js?v=20261111a"></script>
+<script src="js/05c-layouts.js?v=20261111a"></script>
+<script src="js/06-engineering.js?v=20261111a"></script>
+<script src="js/07-nav.js?v=20261111a"></script>
+<script src="js/08-effects.js?v=20261111a"></script>
+<script src="js/09a-defs.js?v=20261111a"></script>
+<script src="js/09-weapons.js?v=20261111a"></script>
+<script src="js/10-viewmodel.js?v=20261111a"></script>
+<script src="js/11-soldiers.js?v=20261111a"></script>
+<script src="js/12-ragdolls.js?v=20261111a"></script>
+<script src="js/13-combat.js?v=20261111a"></script>
+<script src="js/14-bots.js?v=20261111a"></script>
+<script src="js/15-vehicles.js?v=20261111a"></script>
+<script src="js/15b-trucks.js?v=20261111a"></script>
+<script src="js/15c-specveh.js?v=20261111a"></script>
 <!-- 2026-09-20N 海战批: 15e(剪影建模) 必须在 15d(载具本体) 之前 —— 15d 的构造器调用 15e 的
      navBuildModel, 两者都走 const/函数声明, 倒序会在 TDZ 里抛错。15f(反舰炮位) 依赖 15d 的
      navalNear 索敌接口, 故排在其后、17-emplacements 之前 (炮位在布局期由 17 架设)。 -->
-<script src="js/15e-navmodels.js?v=20261006b"></script>
-<script src="js/15d-naval.js?v=20261006b"></script>
-<script src="js/15f-battery.js?v=20261006b"></script>
-<!-- 2026-09-30 阶段五 P4 (大舰): 15g(剪影建模) 必须在 15h(本体) 之前 —— 15h 的构造器调用 15g 的
-     capBuildModel (与 15e→15d 同一条 TDZ 纪律)。15h 依赖 15d 的 navalRaySeg/navalPtSeg2/水态接口,
-     故排在 15f 之后、16-aircraft 之前 (战机只需大小艇并列的命中链在运行时可见)。 -->
-<script src="js/15g-capmodels.js?v=20261006b"></script>
-<script src="js/15h-capital.js?v=20261006b"></script>
-<script src="js/16-aircraft.js?v=20261006b"></script>
-<script src="js/17-emplacements.js?v=20261006b"></script>
-<script src="js/18-game.js?v=20261006b"></script>
-<script src="js/19-input.js?v=20261006b"></script>
-<script src="js/19b-gamepad.js?v=20261006b"></script>
-<script src="js/20-player.js?v=20261006b"></script>
-<script src="js/20a-seats.js?v=20261006b"></script>
-<script src="js/21-match.js?v=20261006b"></script>
-<script src="js/22-hud.js?v=20261006b"></script>
-<script src="js/22a-menuart.js?v=20261006b"></script>
-<script src="js/22b-speclayer.js?v=20261006b"></script>
-<script src="js/23-deploy.js?v=20261006b"></script>
-<script src="js/23b-worldrestore.js?v=20261006b"></script>
-<script src="js/24-main.js?v=20261006b"></script>
+<script src="js/15e-navmodels.js?v=20261111a"></script>
+<script src="js/15d-naval.js?v=20261111a"></script>
+<script src="js/15f-battery.js?v=20261111a"></script>
+<!-- 2026-11-10: 纯海战图 (coral/ironbottom) 与大舰子系统 (15g/15h) 整体下架 → archive/naval-coral-ironbottom-20261110/。
+     15d/15e/15f (小艇/两栖建模/岸炮) 为塔拉瓦环礁 (island) 共用, 保留。 -->
+<script src="js/16-aircraft.js?v=20261111a"></script>
+<script src="js/17-emplacements.js?v=20261111a"></script>
+<script src="js/18-game.js?v=20261111a"></script>
+<script src="js/19-input.js?v=20261111a"></script>
+<script src="js/19b-gamepad.js?v=20261111a"></script>
+<script src="js/20-player.js?v=20261111a"></script>
+<script src="js/20a-seats.js?v=20261111a"></script>
+<script src="js/21-match.js?v=20261111a"></script>
+<script src="js/22-hud.js?v=20261111a"></script>
+<script src="js/22a-menuart.js?v=20261111a"></script>
+<script src="js/22b-speclayer.js?v=20261111a"></script>
+<script src="js/23-deploy.js?v=20261111a"></script>
+<script src="js/23b-worldrestore.js?v=20261111a"></script>
+<script src="js/25-zombies.js?v=20261111a"></script>
+<script src="js/26-commander.js?v=20261111a"></script>
+<script src="js/27-achievements.js?v=20261111a"></script>
+<script src="js/24-main.js?v=20261111a"></script>
 <script>
 // 兜底: 首屏 pre-hide 之后若主脚本链中途抛错, 不要留下"全黑屏且无 UI"的死局 ——
 // 只有 24-main 正常跑完才会置 window.__sfBooted; 未置位则解除隐藏并把菜单抬到最前, 让报错可见可交互。

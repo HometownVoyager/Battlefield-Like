@@ -504,6 +504,8 @@ class NavalCraft {
     this.flood+=(amt*(this.spec.floodK||0));         // §3.4: flood += dmg*floodK
     if(this.playerDriven&&typeof addDmgFlash==='function'){ addDmgFlash(0.35); addTrauma(0.3); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
     else if(attacker&&attacker.pos) this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
+    // 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走; follow 火源对舰艇通用, 04b-fire)
+    if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
     if(this.flood>1) this.beginDestroy(attacker,'sink');
     else if(this.hp<=0) this.die(attacker);
   }
@@ -544,6 +546,7 @@ class NavalCraft {
       rand(-1,1),rand(1.2,3),rand(-1,1),rand(1.0,2.0),1.6,rand(1.4,2.6),0.8,0.6);
     if(sea) waterSplash(V3(cx,wy+0.1,cz),1.8,true,true);
     if(this.fireSrc) removeFireSource(this.fireSrc);
+    if(this.burnSrc) removeFireSource(this.burnSrc); // 起火火源随退场一并掐 (follow 块对 alive=false 也会自动掐, 双保险)
     // 先拆夜战大灯 (N2): 黑化 traverse 会把 additive 光锥换成不透明材质, 辉光 Sprite 也会残留在沉船上
     if(typeof vehHeadlightKill==='function') vehHeadlightKill(this);
     // 残骸材质 (与坦克残骸同一材质单源)
@@ -556,6 +559,7 @@ class NavalCraft {
       else attacker.score=(attacker.score||0)+SCORE_TABLE.tank;
       addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
       if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击沉红档 (2026-09-30 批): 舰艇无乘员死亡链, 空艇击沉旧口径无屏中反馈
+      if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
     }
     if(typeof tickets!=='undefined'&&tickets) tickets[this.team]=Math.max(0,tickets[this.team]-(S.ticket||4));
     // 燃烧残骸 (两栖车): 持续火源 + 点燃周围植被 (与 Tank 同口径)
@@ -690,6 +694,9 @@ class NavalCraft {
   respawn(initial,silent){
     // 提前结清上一轮残骸 (碰撞体撤除 + 火源熄灭 + 视觉复位)
     if(this.fireSrc){ removeFireSource(this.fireSrc); this.fireSrc=null; }
+    // 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者/弃船标记不得跨生死携带
+    if(this.burnSrc){ removeFireSource(this.burnSrc); this.burnSrc=null; }
+    this.burning=false; this.burnBy=null; this._burnCrewOut=false;
     if(this.wreckBs){ for(const b of this.wreckBs) killDynCollider(b); this.wreckBs=null; }
     if(this.sinkJob){ finishSinkJob(this.sinkJob); this.sinkJob=null; }
     this.sink=null;
@@ -718,7 +725,7 @@ class NavalCraft {
     this.grp.visible=true;
     this.grp.rotation.set(0,this.yaw,0);
     this.grp.position.copy(this.pos);
-    this.grp.traverse(o=>{ if(o.isMesh&&o.userData.mat0) o.material=o.userData.mat0; });
+    this.grp.traverse(o=>{ if(o.isMesh&&o.userData.mat0){ o.material=o.userData.mat0; delete o.userData.mat0; } }); // ★2026-11-01: 还原即清账 —— userData 不长期攥 Material→map→canvas 引用 (禁对象引用红线)
     this.engineOn=true;                        // 重生: 引擎音频重新接管
     if(this.engine){ try{ this.engine.update(0,0); }catch(e){} }
     const sil=(silent===undefined)?!!initial:!!silent;
@@ -731,6 +738,14 @@ class NavalCraft {
     if(this.state==='sinking'){ this._updateSinking(dt); return; }
     if(!this.alive){ this._deadTick(dt); return; }
     const S=this.spec;
+    // 载具残血起火 (2026-11-09 批): 燃烧掉血账 —— 每秒烧 maxHp×VEH_BURN_FRAC/VEH_BURN_TIME, 自起火起
+    // VEH_BURN_TIME 秒内必烧毁 (直扣 hp 不走 takeDmg: 不刷 lastDmgT/不叠 flood); 击杀归因=点燃者。
+    // Bot 对齐: 起火即弃船 (Bot 车组 crewOut 落水逃离); 玩家不弹 —— 警告条提示, 沉没时既有弃船链接管。
+    if(this.burning){
+    if(!this._burnCrewOut&&this.crewBot&&!this.playerDriven){ this._burnCrewOut=true; this.crewOut(); }
+    this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
+    if(this.hp<=0){ this.die(this.burnBy||null); return; }
+    }
     this.cannonCd-=dt; this.secT-=dt; this.mgT-=dt; this.torpCd-=dt;
     // A#3 载具机枪过热 (契约 A): 每帧推进散热/解锁 (玩家 0.22/s 且开火不散 / AI 0.15/s 常散);
     // 放在 AI 决策与玩家输入之后 ⇒ 本帧的开火请求 (fireMG/fireSecondary) 已被 mgTrig 记到。
@@ -952,10 +967,10 @@ class NavalCraft {
     if(hitObstacle) this.vel*=0.9;
     // 装甲车辆碾压步兵 (履带态, 与 Tank 同一函数单源)
     if(Math.abs(this.vel)>0.8){
-      vehiclePushSoldiers(this,Math.max(2.05,this.halfW),S.hullL/2+0.45,
-        {dt,crusher:this.playerDriven?player:(this.crewBot||this.crew),
-         moving:Math.abs(this.vel)>1.2,yMax:1.9,frontalBand:1.5,symmetricFrontal:false,
-         crushDmg:320,pushVel:Math.abs(this.vel)});
+      const _o=_vpsOpts; _o.dt=dt; _o.crusher=this.playerDriven?player:(this.crewBot||this.crew);
+      _o.moving=Math.abs(this.vel)>1.2; _o.yMax=1.9; _o.frontalBand=1.5; _o.symmetricFrontal=false;
+      _o.crushDmg=320; _o.pushVel=Math.abs(this.vel); _o.checkSpectator=false;
+      vehiclePushSoldiers(this,Math.max(2.05,this.halfW),S.hullL/2+0.45,_o);
     }
   }
   // ── 浮态: 浪涌 + 转向横倾 + 加速纵倾 (浮航) / 悬挂弹簧 (履带态) ──
@@ -1036,9 +1051,14 @@ class NavalCraft {
       const spin=dt*(6+Math.abs(this.vel)*2.4);
       for(const pv of nd.propeller.children) pv.rotation.z=(pv.rotation.z||0)+spin;
     }
-    if(nd.rudder&&nd.rudder.rotation){
+    if(nd.rudder){
+      // 舵偏转 (2026-11-01 修): 与上面螺旋桨同一口径 —— 转的是 15e 每片"原点落在自己舵杆上"的
+      // nmRudderPivot 子枢轴, **不是整组** (组原点在艉中线上, 转整组=两片舵绕中线公转, 满舵扫进桨盘)。
+      // 契约不变: 驱动入口仍是 nodes.rudder 这一个; 艇的单舵无 pivot 子件 ⇒ 回退整组转 (旧结构兼容)。
       const tgt=-this.inTurn*0.5;
-      nd.rudder.rotation.y=dampF(nd.rudder.rotation.y||0,tgt,5,dt);
+      let piv=false;
+      for(const pv of (nd.rudder.children||[])) if(pv&&pv.name==='nmRudderPivot'){ pv.rotation.y=dampF(pv.rotation.y||0,tgt,5,dt); piv=true; }
+      if(!piv&&nd.rudder.rotation) nd.rudder.rotation.y=dampF(nd.rudder.rotation.y||0,tgt,5,dt);
     }
     if(this.engine&&this.engineOn){
       const dCam=this.pos.distanceTo(camera.position);
@@ -1119,7 +1139,7 @@ function navalPushCraft(c,dt){
 // ★2026-09-26E: 搁浅的艇**不被推** (它是坐在礁盘上的, 推开就等于"侧滑脱困", 与"只有倒车能脱困"的
 //   搁浅语义冲突 —— 实测把红线 3 的"PT 硬搁浅位移<1m"推成 11m); 对方搁浅时当**不可动障碍** (只推自己)。
 if(!c||!c.alive||c.state==='wreck'||c.state==='sinking'||c.state==='ground') return;
-const hc=navalHitCyl(c);
+const hc=navalHitCyl(c,_nHC);
 const offC=Math.max(2.5,(hc.r||2.2)*1.1);
 const sn=Math.sin(c.yaw), cs=Math.cos(c.yaw);
 // 推挤方向取**中心连线**、穿透量取"最深的那一组圆" —— 与 15-vehicles vehiclePushTanks 同一条实测定案:
@@ -1161,19 +1181,30 @@ if(closing&&c.playerDriven&&nowT-(c._ramPopT||-99)>1.5){ c._ramPopT=nowT; if(typ
 };
 for(const o of navalCraft){
 if(o===c||!o||!o.alive||o.state==='wreck'||o.state==='sinking') continue;
-const ho=navalHitCyl(o);
+const ho=navalHitCyl(o,_nHO);
 apply(o,o.pos.x,o.pos.z,o.yaw,ho.r,Math.max(2.5,(ho.r||2.2)*1.1),true);
 }
 // 艇↔坦克 (审计 4 的后半条): 坦克不会被推 (它是 15-vehicles 的刚体语义), 只把艇顶开 + 掉速
 if(typeof tanks!=='undefined') for(const tk of tanks){
 if(!tk||!tk.alive) continue;
-const ht=vehHitCyl(tk);
+const ht=vehHitCyl(tk,_nHO);
 apply(null,tk.pos.x,tk.pos.z,tk.yaw,Math.max(1.6,ht.r||2.2),Math.max(1.6,(ht.r||2.2)*1.2),false);
 }
 }
 // 命中圆柱 (§4.2): 两栖车复用 vehHitCyl 口径; 艇按 yaw 取主轴"长扁形" ——
 // 圆 r = 半宽×1.05 (rayCyl 可直接用), 附加 seg = 中心线胶囊 (navalRayHit/navalPointHit 用真形)
-function navalHitCyl(n){
+// out 参 (2026-11-01 性能批): navalPushCraft 每帧每艇两调 (hc/ho), 走模块槽零分配;
+// 缺省仍分配新对象 —— 15f 与 dev 探针走"返回并持有"路径, 不能共享槽 (seg 字段同理只在艇分支填)。
+const _nHC={x:0,z:0,r:2.2,y0:0,y1:0,seg:{ax:0,az:0,bx:0,bz:0,r:0}};
+const _nHO={x:0,z:0,r:2.2,y0:0,y1:0,seg:{ax:0,az:0,bx:0,bz:0,r:0}};
+function navalHitCyl(n,out){
+  if(out&&n.spec.kind==='amph') return vehHitCyl(n,out);
+  if(out){
+    const cap=navalCapsule(n);
+    out.x=n.pos.x; out.z=n.pos.z; out.r=cap.r; out.y0=cap.y0; out.y1=cap.y1;
+    out.seg.ax=cap.ax; out.seg.az=cap.az; out.seg.bx=cap.bx; out.seg.bz=cap.bz; out.seg.r=cap.r;
+    return out;
+  }
   if(n.spec.kind==='amph') return vehHitCyl(n);
   const cap=navalCapsule(n);
   return {x:n.pos.x,z:n.pos.z,r:cap.r,y0:cap.y0,y1:cap.y1,
@@ -1234,12 +1265,13 @@ function navalPointHit(p,team,r){
 //   仍按下面的兜底值跑)。旧版把"本帧位移"写死成 vel*0.02, 而 updateShells 真实步进是 vel*dt 且 dt≤0.05
 //   (24-main 的帧步长上限) ⇒ 低帧率 (20fps ⇒ dt=0.05) 时一步 2.5× 于这里的包络: 弹丸会**跳过**艇体
 //   (塔拉瓦礁盘上打登陆艇/鱼雷艇的实测形态)。现按真实 dt 取包络, 与调用方同一口径。
+const _nShDir=V3(0,0,1);
 function shellHitNaval(s,dt){
   if(!navalCraft.length||!s) return false;
   const step=s.vel.length()*(dt>0?dt:0.02);        // 本帧位移的上界 = 与 updateShells 同一支 (缺 dt 时退回旧口径)
   const shPad=(s.kind==='at')?0:SHELL_R;
   const maxD=Math.max(2.5,step+0.6)+shPad;
-  const dir=s.vel.clone().normalize();
+  const dir=_nShDir.copy(s.vel).normalize();   // 复用槽 (2026-11-01 性能批): 每弹每帧 clone 是纯垃圾, dir 本函数内同步消费不持有
   const r=navalRayHit(s.pos,dir,maxD,s.team,shPad);
   if(!r) return false;
   const hit=r.craft;
@@ -1346,11 +1378,7 @@ function updateTorpedoes(dt){
       if(dc<70&&typeof AudioSys!=='undefined'&&AudioSys.splash) AudioSys.splash(dc*0.55,false);
     }
     const hit=torpedoHitTest(t.pos,t.team,t.dmg,t.owner);
-    // 大舰吃雷 (2026-10-01b 修"鱼雷穿过大舰"): 小艇没接住时再问一次大舰管线 —— 判定/分区/进水/
-    //   战果记账全在 15h capitalTorpedoHit 内 (返回命中的舰 | null)。旧版这里只查 navalCraft,
-    //   鱼雷从 152m 的舰体正中穿过去 (那正是"鱼雷是唯一能有效重创大舰的轻兵器"这条口径的落点)。
-    const hitCap=(!hit&&typeof capitalTorpedoHit==='function')?capitalTorpedoHit(t.pos,t.team,t.dmg,t.owner):null;
-    if(hit||hitCap){
+    if(hit){   // (2026-11-10: 大舰吃雷 capitalTorpedoHit 钩随大舰子系统下架摘除)
       explosionFX(V3(t.pos.x,wy+0.4,t.pos.z));
       waterSplash(V3(t.pos.x,wy+0.2,t.pos.z),2.0,true,true);
       if(typeof AudioSys!=='undefined') AudioSys.explosion(t.pos.distanceTo(camera.position));

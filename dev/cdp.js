@@ -204,6 +204,32 @@ async key(code,key){
 await this.send('Input.dispatchKeyEvent',{type:'keyDown',code,key:key||code,windowsVirtualKeyCode:0});
 await this.send('Input.dispatchKeyEvent',{type:'keyUp',code,key:key||code,windowsVirtualKeyCode:0});
 }
+// ── 输入原语扩展 (2026-10-27 指挥官交互批) ──
+// 为什么必须补: 本批的验收面全是**按住型 / 拖拽型 / 非左键**输入 ——
+//   · 减速是「按住 V」的持续动作 ⇒ 要能 keyDown 与 keyUp **分开**发 (key() 是原子的一按一放,
+//     按住期状态永远采样不到);
+//   · 滚轮切高亮走 canvas 的 wheel 监听 ⇒ 需要 Input.dispatchMouseEvent 的 mouseWheel;
+//   · 右键退出指挥态走 contextmenu 的 mousedown button=right ⇒ 需要指定 button 与按下/抬起分离。
+// 语义与 CDP 一致: x/y 是 CSS 像素视口坐标, 与 getBoundingClientRect() 同一坐标系。
+async keyDown(code,key){
+await this.send('Input.dispatchKeyEvent',{type:'keyDown',code,key:key||code,windowsVirtualKeyCode:0});
+}
+async keyUp(code,key){
+await this.send('Input.dispatchKeyEvent',{type:'keyUp',code,key:key||code,windowsVirtualKeyCode:0});
+}
+async mouseDown(opts){ opts=opts||{};
+await this.send('Input.dispatchMouseEvent',{type:'mousePressed',x:opts.x,y:opts.y,
+ button:opts.button||'left',clickCount:1,buttons:opts.button==='right'?2:1});
+}
+async mouseUp(opts){ opts=opts||{};
+await this.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:opts.x,y:opts.y,
+ button:opts.button||'left',clickCount:1,buttons:0});
+}
+// 滚轮: deltaY>0 = 向下滚 (与 DOM WheelEvent.deltaY 同号)。CDP 要求 mouseWheel 带 deltaX/deltaY。
+async mouseWheel(opts){ opts=opts||{};
+await this.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:opts.x,y:opts.y,
+ deltaX:opts.deltaX||0,deltaY:opts.deltaY||0,buttons:0});
+}
 async close(){
 try{ await this.send('Browser.close'); }catch(e){}
 try{ this.ws.close(); }catch(e){}

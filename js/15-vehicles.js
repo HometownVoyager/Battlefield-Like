@@ -26,11 +26,29 @@ const AT_SHELL_PAD=0.45;
 // 以及 navalCapsule 的 amph 上限) 也读它 —— 旧版 15d 那边自写 hullH*1.05 (LVT 2.05 / カミ 1.63), 比模型
 // 炮塔顶 (2.78 / 2.39) 矮一截, 于是打车顶的子弹从头顶飞过; 两处从此同源, 改口径只改这一个数。
 const VEH_HIT_TOP=2.6;
-function vehHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.3,y0:t.pos.y,y1:t.pos.y+VEH_HIT_TOP}; }
-function truckHitCyl(t){ return {x:t.pos.x,z:t.pos.z,r:2.2,y0:t.pos.y+0.2,y1:t.pos.y+2.5}; }
+const _vehCylSlot={x:0,z:0,r:2.3,y0:0,y1:0};
+if(typeof globalThis!=='undefined') globalThis._vehCylSlot=_vehCylSlot;
+function vehHitCyl(t,out){
+const o=out||{x:0,z:0,r:2.3,y0:0,y1:0};
+o.x=t.pos.x; o.z=t.pos.z; o.r=2.3; o.y0=t.pos.y; o.y1=t.pos.y+VEH_HIT_TOP;
+return o;
+}
+function truckHitCyl(t,out){
+const o=out||{x:0,z:0,r:2.2,y0:0,y1:0};
+o.x=t.pos.x; o.z=t.pos.z; o.r=2.2; o.y0=t.pos.y+0.2; o.y1=t.pos.y+2.5;
+return o;
+}
 // 带"弹体判定半径"的同源变体 (2026-09-17 观战扩展批): 供坦克主炮炮弹命中判定用 (SHELL_R)
-function vehHitCylR(t,pad){ return {x:t.pos.x,z:t.pos.z,r:2.3+pad,y0:t.pos.y,y1:t.pos.y+VEH_HIT_TOP}; }
-function truckHitCylR(t,pad){ return {x:t.pos.x,z:t.pos.z,r:2.2+pad,y0:t.pos.y+0.2,y1:t.pos.y+2.5}; }
+function vehHitCylR(t,pad,out){
+const o=out||{x:0,z:0,r:2.3,y0:0,y1:0};
+o.x=t.pos.x; o.z=t.pos.z; o.r=2.3+pad; o.y0=t.pos.y; o.y1=t.pos.y+VEH_HIT_TOP;
+return o;
+}
+function truckHitCylR(t,pad,out){
+const o=out||{x:0,z:0,r:2.2,y0:0,y1:0};
+o.x=t.pos.x; o.z=t.pos.z; o.r=2.2+pad; o.y0=t.pos.y+0.2; o.y1=t.pos.y+2.5;
+return o;
+}
 // ── 出生落位校验 (★2026-09-26 新增, P0-5): 出生点不该落在建筑/道具/深水/陡坡上 ──
 // 采样口径与 update() 的坡度物理**同源**: 车体轴线三圆 (±2.6, 与 tankPush 的三圆同轴距) 逐个查占用格,
 //   车体四角 (前/后 ±2.6, 左/右 ±1.3 = 半宽) 查高差; 门限 25° —— 出生点不该让车一落地就落在
@@ -58,7 +76,9 @@ return (team===0&&FACTORY_FLAG&&FACTORY_FLAG.owner===0)?FACTORY_SPEED_MUL:1;
 function vehiclePushSoldiers(veh,hx,hz,o){
 const csb=Math.cos(veh.yaw), snb=Math.sin(veh.yaw);
 for(const s of combatants){
+if(s._crushCd>0) s._crushCd-=o.dt; // 碾压幸存宽限 (2026-11-03): 墙钟账, 逐车逐帧衰减 (双车叠压≈2×dt, 无碍)
 if(!s.alive||s.onVehicle) continue;
+if(s.clingVeh) continue;   // 扒车中的丧尸不推不碾 (25-zombies cling 单源豁免, 2026-10-07d): 挂得住才拆得动
 if(o.checkSpectator&&s.spectator) continue;
 if(s.pos.y>veh.pos.y+o.yMax) continue;
 const relx=s.pos.x-veh.pos.x, relz=s.pos.z-veh.pos.z;
@@ -66,13 +86,16 @@ const lx=relx*csb-relz*snb;
 const lz=relx*snb+relz*csb;
 if(Math.abs(lx)>=hx+0.38||Math.abs(lz)>=hz+0.38) continue;
 const frontal=o.symmetricFrontal?(lz>hz-o.frontalBand):(veh.vel>0?(lz>hz-o.frontalBand):(lz<-(hz-o.frontalBand)));
-if(o.moving&&frontal&&s.team!==veh.team){
+if(o.moving&&frontal&&s.team!==veh.team&&!(s._crushCd>0)){
 o.crusher._src=veh.name; // 碾压击杀来源: 记入载具名
 // 碾压命中反馈 (2026-09-30 批): 玩家驾驶碾到活着的敌方步兵出白档 (档='mg' 无框; 致命一击走 die 链红档)
 if(typeof markHitCls==='function') markHitCls('mg');
 s.damage(o.crushDmg,o.crusher,false);
 if(o.crusher&&o.crusher.isPlayer&&s.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('mg');
 if(!s.alive) continue;
+// 碾而不死 (2026-11-03 用户裁定): 发宽限账防下一帧再结一次 → "连续碾=事实秒杀"让改 99/80 形同虚设;
+// 人随既有侧向限幅推挤被挤出车壳 (与友军挤开同一支, 见下), 宽限走完若仍在车前才会再吃一次。
+s._crushCd=TANK_CRUSH_CD;
 }
 const penX=hx+0.38-Math.abs(lx);
 const penZ=hz+0.38-Math.abs(lz);
@@ -89,6 +112,9 @@ s.pos.x+=snb*sgn*penZ; s.pos.z+=csb*sgn*penZ;
 if(s.isPlayer) collideMove(s.pos,0.42);
 }
 }
+// 选项复用槽 (2026-11-01 性能批): 旧版坦克/卡车/两栖每帧各新建一个 options 对象字面量。
+// 函数体只同步读字段 (o.crusher._src 写的是 crusher 不是 o), 三处调用点串行填充后即弃。
+const _vpsOpts={dt:0,crusher:null,moving:false,yMax:1.9,frontalBand:1.5,symmetricFrontal:false,crushDmg:320,pushVel:0,checkSpectator:false};
 // ═══════════ 坦克车组 AI 交战层 (2026-09-20 I1) ═══════════
 // 用户口径 (2026-09-20): "完整坦克AI逻辑但不同难度下应当有不同削弱" + "不能太超雄".
 // 根因: 旧 turretAI 只做"选目标 + 转塔 + 开火", 缺"敌车感知 → 交战决策 → 战术机动"三层 ——
@@ -253,25 +279,31 @@ if(dx*dx+dz*dz<q*q&&c.y1>h) h=c.y1;
 });
 return h;
 }
-function tankSurfH(x,z){
-// 悬挂采样面高度: 地面与足下可跨越障碍顶面取高者 —— 不做 baseY 频带过滤,
+// 悬挂采样面高度 (tankSurfH): 地面与足下可跨越障碍顶面取高者 —— 不做 baseY 频带过滤,
 // 前/后/左/右采样点一旦贴到障碍顶面就推动俯仰/侧倾弹簧, 越过时产生"上坡-颠簸-下坡"的跨越姿态
 // 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (盒 1.6 / 圆柱 r+1.5≤4.0)
-let h=heightAt(x,z);
-eachBoxNear(x-1.6,z-1.6,x+1.6,z+1.6,b=>{
+// ── 候选回调提升 (2026-11-01 性能批): 每辆坦克每帧 ~14 次 tankSurfH, 旧版每次分配 2 个内联闭包;
+//    采样点/累计高经模块槽 _tsQ 传递, 回调只在装载期创建一次。复用前提 (逐处已核):
+//    eachBoxNear/eachCylNear 的回调体内不再调 tankSurfH, 调用方串行消费返回值, 不跨调用持有。
+const _tsQ={x:0,z:0,h:0};
+function _tsBoxCb(b){
 if(b.dead) return;
 const bh=b.maxY-b.gh;
 if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
-const cx=clamp(x,b.minX,b.maxX), cz=clamp(z,b.minZ,b.maxZ);
-const dx=x-cx, dz=z-cz;
-if(dx*dx+dz*dz<1.55*1.55&&b.maxY>h) h=b.maxY;
-});
-eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,c=>{
+const cx=clamp(_tsQ.x,b.minX,b.maxX), cz=clamp(_tsQ.z,b.minZ,b.maxZ);
+const dx=_tsQ.x-cx, dz=_tsQ.z-cz;
+if(dx*dx+dz*dz<1.55*1.55&&b.maxY>_tsQ.h) _tsQ.h=b.maxY;
+}
+function _tsCylCb(c){
 if(c.r<0.3||c.y1-c.y0>TANK_STEP) return;
-const dx=x-c.x, dz=z-c.z, q=c.r+1.5;
-if(dx*dx+dz*dz<q*q&&c.y1>h) h=c.y1;
-});
-return h;
+const dx=_tsQ.x-c.x, dz=_tsQ.z-c.z, q=c.r+1.5;
+if(dx*dx+dz*dz<q*q&&c.y1>_tsQ.h) _tsQ.h=c.y1;
+}
+function tankSurfH(x,z){
+_tsQ.x=x; _tsQ.z=z; _tsQ.h=heightAt(x,z);
+eachBoxNear(x-1.6,z-1.6,x+1.6,z+1.6,_tsBoxCb);
+eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,_tsCylCb);
+return _tsQ.h;
 }
 // ══════════════════════════════════════════════════════════════════════
 // 坦克剪影几何工厂 (2026-09-20 I2 批: 按国家/车型出可辨识剪影)
@@ -457,12 +489,18 @@ return g;
 }
 // 轴对齐盒 (6 面各自的法线与 0..1 面 UV, 与车体各 BoxGeometry 的面 UV 同密度)
 // 角序 c0..c7 = (x0y0z0, x1y0z0, x1y1z0, x0y1z0, x0y0z1, x1y0z1, x1y1z1, x0y1z1); 绕向由 quad 自校正。
+// ★ 2026-11-01 修: UV 必须按**面内两轴**取 —— 旧式对全部面统一传 (y旗,x旗), ±X 面 v 恒定/±Y 面 u 恒定,
+//   UV 塌成一条线, 裙板 (M.tone 带 grime 贴图) 侧面被拉成条纹。±X 面 u=z旗,v=y旗 / ±Y 面 u=x旗,v=z旗 / ±Z 面 u=x旗,v=y旗。
 function tbBox(B,x0,y0,z0,x1,y1,z1){
 const c=[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
 const F=[[1,2,6,5,1,0,0],[0,3,7,4,-1,0,0],[3,2,6,7,0,1,0],[0,1,5,4,0,-1,0],[4,5,6,7,0,0,1],[0,1,2,3,0,0,-1]];
 for(const f of F){
 const [nx,ny,nz]=f.slice(4);
-const q=f.slice(0,4).map(k=>B.vert(c[k][0],c[k][1],c[k][2],nx,ny,nz,(k>>1)&1,(k&1)?1:0));
+const q=f.slice(0,4).map(k=>{
+const xf=k&1, yf=(k>>1)&1, zf=(k>>2)&1;
+const uv=nx? [zf,yf] : ny? [xf,zf] : [xf,yf];
+return B.vert(c[k][0],c[k][1],c[k][2],nx,ny,nz,uv[0],uv[1]);
+});
 B.quad(q[0],q[1],q[2],q[3],nx,ny,nz);
 }
 }
@@ -685,6 +723,9 @@ this.kind='tank';
 this.team=team; this.variant=variant||0;
 this.def=TEAM_FACTION[team].tanks[this.variant];
 this.name=this.def.name;
+// 碾压伤害分档 (2026-11-03 用户裁定, 常量单源 00-config): 日系 chiha 形 (九七式/一式+缴获两版) 80, 其余坦克 99
+// —— 旧 320 一击必杀; 幸存者走 vehiclePushSoldiers 侧向挤开 + TANK_CRUSH_CD 宽限 (防连续碾每帧结算)。
+this.crushDmg=(this.def.tk&&this.def.tk.shape==='chiha')?TANK_CRUSH_DMG_CHIHA:TANK_CRUSH_DMG;
 this.hp=this.def.hp; this.maxHp=this.def.hp; this.alive=true;
 this.pos=V3(); this.yaw=0; this.turretYaw=0; this.turretPitch=0; this.vel=0;
 this.playerDriven=false; this.isAI=true;
@@ -720,6 +761,26 @@ this.halfW=S.halfW; // 车体实际半宽 (翼板/裙板外沿, tkSpec 单源 = 
 tankBuildHull(this,S,M);
 tankBuildGear(this,S,M);
 tankBuildTurret(this,S,M);
+// 悬浮队色信标 (2026-10-24 用户指定: **敌方**倒三角/友方原正三角, 判据单源 00-config beaconInverted
+// 与 16-aircraft 飞机信标同一判据): 只标"存活坦克" ——
+// 击毁即隐 (update 按 alive 维护), 残骸不再被误认活车浪费弹药。depthTest=false 同飞机口径
+// (烟尘/雾里可辨); 玩家第一人称车长镜隐藏 (同 pitchG 口径), 第三人称跟车保留。恒定世界尺寸,
+// 位高 3.8m (底缘 2.6m > 最高车长帽顶 ~2.5m; 炮管仰角 20° 在信标半宽 1.2m 处 ~2.3m 亦让空)。
+const bc=document.createElement('canvas'); bc.width=bc.height=64;
+const bg=bc.getContext('2d');
+bg.fillStyle='#'+(((TEAM_COL[this.team]>>>0).toString(16)).padStart(6,'0'));
+bg.strokeStyle='#ffffff'; bg.lineWidth=7;
+bg.beginPath();
+if(beaconInverted(this.team)){ bg.moveTo(32,59); bg.lineTo(59,5); bg.lineTo(5,5); } // 敌方: 倒三角 (顶边在上, 尖朝下)
+else{ bg.moveTo(32,5); bg.lineTo(59,57); bg.lineTo(5,57); }                        // 友方: 原正三角 (尖朝上)
+bg.closePath();
+bg.fill(); bg.stroke();
+this.beaconMat=new THREE.SpriteMaterial({map:new THREE.CanvasTexture(bc),transparent:true,depthTest:false,depthWrite:false});
+this.beacon=new THREE.Sprite(this.beaconMat);
+this.beacon.scale.set(2.4,2.4,1);
+this.beacon.position.set(0,3.8,0);
+this.beacon.renderOrder=9;
+this.grp.add(this.beacon);
 this.grp.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
 world.add(this.grp);
 }
@@ -749,6 +810,12 @@ update(dt){
 // 炮管可见性单点维护: 仅玩家乘本车且开车长镜(炮手镜)时隐藏防穿模, 其余状态(下车/第三人称跟车/残骸)一律恢复
 // (旧实现只在 20-player 相机分支里切 visible, 下车后无人恢复 → 车外看坦克光秃秃没炮管)
 this.pitchG.visible=!(this.playerDriven&&player.tankView);
+// 信标显隐+脉动 (update 早退也先走到这行 ⇒ 死车/沉没/重生全覆盖, 无需 die/respawn 各补一份):
+// 存活才显示; 玩家开本车且第一人称车长镜时隐藏 (与 pitchG 同判据)。脉动相位与飞机信标同式。
+if(this.beacon){
+this.beacon.visible=this.alive&&!(this.playerDriven&&player.tankView);
+this.beaconMat.opacity=0.6+0.4*Math.sin(nowT*2.6+this.team*2.3);
+}
 	if(!this.alive){
 	this.respawnT-=dt*tankRespawnMul(this.team); // 厂房在手: 苏军坦克重生倒计时倍速消耗 (22~29s)
 	this.engine.update(0,0);
@@ -775,10 +842,33 @@ this.mgTrig=false;
 	this.takeDmg(VEH_WATER_DMG*dt,null,true);
 	if(this.playerDriven&&Math.random()<dt*2) showScorePop('⚠ 涉水熄火! 快倒车离开水面');
 	}
-// 无人闲置的坦克脱战后缓慢检修回血, 修到40%以上AI步兵才会重新接管
-if(!this.playerDriven&&!this.crewBot&&this.hp<this.maxHp&&nowT-(this.lastDmgT||-99)>10){
+// 载具残血起火 (2026-11-09 批): 燃烧掉血账 —— 每秒烧 maxHp×VEH_BURN_FRAC/VEH_BURN_TIME, 自起火起
+// VEH_BURN_TIME 秒内必烧至损毁 (直接扣 hp 不走 takeDmg: 不刷伤害红闪/不刷 lastDmgT/不叠装甲减免);
+// 击杀归因 = 点燃者 burnBy。起火期正常受创照常结算 ("仍会正常受伤")。
+if(this.burning&&this.alive){
+this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
+// ★2026-11-10 修"烧毁瞬间整车模型位置漂移一次" (实机报告): 烧死必须在 update 中段就地停帧 ——
+// die() 会当场注册 3 个自身残骸碰撞盒 (下方车毁段 registerDynCollider), 若继续走完本帧,
+// 底盘碰撞段的三圆 (±1.95, r1.55) 圆心正落在自己刚注册的残骸盒内 ⇒ "圆心在盒内沿最浅轴整体
+// 顶出"分支把车体从自己的残骸里推出去 (双 pass 累计可位移 2m+) = 损毁瞬间整车漂移一次。
+// 中弹死亡的 die() 发生在 update 之外 (之后不再走车体碰撞段) 所以从不漂移 —— 只有 update
+// 内段杀车 (燃烧/激流/涉水) 会踩中。与 15b-trucks/15d-naval 燃烧账同款 return (那两处落地时
+// 就带, 坦克漏了)。
+if(this.hp<=0){ this.die(this.burnBy||null); return; }
+}
+// 激流/涉水两处 takeDmg 同样能在 update 中段触发 die() —— 同一漂移病根, 死亡当帧一并停帧。
+// (能在这里看到 !alive 的必是本帧刚死的: 顶部死车分支早退, 活车不受影响)
+if(!this.alive) return;
+// 无人闲置的坦克脱战后缓慢检修回血, 修到40%以上AI步兵才会重新接管 (2026-11-09 批: 起火中一律停修 —— 烧毁不可逆)
+if(!this.playerDriven&&!this.crewBot&&!this.burning&&this.hp<this.maxHp&&nowT-(this.lastDmgT||-99)>10){
 this.hp=Math.min(this.maxHp,this.hp+this.maxHp*0.025*dt);
 }
+// 扒车统计 (2026-10-07d, 丧尸模式): 每帧重算挂在身上的丧尸数 —— 驱动履带卡尸减速 (下方 mvx 段)。
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE&&typeof ZOMBIES!=='undefined'&&ZOMBIES.length){
+let _zn=0;
+for(let _zi=0;_zi<ZOMBIES.length;_zi++){ const _z=ZOMBIES[_zi]; if(_z.alive&&_z.clingVeh===this) _zn++; }
+this._zClingN=_zn;
+} else if(this._zClingN) this._zClingN=0;
 const dCam=this.pos.distanceTo(camera.position);
 this.engine.update(58+Math.abs(this.vel)*7, clamp(0.3-dCam/110,0,0.3)*(0.55+Math.abs(this.vel)*0.08));
 // A#7 (2026-09-21): 删除"乘员严重受损(<25% hp)时弃车逃生" —— 车组全程在车内 (用户裁定"严格三人"),
@@ -792,6 +882,10 @@ const sn=Math.sin(this.yaw), cs=Math.cos(this.yaw);
 // 坡度>限值", 倒车第一步中点坡度更大 → 进退不得。下坡放行后: 直壁下崖=单向慢爬 (沟壑=史实反坦克壕,
 // 下去就得出坡道/渡口), AI 坦克由 OCC 沟壁占用格挡住不会下崖。
 let mvx=sn*this.vel*dt, mvz=cs*this.vel*dt;
+// 履带卡尸 (2026-10-07d): 挂车丧尸 ≥2 只减速 22% / ≥4 只 45% —— 被围的坦克想跑也得先挣脱。
+// 对玩家驾驶同样生效 (AI/玩家同车物理); 碾压清尸后 _zClingN 归零自动恢复。
+if(this._zClingN>=4){ mvx*=0.55; mvz*=0.55; }
+else if(this._zClingN>=2){ mvx*=0.78; mvz*=0.78; }
 {
 const dist=Math.hypot(mvx,mvz);
 if(dist>1e-5){
@@ -924,7 +1018,8 @@ if(Math.abs(this.vel)>0.8&&typeof floraCrushTank==='function') floraCrushTank(th
 // 实体碰撞: 步兵无法穿入车体; 友军挤开, 敌军按行进方向与车速判定碾压
 // 2026-09-20 I2-b (Lead 裁决②): 横向口径按车体实际半宽派生 (this.halfW 由 buildMesh 从 tkSpec 单源算出), 以既有 2.05 为下限 ——
 // 除最宽的 M26(2.055) 外各型仍取 2.05 (推挤手感不变); vehiclePushSoldiers 函数体不动 (坦克/卡车共用单源)
-vehiclePushSoldiers(this,Math.max(2.05,this.halfW||2.05),this.def.hullL/2+0.45,{dt,crusher:this.playerDriven?player:(this.crewBot||this.crew),moving:Math.abs(this.vel)>1.2,yMax:1.9,frontalBand:1.5,symmetricFrontal:false,crushDmg:320,pushVel:Math.abs(this.vel)});
+{const _o=_vpsOpts; _o.dt=dt; _o.crusher=this.playerDriven?player:(this.crewBot||this.crew); _o.moving=Math.abs(this.vel)>1.2; _o.yMax=1.9; _o.frontalBand=1.5; _o.symmetricFrontal=false; _o.crushDmg=this.crushDmg; _o.pushVel=Math.abs(this.vel); _o.checkSpectator=false;
+vehiclePushSoldiers(this,Math.max(2.05,this.halfW||2.05),this.def.hullL/2+0.45,_o);}
 // 履带花纹滚动 (2026-09-26 A5 定速率; 2026-09-28 带环口径取符号): 带环外表面的花纹 v 沿**环向**排开、
 // 每贴 = trackTileLen 米世界长 ⇒ 位移量除以每贴长度就是"贴/秒", 与地面零打滑 (旧版 `offset.y-=vel*dt*0.55`
 // 是估的, 差 ~20%)。**符号**: v 沿带环的**材料流向**递增 (接地段向后 / 回程段向前 / 后端向上 / 前端向下),
@@ -997,16 +1092,22 @@ let best=null,bd=0,bs=-1e9;
 const score=(t,ty,lowHp)=>{
 const dx=t.pos.x-ex, dz=t.pos.z-ez;
 const d=Math.hypot(dx,dz);
-// 夜档 (昼夜设计 §3.3/§4.1): 车长视距 ×viewDMul; 开大灯的敌车 ×headExpo —— 大灯照亮路面也暴露自身,
-//   且开灯车无视前向视锥 (灯就是方位)。白天档两个乘数都为 1/false, 与原判定逐位一致。
-//   天气乘子 ×WX_CFG.viewDMul (天气设计 §5-8 登记项: 与步兵索敌同语义, 暴雨/暴风雪车组同样看不远; 晴朗 ×1 逐位不变)。
+// 环境暗度动态暴露度联动: 载具大灯照亮路面也暴露自身 (暴雨天/夜间开灯强光暴露)
 let vis=T.vis*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
-if(NIGHT_MODE&&t.lightsOn) vis*=NIGHT_GEAR.headExpo;
+const envLum=(typeof getEnvBrightness==='function')?getEnvBrightness():(NIGHT_MODE?0.12:1.0);
+const darkRatio=clamp(1.0-envLum,0,1);
+let lightExposed=false;
+if(t.lightsOn){
+const hExpo=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.headExpo)?NIGHT_GEAR.headExpo:1.8;
+const expo=1.0+(hExpo-1.0)*(0.1+0.9*darkRatio);
+vis*=expo;
+if(darkRatio>0.2) lightExposed=true;
+}
 if(d>vis||d<1) return;
 const bearing=Math.atan2(dx,dz);
 const tracked=(this.tVehTgt===t&&this.tMemT>0);
-// 前向视锥: 车体前向或炮塔指向任一覆盖即可; 记忆中的目标不再要求视锥 (已交火, 车组知道它在哪)
-if(!tracked&&!(NIGHT_MODE&&t.lightsOn)&&Math.abs(angDiff(this.yaw,bearing))>TANK_VIEW_CONE&&Math.abs(angDiff(face,bearing))>TANK_VIEW_CONE) return;
+// 前向视锥: 车体前向或炮塔指向任一覆盖即可; 记忆中的目标不再要求视锥; 强光暴露目标同样放宽
+if(!tracked&&!lightExposed&&Math.abs(angDiff(this.yaw,bearing))>TANK_VIEW_CONE&&Math.abs(angDiff(face,bearing))>TANK_VIEW_CONE) return;
 let hx=t.pos.x-ex, hy=ty-ey, hz=t.pos.z-ez;
 const hl=Math.hypot(hx,hy,hz)||1; hx/=hl; hy/=hl; hz/=hl;
 const hit=raycastWorld(V3(ex,ey,ez),V3(hx,hy,hz),hl);
@@ -1020,6 +1121,14 @@ if(CROP_FIELDS.length&&cropBlocksLOS(ex,ey,ez,t.pos.x,ty,t.pos.z)) return;
 // (与 14-bots.js 的 `typeof tankRollingToObjective==='function'` 同一纪律)
 if(typeof foliageBlocksLOS==='function'&&foliageBlocksLOS(ex,ey,ez,t.pos.x,ty,t.pos.z)) return;
 let sc=200-d*0.5;
+// ★2026-10-26 指挥官交互重做批 (用户需求 3 集火): 车组也吃集火令 —— 判据单源在 26-commander 的
+//   cmdFocusBonus (圈内顶到最前 / 圈外线性衰减); 本文件只加进候选分, 不重复实现半径/过期判断。
+//   取令走 this.cmdOrder 所属的单位 (cmdOrbatBuild 把 unit.order 挂成 t.cmdOrder), 因此这里按 veh 反查。
+//   cmdFocusBonus 缺失 (只加载 15-vehicles 的沙箱) ⇒ 0, 选目标逐位不变 = 零回归。
+if(typeof cmdFocusBonus==='function'){
+const _fu=(typeof cmdFindUnitOfVeh==='function')?cmdFindUnitOfVeh(this):null;
+sc+=cmdFocusBonus(_fu,t.pos.x,t.pos.z);
+}
 if(lowHp) sc+=60;  // 残血敌车是"战机": 完整AI会抓 (追击意愿另受难度分档)
 if(tracked) sc+=40;            // 目标粘滞: 不因另一辆稍微更近就来回换炮口
 if(sc>bs){ bs=sc; best=t; bd=d; }
@@ -1145,9 +1254,31 @@ return null;
 }
 driveAI(dt){
 this.thinkCD-=dt; this.repathT-=dt;
-if(this.thinkCD<=0){
-this.thinkCD=rand(0.6,0.9);
-if(GAMEMODE==='demolition'){
+	if(this.thinkCD<=0){
+	this.thinkCD=rand(0.6,0.9);
+	// 指挥官坦克令 (2026-10-26 指挥官批, 26-commander cmdTankCmd 单源): 非 free 令直接覆写推进目标 ——
+	// attack_move/hold 都 = 开往指定点 (坦克交战层战术机动在下方照常接管, 到点 engagedStop 静止对射口径不变);
+	// free 令走下方默认选点 = 零回归。令解除时清 objective 让默认选点即刻重选。
+	const _cto=(typeof cmdTankCmd==='function')?cmdTankCmd(this):null;
+	if(_cto){
+	this.objective={x:_cto.x,z:_cto.z};
+	this._cmdHad=true;
+	}else if(this._cmdHad){
+	this._cmdHad=false;
+	this.objective=null;
+	}else if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
+// 丧尸守家 (2026-10-07d): 载具不跑旗 —— 驻守己方基地外环车位 (zVehPosts 单源 25-zombies),
+// 到位停车、炮塔自由扫尸 (机枪候选本就含丧尸; 主炮对重尸的门在 turretAI)。teams 两队各自守家。
+if(!this.objective||!this.objective._zv){
+const posts=(typeof zVehPosts==='function')?zVehPosts(this.team):null;
+let bp=null,bs=1e9;
+if(posts) for(const p of posts){
+const d=Math.hypot(p.x-this.pos.x,p.z-this.pos.z);
+if(d<bs){ bs=d; bp=p; }
+}
+if(bp){ this.objective={x:bp.x,z:bp.z,_zv:true}; this.repathT=0; }
+}
+} else if(GAMEMODE==='demolition'){
 const dp=nearestDepot(this.pos.x,this.pos.z);
 const bf=dp?{x:dp.x,z:dp.z}:FLAGS[0];
 if(!this.objective||this.objective.x!==bf.x){ this.objective=bf; this.repathT=0; }
@@ -1227,7 +1358,8 @@ return;
 }
 const dObj=Math.hypot(f.x-this.pos.x,f.z-this.pos.z);
 // 有战术点时的到位半径取小 (否则 12~26m 的掩体/绕侧点一生成就被判"已到位")
-const arriveD=this.aiOrder?4.5:20;
+// 丧尸驻车位同理取小 (2026-10-07d): 驻守要真停进 15~26m 车位, 20m 默认值会隔着半个环就"到位"
+const arriveD=this.aiOrder?4.5:(this.objective&&this.objective._zv?6:20);
 // 静止对射 (旧口径) 只在没有战术点时才成立 —— 否则"抢掩体/绕侧"会被 engagedStop 钉死在原地
 const engagedStop=!this.aiOrder&&this.tTarget&&this.tTarget.kind==='tank'&&this.tMemT>0&&this.losOK&&this.tDist<110;
 if(dObj<arriveD||engagedStop){
@@ -1290,6 +1422,9 @@ if(!s.alive||s.team===this.team||s.onVehicle||s.spectator) continue;
 if(typeof chuteAirborne==='function'&&chuteAirborne(s)) continue; // 伞降目标不进车组候选 (2026-09-30 空对地平衡批: 坦克机枪不再 140m 点名跳伞者)
 const d=Math.hypot(s.pos.x-this.pos.x,s.pos.z-this.pos.z);
 if(d>140) continue;
+// 同轴机枪贴身死角 (2026-10-07d, 仅丧尸模式): 贴车 3.4m 内的丧尸进炮塔机械死角 —— 扒车丧尸
+// 机枪打不着, 逼坦克机动甩落/碾压或队友解围。只在 ZOMBIE_MODE 生效, 普通对战零变化。
+if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE&&s.zombie&&d<3.4) continue;
 if(SMOKES.length&&smokeBlocksLOS(this.pos.x,this.pos.y+1.9,this.pos.z,s.pos.x,s.pos.y+1,s.pos.z)) continue;
 if(CROP_FIELDS.length&&cropBlocksLOS(this.pos.x,this.pos.y+1.9,this.pos.z,s.pos.x,s.pos.y+1,s.pos.z)) continue;
 let sc=90-d*0.9;
@@ -1356,7 +1491,9 @@ const o=this.muzzle.clone();
 const dh=Math.hypot(tgt.pos.x-this.pos.x,tgt.pos.z-this.pos.z);
 // 载具目标 (坦克/两栖车/艇) 走主炮, 步兵走同轴机枪 (2026-09-26 P1-7: 艇与坦克同档 —— 艇体是硬目标,
 // 用机枪扫是给不出伤害的; 只有"人"才走下面那挺同轴机枪)
-const isVeh=(tgt.kind==='tank'||tgt.kind==='amph'||tgt.kind==='boat');
+// 丧尸模式例外 (2026-10-07d): 重尸(brute) 380 血机枪磨不动 —— 解锁主炮, dh>14 门防贴脸自炸。
+const bruteOK=(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE&&tgt.zombie&&tgt.kind==='brute'&&dh>14);
+const isVeh=(tgt.kind==='tank'||tgt.kind==='amph'||tgt.kind==='boat')||bruteOK;
 // 火力距离按难度分档 (新兵120/老兵175/精英230, A#1 下调): 远距离不空放, 压住"隔着半张图点名"
 // A#1 (2026-09-21) 主炮开火门: **只对敌车开炮** —— 旧门 `isTank?dh<=T.fireR:dh>10` 会对 10m 外的步兵
 // 直接轰主炮 (隔着半张图点名步兵是"超雄"主因之一); 步兵目标现在只用下面那挺同轴机枪压制。
@@ -1404,6 +1541,7 @@ dir.x+=rand(-err,err); dir.y+=rand(-err,err)*0.6; dir.z+=rand(-err,err); dir.nor
 }
 const origin=this.muzzle.clone();
 const shooter=this.playerDriven?player:(this.crewBot||this.crew);
+if(shooter&&shooter.protUntil) shooter.protUntil=0; // 出生保护清账 (★2026-11-01 判定批): 主炮不走 fireBullet, 旧版保护期内照样开炮
 shooter._src=this.name; // 坦克炮击杀来源: 载具名 (射手进炮即记入)
 AudioSys.cannon(this.pos.distanceTo(camera.position));
 spawnP(PT.flash,origin.x,origin.y,origin.z, dir.x*3,dir.y*3,dir.z*3, 1.0,10,0.12,1,0,true);
@@ -1437,6 +1575,8 @@ if(typeof specRide==='function'&&specRide(this)) return;
 if(!ap) amt*=TANK_ARMOR;
 this.hp-=amt;
 this.lastDmgT=nowT;
+// 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走, 烧毁仍走本 die 链; 正常受创照常结算)
+if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
 if(this.playerDriven){ addDmgFlash(0.35); addTrauma(0.3); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
 else if(attacker&&attacker.pos){
 this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
@@ -1466,6 +1606,8 @@ if(driver===player){
 // 名额照结算 (本方掉 2 票 + 击杀者 +2 杀)"的劈叉。现在按"观战者从被毁座驾安全脱离"处理: 落到车旁平地,
 // 0 死 / 0 票 / 0 杀, 车照毁 (与 C1 口径一致: 观战者的**干预**照常改战局, 但**战局反噬观战者本人**一律无效)。
 if(spec){ if(typeof specRideEject==='function') specRideEject(this); }
+// 自动脱离载具 (2026-11-09 批, sf_autoexit 默认关): 车毁瞬间自动下车逃生, 代替死亡链 (乘员名额仍随车结算)
+else if(AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){ autoExitWreck(this,false); }
 else player.damage(999,attacker,false);              // 既有链: 自己 -1 票 +1 死 + 击杀者 +1 杀 + 记分
 }else{
 if(cb){ // 阵亡落点: 沿车体轴线前移 1.5m (别把尸体压在残骸中心), 并保住"尸体可见"观感
@@ -1490,6 +1632,7 @@ addKillfeed(attacker,{name:feedName,team:this.team,isPlayer:false},false);
 // 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); 与"3 杀"的击杀分是两回事, 只结算这一处
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁坦克',SCORE_TABLE.tank);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 屏中击毁红档 (2026-09-30 批): 空车击毁旧口径无任何屏中反馈; 有人车另有乘员 die 链的红档, 同帧合并为一响
+if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
 explosionFX(this.pos.clone().add(V3(0,1.4,0)));
 AudioSys.explosion(this.pos.distanceTo(camera.position));
@@ -1522,6 +1665,12 @@ respawn(silent,initial){
 // 提前结清上一轮残骸的下沉任务与火源 (残骸模型体重生复用)
 if(this.sinkJob){ finishSinkJob(this.sinkJob); this.sinkJob=null; }
 if(this.fireSrc){ removeFireSource(this.fireSrc); this.fireSrc=null; }
+// 起火态随重生复位 (2026-11-09 批): 车体模型重生复用, 燃烧账/火源引用不得跨生死携带
+// (残骸火源本体在 die 时 alive=false 已被 follow 块自动掐火, 这里只兜底清引用)
+if(this.burning||this.burnBy||this.burnSrc){
+if(this.burnSrc){ removeFireSource(this.burnSrc); this.burnSrc=null; }
+this.burning=false; this.burnBy=null;
+}
 const bp=basePos(this.team);
 // 同variant多车(东线4辆/西线3辆)按队内序号错位前后排, 避免叠在同一点 (2026-09-02 加载具配套)
 const ord=tanks.filter(t=>t.team===this.team).indexOf(this);
@@ -1601,6 +1750,12 @@ if(dd<bd){ bd=dd; best=d; }
 }
 return best;
 }
+// 弹道方向复用槽 (2026-11-01 性能批): 每弹每帧 vel.clone().normalize() 是纯垃圾 —— dir 只在本迭代内
+// 被 raycastWorld/rayCyl/raySoldiers/addScaledVector 同步消费, 不跨弹持有 (逐处已核)。
+const _shDir=V3(0,0,1);
+const _shCyl=typeof _vehCylSlot!=='undefined'?_vehCylSlot:{x:0,z:0,r:2.3,y0:0,y1:0};
+const _shTrkCyl={x:0,z:0,r:2.2,y0:0,y1:0};
+const _shRayOpt={team:0,isPlayer:false};   // raySoldiers 选项复用槽 (每弹每帧填充)
 function updateShells(dt,rdt){
 // 每发炮弹按**自己的**帧长推进 (2026-09-27M 时停修复批; 帧长判据单源 = 22b 的 specTimeShotDt,
 // 缺 22b 的部分沙箱退化成世界帧长 = 旧行为):
@@ -1631,7 +1786,7 @@ continue;
 }
 }
 const step=s.vel.length()*sdt;
-const dir=s.vel.clone().normalize();
+const dir=_shDir.copy(s.vel).normalize();
 // 坦克主炮炮弹判定半径 (2026-09-17 观战扩展批): SHELL_R=0.3;
 // **反坦克火箭/反坦克炮弹独立判定半径 (2026-09-28 阶段三 P1, 用户裁定"加大火箭弹判定")**: AT_SHELL_PAD=0.45
 // —— 火箭弹 170m/s 慢于坦克炮弹 380, 弹体判定反而更小 (旧 0) 是"擦过不算"挫败感的主因; 加大后
@@ -1654,15 +1809,15 @@ const wr=raycastWorld(s.pos,dir,hitD);
 if(wr){ hitD=wr.dist; hit=wr; }
 for(const t of tanks){
 if(!t.alive||t.team===s.team) continue;
-const r=rayCyl(s.pos,dir,shPad>0?vehHitCylR(t,shPad):vehHitCyl(t),hitD);
+const r=rayCyl(s.pos,dir,shPad>0?vehHitCylR(t,shPad,_shCyl):vehHitCyl(t,_shCyl),hitD);
 if(r){ hitD=r.t; hit=r; hitTank=t; hitSol=null; }
 }
 for(const t of trucks){
 if(!t.alive||t.team===s.team) continue;
-const r=rayCyl(s.pos,dir,shPad>0?truckHitCylR(t,shPad):truckHitCyl(t),hitD);
+const r=rayCyl(s.pos,dir,shPad>0?truckHitCylR(t,shPad,_shTrkCyl):truckHitCyl(t,_shTrkCyl),hitD);
 if(r){ hitD=r.t; hit=r; hitTruck=t; hitTank=null; hitSol=null; }
 }
-const sr=raySoldiers(s.pos,dir,hitD,{team:s.team,isPlayer:false},shPad);
+const sr=raySoldiers(s.pos,dir,hitD,(_shRayOpt.team=s.team,_shRayOpt),shPad);
 if(sr){ hitD=sr.t; hitSol=sr.sol; hitTank=null; hitTruck=null; hit=sr; }
 if(hit){
 const p=V3(s.pos.x+dir.x*hitD,s.pos.y+dir.y*hitD,s.pos.z+dir.z*hitD);
@@ -1686,9 +1841,7 @@ shells.splice(i,1);
 continue;
 }
 if(typeof shellHitNaval==='function'&&shellHitNaval(s,sdt)){ shells.splice(i,1); continue; } // 海战批 (§11.4): 炮弹对艇 —— 判定/伤害/特效全在 15d-naval 的 shellHitNaval 内; 帧长是本帧步长 (2026-09-26 P1-10: 扫掠包络须与本行 step=vel*dt 同一口径, 否则低帧率跳艇; 2026-09-27M 起随逐发帧长 sdt 同源)
-// 大舰 (2026-09-30 阶段五 P4): 与小艇并列的第二支对舰判定 —— 大舰不在 navalCraft 表里 (见 15h 头注释一),
-//   故必须另接一行; 判定/分区装甲/伤害/特效全在 15h 的 capitalShellHit 内, 帧长口径同上行 (同一支 sdt)。
-if(typeof capitalShellHit==='function'&&capitalShellHit(s,sdt)){ shells.splice(i,1); continue; }
+// (2026-11-10: 大舰炮弹判定 capitalShellHit 钩随大舰子系统下架摘除)
 s.pos.addScaledVector(dir,step);
 }
 }
@@ -1710,6 +1863,7 @@ if(Math.abs(m.x-x)>3||Math.abs(m.z-z)>3) continue;
 if(Math.hypot(m.x-x,m.z-z)<1.9) mineBlast(m);
 }
 }
+const MINE_CHAIN=[]; // 链爆账 (游戏时钟, 2026-11-01 判定批): {m,t} —— 消费点在 updateMineTriggers(dt)
 function mineBlast(m){
 m.dead=true;
 if(m.mesh&&m.mesh.parent) m.mesh.parent.remove(m.mesh);
@@ -1720,13 +1874,19 @@ AudioSys.explosion(p.distanceTo(camera.position));
 splashDamage(p,null,-1,5,95,340,true);   // 与反坦克雷同口径: 反装甲全额
 damageStructures(p,5,130);                // 无主 (反坦克雷没有 owner 字段): 破坏结构不给任何人加分
 crater(m.x,m.z,1.1,true);
-// 邻近链爆 (3m 内, 延迟一帧自然串联 —— 直接递归会深链, 用延时分批)
+// 邻近链爆 (3m 内, 延迟串联 —— 直接递归会深链, 用延时分批)。★2026-11-01 判定批: 旧 setTimeout 挂
+// 浏览器时钟, Esc 暂停/K 时停期间照常到点, 冻结的战场里链爆照样炸人 (与 2026-10-28 丧尸近战
+// setTimeout→dt 账同族病); 改挂 24-main 传进来的世界帧长 —— 时停/布势 dt=0 整列停住, 暂停整段不跑。
 for(const n2 of MINES){
 if(n2.dead) continue;
-if(Math.hypot(n2.x-m.x,n2.z-m.z)<3) setTimeout(()=>{ if(!n2.dead) mineBlast(n2); },120+Math.random()*180);
+if(Math.hypot(n2.x-m.x,n2.z-m.z)<3) MINE_CHAIN.push({m:n2,t:0.12+Math.random()*0.18});
 }
 }
-function updateMineTriggers(){
+function updateMineTriggers(dt){
+for(let i=MINE_CHAIN.length-1;i>=0;i--){ // 链爆账先于碾压触发消费 (MINES 里 dead 项常驻, 不依赖上面的早退)
+const c=MINE_CHAIN[i]; c.t-=(dt||0);
+if(c.t<=0){ MINE_CHAIN.splice(i,1); if(!c.m.dead) mineBlast(c.m); }
+}
 if(!MINES.length) return;
 for(const t of tanks){ if(t.alive) checkMinesAt(t.pos.x,t.pos.z); }
 for(const tk of trucks){ if(tk.alive&&!tk.escaped) checkMinesAt(tk.pos.x,tk.pos.z); }

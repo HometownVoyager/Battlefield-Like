@@ -100,6 +100,11 @@ if(!this.alive){
 // 残骸沉没已收敛 queueSink (2026-09-06 B7b/P2-4): 静置1.2s→沉入3.6s→半沉(40%)撤碰撞→全沉移除, 冒烟走 onTick
 if(this.escaped||this.sunk||this.sinking) return;
 }
+// 载具残血起火 (2026-11-09 批): 燃烧掉血账 —— 每秒烧 maxHp×VEH_BURN_FRAC/VEH_BURN_TIME (击杀归因=点燃者)
+if(this.burning&&this.alive){
+this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
+if(this.hp<=0){ this.die(this.burnBy||null); return; }
+}
 const P=convoyPath();
 if(this.wpI>=P.length-1){
 // 抵达终点: 突围西口
@@ -121,7 +126,8 @@ this.pos.x+=Math.sin(this.yaw)*this.vel*dt;
 this.pos.z+=Math.cos(this.yaw)*this.vel*dt;
 this.pos.y=dampF(this.pos.y,heightAt(this.pos.x,this.pos.z),8,dt);
 // 实体碰撞: 步兵不可穿入车体; 行进正面的敌军碾压, 其余侧向挤出 (同坦克模式)
-vehiclePushSoldiers(this,1.05,3.7,{dt,crusher:this,moving:this.vel>0.8,yMax:2.0,frontalBand:1.4,symmetricFrontal:true,crushDmg:300,pushVel:this.vel});
+{const _o=_vpsOpts; _o.dt=dt; _o.crusher=this; _o.moving=this.vel>0.8; _o.yMax=2.0; _o.frontalBand=1.4; _o.symmetricFrontal=true; _o.crushDmg=300; _o.pushVel=this.vel; _o.checkSpectator=false;
+vehiclePushSoldiers(this,1.05,3.7,_o);}
 // 护运方补给: 紧贴本车的护运士兵自动补绷带 (运输车是护运方唯一补给来源)
 for(const s of combatants){
 if(!s.alive||s.team!==this.team||s.onVehicle) continue;
@@ -153,6 +159,8 @@ for(const w of this.wheels){ const wr=(w.geometry&&w.geometry.parameters&&w.geom
 takeDmg(amt,attacker){
 if(!this.alive) return;
 this.hp-=amt;
+// 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走, 烧毁仍走本 die 链)
+if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
 if(this.hp<=0) this.die(attacker);
 }
 die(attacker){
@@ -186,6 +194,7 @@ if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧�
 else attacker.score=(attacker.score||0)+SCORE_TABLE.truck;
 addKillfeed(attacker,this,false);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击毁红档 (2026-09-30 批): 卡车无乘员死亡链
+if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
 addKillMsg(`运输车被摧毁! 剩余 ${CONVOY_STATE?CONVOY_STATE.left:0} 辆`,attacker?attacker.team:player.team);
 }

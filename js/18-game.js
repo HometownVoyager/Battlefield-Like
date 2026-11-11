@@ -3,15 +3,46 @@
 // 源: Index.original.html 第 6768-6936 行
 // ─────────────────────────────────────────────
 'use strict';
+// ── 对局级定时器句柄管理 (2026-10-07 任务 0.5: 消除幽灵弹窗) ──
+const MATCH_TIMERS = (typeof globalThis !== 'undefined' && globalThis.MATCH_TIMERS) || [];
+if (typeof globalThis !== 'undefined') globalThis.MATCH_TIMERS = MATCH_TIMERS;
+
+function addMatchTimeout(fn, ms) {
+  let done = false;
+  let id;
+  const cb = () => {
+    done = true;
+    if (id !== undefined) {
+      const idx = MATCH_TIMERS.indexOf(id);
+      if (idx !== -1) MATCH_TIMERS.splice(idx, 1);
+    }
+    fn();
+  };
+  id = setTimeout(cb, ms);
+  if (!done) MATCH_TIMERS.push(id);
+  return id;
+}
+
+function clearMatchTimers() {
+  while (MATCH_TIMERS.length > 0) {
+    const id = MATCH_TIMERS.pop();
+    clearTimeout(id);
+  }
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.addMatchTimeout = addMatchTimeout;
+  globalThis.clearMatchTimers = clearMatchTimers;
+}
+
 let nowT=0, matchOver=false, matchTime=15*60;
 let gamePaused=false, nowOff=0; // ESC 暂停: 主循环冻结+游戏时钟停止前进
-let menuHold=false; // 返回主界面冻结 (2026-09-16 本批): 与 gamePaused 同为"冻结主循环", 但语义是"人在主菜单" ——
+let menuHold=true; // 返回主界面冻结 (2026-09-16 本批): 与 gamePaused 同为"冻结主循环", 但语义是"人在主菜单" ——
 // 用于区分"暂停面板打开"与"菜单冻结", 恢复战斗时据此决定是否重新盖回暂停面板 (19-input 的 Esc 暂停只认 gamePaused)
 let matchRunning=false; // 战局存续期 (2026-09-16 本批): 开局置位, 结算清零。与 player.deployed 分工不同 ——
 // deployed 表示"玩家已落地参战"(兵种选择阶段为 false, 那是给 HUD/输入用的), matchRunning 表示"这一局还在";
 // 「返回战斗」按钮与返回二次确认都认 matchRunning, 否则兵种选择阶段返回主界面会被判成"没有战局"而丢掉入口。
 const tickets=[START_TICKETS,START_TICKETS];
-let nadeWarnT=0;
+let nadeWarnT=0, nadeMinDist=null;
 // (2026-09-21 A#2 契约G) 第三人称动作计时口径 (姿势机在 20-player 的 playerAnimTick/updatePlayerAvatar 消费):
 // 常量放这里而不是 20-player —— 18-game 是 player 状态的家 (damage/releaseNade/doMeleeHit 都在本文件写这些计时),
 // 两边共用同一组数值, 不出现"动作时长在两个文件里各写一份"。
@@ -33,6 +64,12 @@ specUsed:false, // 本局是否**在观战态下部署过** (判据 2026-09-27 �
 specWant:null, // 待生效的观战意图 (2026-09-26H 观战批, 审计 #3/A3): 战斗中在兵种卡上开启观战只记意图,
 // 到**下一次部署** (23-deploy deployPlayer) 才落到 player.spectator —— 旧版二次点击当场生效,
 // 一个正在交战的活人可以在不阵亡的情况下瞬间变成"免伤+无限弹+可打双方"。null = 无待生效项。
+// ★2026-11-01 裁定: 旧观战改称「调试模式」(能干涉战局 ⇒ 不计历史); 新增"自由观战"视模式见 specView。
+specView:false, // 自由观战视模式 (2026-11-01, MC 旁观者式): 票尽后从部署页「观战」按钮进入。无碰撞/不可攻击/
+// 无有效交互/创造飞行/可附身 Bot 视角 (20-player specView* 系)。与旧调试观战共用 player.spectator=true
+// (免伤/不被索敌/清场票务等全部既有排除门零改动), 差异只用本标记区分。
+specViewHost:null, // 附身的 Bot (14-bots 实体) 或 null=自由飞行; 只读视角, 不写 Bot 任何状态
+specViewSpd:14, // 自由飞行速度 (m/s, 滚轮调 3..90)
 ffAll:false, // 无差别火力 (2026-09-17 观战扩展批): 仅"驾驶观战专属幽灵坦克"期间为 true ——
 // raySoldiers/命中载具时的敌我过滤失效, 主炮与同轴机枪对双方一律生效 (15c-specveh)。
 ffSpecSniper:false, // 观战连狙无差别火力 (2026-09-20 观战连狙批, 用户口径"只有观战连狙可打双方"):
@@ -49,12 +86,9 @@ fireT:0, bloom:0, lastDmgT:-99, deathT:0,
 recoilPitch:0, recoilYaw:0,
 kills:0, deaths:0, score:0, demol:0,   // demol: 摧毁的地图可破坏物组数 (2026-09-26 破坏得分批; 新对局由 22-hud resetPlayerForNewMatch 复位)
 nadeHeld:false, nadeFuse:0, nadeIsSmoke:false, smokeCount:1, onMG:null, resupplyCd:0,
-onVehicle:null, onAT:null, onAA:null, onNaval:null, atNades:0, nadeIsAT:false, nadeIsIncin:false, incinCount:0, loiter:null, loiterView:0,
-// 大舰甲板座位 (2026-09-30 阶段五 P4): onCapital = 当前站在哪艘大舰的甲板上 (15h 的 capBoard/capSeatRelease 维护);
-//   capitalGun = 已接管的炮位 {ship,type:'main'|'sec'|'aa',idx} (null = 未接管; 2026-10-01b 分炮塔接管)。
-//   与 onVehicle/onNaval 构成**三座位互斥** (同一时刻至多一个非空),
-//   互斥的另一半在 20a-seats 的 navalBoard / 15c 的 specVehBoard 与 15h 的 capBoard, 三处都做显式双向清理。
-onCapital:null, capitalGun:null,
+onVehicle:null, onAT:null, onAA:null, onNaval:null, flashlight:false, atNades:0, nadeIsAT:false, nadeIsIncin:false, incinCount:0, loiter:null, loiterView:0,
+// (2026-11-10: 大舰甲板座位字段 onCapital/capitalGun 随大舰子系统下架摘除 —— 原"三座位互斥"只剩
+//   onVehicle/onNaval 两座位, 互斥账在 20a-seats navalBoard / 15c specVehBoard 两处, 依旧双向清理。)
 // tvDX/tvDY: 操控巡飞弹 (TV 制导) 期间鼠标 movementX/Y 的**累计器** (2026-09-28 制导重做):
 //   19-input 只记账, 13-combat.updateLoiters 逐帧消费并清零 —— 制导的单源 (见那两处注释)。
 tvDX:0, tvDY:0,
@@ -72,6 +106,69 @@ eyeH:1.62,
 lastFiredT:-99, killerName:'',
 suppress(a){ this.suppressV=Math.min(1,this.suppressV+a); },
 leanT:0,
+// ── 读条动作的取消单源 (★2026-10-12 用户提议② → 2026-10-25 扩容) ────────────────────────────────
+// 全游戏原有三条"读条": 包扎 (本文件 bandaging 计时) / 拆除回收 (06-engineering 的 demolish) /
+//   固定火力点使用前摇 (20-player 的 useCast)。★2026-10-25 用户裁定"拿起手雷/换弹无法取消不好":
+//   举雷待发 (VM 'nade' 哨兵态 + nadeHeld, 手雷不消耗可收回) 与换弹 (VM 'reload', 弹药不结算)
+//   并入同一张取消网 —— 账目各在各文件里, 但"怎么取消"只能有一条路 ——
+//   否则就是"外部改字段、收尾只写在各自正常走完的路径里"的老病: 用户实报②的病根正是它
+//   (F 取弹抢走 VM.state 后, 包扎的收尾永不执行 ⇒ 绷带卷 + 左臂缠臂环永久留在手上)。
+// 两层收尾各归各的单源:
+//   ① 账目层 = cancelReadBar: 计时清零 + 炮位占位交还 (useCast.g.user) + 举雷摘 nadeHeld + 文案;
+//   ② 模型层 = vmAbortAction (10-viewmodel): 绷带卷/缠臂环/持刀左臂/举雷收枪/换弹中弹匣·弹夹·枪栓
+//      归位的残留收起 (幂等; 换弹被抢走时弹匣正被搬在半路, 不归位就是"枪缺弹匣"滞留)。
+// 口径: **取消 (X/✕/左键·限非举雷) / 受击打断 / 被别的行动抢占 走同一个出口**, 只是文案不同。
+// ★2026-10-25 反馈轮两条裁定:
+//   ① "打断"的完整语义 = 读条期间做**其他交互动作**会打断读条 (换枪/装填/举雷/包扎/近战/建造拆除/
+//      F 交互栈…各入口在确认起步后调 stealBar 抢占; 同键重按不抢——R 重按不重启换弹、同种雷重举不重烧引信);
+//   ② 受伤打断门槛 = 单次伤害 >READBAR_DMG_GATE (25) 才打断, 刮伤/火蚀/小跳伤不再打断 (damage 内单源门)。
+readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast
+||(typeof VM!=='undefined'&&((VM.state==='nade'&&this.nadeHeld)||VM.state==='reload')); },
+// 读条期间"身体被别的行动占用"的判据 (包扎 tick 每帧问一次, 见 20-player 的包扎段):
+//   上炮/上车/上艇/进炮位/驾巡飞弹/取弹 (grabAction) 任一为真, 或 VM 动作态已被抢走 ⇒ 按被打断收账。
+// 故意**不含 useCast**: 它是"F 刚点上的新行动", 由 useCast 自己的 tick 反向收掉包扎 —— 放进来会把
+//   玩家刚按下的 F 吃掉 (自己取消自己)。
+readBarBusy(){ return !this.alive||!!this.onVehicle||!!this.onNaval||!!this.onMG||!!this.onAT||!!this.onAA||!!this.onMortar||!!this.onBattery||!!this.loiter||!!this.grabAction||(typeof VM!=='undefined'&&VM.state!=='bandage'); },
+cancelReadBar(msg,quiet){
+// ★2026-10-25 举雷/换弹并入: 账目旗必须在 vmAbortAction **之前**取 —— 模型层一收, VM.state 已回 idle,
+//   事后再判就永远扑空 (any 不置位 ⇒ 取消了也不弹文案)。换弹的账目全在 VM/模型层, 这里只补旗标。
+const nadeHold=this.nadeHeld, rl=(typeof VM!=='undefined'&&VM.state==='reload');
+this.barArmKey=null;   // ★2026-10-30: 读条收尾顺手清打断确认账 (readBarActive 已变 ⇒ 旧键不得残留到下一条读条)
+if(typeof vmAbortAction==='function') vmAbortAction();   // 模型层先收 (与下面账目层先后无所谓, 两边幂等)
+let any=false;
+if(this.bandaging>0){ this.bandaging=0; any=true; }
+if(this.demolish){ if(typeof stopDemolish==='function') stopDemolish(this,true); else this.demolish=null; any=true; }
+if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; any=true; }
+if(nadeHold){ this.nadeHeld=false; any=true; }   // 举雷收回: 雷回 pouch 不消耗 (VM/雷模由 vmAbortAction 收)
+if(rl){ any=true; }                              // 换弹中止: 弹药不结算 (finishReload 只在自然走完那条路)
+if(any&&!quiet&&this.isPlayer) showScorePop(msg||'已取消');
+return any;
+},
+// ★2026-10-25 反馈轮① 抢占单源: 动作/交互入口在**确认会起步之后**调用 —— 安静收掉当前读条 (账目+模型
+//   两层, 与 X/受击同一出口; 新动作自身的提示就是反馈, 不再叠"已取消")。空按 (无目标/冷却中/同键重按)
+//   不得走到这里 —— 不该白丢读条。调用方: 19-input 各动作键 / 20-player tryInteract 交互栈 / 06-engineering 建造。
+stealBar(){ if(this.readBarActive()) this.cancelReadBar(null,true); },
+// ★2026-10-30 读条交互批 (用户裁定③) 打断确认单源: 读条中按**其他动作键**第一次 = 只记键**不抢** (22-hud
+//   的读条上会亮"再按一次打断"提示), BAR_ARM_WIN 秒内**同键**再按才放行。放行后抢占仍由调用方在
+//   "确认起步"处调 stealBar (★2026-10-25 的"确认起步才抢"纪律原样保留 —— 第二次按时目标没了/起步失败了
+//   也不白丢读条)。无读条时恒 true (直通, 零行为变化)。键传 e.code 或稳定标识 (换枪用 'SW'+槽位)。
+//   同键再按 (包扎H/回收6/前摇F/拆除B/换弹R) 不走这里 —— 那是"加速"不是"打断", 各键处理器自理。
+barArmKey:null, barArmT:-9,
+barStealArmed(key){
+if(!this.readBarActive()){ this.barArmKey=null; return true; }
+if(this.barArmKey===key&&nowT-this.barArmT<BAR_ARM_WIN){ this.barArmKey=null; return true; }
+this.barArmKey=key; this.barArmT=nowT;
+return false;
+},
+// ★2026-10-30 票尽观战部署放行 (用户裁定): 部署门单源判据 —— **本次部署解决后**的观战态。
+//   specWant 是"待生效"意图 (战斗中在兵种卡上点开的开关), 要到 deployPlayer 才落进 spectator,
+//   所以门必须问"解决后"而不是"现在": specWant=true → 放行; specWant=false (显式关) 与
+//   未设 (null+false) → false, 票尽照旧禁用。观战部署不耗票, fieldCount 不计观战者 (21-match),
+//   清场判定/最后一人倒计时均不受影响。
+//   ★2026-11-01: 自由观战视模式 (specView) 也把 spectator 置真, 但它**没有"待生效"语义** ——
+//   视模式不是部署, specWant 必须保持 null; 回退分支因此排除 specView (视模式下本门照旧 false,
+//   部署按钮才会在票尽时切成「观战」而非「部署」, 见 22-hud/23-deploy/24-main 三处同判据)。
+specWillBe(){ return (typeof this.specWant==='boolean')?this.specWant:(!!this.spectator&&!this.specView); },
 damage(amt,attacker,isHead){
 if(!this.alive||matchOver||this.spectator) return; // 观战: 完全免伤
 // 出生保护 (2026-09-28 阶段三 P1): 落地 0.5s 内**敌方来源**伤害免掉 (开火即解除, fireBullet 清账);
@@ -89,9 +186,18 @@ if(attacker||amt>=2) this.flinchT=FLINCH_ANIM_T;
 if(this.streakBuff&&this.streakBuff.dmgCut>0&&attacker&&attacker!==this&&attacker.team!==this.team) amt*=1-this.streakBuff.dmgCut;
 this.hp-=amt;
 this.lastDmgT=nowT;
-if(this.bandaging>0){ this.bandaging=0; showScorePop('包扎被打断!'); }
-if(this.demolish){ this.demolish=null; if(this.isPlayer) showScorePop('拆除被打断!'); } // 读条回收: 受击打断 (2026-09-28 阶段三 P1)
-if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; showScorePop('使用被打断!'); } // 固定火力点前摇: 中弹打断
+// 读条受击打断 (★2026-10-12 → 2026-10-25 扩到举雷/换弹 → 反馈轮② 加门槛): 统一走取消单源 —— 旧版只清字段
+//   (bandaging=0 / demolish=null), VM.state 仍停在 'bandage' ⇒ 绷带卷与缠臂环永久挂在手上 (用户实报②的另
+//   一个入口, 与 F 抢占同源)。举雷被打断 = 雷收回不消耗; 换弹被打断 = 弹药不结算 (想换完就先找掩体)。
+//   门槛 = 单次伤害 >READBAR_DMG_GATE (25): 判在减免之后的最终 amt 上; 死亡清账 (die 内) 仍无条件收。
+if(amt>READBAR_DMG_GATE&&this.readBarActive()){
+// ★2026-11-03 死亡掉雷批: 这一击直接致命 (hp 已在上方扣减) ⇒ 捏着的雷**掉落**代替收回 —— dropHeldNade 入
+//   全局 nades 账, 随后的 cancelReadBar 只收玩家侧账目/模型, 碰不到已入账的弹体; 读条余时由厨雷账
+//   nadeFuse 天然继承 (掉落引信=余值)。出手弧 (readBarActive 假, 松手后) 与 ≤25 致命击不走这里 ——
+//   由 die() 内的掉雷钩兜底 (持雷/弧两态判据见 die())。
+if(this.hp<=0&&this.nadeHeld) dropHeldNade(this);
+this.cancelReadBar(this.bandaging>0?'包扎被打断!':(this.demolish?'拆除被打断!':(this.useCast?'使用被打断!':(this.nadeHeld?'举雷被打断!':'换弹被打断!'))));
+}
 AudioSys.hurt();
 dmgFlash=Math.min(1,dmgFlash+0.5);
 addTrauma(0.25);
@@ -107,12 +213,16 @@ this.die(attacker,isHead);
 die(attacker,isHead){
 this.alive=false;
 this.deaths++;
+// 指挥官阵亡 (2026-10-26 指挥官批, D1): 地图关 + 死亡期间无法下令; 各单位维持最后命令继续执行
+if(typeof cmdMapForceClose==='function') cmdMapForceClose();
 this.deathT=nowT;
 tickets[this.team]=Math.max(0,tickets[this.team]-1);
 this.killerName=attacker?(attacker.name||'敌军'):'';
 this.killerSrc=killSrcLabel(attacker); // 击杀来源: 载具/固定火力点/武器名 (2026-09-04)
-if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+SCORE_TABLE.kill; addKillfeed(attacker,this,false); }
+if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+SCORE_TABLE.kill; addKillfeed(attacker,this,!!isHead); } // ★2026-11-01 判定批: 爆头位透传 (旧硬编码 false —— Bot die 链 14-bots 传 isHead, 唯独玩家被爆头击杀时播报永远不出 ☠)
 if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀计数
+const _pInfAct=(attacker&&attacker.zombie)||(typeof isFullInfectionActive==='function'&&isFullInfectionActive());
+if(ZOMBIE_MODE&&_pInfAct){ if(typeof queueZombieInfect==='function') queueZombieInfect(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker',1.6,this.deathRag); else if(typeof spawnZombie==='function') spawnZombie(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker'); } // 丧尸模式: 延迟尸变入队 (防同帧爆炸二次炸死/双倍击杀)
 	if(this.onMG){ releaseEmpl(this.onMG,true); this.onMG=null; }
 	if(this.onAT){ releaseEmpl(this.onAT,true); this.onAT=null; }
 	if(this.onAA){ releaseEmpl(this.onAA,true); this.onAA=null; }
@@ -125,14 +235,24 @@ if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀
 	// #navalHud 与"鱼雷 ×N/[F] 鱼雷"还会在死亡镜头里冻结显示。旧版只靠 23-deploy:382 的再部署兜住。
 	// typeof 守卫: navalSeatRelease 由 20a-seats 提供, 缺了它就只清字段 (绝不能把人钉在艇上)。
 	if(this.onNaval){ if(typeof navalSeatRelease==='function') navalSeatRelease(); else this.onNaval=null; }
-	// 大舰甲板座位随死亡交还 (2026-09-30 阶段五 P4): 同一族 —— 不交还的话死亡镜头里仍算"站在甲板上",
-	//   复活部署后 player.onCapital 悬空, 下一帧的 capPlayerTick 会拿旧舰判"掉下甲板"而误清状态。
-	if(this.onCapital){ if(typeof capSeatRelease==='function') capSeatRelease(); this.onCapital=null; this.capitalGun=null; }
+	// (2026-11-10: 大舰甲板座位 onCapital/capitalGun 死亡交还账随大舰子系统下架摘除)
 	if(this.loiter){ loiterDetonate(this.loiter,this.loiter.pos.clone()); }
+	// ★2026-11-03 死亡掉雷批 (用户裁定"死亡时手里捏的雷掉落在原地, 并继承读条时间"):
+	// "捏着" = 持雷 (nadeHeld, 厨雷引信照烧) 或出手弧中 (松手后 VM 仍 'nade', 出手帧未到) —— 与 20-player
+	// playerNadeReady 同口径。updateViewModel 随 alive 停摆 (24-main 门) ⇒ 死后弧永不走出手帧, 不掉落就是
+	// 又一例"原地消失"。掉落后把 'nade' 态收回 idle (复刻 10-viewmodel 哨兵自愈的收尾三件套) —— 死后残留的
+	// 弧绝不能再走出手 (防复活后双雷)。受创>25 打断 (damage 内) 不走这里: 人没死, 雷收回不消耗。
+	if(this.nadeHeld||((typeof VM!=='undefined')&&VM&&VM.state==='nade'&&(this.nadeThrowT||0)<=0)){
+	dropHeldNade(this);
+	if(typeof VM!=='undefined'&&VM&&VM.state==='nade'){ VM.state='idle'; if(VM.nadeM) VM.nadeM.visible=false; if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true; }
+	}
 		this.onVehicle=null;
 		this.nadeHeld=false;
 	// (2026-09-21 A#2 契约G) 动作计时随死亡清零: 死亡姿态由布娃娃/倒地接手, 不留开火后坐/换弹/投掷的残余
 	this.fireAnimT=0; this.reloadT=0; this.nadeThrowT=0; this.meleeT=0;
+	// ★2026-10-12 读条随死亡一次收口 (与上面动作计时同规, quiet: 死亡反馈已经够多, 不再叠一条"已取消"):
+	//   旧版 die() 不清 bandaging/demolish/useCast ⇒ 死亡镜头里绷带卷与缠臂环照挂, 复活后第一帧才自愈。
+	if(this.readBarActive()) this.cancelReadBar(null,true);
 	// (2026-09-21 A#8 契约E) 死亡必须彻底收伞 (空中阵亡): 置 false 后**同帧**摘模型, 不留"尸体挂着伞"
 	this.chute=false;
 	if(typeof playerChuteClear==='function') playerChuteClear();
@@ -160,8 +280,8 @@ this.deathPos=this.pos.clone();
 this.deathPos.y+=0.4;
 setRespawnCd(8); // 经 22-hud owner 接口 (2026-09-06 B7b/P2-14)
 const dly=this.deathRag?2100:900;
-setTimeout(()=>{ if(!this.alive) document.getElementById('blackOv').style.opacity=0.75; },dly);
-setTimeout(()=>{ if(!matchOver&&!this.alive) showDeploy(true); },dly+700);
+addMatchTimeout(()=>{ if(!this.alive){ const bo=document.getElementById('blackOv'); if(bo) bo.style.opacity=0.75; } },dly);
+addMatchTimeout(()=>{ if(!matchOver&&!this.alive&&typeof showDeploy==='function') showDeploy(true); },dly+700);
 },
 doMeleeHit(){
 // (2026-09-21 A#2 契约G) 刺刀命中瞬间: 动作计时置满 (姿势机据此做"枪前刺 + 上身突进")。
@@ -169,8 +289,9 @@ doMeleeHit(){
 this.meleeT=MELEE_ANIM_T;
 const dir=camForward();
 const o=camera.position.clone();
-// 刺刀不吃"观战连狙无差别火力" (2026-09-20 观战连狙批): ffSpecSniper 的语义是"这把连狙的弹道对双方生效",
-// 拼刺刀是另一件事 —— 不摘标记的话, 观战者手里握着连狙贴队友按 V 会直接把友军捅死。同一帧内摘除并还原。
+// 刺刀摘 ffSpecSniper (2026-09-20 观战连狙批; 2026-11-09 观战中立批后为历史注记): 旧口径"只有观战连狙
+// 可打双方"时, 不摘标记的话观战者握连狙贴队友按 V 会直接把友军捅死。新口径下观战者所有武器对双方生效
+// (coFfFire 的 spectator 门), 摘旗不再阻断观战刺刀伤友军; 代码保留 —— 非观战握持态语义不变, 探针锚在此。
 const ff=player.ffSpecSniper; player.ffSpecSniper=false;
 const sr=raySoldiers(o,dir,2.6,player);
 player.ffSpecSniper=ff;
@@ -224,6 +345,7 @@ AudioSys.metalSlide(0.2,0.08,600,300);
 finishReload(){
 const w=this.curW;
 if(!w) return;
+if(this.specViewHost) return;   // ★2026-11-03 真附身: 换弹镜像是宿主账 (Bot 换弹完成时已自账写满), 玩家侧结算让位防跨账写
 const need=w.def.mag-w.mag;
 const take=Math.min(need,w.reserve);
 w.mag+=take; w.reserve-=take;
@@ -233,9 +355,11 @@ if(!this.grabAction) return;
 const ga=this.grabAction;
 		if(ga.kind==='ammo'||ga.kind==='truck'||ga.kind==='supply'){
 		const ac=ga.crate;
-		// 补给(弹药箱/运输车/临时补给点): 弹夹+备用+投掷物+绷带全满
-		for(const s of this.slots){ s.reserve=s.def.reserve; s.mag=s.def.mag; }
-	const gear=clsGear(this.cls,this.team);
+		// 补给(弹药箱/运输车/临时补给点): 投掷物+绷带全满; 子弹 ★2026-10-25 用户裁定改为"进弹袋不进弹夹":
+		//   旧版 mag+reserve 直接双满 (拿起就能打); 新版 mag 原样不动, reserve 顶到 **备用上限+一个弹夹**
+		//   (有意超上限 —— 超出量恰是一匣, 与旧版相比总弹数不亏, 只多一道自己按 R 的手续)。读条/取消不涉及。
+		for(const s of this.slots){ s.reserve=s.def.reserve+s.def.mag; }
+		const gear=clsGear(this.cls,this.team);
 	this.nadeCount=gear.nades;
 	this.smokeCount=gear.smoke;
 	this.incinCount=gear.incin;

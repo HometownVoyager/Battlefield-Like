@@ -45,7 +45,7 @@ const PATCHES=[
  ['js/15-vehicles.js','tankBuildSkirt(g,S,M);','g.add(new THREE.Mesh(new THREE.BoxGeometry(0.06,0.8,S.L),M.tone));'],
  ['js/15-vehicles.js','T.trackTex.repeat.set(1,1);\nT.trackTex.rotation=0;','T.trackTex.repeat.set(1,8);\nT.trackTex.rotation=Math.PI/2;'],
  ['js/15-vehicles.js','this.trackTex.offset.y-=this.vel*dt/(this.trackTileLen||1.5);','this.trackTex.offset.y+=this.vel*dt/(this.trackTileLen||1.5);'],
- ['js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','const wr=(w.geometry&&w.geometry.parameters&&w.geometry.parameters.radiusTop)||0.45; w.rotation.x+=this.vel*dt/wr;',
+ ['js/15b-trucks.js','const wr=(w.geometry&&w.geometry.parameters&&w.geometry.parameters.radiusTop)||0.45; w.rotation.x+=this.vel*dt/wr;',
   'w.rotation.x+=this.vel*dt*1.6;'],
  ['js/16-aircraft.js','new THREE.CylinderGeometry(FR*0.88,FR*0.46,FL*0.18,10)','new THREE.CylinderGeometry(FR*0.46,FR*0.88,FL*0.18,10)'],
  ['js/15e-navmodels.js',"const rud=nmBox(g,W*0.05,H*0.14,L*0.02,M.dark,0,wl*0.5,freeRear-0.01); rud.name='nmRudder';\nR.nodes.rudder=rud;",
@@ -127,7 +127,9 @@ assert('05a: 乌篷鼓面朝上 (轴向仍沿船长)',s5a.includes('cover.rotati
 const s5c=srcOf('js/05c-layouts.js');
 assert('05c: 基地碉堡朝向敌军来向',s5c.includes('Math.atan2(sgn*100,30)')&&s5c.indexOf('Math.atan2(-sgn*100,30)')<0);
 const s5b=srcOf('js/05b-props.js');
-assert('05b: 棕榈叶长轴沿下垂方向',s5b.includes('frond.rotation.set(p+HPI,a,0);'));
+// ★2026-11-01 锚跟走: 棕榈叶性能批起改 InstancedMesh 逐实例矩阵 (frond 逐实例欧拉退役), 下垂不变量
+//   同式迁移为矩阵欧拉 _pmE.set(p+HPI, a, 0,'YXZ') —— 叶长轴=实例局部 Y×len, 俯角 p+HPI 绕 X 不变。
+assert('05b: 棕榈叶长轴沿下垂方向',s5b.includes("_pmE.set(p+HPI, a, 0, 'YXZ')"));
 const s10=srcOf('js/10-viewmodel.js');
 assert('10: 架枪锚定 oz 符号正确',s10.includes('oz+=(1-Math.cos(rel))*0.45*pin;')&&!s10.includes('oz+=(Math.cos(rel)-1)*0.45*pin;'));
 const scfg=srcOf('js/00-config.js');
@@ -150,7 +152,7 @@ function loadRealTHREE(){
 	vm.runInContext(fs.readFileSync(path.join(root,'dev/vendor/three.min.js'),'utf8'),s,{filename:'dev/vendor/three.min.js'});
 	return m.exports;
 }
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 function boot(campIdx){
 	const T=loadRealTHREE();
 	T.WebGLRenderer=class{ constructor(){ this.domElement=Object.assign(document.createElement('canvas'),{width:0,height:0}); this.shadowMap={enabled:false,type:0,autoUpdate:true};

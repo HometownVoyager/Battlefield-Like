@@ -9,10 +9,11 @@ const world = new THREE.Group(); scene.add(world);
 const NAV_CLEARS=[];
 // ===== 建筑框架: 布局随机 =====
 // URL 带 ?seed=N 时世界布局用确定性随机(便于复现验证同一布局), 否则维持 Math.random
+// procgen 图: 00c-procgen 置 PG_WR_SEED=种子 ⇒ 布局级确定性复现 (同种子同图, 设计定稿 §2.1)
 const WORLD_SEED=(()=>{ try{ const m=location.search.match(/(?:\?|&)seed=(\d+)/); return m?((parseInt(m[1])||1)>>>0):0; }catch(e){ return 0; } })();
-let _wstate=WORLD_SEED||0;
+let _wstate=WORLD_SEED||(typeof PG_WR_SEED!=='undefined'?PG_WR_SEED:0);
 function wRand(){ _wstate=(_wstate+0x6D2B79F5)|0; let t=Math.imul(_wstate^(_wstate>>>15),1|_wstate); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }
-const wr=(a,b)=>WORLD_SEED?a+wRand()*(b-a):rand(a,b);
+const wr=(a,b)=>(WORLD_SEED||(typeof PG_WR_SEED!=='undefined'&&PG_WR_SEED))?a+wRand()*(b-a):rand(a,b);
 const wri=(a,b)=>Math.floor(wr(a,b+1));
 // ===== 建筑框架: 几何缓存 (同尺寸盒子复用几何体, 削减上千重复 BoxGeometry) =====
 const _geoCache=new Map();
@@ -22,7 +23,7 @@ let g=_geoCache.get(k);
 if(!g){ g=new THREE.BoxGeometry(w,h,d); _geoCache.set(k,g); }
 return g;
 }
-function mesh(geo,mat,x,y,z,ry=0,cast=true,recv=true){
+function mesh(geo,mat,x,y,z,ry=0,cast=false,recv=true){
 const m=new THREE.Mesh(uvGeo(geo,mat),mat);
 m.position.set(x,y,z); m.rotation.y=ry;
 m.castShadow=cast; m.receiveShadow=recv;
@@ -69,10 +70,17 @@ const rT=(p.radiusTop!==undefined)?p.radiusTop:(p.radius||0);
 const rB=(p.radiusBottom!==undefined)?p.radiusBottom:(p.radius||0);
 const h=p.height;
 const theta=(p.thetaLength!==undefined)?p.thetaLength:Math.PI*2;
-const key=geo.type+':'+rT.toFixed(3)+'/'+rB.toFixed(3)+'x'+h.toFixed(2)+'t'+theta.toFixed(3)+'@'+S;
+// ★ 2026-11-01 修: 缓存键必须含**全部形状参数** —— 旧键只含 r/h/θ, 同尺寸不同 radialSegments/
+//   heightSegments/openEnded/thetaStart 的两根圆柱会共享同一克隆 (第二根被第一根的几何顶替 =
+//   分段数/开口/起始角全错)。Box 键无此病 (w/h/d 即全部参数)。
+const key=geo.type+':'+rT.toFixed(3)+'/'+rB.toFixed(3)+'x'+h.toFixed(2)+'t'+theta.toFixed(3)
++'s'+(p.radialSegments!==undefined?p.radialSegments:32)+'h'+(p.heightSegments!==undefined?p.heightSegments:1)
++'o'+(p.openEnded?1:0)+'a'+((p.thetaStart||0).toFixed(3))+'@'+S;
 const hit=_uvCache.get(key); if(hit) return hit;
 const g=geo.clone?geo.clone():null;
-if(!g||!g.attributes||!g.attributes.uv||!g.attributes.position){ _uvCache.set(key,g||geo); return g||geo; }
+// ★ 失败路径必须回**原几何**: 桩/无 position 属性的克隆直接返回 geo —— 旧写法把"缺 position 的盒形克隆"
+//   缓存并顶替原几何, 沙箱桩的 Cylinder clone (Geo 桩) 会把 type 翻成 BoxGeometry (探针非盒判据静默清空)。
+if(!g||!g.attributes||!g.attributes.uv||!g.attributes.position){ return geo; }
 const uv=g.attributes.uv, pos=g.attributes.position;
 const rMax=Math.max(rT,rB);
 const su=(theta*rMax)/S, sv=Math.sqrt(h*h+(rT-rB)*(rT-rB))/S;
@@ -779,58 +787,167 @@ _rtS=end;
 //   斜置的"长边沿本地 Z"的墙/楼板, 碰撞小块链整体铺在与墙体垂直的方向上(±long/2),
 //   墙体本身几乎无碰撞(穿墙), 站立面也没了(掉下楼), 还在墙两侧空中留下幻影碰撞盒。
 //   dir 只在此处展开: 正交朝向(±90°/0°)走上面精确 AABB 分支, 不受影响。
-function solidBox(mat,w,h,d,x,y,z,ry=0,chain,crush){
-const m=mesh(boxGeo(w,h,d),mat,x,y,z,ry);
-// 碰撞盒回挂视觉网格: killBox 时连同网格一起移除 (屋顶碰撞带/山墙与此同源)
+// ===== 建筑构件网格合并 (Mesh Merging) =====
+let _bldBatchDepth = 0;
+let _bldBatch = null;
+
+function bldBatchBegin(){
+if(_bldBatchDepth === 0){
+_bldBatch = new Map();
+}
+_bldBatchDepth++;
+}
+
+function mergeBoxItems(items, mat){
+let anyCast = false;
+for(const it of items){ if(it.cast) anyCast = true; }
+
+const testGeo = uvGeo(boxGeo(items[0].w, items[0].h, items[0].d), mat);
+if(testGeo && testGeo.attributes && testGeo.attributes.position && testGeo.attributes.position.array){
+const N = items.length;
+const positions = new Float32Array(N * 24 * 3);
+const normals = new Float32Array(N * 24 * 3);
+const uvs = new Float32Array(N * 24 * 2);
+const indices = new (N * 24 > 65535 ? Uint32Array : Uint16Array)(N * 36);
+
+let vOff = 0, iOff = 0;
+for(const it of items){
+const g = uvGeo(boxGeo(it.w, it.h, it.d), mat);
+const pos = g.attributes.position;
+const norm = g.attributes.normal || { getX:()=>0, getY:()=>1, getZ:()=>0 };
+const uv = g.attributes.uv || { getX:()=>0, getY:()=>0 };
+const idx = (g.index && g.index.array) ? g.index.array : null;
+const cs = Math.cos(it.ry), sn = Math.sin(it.ry);
+for(let k = 0; k < 24; k++){
+const lx = pos.getX(k), ly = pos.getY(k), lz = pos.getZ(k);
+positions[(vOff + k) * 3] = it.x + lx * cs + lz * sn;
+positions[(vOff + k) * 3 + 1] = it.y + ly;
+positions[(vOff + k) * 3 + 2] = it.z - lx * sn + lz * cs;
+const nx = norm.getX(k), ny = norm.getY(k), nz = norm.getZ(k);
+normals[(vOff + k) * 3] = nx * cs + nz * sn;
+normals[(vOff + k) * 3 + 1] = ny;
+normals[(vOff + k) * 3 + 2] = -nx * sn + nz * cs;
+uvs[(vOff + k) * 2] = uv.getX(k);
+uvs[(vOff + k) * 2 + 1] = uv.getY(k);
+}
+if(idx){
+for(let j = 0; j < 36; j++){
+indices[iOff + j] = vOff + idx[j];
+}
+} else {
+const boxIdx = [0,2,1,2,3,1, 4,6,5,6,7,5, 8,10,9,10,11,9, 12,14,13,14,15,13, 16,18,17,18,19,17, 20,22,21,22,23,21];
+for(let j = 0; j < 36; j++){
+indices[iOff + j] = vOff + boxIdx[j];
+}
+}
+vOff += 24;
+iOff += 36;
+}
+const merged = new THREE.BufferGeometry();
+merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+merged.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+merged.setIndex(new THREE.BufferAttribute(indices, 1));
+if(merged.computeVertexNormals) merged.computeVertexNormals();
+if(merged.computeBoundingSphere) merged.computeBoundingSphere();
+const mm = new THREE.Mesh(merged, mat);
+mm.castShadow = anyCast;
+mm.receiveShadow = true;
+return mm;
+} else {
+const merged = new THREE.BufferGeometry();
+const mm = new THREE.Mesh(merged, mat);
+mm.castShadow = anyCast;
+mm.receiveShadow = true;
+return mm;
+}
+}
+
+function bldBatchEnd(){
+if(_bldBatchDepth <= 0) return;
+_bldBatchDepth--;
+if(_bldBatchDepth === 0){
+const batch = _bldBatch;
+_bldBatch = null;
+if(!batch) return;
+for(const [mat, items] of batch){
+if(!items.length) continue;
+if(items.length === 1){
+const item = items[0];
+world.add(item.mesh);
+item.mesh.castShadow = item.cast;
+item.mesh.receiveShadow = true;
+continue;
+}
+const mergedMesh = mergeBoxItems(items, mat);
+world.add(mergedMesh);
+for(const item of items){
+item.mesh.mergedMesh = mergedMesh;
+item.mesh.parent = mergedMesh;
+}
+}
+}
+}
+
+function solidBox(mat,w,h,d,x,y,z,ry=0,chain,crush,cast){
+const doCast = cast !== undefined ? !!cast : (h >= 1.8 && Math.max(w,d) >= 1.8);
+const bbList = [];
 const sn=Math.sin(ry), cs=Math.cos(ry);
 if(Math.abs(sn)<0.02||Math.abs(cs)<0.02){
 const swap=Math.abs(sn)>0.5;
-const bb=addBoxCollider(x,y,z, swap?d:w, h, swap?w:d); bb.mesh=m; if(crush) bb.crush=true;
+const bb=addBoxCollider(x,y,z, swap?d:w, h, swap?w:d); if(crush) bb.crush=true;
+bbList.push(bb);
 } else {
 const long=Math.max(w,d), short=Math.min(w,d);
-// 薄条块径: 细长件(墙/护栏/沙袋段, 长细比≥1.4)取 ≈厚度 —— 轴对齐方块包斜置薄墙时法向外溢 ≈
-// (s/2)(|cos|+|sin|) - t/2 (45° 最坏), 1.15t 时 ≈0.31t / 1.0t 时 ≈0.21t, 块越多外溢越大;
-// 近方件(长细比<1.4, 方箱/墩)取 1.15×短边 —— 块能把整个面盖住(取 1.0t 会出现"两块重合在中心、
-// 四角露缝"的退化: long≈s 时链跨度为 0)。
 const s=chain||clamp(short*((long/short)<1.4?1.15:1.0),0.34,1.6);
 const dirX=w>=d?cs:sn, dirZ=w>=d?-sn:cs;
 const perpX=w>=d?-sn:-cs, perpZ=w>=d?-cs:sn;
-// 两档铺法 (斜置件一律绕长轴铺链/铺阵):
-//  薄条(墙/护栏/沙袋段): 沿长轴小块链, 块心内缩 s/2、间距 0.92s ⇒ 中线连续无缝, 法向外溢最小;
-//  大截面(楼板/平台/走台/大屋盖): 2D 贴片 —— 轴对齐方块铺斜置矩形, 任意倾角下法向外溢恒为 ≈0.21·s,
-//    故**主体格贴边铺**(外溢不叠加), 四角另加 0.6s 小格补角 (小格外溢 ≈0.13s);
-//    旧版(2026-09-20 上半场)按 0.68s/端内缩 0.32s 铺, 覆盖是 0% 缺口, 但法向外溢 0.44~0.60m ——
-//    斜置楼板/屋盖四周一圈"隐形台阶", 贴墙跳跃/上檐全被挡在外面 (用户实机"无法跳墙·诡异穿墙"的真因)。
 const big=!chain&&short*1.15>1.55;
 let nLong,nShort;
 if(big){
-const s2=clamp(short*0.9,0.34,1.6);   // 窄条(1.4~1.8)不再被 1.6 大方块糊住
-const sp=0.62;                        // 0.62 < 1/√2 ⇒ 任意倾角下相邻方块必有重叠(无缝)
-const ins=s2/2;                       // 主体格贴边
+const s2=clamp(short*0.9,0.34,1.6);
+const sp=0.62;
+const ins=s2/2;
 const rl=Math.max(0.02,long-s2), rs=Math.max(0.02,short-s2);
 nLong=Math.max(2,Math.ceil(rl/(s2*sp))+1);
 nShort=Math.max(2,Math.ceil(rs/(s2*sp))+1);
 for(let i=0;i<nLong;i++)for(let j=0;j<nShort;j++){
 const t=-(long/2-ins)+i*rl/(nLong-1);
 const u=-(short/2-ins)+j*rs/(nShort-1);
-const bb=addBoxCollider(x+dirX*t+perpX*u, y, z+dirZ*t+perpZ*u, s2, h, s2); bb.mesh=m; if(crush) bb.crush=true;
+const bb=addBoxCollider(x+dirX*t+perpX*u, y, z+dirZ*t+perpZ*u, s2, h, s2); if(crush) bb.crush=true;
+bbList.push(bb);
 }
-// 四角补角贴片 (小格中心内缩 0.354·sC ⇒ 恰好盖住斜置矩形的尖角, 外溢只有小格那一档)
 const sC=s2*0.6, dC=0.354*sC;
 for(const sx of [-1,1])for(const sz of [-1,1]){
 const t=sx*(long/2-dC), u=sz*(short/2-dC);
-const bb=addBoxCollider(x+dirX*t+perpX*u, y, z+dirZ*t+perpZ*u, sC, h, sC); bb.mesh=m; if(crush) bb.crush=true;
+const bb=addBoxCollider(x+dirX*t+perpX*u, y, z+dirZ*t+perpZ*u, sC, h, sC); if(crush) bb.crush=true;
+bbList.push(bb);
 }
 }else{
 nLong=Math.max(1,Math.ceil(long/(s*0.92)));
 nShort=1;
 for(let i=0;i<nLong;i++){
 const t=nLong===1?0:-long/2+s/2+i*(long-s)/(nLong-1);
-const bb=addBoxCollider(x+dirX*t, y, z+dirZ*t, s, h, s); bb.mesh=m; if(crush) bb.crush=true;
+const bb=addBoxCollider(x+dirX*t, y, z+dirZ*t, s, h, s); if(crush) bb.crush=true;
+bbList.push(bb);
 }
 }
 }
+
+if(_bldBatch && !_dG && !crush && !chain){
+let arr = _bldBatch.get(mat);
+if(!arr){ arr = []; _bldBatch.set(mat, arr); }
+const m = new THREE.Mesh(uvGeo(boxGeo(w,h,d),mat), mat);
+m.position.set(x, y, z); m.rotation.y = ry;
+m.castShadow = doCast; m.receiveShadow = true;
+arr.push({w, h, d, x, y, z, ry, cast: doCast, bbList, mesh: m});
+for(const bb of bbList) bb.mesh = m;
 return m;
+} else {
+const m = mesh(boxGeo(w,h,d), mat, x, y, z, ry, doCast);
+for(const bb of bbList) bb.mesh = m;
+return m;
+}
 }
 // ===== 地物贴坡: 采样物体局部轴向的地面高差 → 贴合俯仰/侧倾角 + 落地高度 =====
 // 约定与载具悬挂一致 (YXZ 序): 局部 X=物体长轴, +X 端抬高=正 roll; 局部 Z=短轴(正面), +Z 端抬高=负 pitch
@@ -1462,7 +1579,7 @@ const signs=o.skip!==undefined?[o.skip]:[1,-1];
 for(const sgn of signs){
 const off=sgn*span/2;
 const p=ctx.L(o.axis==='x'?0:off, o.axis==='x'?off:0);
-const rm=mesh(boxGeo(o.axis==='x'?ridgeLen:slope, 0.14, o.axis==='x'?slope:ridgeLen), o.mat, p[0], ctx.g0+o.y0+o.rise/2, p[1], ctx.ry);
+const rm=mesh(boxGeo(o.axis==='x'?ridgeLen:slope, 0.14, o.axis==='x'?slope:ridgeLen), o.mat, p[0], ctx.g0+o.y0+o.rise/2, p[1], ctx.ry, true, true);
 rm.rotation.order='YXZ';
 if(o.axis==='x') rm.rotation.x=sgn*pitch; else rm.rotation.z=-sgn*pitch;
 addSnowCap(rm); slabs.push(rm);
@@ -1618,6 +1735,7 @@ return null;
 }
 // 手写坐标摆建筑: 原地校验(高差宽限), 失败小偏移重试, 兜底原样登记
 // o:{ox,oz: 足迹中心局部偏移(如教堂含背面钟塔), maxDh}
+// o.noWater=true: 拒绝落进通用水体 (主河/汊港/鱼塘/海面) —— 算法图滨河地块用 (手摆图不传, 零指纹漂移)
 // o.strict=true: 8 次重试全败返回 null 而非兜底强放 (2026-09-09 柏林加密批次 ——
 //   兜底强放会绕过 B_FOOT 互斥, 把 37m 长街墙压在已有公寓上; 老调用方行为不变)
 function placeAt(x,z,ry,w,d,o={}){
@@ -1628,6 +1746,7 @@ const rxx=px+ox*Math.cos(ry)+oz*Math.sin(ry), rzz=pz-ox*Math.sin(ry)+oz*Math.cos
 if(terrainDelta(px,pz,ry,w,d)>(o.maxDh!==undefined?o.maxDh:1.4)) continue;
 if(metroBlocked(rxx,rzz,w,d)) continue; // 地铁站厅/隧道上方禁建 (2026-09-09)
 if(SEA&&shoreDist(rxx,rzz)>-6) continue; // 2026-09-19 环海图: 手摆建筑同样不得落水/贴水线
+if(o.noWater&&typeof inWaterBody==='function'&&inWaterBody(rxx,rzz)) continue; // 2026-10-07e 算法图水体门
 const rect=footRect(rxx,rzz,ry,w,d,1.0);
 if(!propFreeRect(rect)) continue; // 同 placeBuild: 手摆建筑也让开道具
 if(B_FOOT.some(f=>rectsOverlap(rect,f))) continue;

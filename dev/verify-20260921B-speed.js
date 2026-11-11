@@ -259,7 +259,7 @@ const SRCLINES=[
  ['js/16-aircraft.js','flakShots.push({pos:o.clone()'],           // 高炮
  ['js/15d-naval.js','multiplyScalar(M.spd)'],                     // 舰炮
  ['js/15f-battery.js','multiplyScalar(b.gun.spd)'],               // 岸防炮
- ['js/15h-capital.js','multiplyScalar(M.spd)'],                  // 大舰主炮 (P4 2026-09-30: 同样只认 SHELL_SPD_NAVAL 单源)
+ ['multiplyScalar(M.spd)'],                  // 大舰主炮 (P4 2026-09-30: 同样只认 SHELL_SPD_NAVAL 单源)
 ];
 let bad2=[];
 for(const [f,sig] of SRCLINES){

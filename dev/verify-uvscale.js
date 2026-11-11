@@ -30,18 +30,22 @@ console.log('\n── A 段: 00-config.UV_DENSITY → 02-scene.MAT ──');
 const actx=(()=>{
 	const ctx=vm.createContext(Object.assign({},sandbox));
 	ctx.document=document; ctx.window=window; ctx.globalThis=ctx;
-	for(const f of ['js/00-config.js','js/02-scene.js']) vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{filename:f});
+	// 05a 一起载入: cloth 的 uvRef 挂在就地材质 tentMatA/B 上 (2026-09-27 契约), 表键↔材质的对应要连它一起验
+	for(const f of ['js/00-config.js','js/02-scene.js','js/05a-buildings.js']) vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{filename:f});
 	return ctx;
 })();
 const UV=vm.runInContext('UV_DENSITY',actx), MAT=vm.runInContext('MAT',actx);
 const uvKeys=Object.keys(UV);
 chk(uvKeys.length>=10,`UV_DENSITY 登记 ${uvKeys.length} 种建材贴图`);
+// 就地建材质的键 (00-config 注释与 05a 建材段同名登记): 不在 MAT 表里, 但 uvRef 必须在那边真实挂上
+const INPLACE={cloth:['tentMatA','tentMatB']};
 let missTable=[],missMat=[];
 for(const k of uvKeys){
-	if(!MAT[k]) missMat.push(k);
-	else if(MAT[k].uvRef!==UV[k]) missTable.push(k);
+	if(MAT[k]){ if(MAT[k].uvRef!==UV[k]) missTable.push(k); continue; }
+	const inc=INPLACE[k];
+	if(!inc||!inc.every(n=>vm.runInContext(`typeof ${n}!=='undefined'&&${n}&&${n}.uvRef===UV_DENSITY.${k}`,actx))) missMat.push(k);
 }
-chk(missMat.length===0,`表内每个键都在真实 MAT 里${missMat.length?` (缺 ${missMat.join(',')})`:''}`);
+chk(missMat.length===0,`表内每个键都在真实 MAT 或就地材质里 (uvRef 逐值核对)${missMat.length?` (缺 ${missMat.join(',')})`:''}`);
 chk(missTable.length===0,`真实 MAT 的 uvRef 与表逐值相等${missTable.length?` (不符 ${missTable.join(',')})`:''}`);
 // 该挂却没挂的: 有平铺贴图的建材材质, 白名单除外 (地形顶点色/有机拉伸/无贴图)
 const EXEMPT={grass:'地形顶点色带底图',bark:'树干有机拉伸',leaves:'树叶有机拉伸',snowCap:'无贴图'};

@@ -12,7 +12,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),zlib=require('zlib');
 const stub=require('./_bootstub.js');
 const root=path.resolve(__dirname,'..');
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const RENDERER_STUB=`
 class StubRenderer{
 constructor(o){ this.domElement=(o&&o.canvas)||document.createElement('canvas'); this.domElement.style=this.domElement.style||{};
@@ -50,10 +50,30 @@ player.ads=false; player.sprinting=false; player.crouch=false; player.prone=fals
 player.onGround=true; player.braced=false; player.leanT=0; player.landDip=0;
 player.vel={x:0,y:0,z:0}; player.mouseDX=0; player.mouseDY=0; player.holdBreath=false;
 player.nadeHeld=false; player.bandaging=0; player.pendingBuild=null;
+player.hp=50; player.bandages=player.maxBandages||4; player.nadeHeld=false;
 vmEquip(key,0);
 const defR=VM.arms.R.position.clone(), defL=VM.arms.L.position.clone(); // positionHands 默认握位 (vmEquip 末尾)
-VM.state='reload'; VM.stateDur=(d.reload||2.5); VM.stateT=k*VM.stateDur;
-for(let i=0;i<frames;i++){ VM.stateT=k*VM.stateDur; updateViewModel(1/60,player); }
+// ★2026-10-12 左臂取证扩展: STATE=<reload|grab|bandage|build|nade|bolt|melee> 逐一出图 ——
+//   与真机同源: 只置"该动作需要的玩家字段", 其余交给 updateViewModel 自己的分支。
+const ST='${process.env.STATE||'reload'}';
+if(ST==='reload'){ VM.stateDur=(d.reload||2.5); }
+else if(ST==='grab'){ VM.stateDur=0.85; player.grabAction={kind:'ammo',crate:{x:0,z:0}}; }
+else if(ST==='bandage'){ VM.stateDur=2.6; player.bandaging=VM.stateDur*(1-k); }
+else if(ST==='build'){ VM.stateDur=BUILD_TIME.sandbag||2.2; player.pendingBuild={type:'sandbag',cost:1,tx:1,tz:1,ry:0}; }
+else if(ST==='nade'){ VM.stateDur=999; player.nadeHeld=true; }
+else if(ST==='bolt'){ VM.stateDur=1.0; }
+else if(ST==='melee'){ VM.stateDur=0.5; }
+VM.state=ST; VM.stateT=k*VM.stateDur;
+if(ST==='bandage') player.bandaging=VM.stateDur*(1-k);   // 每帧重置 (下面循环里也重置, 免得被分支改掉)
+for(let i=0;i<frames;i++){ VM.stateT=k*VM.stateDur; if(ST==='bandage') player.bandaging=VM.stateDur*(1-k); updateViewModel(1/60,player); }
+// LEGACY=1 (2026-10-12 阴性对照): 把左臂覆盖位姿**复原成 2026-10-05 那版字面量**, 与修后同相位出图对照 ——
+//   旧字面量 = 腕位 + rotY 0 (包扎为 +1.2), 正是"左臂像长在右肩上"的取证来源。
+if(${process.env.LEGACY?1:0}){
+const key2=(ST==='reload'&&d.rocket)?'rocketreload':ST;
+const LG={grab:{p:[-0.04,-0.08,-0.22],r:[0.4,0,0]},rocketreload:{p:[-0.04,-0.09,-0.24],r:[0.42,0,0]},
+bandage:{p:[-0.125,-0.038,-0.05],r:[0.12,1.2,0.08]}}[key2];
+if(LG){ VM.arms.L.position.set(LG.p[0],LG.p[1],LG.p[2]); VM.arms.L.rotation.set(LG.r[0],LG.r[1],LG.r[2]); console.log('[legacy] 复原旧左臂字面量 '+key2); }
+}
 VM.inner.updateMatrixWorld(true);
 VM.root.updateMatrixWorld(true); // fps 透视视图需要 root 的腰际位 (px,py,pz) 烘进 matrixWorld
 // VMTAG=1 调试上色 (2026-10-05): 材质是共享的 (sleeve0/skin 两臂同料), 逐网格 clone 后染色 ——
@@ -82,6 +102,15 @@ V.set(nrmA.getX(i),nrmA.getY(i),nrmA.getZ(i)).applyMatrix3(new THREE.Matrix3().g
 for(let t=0;t<P.length;t+=3) tris.push({P:[P[t],P[t+1],P[t+2]],N:[N[t],N[t+1],N[t+2]],col:col,emi:0});
 });
 const f=(v)=>v?('('+[v.x,v.y,v.z].map(x=>+x.toFixed(3)).join(',')+')'):'-';
+// ★2026-10-12 左臂取证 (用户实报"左臂像长在右肩上"): 逐帧打印"袖口端 (臂组 local +z 0.25 = 肩端)"与
+//   掌心 (local -0.09) 在**相机空间** (= vmScene 世界坐标, 相机在原点朝 -z) 的落点 —— 出图是给人看的,
+//   这两行是给探针断言的: 合法左臂 = 肩端 x 明显**小于**掌心 x, 且肩端在画面左半 (x<0)。
+const armEnd=(a,z)=>{ const v=new THREE.Vector3(0,0,z); a.localToWorld(v); return v; };
+console.log('[armL] sleeve='+f(armEnd(VM.arms.L,0.25))+' palm='+f(armEnd(VM.arms.L,-0.09))+' rotY='+(+VM.arms.L.rotation.y.toFixed(3))
++' | [armR] sleeve='+f(armEnd(VM.arms.R,0.25))+' palm='+f(armEnd(VM.arms.R,-0.09))+' rotY='+(+VM.arms.R.rotation.y.toFixed(3))
++' | state='+VM.state+' k='+k+' bandaging='+(+player.bandaging.toFixed(2))+' bandageVis='+(VM.bandageM?Number(VM.bandageM.visible):'-')
++' wrapVis='+((VM.arms.L.userData&&VM.arms.L.userData.wrap)?Number(VM.arms.L.userData.wrap.visible):'-')
++' gunVis='+Number(VM.gunParts.gun.visible));
 console.log('[pose] clip='+(VM.gunParts.clip?('v'+Number(VM.gunParts.clip.visible)+' p'+f(VM.gunParts.clip.position)+' r'+f(VM.gunParts.clip.rotation)):'none')
 +' mag='+(VM.gunParts.mag?('v'+Number(VM.gunParts.mag.visible)+' p'+f(VM.gunParts.mag.position)):'none')
 +' handR='+f(VM.arms.R.position)+' handL='+f(VM.arms.L.position)
@@ -230,7 +259,7 @@ for(const wkey of key.split(',')){
 for(const k of phases){
 const tris=Q(`__poseVM('${wkey}',${k},${FR})`);
 for(const vw of views){
-const out=path.join(root,'dev',`_vmr-${wkey}-${String(k).replace('.','_')}-${vw}.png`);
+const out=path.join(root,'dev',`_vmr-${wkey}-${String(k).replace('.','_')}-${vw}${process.env.VMTAG?'-tag':''}${process.env.STATE?'-'+process.env.STATE:''}${process.env.LEGACY?'-legacy':''}.png`);
 const info=raster(tris,vw,out);
 console.log(`写出 ${out}  ${info}  三角 ${tris.length}`);
 }

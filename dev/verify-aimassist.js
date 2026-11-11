@@ -19,6 +19,10 @@
 //   T6 只读视图: AIM_ASSIST 计数 (shots/assisted/blocked) 与实测一致;
 //   T7 静态接线: 各玩家开火链的 aimAssistDir 调用点 + 设置项 (sf_aim/按钮/词典) 一件不少
 //      + 赋值目标扫描 (接线点的 dir/ad/md/sd 必须是 let: const 只在扣扳机那一刻炸, 子串断言看不见)。
+//   T8 ★ 爆头批 (2026-11-08): 士兵双靶点 —— 正对爆头球心绝不掰 (旧病根: 只瞄胸 ⇒ 瞄站立敌人的头被向下掰
+//      0.29k 米, 标准档任何距离都爆不了头); 差一点打中头 ⇒ 掰向头部 (落点进球 35% 深 = 真爆头, 真伤害入口
+//      isHead 透传); 瞄胸照旧 (头球不抢身体候选)。本文件沿惯例无 NEG 桩, T8 第一条就是旧病根的回归钉
+//      (撤掉头球测试或"已指着"守卫它必红)。
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
@@ -63,7 +67,7 @@ get currentTime(){return 0;} get sampleRate(){return 44100;}
 sandbox.AudioContext=ACStub; sandbox.window.AudioContext=ACStub; sandbox.window.webkitAudioContext=ACStub;
 sandbox.confirm=()=>true;
 // ── 全链文件表 (与 index.html 同序; 含 15c/15d/15e/15f 与 22b) ──
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
 // 沙箱内小工具 (与 _finalaudit-tankai 同风格: 只在沙箱内定义一次)
 // ★ 用顶层 `var` 而不是 `globalThis.__AA`: 桩里的 globalThis 指向**共享的 sandbox 对象** (跨 boot 污染),
@@ -464,8 +468,9 @@ ok(nPl>=2,'T7 20-player: 步兵开火链 2 处接线 (枪弹 + 火箭筒), 实�
 ok(nSeats>=6,'T7 20a-seats: 载具座驾链 ≥6 处接线 (坦克主炮/同轴 MG/固定 MG/反坦克炮/防空炮/岸防炮/舰炮主炮+副炮), 实测 '+nSeats);
 ok(air.indexOf("shooter===player&&typeof aimAssistDir==='function'")>=0,'T7 16-aircraft: 航炮只在 shooter===player 时接 (AI 机不吃)');
 ok(cfg.indexOf("'sf_aim'")>=0&&cfg.indexOf('sf_aim')>=0&&cfg.indexOf('aim:1')>=0,'T7 00-config: SETTINGS.aim + sf_aim 存档读取');
-ok(hud.indexOf('aimBtn')>=0&&hud.indexOf("localStorage.setItem('sf_aim'")>=0,'T7 22-hud: 设置按钮绑定 + 落盘 + 初值同步');
-ok(html.indexOf('data-a="1"')>=0&&html.indexOf('class="optBtn aimBtn sel"')>=0,'T7 index.html: 档位按钮 (关/轻度/标准, 默认轻度)');
+ok(hud.indexOf('aimAssistBtn')>=0&&hud.indexOf("localStorage.setItem('sf_aim'")>=0,'T7 22-hud: 设置按钮绑定 + 落盘 + 初值同步 (2026-11-08 迁入游戏内容设置, 单钮循环)');
+ok(html.indexOf('id="aimAssistBtn"')>=0&&html.indexOf('data-a=')<0&&html.indexOf('id="aimAssistBtn"')>html.indexOf('id="mGameplaySet"'),
+'T7 index.html: 瞄准吸附档位按钮在游戏内容设置面板内 (mGameplaySet 之后 + 旧 data-a 三档钮绝迹)');
 ok(i18n.indexOf("'瞄准吸附':'AIM ASSIST'")>=0&&i18n.indexOf("'轻度':'Light'")>=0&&i18n.indexOf("'标准':'Standard'")>=0,
 'T7 00b-i18n: 中文原文即键的 EN 词条齐 (瞄准吸附/轻度/标准)');
 // 每个接线点的"赋值目标"必须不是 const 声明 (2026-09-27 首跑红的教训: playerShoot/updatePlayerMG 的 dir
@@ -490,9 +495,73 @@ ok(bad.length===0,'T7 ★ 接线点赋值目标可重写 (let/var; const 会在�
 }
 }
 
+// ═════ T8 ★ 爆头批 (2026-11-08): 士兵双靶点 ═════
+function t8(){
+console.log('T8 ★ 爆头批: 瞄头绝不掰 (不抢爆头) / 差一点打中头掰向头部 (救援成真爆头) / 瞄胸照旧');
+const ctx=boot({store:{sf_aim:'1'}});
+if(!enter(ctx)) return;
+const r=VM(ctx,`(()=>{try{
+player.team=0; player.cls=0; selectedSpawn=-1; deployPlayer();
+__AA.clearTroops(); __AA.clearVehicles();
+// 选点: openSpot 只保证胸高射线通, 头高 (hb+1.68) 也必须通 —— 否则遮挡检查会把"没掰"误判成"守卫生效"
+let sp=null,O=null,Hc=null;
+for(let i=0;i<8&&!sp;i++){
+const s2=__AA.openSpot(60); if(!s2) break;
+const o2=V3(s2.ax,s2.ha+1.6,s2.az), hc2=V3(s2.bx,s2.hb+1.68,s2.bz);
+const d2=hc2.clone().sub(o2); const L2=d2.length(); d2.normalize();
+if(raycastWorld(o2,d2,Math.max(0.1,L2-0.6))) continue;
+sp=s2; O=o2; Hc=hc2;
+}
+if(!sp) return 'NOPLACE';
+const b=__AA.mkBot(1,sp.bx,sp.bz,'靶');
+const Cc=V3(sp.bx,b.pos.y+1.10,sp.bz);             // 胸口靶点 (旧行为)
+const def=player.curW&&player.curW.def?player.curW.def:{dmg:30,headMul:2.6,snd:'smg',type:'auto',rpm:600,recoil:1,recSide:1};
+const closest=(dir,P)=>{                           // 射线对点 P 的最近距离 (判"这一枪算不算进爆头球")
+const vx=P.x-O.x, vy=P.y-O.y, vz=P.z-O.z;
+const t=Math.max(0,vx*dir.x+vy*dir.y+vz*dir.z);
+const dx=vx-dir.x*t, dy=vy-dir.y*t, dz=vz-dir.z*t;
+return Math.sqrt(dx*dx+dy*dy+dz*dz);
+};
+const dmgOf=(fireDir)=>{                           // 真伤害入口一发: isHead 由 damage 第三参透传 (killattr 契约)
+let head=null; const _d=b.damage.bind(b);
+b.damage=function(a,at,h){ head=!!h; return _d(a,at,h); };
+b.hp=100; fireBullet(player,O,fireDir,def,null);
+delete b.damage;                                   // 摘实例 spy, 还原原型方法
+return {hp:b.hp,isHead:head};
+};
+// ① 瞄头守卫: 正对爆头球心 ⇒ 原样返回 (旧病根: 射线在胸球外 0.13m ⇒ over>0 ⇒ 被向下掰 ~0.29k 米)
+const dirH=__AA.offDir(O,Hc,0);
+const a0=AIM_ASSIST.assisted;
+const resH=aimAssistDir(O,dirH,'ads',{team:player.team});
+const guardSame=(resH===dirH), assisted0=AIM_ASSIST.assisted-a0;
+const h0=dmgOf(dirH);
+// ② 救援: 瞄头顶上方 0.35m (60m 处 over≈0.08°, 真差一点; 胸球擦出 0.46° 远 ⇒ 头球赢 min-over)
+const dirUp=__AA.offDir(O,V3(Hc.x,Hc.y+0.35,Hc.z),0);
+const resU=aimAssistDir(O,dirUp,'ads',{team:player.team});
+const bendTarget=AIM_ASSIST.lastTarget, bendU=AIM_ASSIST.lastBend;
+const missU=closest(resU,Hc);
+const hU=dmgOf(resU);
+// ③ 胸口照旧: 瞄胸球下方 0.5m (over≈0.05°) ⇒ 仍掰向胸口 —— 头球不抢身体候选
+const dirLo=__AA.offDir(O,V3(Cc.x,Cc.y-0.50,Cc.z),0);
+const resL=aimAssistDir(O,dirLo,'ads',{team:player.team});
+const targetL=AIM_ASSIST.lastTarget;
+const missL=closest(resL,Cc);
+return {guardSame,assisted0,h0Hp:h0.hp,h0Head:h0.isHead,
+bendTarget,bendU:+bendU.toFixed(3),missU:+missU.toFixed(3),hUHp:hU.hp,hUHead:hU.isHead,sameU:(resU===dirUp),
+targetL,missL:+missL.toFixed(3)};
+}catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`);
+if(typeof r==='string'){ exc('T8',r); return; }
+ok(r.guardSame===true&&r.assisted0===0,'T8 ★ 瞄头守卫: 正对爆头球心原样返回 (assisted 不动) —— 吸附绝不与爆头瞄准对抗 (旧病根在此转红)');
+ok(r.h0Hp<100&&r.h0Head===true,'T8 ★ 瞄头直射 = 真爆头 (fireBullet 伤害入口 isHead 透传; hp '+r.h0Hp+')');
+ok(r.sameU===false&&r.bendTarget==='solHead','T8 ★ 差一点打中头 (头顶 0.35m) ⇒ 掰向头部 (lastTarget='+r.bendTarget+', 掰 '+r.bendU+'°)');
+ok(r.missU<0.26,'T8 ★ 掰完落进爆头球 (对球心最近距离 '+r.missU+'m < 半径 0.26m)');
+ok(r.hUHead===true,'T8 ★★ 真伤害入口: 救援弹 isHead=true —— 吸附帮打出爆头 (hp '+r.hUHp+')');
+ok(r.targetL==='sol'&&r.missL<0.45,'T8 瞄胸照旧: 掰向胸口 (lastTarget='+r.targetL+', 落点距胸心 '+r.missL+'m) —— 头球不抢身体候选');
+}
+
 console.log('══ 瞄准吸附验收 (dev/verify-aimassist.js) ══');
 const ONLY=process.env.ONLY||'';   // ONLY=t2 node dev/verify-aimassist.js —— 单测调试用
-for(const f of [t1,t2,t3,t4,t5,t6,t7]){
+for(const f of [t1,t2,t3,t4,t5,t6,t7,t8]){
 if(ONLY&&f.name!==ONLY) continue;
 try{ f(); }catch(e){ exc(f.name,e); }
 }

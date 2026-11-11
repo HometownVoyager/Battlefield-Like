@@ -7,8 +7,15 @@ const RGRID={ cell:13, N:0, off:(MAP_SIZE+60)/2, boxCells:null, cylCells:null, s
 function buildSpatialIndex(){
 RGRID.N=Math.ceil((MAP_SIZE+60)/RGRID.cell);
 const {cell,N,off}=RGRID;
+// 倒排表原地复用 (2026-11-01 性能批): NAV.refresh 在火情期每 5s 整表重建一次, 旧版每次分配 N² 个
+// 新数组 (640 图 ≈2900 个) —— 尺寸没变就 length=0 清空续用, 重灌结果与重建逐位一致。
+if(!RGRID.boxCells||RGRID.boxCells.length!==N*N){
 RGRID.boxCells=Array.from({length:N*N},()=>[]);
 RGRID.cylCells=Array.from({length:N*N},()=>[]);
+}else{
+for(let k=0;k<RGRID.boxCells.length;k++){ RGRID.boxCells[k].length=0; }
+for(let k=0;k<RGRID.cylCells.length;k++){ RGRID.cylCells[k].length=0; }
+}
 BOXES.forEach((b,bi)=>{
 const i0=clamp(Math.floor((b.minX+off)/cell),0,N-1), i1=clamp(Math.floor((b.maxX+off)/cell),0,N-1);
 const j0=clamp(Math.floor((b.minZ+off)/cell),0,N-1), j1=clamp(Math.floor((b.maxZ+off)/cell),0,N-1);
@@ -23,9 +30,20 @@ RGRID.stampB=new Int32Array(BOXES.length+96);
 RGRID.stampC=new Int32Array(CYLS.length+16);
 stampBLen=RGRID.stampB.length; stampCLen=RGRID.stampC.length; // 与去重戳同步 (见 raycastWorld 的按需扩容)
 }
+function spatialIndexAddBox(bi){
+if(!RGRID.boxCells) return;
+const b=BOXES[bi];
+if(!b) return;
+const {cell,N,off}=RGRID;
+const i0=clamp(Math.floor((b.minX+off)/cell),0,N-1), i1=clamp(Math.floor((b.maxX+off)/cell),0,N-1);
+const j0=clamp(Math.floor((b.minZ+off)/cell),0,N-1), j1=clamp(Math.floor((b.maxZ+off)/cell),0,N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.boxCells[j*N+i].push(bi);
+}
+if(typeof window!=='undefined') window.spatialIndexAddBox=spatialIndexAddBox;
 // 去重戳当前容量 (与 RGRID.stampB/stampC 同步; 见 raycastWorld 的按需扩容)
 let stampBLen=0, stampCLen=0;
 const _rcP=V3(), _rcN=V3();
+const _rcGnd={nx:0,ny:1,nz:0};   // 地面命中法线常量 (2026-11-01 性能批, 消费契约同 _rcResult)
 const _rcResult={dist:0,point:null,normal:null,kind:null}; // 共享结果槽 (2026-09-06 B6/P1-6): 全库 28 调用点均即时消费不长期持有
 function raycastWorld(o,dir,maxD){
 let best=maxD, bn=null, kind=null;
@@ -86,7 +104,7 @@ for(let i=0;i<6;i++){
 const m=(lo+hi)/2;
 (o.y+dir.y*m<=heightAt(o.x+dir.x*m,o.z+dir.z*m))?hi=m:lo=m;
 }
-best=hi; bn={nx:0,ny:1,nz:0}; kind='ground';
+best=hi; bn=_rcGnd; kind='ground';   // 法线常量复用 (2026-11-01 性能批): 每条落地射线一个新对象是纯垃圾, bn 在 :107 即时消费
 break;
 }
 t+=step;
@@ -145,12 +163,20 @@ fn(CYLS[ci]);
 }
 }
 }
-function collideMove(pos, radius){
-// 查询半径=碰撞半径 (推挤只作用于表面距 pos<radius 的盒/柱, 候选矩形再留 0.02 采样余量)
-const m=0.02;
-eachBoxNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,b=>{
+// ── collideMove/standHeight 候选回调提升 (2026-11-01 性能批) ──
+// 两函数都是每帧每移动单位调用, 旧版每次分配 2/1 个捕获闭包 (~120-160 个/帧 稳态)。
+// 循环上下文经模块槽 _cmS/_shS 传递; 复用前提 (逐处已核): 两个回调体内不再进入 collideMove/
+// standHeight (无重入路径), eachBoxNear/eachCylNear 独占传 fn, 不存在交叉迭代持有。
+const _cmS={pos:null,radius:0};
+// 头部擦碰容差 (2026-11-10 批): 盒/柱底面落在"头顶~头顶-0.06"档内按**天花板**对待, 不做横推 ——
+// 头顶钳制 (headCeilClamp) 把人停在底面正下方时 pos.y+1.7 与底面仅差浮点尾数, 无此容差横推仍会
+// 接管把人挤出楼板 footprint (= 用户实报"顶上有墙跳跃碰撞后穿模穿墙"的另一半病根)。
+// 0.06 > 双精度 (a-1.7)+1.7 的舍入漂移; 底面低于该档的肩高障碍照常横推, 行为不变。
+const HEAD_GRAZE=0.06;
+function _cmBoxCb(b){
+const pos=_cmS.pos, radius=_cmS.radius;
 if(b.dead) return;
-if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) return;
+if(pos.y+1.7-HEAD_GRAZE<b.minY||pos.y+0.25>b.maxY) return;
 if(b.maxY-pos.y<=0.56) return;
 const cx=clamp(pos.x,b.minX,b.maxX), cz=clamp(pos.z,b.minZ,b.maxZ);
 let dx=pos.x-cx, dz=pos.z-cz;
@@ -165,38 +191,93 @@ const d=Math.sqrt(d2), push=(radius-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
 }
-});
-eachCylNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,c=>{
-if(pos.y+1.7<c.y0||pos.y+0.2>c.y1) return;
+}
+function _cmCylCb(c){
+const pos=_cmS.pos, radius=_cmS.radius;
+if(pos.y+1.7-HEAD_GRAZE<c.y0||pos.y+0.2>c.y1) return;
+// ★2026-11-05 实机反馈批 (用户实报"很多圆柱体的顶端无法站立, 一上去就被挤开"): 顶面跨步豁免, 与
+//   _cmBoxCb 的 `b.maxY-pos.y<=0.56` 同规 —— 顶面在跨步档内不横推, 由 standHeight 的圆柱支撑抬上顶面。
+//   旧版圆柱只有纵重叠门没有跨步豁免: 跳上桶/草垛/筒仓顶后脚下沉 0.2m 横推立即接管 = 被侧面挤飞。
+if(c.y1-pos.y<=0.56) return;
 let dx=pos.x-c.x, dz=pos.z-c.z;
 const rr=c.r+radius, d2=dx*dx+dz*dz;
 if(d2<rr*rr&&d2>1e-8){
 const d=Math.sqrt(d2), push=(rr-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
-});
-// 大舰舰体 (2026-09-30 阶段五 P4): 舷侧是硬墙 —— 水线以上的部分把步兵挡在外面 (水线以下不挡,
-//   游泳者可贴舰底通过; 也避免深水区把玩家夹在舰与礁之间卡死)。走 15h 的局部空间解算,
-//   不进全局 BOXES/OCC —— 理由同 standHeight 那一行 (舰在动)。
-if(typeof capPushBody==='function') capPushBody(pos,radius);
+}
+function collideMove(pos, radius){
+// 查询半径=碰撞半径 (推挤只作用于表面距 pos<radius 的盒/柱, 候选矩形再留 0.02 采样余量)
+const m=0.02;
+_cmS.pos=pos; _cmS.radius=radius;
+eachBoxNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,_cmBoxCb);
+eachCylNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,_cmCylCb);
+// (2026-11-10: 旧"大舰舰体硬墙"capPushBody 钩随大舰子系统下架摘除 —— 珊瑚海/铁底湾已归档)
 // ★2026-09-26E (审计 28): 与 15d 同一支世界边缘单源 (旧值 MAP_SIZE/2+8 比网格边界只差 12m ⇒ 贴边即见断崖)
 const lim=(typeof WORLD_ACTOR_LIMIT==='number')?WORLD_ACTOR_LIMIT:(MAP_SIZE/2+8);
 pos.x=clamp(pos.x,-lim,lim); pos.z=clamp(pos.z,-lim,lim);
 }
+const _shS={x:0,z:0,curY:0,h:0};
+function _shBoxCb(b){
+if(b.dead) return;
+if(_shS.x>b.minX-0.05&&_shS.x<b.maxX+0.05&&_shS.z>b.minZ-0.05&&_shS.z<b.maxZ+0.05){
+if(b.maxY<=_shS.curY+0.55&&b.maxY>_shS.h) _shS.h=b.maxY;
+}
+}
+// 圆柱顶面支撑 (2026-11-05 实机反馈批, 与 _shBoxCb 同规): 采样点落在圆内 (+0.05 采样余量同盒档) 且
+//   顶面够得着 (curY+0.55) ⇒ 脚下高度=顶面 —— 桶/草垛/筒仓/烟囱/水塔顶从此可站立 (旧版圆柱不供支撑,
+//   站上去只在重力把脚沉到顶面下 0.2m 的瞬间被 _cmCylCb 横推挤飞 = 用户实报症状)。
+function _shCylCb(c){
+const dx=_shS.x-c.x, dz=_shS.z-c.z, rr=c.r+0.05;
+if(dx*dx+dz*dz<=rr*rr){
+if(c.y1<=_shS.curY+0.55&&c.y1>_shS.h) _shS.h=c.y1;
+}
+}
 function standHeight(x,z,curY){
 let h=heightAt(x,z);
-// 大舰甲板 (2026-09-30 阶段五 P4): 甲板是**移动平台**, 不进 heightAt/BOXES/OCC (舰在动, 逐帧搬盒
-//   等于把寻路网格当筛子摇), 而是由 15h 在本行做一次 O(舰数≤4) 的局部矩形查询。语义与下面的盒顶面
-//   逐字同规 —— "够得着才抬脚": 在水里看 7m 高的甲板不算站上去 (capDeckY 内部按 CAPITAL_CFG.stepUp 夹),
-//   走出甲板矩形则返回 −1e9, 脚下自然变回海床 ⇒ 掉海 (与"走出崖缘"同一条物理路径)。
-if(typeof capDeckY==='function'){ const cd=capDeckY(x,z,curY); if(cd>h) h=cd; }
-eachBoxNear(x-0.07,z-0.07,x+0.07,z+0.07,b=>{
-if(b.dead) return;
-if(x>b.minX-0.05&&x<b.maxX+0.05&&z>b.minZ-0.05&&z<b.maxZ+0.05){
-if(b.maxY<=curY+0.55&&b.maxY>h) h=b.maxY;
+// (2026-11-10: 旧"大舰甲板移动平台"capDeckY 钩随大舰子系统下架摘除)
+_shS.x=x; _shS.z=z; _shS.curY=curY; _shS.h=h;
+eachBoxNear(x-0.07,z-0.07,x+0.07,z+0.07,_shBoxCb);
+eachCylNear(x-0.07,z-0.07,x+0.07,z+0.07,_shCylCb);
+return _shS.h;
 }
-});
-return h;
+// ── 头顶天花板钳制 (2026-11-10 批, 用户实报"顶上有墙时跳跃会碰撞后穿模穿墙") ──
+// 病根: 竖直方向只有 standHeight 落地支撑, 没有"天花板"概念 —— 跳跃上升段头顶 (pos.y+1.7, 与
+// collideMove 纵带同参数) 一旦探进上方盒/柱的纵带, collideMove 的横推接管: 站在楼板正下方时
+// XZ 距 footprint 中心 d≈0, 走"最近边"分支把人整只横向挤出 —— 表现为"一跳就被楼板撞开",
+// 挤出量大时直接穿过相邻薄墙/落到楼板上面 (穿模穿墙)。修法 (用户裁定 "头碰到东西就适可而止"):
+// 上升段先做头顶检测, 本帧头顶要探进底面就**就地停住** (钳到 底面-1.7, 调用方清垂直速度),
+// 纵带永不重叠 ⇒ 横推永不接管。接线点=20-player 两条步兵积分路径 (步行 / TV制导本体);
+// Bot 竖直走 dampF 贴地永不上升, 不接线。
+// 底面穿越窗 = (上帧头顶, 本帧头顶] —— 底面低于上帧头顶的 (桌沿/已越过的槛) 不是本帧撞的
+// 天花板 (那类盒与身体的纵带早已重叠, 由横推按"墙"处理); 重复小跳贴住天花板时 底面==上帧
+// 头顶 也在窗内 ⇒ 钳位式不动 + 垂直速度清零, 头永不探入。
+const _hcS={pos:null,r:0.42,prevHead:0,head:0,hit:0};
+function _hcBoxCb(b){
+const s=_hcS;
+if(b.dead) return;
+if(b.minY<s.prevHead||b.minY>s.head) return;
+const cx=clamp(s.pos.x,b.minX,b.maxX), cz=clamp(s.pos.z,b.minZ,b.maxZ);
+let dx=s.pos.x-cx, dz=s.pos.z-cz;
+if(dx*dx+dz*dz<s.r*s.r&&b.minY<s.hit) s.hit=b.minY;
+}
+function _hcCylCb(c){
+const s=_hcS;
+if(c.y0<s.prevHead||c.y0>s.head) return;
+let dx=s.pos.x-c.x, dz=s.pos.z-c.z;
+const rr=c.r+s.r;
+if(dx*dx+dz*dz<rr*rr&&c.y0<s.hit) s.hit=c.y0;
+}
+// rise=本帧上升位移 (调用点 vel.y*dt, 须 vel.y>0); 命中返回 true 并把 pos.y 钳到 底面-1.7
+// (命中多个底面取最低者 —— 先撞到的就是最低天花板)。XZ 判定用与 collideMove 同一身体半径
+// 0.42 (擦着楼板边缘起跳同样算"头碰到了", 与横推判定同口径)。
+function headCeilClamp(pos,rise){
+_hcS.pos=pos; _hcS.head=pos.y+1.7; _hcS.prevHead=_hcS.head-rise; _hcS.hit=Infinity;
+eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcBoxCb);
+eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcCylCb);
+if(_hcS.hit===Infinity) return false;
+pos.y=_hcS.hit-1.7;
+return true;
 }
 // 坡度物理 (步兵, 2026-09-12 百团改版, 全战役生效; 玩家/Bot 同规则 —— 纲领第 2 条):
 // 上坡 FOOT_SLOPE_SLOW(40°)起减速"手脚并用", FOOT_SLOPE_MAX(65°)以上不可登攀 ——

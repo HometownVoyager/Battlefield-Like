@@ -165,7 +165,7 @@ for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/15c-specveh.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -204,7 +204,7 @@ const back={key:player.slots[1].key,cur:player.curW.key,vm:VM.key};
 return {def,base,spec,specOther,deployedSlot,off0,on1,off1,after,back};
 }catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`,ctx);
 if(typeof r==='string'){ exc('T1',r); return; }
-ok(r.def.has&&r.def.dmg===75&&r.def.rpm===300&&r.def.mag===20,'T1 specsniper 定义: 单发75 / 300发分 / 20发弹匣');
+ok(r.def.has&&r.def.dmg===75&&r.def.rpm===600&&r.def.mag===20,'T1 specsniper 定义: 单发75 / 600发分 / 20发弹匣 (rpm 300→600=2026-11-08 specsniper 批, 瞄准吸附×爆头批并发跟走)');
 ok(r.def.scoped&&r.def.type==='auto'&&r.def.fov>0&&r.def.model,'T1 全自动 + scoped 可开镜 + 复用春田狙击模型');
 ok(r.def.recoil<=1.2&&r.def.recSide<=0.3,'T1 后坐力压低 (recoil='+r.def.recoil+' / recSide='+r.def.recSide+')');
 ok(r.base[1]!=='specsniper'&&r.spec[1]==='specsniper','T1 playerClassWeapons: 观战副武器位换成连狙 (非观战=原副武器)');
@@ -246,7 +246,7 @@ ok(r.ret1===true&&r.ret2===false,'T2 T 键触发一次即生效 (无弹时静默
 ok(d&&d.dead===true&&r.loiter===null,'T2 巡飞弹立刻消失: dead=true 且 player.loiter 清空 (静默退场, 不爆炸不伤害)');
 ok(Math.abs(r.px-40)<0.6&&Math.abs(r.pz+60)<0.6&&r.py>=r.gh-0.01,'T2 自身瞬移到弹体位置 (y 不低于该点地面)');
 ok(r.vx===0&&r.vy===0&&r.vz===0,'T2 传送后速度清零 (不带着弹速冲出去)');
-ok(r.flying===true&&r.aero===true&&r.aeroSpd>0,'T2 保持当时的飞行状态与视角朝向 (气动飞行延续)');
+ok(r.flying===true&&r.aero===false&&r.aeroSpd===0,'T2 保持当时的飞行状态与视角朝向 (2026-11-07 定身批裁定: 气动中发射即就地切悬停, T 弃弹传送延续的是**悬停**态; H 可再切回气动——旧判据"气动延续"随裁定退役)');
 ok(r.tv==='none'&&r.vmVis===true,'T2 TV 遮罩收回 + 第一人称武器模型恢复');
 }
 

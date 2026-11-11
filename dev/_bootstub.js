@@ -50,9 +50,9 @@ addScaledVector(v,s){this.x+=v.x*s;this.y+=v.y*s;this.z+=v.z*s;return this;}
 multiplyScalar(s){this.x*=s;this.y*=s;this.z*=s;return this;}
 normalize(){const l=Math.hypot(this.x,this.y,this.z)||1;this.x/=l;this.y/=l;this.z/=l;return this;}
 length(){return Math.hypot(this.x,this.y,this.z);}lengthSq(){return this.x*this.x+this.y*this.y+this.z*this.z;}
-distanceTo(v){return Math.hypot(this.x-v.x,this.y-v.y,this.z-v.z);}
+distanceTo(v){return Math.hypot(this.x-v.x,this.y-v.y,this.z-v.z);}distanceToSquared(v){return (this.x-v.x)**2+(this.y-v.y)**2+(this.z-v.z)**2;}
 dot(v){return this.x*v.x+this.y*v.y+this.z*v.z;}crossVectors(a,b){this.x=a.y*b.z-a.z*b.y;this.y=a.z*b.x-a.x*b.z;this.z=a.x*b.y-a.y*b.x;return this;}
-applyAxisAngle(){return this;}setFromMatrixColumn(){return this;}lerpVectors(){return this;}}
+applyAxisAngle(){return this;}setFromMatrixColumn(){return this;}lerpVectors(){return this;}applyMatrix4(){return this;}project(){return this;}}
 class Euler{constructor(){this.x=0;this.y=0;this.z=0;this.order='XYZ';}set(x,y,z,o){this.x=x;this.y=y;this.z=z;if(o)this.order=o;return this;}}
 // ★ 2026-09-21: 补 isMesh/isPoints/isLine —— 真 THREE 的 Object3D 上这三个是类属性 (Mesh=true),
 //   而本桩一直没给 ⇒ 所有靠 `o.isMesh` 判网格的**运行时**代码在沙箱里静默走空分支:
@@ -60,7 +60,7 @@ class Euler{constructor(){this.x=0;this.y=0;this.z=0;this.order='XYZ';}set(x,y,z
 //   · 15e navBuildModel 末尾的 castShadow 批量设置同理
 //   · 本仓多个 dev 探针用 o.isMesh 统计网格数 ⇒ 会数出 0 件 (实测: 新验收脚本第①条据此报"网格=0")
 //   在桩上补齐是**忠实化桩**, 不是改被测代码 (真浏览器里真 THREE 本来就有这三个字段)。
-class Obj3{constructor(){this.position=new V3();this.rotation=new Euler();this.scale=new V3(1,1,1);this.quaternion={setFromUnitVectors(){return this;}};this.children=[];this.visible=true;this.castShadow=false;this.receiveShadow=false;this.renderOrder=0;this.matrix={};this.userData={};this.material=null;this.geometry=null;this.isObject3D=true;this.isMesh=false;this.isPoints=false;this.isLine=false;this.isSprite=false;this.isGroup=false;}
+class Obj3{constructor(){this.position=new V3();this.rotation=new Euler();this.scale=new V3(1,1,1);this.quaternion={setFromUnitVectors(){return this;},copy(q){ this.x=q.x; this.y=q.y; this.z=q.z; this.w=(q.w!==undefined)?q.w:1; return this; },set(){return this;},setFromEuler(){return this;}};this.children=[];this.visible=true;this.castShadow=false;this.receiveShadow=false;this.renderOrder=0;this.matrix={};this.userData={};this.material=null;this.geometry=null;this.isObject3D=true;this.isMesh=false;this.isPoints=false;this.isLine=false;this.isSprite=false;this.isGroup=false;} // 2026-11-05: quaternion copy/set/setFromEuler added for flashlight cone (stub fidelity)
 add(m){this.children.push(m);m.parent=this;return this;}
 // remove 与真 THREE.Object3D.remove 同义: 摘出 children 且回置 m.parent=null (2026-10-05 车毁拆灯 T6 依赖该语义)
 remove(m){const i=this.children.indexOf(m);if(i>=0){this.children.splice(i,1);m.parent=null;}}
@@ -106,7 +106,7 @@ getZ(i){return (this.array&&this.array[i*this.itemSize+2])||0;}
 setX(i,v){if(this.array)this.array[i*this.itemSize]=v;}
 setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
-class _Color{constructor(c){this.c=c;}set(){return this;}}
+class _Color{constructor(c){this.c=c!==undefined?c:0xffffff;}set(v){this.c=v;return this;}setHex(v){this.c=v;return this;}}
 // ★2026-10-05 昼夜批: 夜档 02-scene 的 nightFogColor() 会真调 Color.lerp / 08-effects 断言读 getHex ⇒
 // 桩补齐这两个方法 (原桩只有 set(); 缺 lerp 时 ironbottom 等强制夜档图的 LOAD 直接抛 TypeError)。
 if(!_Color.prototype.getHex){
@@ -121,7 +121,7 @@ this.c=(mix[0]<<16)|(mix[1]<<8)|mix[2];
 return this;
 };
 }
-const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
+const _wrapColor=c=>(c&&typeof c==='object'&&typeof c.set==='function')?c:new _Color(c);
 const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
@@ -194,7 +194,7 @@ let audioI=0;
 const sandbox={
 console,Math,JSON,performance:{now:()=>Date.now()},
 location:{search:'?seed=42',reload(){},href:'http://localhost/'},
-localStorage:{_s:{sf_campaign:'0'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}},
+localStorage:{_s:{sf_campaign:'0'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];},get length(){return Object.keys(this._s).length;},key(i){const a=Object.keys(this._s);return i<a.length?a[i]:null;}},
 navigator:{},document,window,
 requestAnimationFrame:()=>0,cancelAnimationFrame:()=>{},
 setTimeout:(f,t)=>{return 0;},clearTimeout:()=>{},setInterval:()=>0,clearInterval:()=>{},

@@ -102,7 +102,7 @@ comp[nIdx]=cid; _bfsStk.push(nIdx);
 return cnt;
 }
 function bakeComponents(){
-comp.fill(-1); csize.length=0;
+comp.fill(-1); csize.length=0; compFreeList.length=0;
 let cid=0;
 for(let s=0;s<NN;s++){
 if(!open[s]||comp[s]>=0) continue;
@@ -140,6 +140,8 @@ return true;
 // 兜底: 脏矩形过大 (散落多处/整图) 或还没有过一次全量烘焙时, 直接走全量 ——
 // 增量赢的是局部性, 不具局部性时不假装有 (阈值见 REBAKE_FULL_FRAC)。
 let baked=false, compNext=0;
+const compFreeList=[];
+const allocCompId=()=>(compFreeList.length>0?compFreeList.pop():compNext++);
 const _seedList=[], _idList=[];
 const REBAKE_FULL_FRAC=0.04; // 脏格数 > NN×此值 ⇒ 全量
 function fullBakeGrid(){ bakeGrid(); bakeComponents(); baked=true; }
@@ -155,7 +157,12 @@ if(!has) ids.push(g);
 }
 const seeds=_seedList; seeds.length=0;
 if(ids.length){
-// 清空这些分量的全部格 (全图扫一遍 Int32 ≈ 0.05ms), 同时收下待重标的格
+// 清空这些分量的全部格 (全图扫一遍 Int32 ≈ 0.05ms), 同时收下待重标的格, 并回收分量 ID
+for(let q=0;q<ids.length;q++){
+const oldId=ids[q];
+csize[oldId]=0;
+compFreeList.push(oldId);
+}
 for(let k=0;k<NN;k++){
 const g=comp[k];
 if(g<0) continue;
@@ -167,12 +174,13 @@ const n=seeds.length;
 for(let s=0;s<n;s++){
 const sd=seeds[s];
 if(comp[sd]>=0) continue;
-csize[compNext]=bfsFill(sd,compNext); compNext++;
+const nid=allocCompId();
+csize[nid]=bfsFill(sd,nid);
 }
 // ② 再收"改动后新出现、且没被任何老分量并走"的开放格 (例如墙炸开露出一间密闭房: 自成新分量)
 for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
 const k=idx(i,j);
-if(open[k]&&comp[k]<0){ csize[compNext]=bfsFill(k,compNext); compNext++; }
+if(open[k]&&comp[k]<0){ const nid=allocCompId(); csize[nid]=bfsFill(k,nid); }
 }
 }
 // 局部重建 (i0..i1 / j0..j1 为"脏范围"的 NAV 格坐标, 闭区间)
@@ -220,6 +228,8 @@ const gScoreB=new Float32Array(NN), cameB=new Int32Array(NN), visitGenB=new Int3
 //      抬上限到 1000 万也只是把 90000 次空转变成 1000 万次 (落定仅 4674) —— 病根是堆溢出, 不是预算。
 //   索引式堆: 容量 2*NN 就够 (每格每方向一项), 弹出数 == 落定数, 改进改为原地降键 (heapPos O(1) 定位)。
 const heapPos=new Int32Array(NN*2), heapIdx=new Int32Array(NN*2), heapKey=new Float32Array(NN*2), heapDir=new Int8Array(NN*2);
+heapPos.fill(-1);
+const _heapTouched=[], meetCandidates=[];
 // ★2026-09-26 修 (P0, 探针实测复现): 访问代必须**每次调用占两格** (gen=入堆 / gen+1=落定)。
 // 旧版每次只 gen++, 于是第 N+1 次调用的"入堆代"正好等于第 N 次调用的"落定代" ——
 // 上一轮已落定的格子在新一轮里被当成"已入堆未落定": expand() 里 `v!==gen` 不成立 ⇒ 只在 g 更优时才重推,
@@ -239,15 +249,12 @@ const SPAWN_MIN_COMP=400;
 // 可观测计数 (22-hud AI 调试层/探针读; 失败率是"寻路退化为站桩"的先行指标)
 const navStats={calls:0,ok:0,fail:0,pruned:0,nodes:0,lastNodes:0,maxNodes:0,meet:0,lastSettles:0,maxSettles:0,
 refreshMs:0,fullBakes:0,partBakes:0,skipBakes:0,lastDirty:0};
-function findPath(sx,sz,tx,tz){
-let [si,sj]=toG(sx,sz), [ti,tj]=toG(tx,tz);
-// 起/终点落到不可走格 (或"只有 1 个开放邻居"的死角) 时外推找落脚格。
-// ★ 2026-09-18b 修: 旧版取"环上第一个 ≥2 邻居的格"—— 攻方滩头基地被帐篷/沙袋/登陆器材围成
-//   3 格小袋时, 起点被吸附进袋内死胡同, findPath 对**任何**目标都返回 null ⇒ Bot 原地站桩不推进
-//   (沙箱诊断: (0,178) 起点的 5m 格被占, 环上首个合格格 (-5,175) 的邻居只有 2 个开放, 整袋仅 3 格)。
-//   现改为"优先最近的走廊格 (≥3 个开放邻居), 找不到才退回旧的 ≥2 判据" —— 正常地图的格子
-//   本来就合格 (第一行直接返回), 行为零变化。
-const openN=(ii,jj)=>{
+// ── findPath 内部函数提升 (2026-11-01 性能批) ──
+// findPath 每帧至多 2 次调用 (NAV.budget=2), 旧版每次新建 10 个捕获闭包 (~20 个函数对象/帧 恒定账)。
+// 除 _fpHLen/_fpPopDir 两根游标外, 全部被捕获状态本来就是 IIFE 级表 (gScore/heap*/gen/open/...),
+// 提升到 IIFE 级后语义逐位不变; findPath 非重入 (内部无用户回调, NAV.budget 串行), 游标放模块级安全。
+let _fpHLen=0, _fpPopDir=0;
+const _fpOpenN=(ii,jj)=>{
 if(ii<0||jj<0||ii>=N||jj>=N||!open[idx(ii,jj)]) return -1;
 let nb=0;
 if(ii>0&&open[idx(ii-1,jj)])nb++;
@@ -256,15 +263,15 @@ if(jj>0&&open[idx(ii,jj-1)])nb++;
 if(jj<N-1&&open[idx(ii,jj+1)])nb++;
 return nb;
 };
-const fix=(i,j)=>{
-const nb0=openN(i,j);
+const _fpFix=(i,j)=>{
+const nb0=_fpOpenN(i,j);
 if(nb0>=2) return [i,j];
 let fallback=null, fbd=1e9;
 for(let r2=1;r2<13;r2++){
 let pick=null, pbd=1e9;
 for(let dj=-r2;dj<=r2;dj++)for(let di=-r2;di<=r2;di++){
 if(Math.max(Math.abs(di),Math.abs(dj))!==r2) continue;
-const nb=openN(i+di,j+dj);
+const nb=_fpOpenN(i+di,j+dj);
 if(nb<2) continue;
 const dd=di*di+dj*dj;
 if(nb>=3&&dd<pbd){ pbd=dd; pick=[i+di,j+dj]; }
@@ -274,7 +281,99 @@ if(pick) return pick; // 本环已有走廊格 → 取环内最近的
 }
 return fallback||[i,j];
 };
-[si,sj]=fix(si,sj); [ti,tj]=fix(ti,tj);
+const _fpHSwap=(a,b)=>{
+const tI=heapIdx[a],tK=heapKey[a],tD=heapDir[a];
+heapIdx[a]=heapIdx[b]; heapKey[a]=heapKey[b]; heapDir[a]=heapDir[b];
+heapIdx[b]=tI; heapKey[b]=tK; heapDir[b]=tD;
+heapPos[heapIdx[a]*2+heapDir[a]]=a; heapPos[heapIdx[b]*2+heapDir[b]]=b;
+};
+const _fpHUp=(k)=>{
+while(k>0){
+const par=(k-1)>>1;
+if(heapKey[par]<=heapKey[k]) break;
+_fpHSwap(par,k); k=par;
+}
+};
+const _fpHDown=(k)=>{
+for(;;){
+const l=k*2+1,r=l+1;
+let s=k;
+if(l<_fpHLen&&heapKey[l]<heapKey[s])s=l;
+if(r<_fpHLen&&heapKey[r]<heapKey[s])s=r;
+if(s===k)break;
+_fpHSwap(s,k); k=s;
+}
+};
+// push: 首次入堆 (写 heapPos) / 已有项则**原地降键** (调用方保证 key 只会变小 —— 只在严格更优 g 时才推)
+const _fpPush=(node,key,dir)=>{
+const pi=node*2+dir, at=heapPos[pi];
+if(at>=0){ if(key<heapKey[at]){ heapKey[at]=key; _fpHUp(at); } return; }
+const k=_fpHLen++;
+heapIdx[k]=node; heapKey[k]=key; heapDir[k]=dir;
+heapPos[pi]=k;
+_heapTouched.push(pi);
+_fpHUp(k);
+};
+// pop: 返回堆顶节点 (-1 = 空堆), 方向写入 _fpPopDir; 摘掉堆项时同步清 heapPos
+const _fpPop=()=>{
+const top=heapIdx[0];
+_fpPopDir=heapDir[0];
+_fpHLen--;
+heapPos[top*2+_fpPopDir]=-1;
+if(_fpHLen>0){
+heapIdx[0]=heapIdx[_fpHLen]; heapKey[0]=heapKey[_fpHLen]; heapDir[0]=heapDir[_fpHLen];
+heapPos[heapIdx[0]*2+heapDir[0]]=0;
+_fpHDown(0);
+}
+return top;
+};
+// 单侧邻居扩展 (dir=0 正向: 从 cur 走向其邻居; dir=1 反向: 从 cur 反向走回其邻居 —— 边通行是无向的, 同一张边表)
+// 落定格不再松弛: 双向搜索两侧都会走同一批格子, 若允许"已落定"的格子被改父指针,
+// 两条方向的前驱链会互相穿针 → 回溯时出现环 (表现为路径里同一坐标重复几百次)。
+const _fpExpand=(cur,dir,gArr,visitArr,cameArr,ti,tj)=>{
+const cI=cur%N, cJ=(cur/N)|0, cg=gArr[cur];
+const otherVisitArr=dir===0?visitGenB:visitGen;
+for(let d=0;d<8;d++){
+const ni=cI+DI[d], nj=cJ+DJ[d];
+if(ni<0||nj<0||ni>=N||nj>=N) continue;
+const nIdx=nj*N+ni;
+if(!open[nIdx]) continue;
+// 边通行: 直行查相邻边, 斜行查对角连线 (薄墙不再可穿越)
+if(d===0){ if(!eH[idx(cI,cJ)]) continue; }
+else if(d===1){ if(!eH[idx(ni,cJ)]) continue; }
+else if(d===2){ if(!eV[idx(cI,cJ)]) continue; }
+else if(d===3){ if(!eV[idx(cI,nj)]) continue; }
+else if(d>=4){
+if(d===4||d===7){ if(!(d===4?eD1[idx(cI,cJ)]:eD1[idx(ni,nj)])) continue; }
+else { if(!(d===5?eD2[idx(cI,nj)]:eD2[idx(ni,cJ)])) continue; }
+if(!open[idx(cI+DI[d],cJ)]||!open[idx(cI,cJ+DJ[d])]) continue;
+}
+const ov=otherVisitArr[nIdx];
+if(ov===gen||ov===gen+1){
+meetCandidates.push(nIdx);
+}
+const v=visitArr[nIdx];
+if(v===gen+1) continue; // 已落定: 它的 g 与父指针都是终值, 不再改
+const ng=cg+DC[d]*SP;
+if(v!==gen||ng<gArr[nIdx]){
+visitArr[nIdx]=gen; gArr[nIdx]=ng; cameArr[nIdx]=cur;
+_fpPush(nIdx, ng+Math.sqrt((ni-ti)*(ni-ti)+(nj-tj)*(nj-tj))*SP, dir);   // 整数格距: sqrt 与 hypot 逐位同值 (2026-11-01 性能批)
+}
+}
+};
+// `gen` = 本代"已入堆未落定", `gen+1` = 本代"已落定", 其余值 = 非本代
+// 返回值 = 本次是否真的落定 (0 = 该格已落定, 这一次是"改进后重推"留下的陈旧堆项 —— 只算弹出, 不算落定)
+const _fpSettle=(i2,visitArr)=>{ if(visitArr[i2]===gen+1) return 0; visitArr[i2]=gen+1; return 1; };
+const _fpIsSettled=(i2,visitArr)=>visitArr[i2]===gen+1;
+function findPath(sx,sz,tx,tz){
+let [si,sj]=toG(sx,sz), [ti,tj]=toG(tx,tz);
+// 起/终点落到不可走格 (或"只有 1 个开放邻居"的死角) 时外推找落脚格。
+// ★ 2026-09-18b 修: 旧版取"环上第一个 ≥2 邻居的格"—— 攻方滩头基地被帐篷/沙袋/登陆器材围成
+//   3 格小袋时, 起点被吸附进袋内死胡同, findPath 对**任何**目标都返回 null ⇒ Bot 原地站桩不推进
+//   (沙箱诊断: (0,178) 起点的 5m 格被占, 环上首个合格格 (-5,175) 的邻居只有 2 个开放, 整袋仅 3 格)。
+//   现改为"优先最近的走廊格 (≥3 个开放邻居), 找不到才退回旧的 ≥2 判据" —— 正常地图的格子
+//   本来就合格 (第一行直接返回), 行为零变化。
+[si,sj]=_fpFix(si,sj); [ti,tj]=_fpFix(ti,tj);
 const startI=idx(si,sj), goalI=idx(ti,tj);
 if(startI===goalI) return [[tx,tz]];
 // 连通分量预检: 起点/终点不同分量 → 无论怎么搜都不可能到达, 立即判定失败 (省掉整轮扩展)
@@ -293,118 +392,43 @@ if(gen>0x40000000){
 gScore.fill(0); came.fill(0); visitGen.fill(0);
 gScoreB.fill(0); cameB.fill(0); visitGenB.fill(0);
 heapPos.fill(-1);
+_heapTouched.length=0;
 gen=2;
 }
-let hLen=0;
-heapPos.fill(-1); // 每次调用清堆位表 (hLen 归零后旧下标即失效; 2*NN=3.3 万次写入 ≈ 十几 µs)
-const _hSwap=(a,b)=>{
-const tI=heapIdx[a],tK=heapKey[a],tD=heapDir[a];
-heapIdx[a]=heapIdx[b]; heapKey[a]=heapKey[b]; heapDir[a]=heapDir[b];
-heapIdx[b]=tI; heapKey[b]=tK; heapDir[b]=tD;
-heapPos[heapIdx[a]*2+heapDir[a]]=a; heapPos[heapIdx[b]*2+heapDir[b]]=b;
-};
-const _hUp=(k)=>{
-while(k>0){
-const par=(k-1)>>1;
-if(heapKey[par]<=heapKey[k]) break;
-_hSwap(par,k); k=par;
-}
-};
-const _hDown=(k)=>{
-for(;;){
-const l=k*2+1,r=l+1;
-let s=k;
-if(l<hLen&&heapKey[l]<heapKey[s])s=l;
-if(r<hLen&&heapKey[r]<heapKey[s])s=r;
-if(s===k)break;
-_hSwap(s,k); k=s;
-}
-};
-// push: 首次入堆 (写 heapPos) / 已有项则**原地降键** (调用方保证 key 只会变小 —— 只在严格更优 g 时才推)
-const push=(node,key,dir)=>{
-const pi=node*2+dir, at=heapPos[pi];
-if(at>=0){ if(key<heapKey[at]){ heapKey[at]=key; _hUp(at); } return; }
-const k=hLen++;
-heapIdx[k]=node; heapKey[k]=key; heapDir[k]=dir;
-heapPos[pi]=k;
-_hUp(k);
-};
-// pop: 返回堆顶节点 (-1 = 空堆), 方向写入 _popDir; 摘掉堆项时同步清 heapPos
-let _popDir=0;
-const pop=()=>{
-const top=heapIdx[0];
-_popDir=heapDir[0];
-hLen--;
-heapPos[top*2+_popDir]=-1;
-if(hLen>0){
-heapIdx[0]=heapIdx[hLen]; heapKey[0]=heapKey[hLen]; heapDir[0]=heapDir[hLen];
-heapPos[heapIdx[0]*2+heapDir[0]]=0;
-_hDown(0);
-}
-return top;
-};
-// 单侧邻居扩展 (dir=0 正向: 从 cur 走向其邻居; dir=1 反向: 从 cur 反向走回其邻居 —— 边通行是无向的, 同一张边表)
-// 落定格不再松弛: 双向搜索两侧都会走同一批格子, 若允许"已落定"的格子被改父指针,
-// 两条方向的前驱链会互相穿针 → 回溯时出现环 (表现为路径里同一坐标重复几百次)。
-const expand=(cur,dir,gArr,visitArr,cameArr,ti,tj)=>{
-const cI=cur%N, cJ=(cur/N)|0, cg=gArr[cur];
-for(let d=0;d<8;d++){
-const ni=cI+DI[d], nj=cJ+DJ[d];
-if(ni<0||nj<0||ni>=N||nj>=N) continue;
-const nIdx=nj*N+ni;
-if(!open[nIdx]) continue;
-// 边通行: 直行查相邻边, 斜行查对角连线 (薄墙不再可穿越)
-if(d===0){ if(!eH[idx(cI,cJ)]) continue; }
-else if(d===1){ if(!eH[idx(ni,cJ)]) continue; }
-else if(d===2){ if(!eV[idx(cI,cJ)]) continue; }
-else if(d===3){ if(!eV[idx(cI,nj)]) continue; }
-else if(d>=4){
-if(d===4||d===7){ if(!(d===4?eD1[idx(cI,cJ)]:eD1[idx(ni,nj)])) continue; }
-else { if(!(d===5?eD2[idx(cI,nj)]:eD2[idx(ni,cJ)])) continue; }
-if(!open[idx(cI+DI[d],cJ)]||!open[idx(cI,cJ+DJ[d])]) continue;
-}
-const v=visitArr[nIdx];
-if(v===gen+1) continue; // 已落定: 它的 g 与父指针都是终值, 不再改
-const ng=cg+DC[d]*SP;
-if(v!==gen||ng<gArr[nIdx]){
-visitArr[nIdx]=gen; gArr[nIdx]=ng; cameArr[nIdx]=cur;
-push(nIdx, ng+Math.hypot(ni-ti,nj-tj)*SP, dir);
-}
-}
-};
-// `gen` = 本代"已入堆未落定", `gen+1` = 本代"已落定", 其余值 = 非本代
-// 返回值 = 本次是否真的落定 (0 = 该格已落定, 这一次是"改进后重推"留下的陈旧堆项 —— 只算弹出, 不算落定)
-const settle=(i2,visitArr)=>{ if(visitArr[i2]===gen+1) return 0; visitArr[i2]=gen+1; return 1; };
-const isSettled=(i2,visitArr)=>visitArr[i2]===gen+1;
+_fpHLen=0;
+for(let i=0;i<_heapTouched.length;i++) heapPos[_heapTouched[i]]=-1;
+_heapTouched.length=0;
+meetCandidates.length=0;
 gScore[startI]=0; visitGen[startI]=gen; came[startI]=-1;
 gScoreB[goalI]=0; visitGenB[goalI]=gen; cameB[goalI]=-1;
-push(startI, Math.hypot(si-ti,sj-tj)*SP, 0);
-push(goalI, Math.hypot(si-ti,sj-tj)*SP, 1);
+_fpPush(startI, Math.hypot(si-ti,sj-tj)*SP, 0);
+_fpPush(goalI, Math.hypot(si-ti,sj-tj)*SP, 1);
 let settled=0, bestMeet=-1, bestCost=Infinity, popped=0;
 // 双向 A* 终止: 两侧"已落定集合"的交集里代价最小者 ≥ 当前最优解 → 不可能再有更优解。
 // 实现上每次落定一格就与对侧落定集求交并更新 bestCost, 再做一次"任一堆顶 f ≥ bestCost"的收敛判定。
 // 双重上限 (2026-09-26): settled 见 settleCap 注释; popped 是性能软上限 (SEARCH_NODES, 极病态图才碰得到)。
-while(hLen>0&&popped<SEARCH_NODES&&settled<settleCap){
+while(_fpHLen>0&&popped<SEARCH_NODES&&settled<settleCap){
 const topKey=heapKey[0];
 if(bestMeet>=0&&topKey>=bestCost) break; // 两棵树的最优前景都不优于已找到的解 → 收工
-const cur=pop(); popped++;
+const cur=_fpPop(); popped++;
 if(cur<0) break;
-const dir=_popDir;
+const dir=_fpPopDir;
 if(dir===0){
-if(isSettled(cur,visitGenB)){ const c=gScore[cur]+gScoreB[cur]; if(c<bestCost){ bestCost=c; bestMeet=cur; } }
-settled+=settle(cur,visitGen);
-expand(cur,0,gScore,visitGen,came,ti,tj);
+if(_fpIsSettled(cur,visitGenB)){ const c=gScore[cur]+gScoreB[cur]; if(c<bestCost){ bestCost=c; bestMeet=cur; } }
+settled+=_fpSettle(cur,visitGen);
+_fpExpand(cur,0,gScore,visitGen,came,ti,tj);
 }else{
-if(isSettled(cur,visitGen)){ const c=gScore[cur]+gScoreB[cur]; if(c<bestCost){ bestCost=c; bestMeet=cur; } }
-settled+=settle(cur,visitGenB);
-expand(cur,1,gScoreB,visitGenB,cameB,si,sj);
+if(_fpIsSettled(cur,visitGen)){ const c=gScore[cur]+gScoreB[cur]; if(c<bestCost){ bestCost=c; bestMeet=cur; } }
+settled+=_fpSettle(cur,visitGenB);
+_fpExpand(cur,1,gScoreB,visitGenB,cameB,si,sj);
 }
-if(hLen<=0) break; // 两棵树都枯竭 (堆空): 没有可扩展的前景
+if(_fpHLen<=0) break; // 两棵树都枯竭 (堆空): 没有可扩展的前景
 }
-// 兜底: 两棵树已"相接"(某格双侧都有 g) 但都没落定 → 取相接格里代价最小的作为会合点
+// 兜底: 两棵树已"相接"(某格双侧都有 g) 但都没落定 → 取相接格里代价最小的作为会合点 (仅遍历候选池)
 if(bestMeet<0){
 let bh=-1, bc=Infinity;
-for(let k=0;k<NN;k++){
+for(let m=0;m<meetCandidates.length;m++){
+const k=meetCandidates[m];
 if(visitGen[k]!==gen&&visitGen[k]!==gen+1) continue;
 if(visitGenB[k]!==gen&&visitGenB[k]!==gen+1) continue;
 const c=gScore[k]+gScoreB[k];
@@ -418,11 +442,11 @@ if(bestMeet<0){ navStats.fail++; return null; }
 navStats.ok++; navStats.meet+=bestMeet;
 const path=[];
 let cur=bestMeet, hops=0, broken=false;
-while(cur!==startI&&cur>=0){ const i=cur%N,j=(cur/N)|0; const [x,z]=toW(i,j); path.push([x,z]); cur=came[cur]; if(++hops>NN){ broken=true; break; } }
+while(cur!==startI&&cur>=0){ const i=cur%N,j=(cur/N)|0; path.push([i*SP-OFF,j*SP-OFF]); cur=came[cur]; if(++hops>NN){ broken=true; break; } }   // toW 内联 (2026-11-01 性能批): 长 ~90 路标×2 的临时数组免掉
 if(broken){ navStats.ok--; navStats.fail++; return null; } // 前驱链异常: 宁可判失败, 也不给出一条打转的路径
 path.reverse();
 cur=cameB[bestMeet]; hops=0;
-while(cur!==goalI&&cur>=0){ const i=cur%N,j=(cur/N)|0; const [x,z]=toW(i,j); path.push([x,z]); cur=cameB[cur]; if(++hops>NN){ broken=true; break; } }
+while(cur!==goalI&&cur>=0){ const i=cur%N,j=(cur/N)|0; path.push([i*SP-OFF,j*SP-OFF]); cur=cameB[cur]; if(++hops>NN){ broken=true; break; } }
 if(broken){ navStats.ok--; navStats.fail++; return null; }
 path.push([tx,tz]);
 // 路径平滑 (2026-09-19): 旧版对每个路标做"最多 8 个候选 × lineClear"的贪心前探 ——

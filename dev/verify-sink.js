@@ -156,7 +156,11 @@ const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+// window 桩跨 boot 共享: 真页每次载入都是新 window, 这里必须手工复位对局期全局,
+// 否则上一战役 startMatch 写的 __sfMatchWorldStart 泄漏进下一战役 —— procgen 世界比旧边界大时,
+// 首次 retireMatchActors 台账清扫会按陈旧边界整段摘掉本世界的后段网格 (2026-10-24g 偶发红根因)。
+delete window.__sfMatchWorldStart; window.__sfMatchSpawned=false;
+const files=['js/00-config.js','js/00b-i18n.js','js/00c-procgen.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 for(const f of files) load(ctx,f); // 不含 24 的 loop 启动? 24 会调用 initMenuUI & setInterval? 探针只调 fn
 return ctx;
 }
@@ -260,8 +264,10 @@ assert(w.m.parent===null||w.m.parent===undefined,'模型体已从场景移除');
 });
 
 // ── 4. 树木: 倒伏停留 → 连干带冠沉入 → 实例删除 ──
+// 2026-11-10 柳树批判据跟码: 柳 (kind:'willow') 也入 TREE_LIVE, 但实例索引走 WLOW_IM (wi) 而非
+// TREE_IM (ti/li) —— 本测试读的是 TREE_IM 数组, 故只取乔木 (柳的下沉链由 verify-willow-20261110 专测)。
 chk('树木:倒伏→停留→沉入→实例删除',()=>{
-const tr=TREE_LIVE.find(t=>t.alive&&!t.fall);
+const tr=TREE_LIVE.find(t=>t.alive&&!t.fall&&t.kind==='tree');
 if(!tr){ out.checks.push('(本布局无活树, 跳过)'); return; }
 const trunkArr=TREE_IM.trunks.instanceMatrix.array;
 const leafArr=TREE_IM.leaves.instanceMatrix.array;
@@ -293,14 +299,14 @@ assert(posZero2(rec.li0,2),'全沉后叶面实例零缩放删除');
 // ── 6. 草丛/庄稼实例下沉 (与灌木同路径, 直接验证 inst sink 任务) ──
 chk('实例批:queueSink inst 下沉→零缩放',()=>{
 const bi=BURN_INST[0];
-assert(bi,'存在可燃实例批');
+if(!bi){ out.checks.push('(本布局无可燃实例批, 跳过)'); return; }
 let idx0=-1;
 for(let k2=0;k2<bi.im.count;k2++){
 const a=bi.im.instanceMatrix.array;
 let vis=false; for(let e=0;e<16;e++) if(a[k2*16+e]!==0){ vis=true; break; }
 if(vis){ idx0=k2; break; }
 }
-assert(idx0>=0,'存在可见实例');
+if(idx0<0){ out.checks.push('(本布局无可燃实例, 跳过)'); return; }
 const y0=bi.im.instanceMatrix.array[idx0*16+13];
 const job=queueSink({inst:{im:bi.im,idxs:[idx0]},depth:1.6,rest:1,sink:2});
 step(updateWreckSinks,0.25,6); // 1s 静置 + 0.5s 下沉 (k≈0.25)

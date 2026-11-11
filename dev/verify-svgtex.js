@@ -58,6 +58,12 @@ Object3D:Obj3,Sprite:class extends Obj3{constructor(m){super();this.material=m||
 Vector3:V3,Color:_Color,
 Fog:class{constructor(c){this.color=new _Color(c);this.near=0;this.far=0;}},
 SphereGeometry:Geo,PlaneGeometry:Geo,BoxGeometry:Geo,CylinderGeometry:Geo,
+// ★ 昼夜批 (2026-10-05) 给 02-scene 加了星空 Points —— 桩当时没跟上, 本探针从那批起一跑就崩
+//   (TypeError: THREE.BufferGeometry is not a constructor), 因不在 run-all 注册表而静默了五周。补齐四件:
+BufferGeometry:class{constructor(){this.attributes={};}setAttribute(n,a){this.attributes[n]=a;return this;}setIndex(){return this;}dispose(){}},
+Float32BufferAttribute:class{constructor(a,n){this.array=(a&&a.length!==undefined)?Array.from(a):a;this.itemSize=n;this.count=this.array?Math.floor(this.array.length/n):0;}},
+Points:class extends Obj3{constructor(g,m){super();this.geometry=g;this.material=m||{};}},
+PointsMaterial:_mat(class{}),
 MeshLambertMaterial:_mat(class{constructor(){}}),
 MeshBasicMaterial:_mat(class{constructor(){}}),
 SpriteMaterial:_mat(class{constructor(){}}),

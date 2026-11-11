@@ -55,6 +55,8 @@ p=ctx.L(0,0); coverPoints.push({x:p[0],z:p[1]});
 BUILD_REG.push({type:'cnHouse',x,z,ry,w,d,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+1.12});
 }
 function buildChurch(x,z,ry){
+bldBatchBegin();
+try{
 const f=foundation(x,z,ry,10,16,{maxDh:1.6});
 const ctx=bctx(x,z,ry,f.floor);
 const H=5.5,t=0.5;
@@ -107,9 +109,14 @@ mesh(new THREE.ConeGeometry(2.2,2.8,4),MAT.woodDark,cp[0],tf.floor+tH+1.8,cp[1],
 addCoverAround(x,z,10,16,ry);
 coverPoints.push({x:ctx.L(0,-4)[0],z:ctx.L(0,-4)[1]},{x:ctx.L(0,3)[0],z:ctx.L(0,3)[1]});
 BUILD_REG.push({type:'church',x,z,ry,w:10,d:16,floor:f.floor,doors:ctx.doors.concat(tc.doors),roofY:f.floor+H+1.91,towerFloor:tf.floor,towerRoofY:tf.floor+tH+0.4});
+}finally{
+bldBatchEnd();
+}
 }
 // 谷仓: 大门(坦克/步兵可入) + 阁楼 + 干草垛 (墙高4.4: 阁楼站立面与屋顶碰撞带间留足净高)
 function buildBarn(x,z,ry){
+bldBatchBegin();
+try{
 const f=foundation(x,z,ry,9,13);
 const ctx=bctx(x,z,ry,f.floor);
 const H=4.4,t=0.35;
@@ -143,9 +150,14 @@ CYLS.push({x:hp[0],z:hp[1],r:1.15,y0:hh,y1:hh+1.6});
 addCoverAround(x,z,9,13,ry);
 coverPoints.push({x:ctx.L(0,1)[0],z:ctx.L(0,1)[1]},{x:ctx.L(-2,-4)[0],z:ctx.L(-2,-4)[1]});
 BUILD_REG.push({type:'barn',x,z,ry,w:9,d:13,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+1.58});
+}finally{
+bldBatchEnd();
+}
 }
 // 两层小楼: 楼梯与二层楼板齐平衔接 + 楼梯井护栏 + 二层四面窗 (有效火力位)
 function twoStoryHouse(x,z,ry,mat){
+bldBatchBegin();
+try{
 const f=foundation(x,z,ry,8,9);
 const ctx=bctx(x,z,ry,f.floor);
 const t=0.35,H1=3.26; // 一层墙顶嵌入二层墙底(3.16), 消除层间缝隙
@@ -199,6 +211,9 @@ solidBox(MAT.woodDark,1.2,0.8,0.8,p[0],heightAt(p[0],p[1])+0.4,p[1],wr(0,3));
 addCoverAround(x,z,8,9,ry);
 coverPoints.push({x:ctx.L(-1.5,1)[0],z:ctx.L(-1.5,1)[1]});
 BUILD_REG.push({type:'twoStory',x,z,ry,w:8,d:9,floor:f.floor,doors:ctx.doors.slice(),roofY:F1+H2+0.28});
+}finally{
+bldBatchEnd();
+}
 }
 // ★ 2026-09-21 WS5 ㈠ 哨亭直爬梯解析几何 —— **单一数据源**: watchtower() 与 dev/verify-watchtower.js 共读本函数
 //   (验证脚本不许另写第二套数学; 用户第 7 条"哨亭在有坡度的地方楼梯不接地"的对治)。
@@ -263,6 +278,8 @@ return {n,sr,tr,width:w,topZ,footZ,footGi,rise,tread,riser,steps,legacy:false};
 }
 // 瞭望塔: 楼梯顶端与平台齐平衔接(顶踏步贴平台边缘), 护栏留准确豁口, 顶棚有碰撞
 function watchtower(x,z,ry=0){
+bldBatchBegin();
+try{
 const ctx=bctx(x,z,ry,0);
 // ★ 2026-09-21 WS5: 补 foundation —— 本函数原是全仓**唯一不调 foundation 的建筑** (没有整平平台):
 //   坡地上塔腿各踩各的高度、楼梯下方直接是原始坡面 ⇒ 用户第 7 条"哨亭在坡地上楼梯不接地"。
@@ -327,6 +344,9 @@ STAIRS.push({x:tp[0],z:tp[1],topY:deckTop,sr:st.sr,width:st.width,n:st.n});
 // (旧 :247-251 "梯下支撑(视觉)"已删: 撑柱是纯视觉 mesh() 无碰撞 —— 现由踢面链 + 梯脚接地段承力)
 coverPoints.push({x,z});
 BUILD_REG.push({type:'watchtower',x,z,ry,w:4,d:7,floor:f.floor,doors:[],roofY:deckTop+2.3});
+}finally{
+bldBatchEnd();
+}
 }
 // 帐篷: 双坡帆布小屋式——四面墙(正面门洞, 墙段框架自动登记通行区)+
 // 实心帆布坡顶(挡弹/挡视线), 全部件有碰撞; 旧 A 型两块帆布板与墙互相穿模, 弃用
@@ -336,6 +356,8 @@ const tentMatB=new THREE.MeshLambertMaterial({color:0x565a3e,map:TEX.cloth});
 //   旧版没挂 uvRef, 坡板/檐口/山墙各按自身尺寸把 0..1 铺满整面 ⇒ 同一顶帐篷上织纹相差 17×。
 tentMatA.uvRef=UV_DENSITY.cloth; tentMatB.uvRef=UV_DENSITY.cloth;
 function tent(x,z,ry){
+bldBatchBegin();
+try{
 const f=foundation(x,z,ry,3.2,4.4,{raise:0.02});
 const ctx=bctx(x,z,ry,f.floor);
 const H=2.35,t=0.2;
@@ -353,6 +375,9 @@ p=ctx.L(0.8,1.2);
 solidBox(MAT.wood,0.9,0.7,0.9,p[0],heightAt(p[0],p[1])+0.35,p[1],wr(0,3));
 p=ctx.L(0,-0.5); coverPoints.push({x:p[0],z:p[1]});
 BUILD_REG.push({type:'tent',x,z,ry,w:3.2,d:4.4,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+0.52});
+}finally{
+bldBatchEnd();
+}
 }
 // 雪地木屋 (可破坏, 双坡顶)
 function logCabin(x,z,ry){
@@ -375,6 +400,8 @@ BUILD_REG.push({type:'logCabin',x,z,ry,w:6,d:5,floor:f.floor,doors:ctx.doors.sli
 }
 // 混凝土碉堡: 正面/侧面真射击孔(站姿可向外射击), 背面入口人/Bot 均可通过
 function bunker(x,z,face){
+bldBatchBegin();
+try{
 const f=foundation(x,z,face,3.8,3.4,{raise:0.1});
 const ctx=bctx(x,z,face,f.floor);
 const H=2.15,t=0.55;
@@ -394,6 +421,9 @@ const rp=ctx.L(0,0);
 addSnowCap(solidBox(MAT.stone,4.4,0.55,4.0,rp[0],f.floor+H+0.275,rp[1],face));
 coverPoints.push({x:ctx.L(0,3.4)[0],z:ctx.L(0,3.4)[1]},{x,z});
 BUILD_REG.push({type:'bunker',x,z,ry:face,w:4.4,d:4,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+0.55});
+}finally{
+bldBatchEnd();
+}
 }
 // ═══════════ 城市组新建筑 (2026-09-05 城市组·斯大林格勒/柏林) ═══════════
 // 多层公寓废墟壳: 2~3 层沿街公寓 —— 逐层楼板(楼梯井)+楼梯, 上层窗位可架枪俯射街道;
@@ -826,7 +856,7 @@ const fy=fit.max; // 车皮坐在轨面最高处 (均值会让一端埋进轨面
 solidBox(MAT.metalDark,3.0,1.25,7.5,p[0],fy+0.85,p[1],ry); // 车皮 (无 crush: 坦克不可碾)
 for(const wz of [-2.6,2.6]){
 const q=L(17,fz+wz);
-const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,2.6,9),MAT.metalDark);
+const wh=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.4,0.4,2.6,9),MAT.metalDark),MAT.metalDark);
 wh.position.set(q[0],fy+0.4,q[1]);
 wh.rotation.order='YXZ';
 wh.rotation.y=ry; wh.rotation.z=HPI; // 轮轴沿厂房长轴垂直方向 (车皮纵轴)
@@ -941,6 +971,8 @@ coverPoints.push({x:x+1.8,z},{x:x-1.8,z});
 //     (destr:false + 无 dGroup), 建筑可进/可上屋顶, 但打不烂 —— 地标恒存, 浮空问题从根上不存在。
 //     柱廊石柱、屋面板、楼板、楼梯均为永久件 (废墟残柱语义取消, 全楼永久)
 function reichstag(x,z,ry){
+bldBatchBegin();
+try{
 const fw=34, fd=24, hw=fw/2, hd=fd/2;
 const f=foundation(x,z,ry,fw,fd,{maxDh:1.8});
 const ctx=bctx(x,z,ry,f.floor);
@@ -1018,6 +1050,9 @@ if(wr(0,1)<0.75){ const p=ctx.L(wr(-6,6),wr(-6,6)); mesh(boxGeo(wr(1,2),wr(0.5,1
 addCoverAround(x,z,fw,fd,ry);
 coverPoints.push({x:ctx.L(0,hd+2.2)[0],z:ctx.L(0,hd+2.2)[1]});
 BUILD_REG.push({type:'reichstag',x,z,ry,w:fw,d:fd,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT,indestr:true});
+}finally{
+bldBatchEnd();
+}
 }
 // ═══════════ 柏林地标 ②: 防空塔 (2026-09-09 用户定案) ═══════════
 // 空间逻辑核算 (14×14 混凝土塔, 局部 x/z±7):
@@ -1319,23 +1354,31 @@ const wx=abx+side*cs*(B.w/2+0.3), wz=abz-side*sn*(B.w/2+0.3);
 solidBox(MAT.stone,0.4,hAb*0.7,1.2,wx,gA+hAb*0.35,wz,B.yaw);
 }
 }
-// ── 引桥坡道: 两岸各 5m 木板坡, 从岸顶升到桥面 ──
+// ── 引桥坡道: 两岸各 5m 石坡, 桥端=桥面严格齐平, 远端落到实地 (2026-10-24 修"楼梯是反的") ──
+// 旧码 sy=gEnd+rise*t (t=0 在桥端) ⇒ 坡道在桥端贴地、背离桥面爬到桥面高 —— 高端悬空不接桥面
+// (实机: 水乡桥头"楼梯是反的, 高的地方没有连接桥面"); 且 gEnd 采在桥端侧岸坡低谷, 平地桥也造出反向凹坡。
+// 现改为: 落差按**远端实地** gFar 采样, 坡面 sy=dy-rise*t (t=0 桥端=桥面, t=1 远端=实地);
+// 中段贴地封底 (缺口 ≤1.25m 时箱体落到地面, 消除浮板), 落差超 2.5m 不建 (与旧口径同)。
 for(const sgn of [-1,1]){
 const ux=sgn*sn, uz=sgn*cs;
 const rampLen=5.0;
 const endU=sgn*(B.len/2+rampLen/2+0.2);
 const px=B.x+sn*endU, pz=B.z+cs*endU;
-const gEnd=heightAt(px-ux*1.5,pz-uz*1.5,true);
-const rise=dy-gEnd;
-if(rise>0.15&&rise<2.5){
+const gFar=heightAt(px+ux*(rampLen/2+1.2),pz+uz*(rampLen/2+1.2),true);
+const rise=dy-gFar;
+if(Math.abs(rise)>0.15&&Math.abs(rise)<2.5){
 // 坡道基体 (斜放大盒, 用多段模拟坡度)
 const nSeg=5;
 for(let i=0;i<nSeg;i++){
 const t=(i+0.5)/nSeg;
 const u=sgn*(B.len/2+0.2)+sgn*t*rampLen;
 const sx=B.x+sn*u, sz=B.z+cs*u;
-const sy=gEnd+rise*t;
-solidBox(MAT.stone,B.w*0.85,0.35,rampLen/nSeg+0.05,sx,sy-0.15,sz,B.yaw);
+const sy=dy-rise*t;
+const gh=heightAt(sx,sz,true);
+let bot=sy-0.325;                                  // 默认 0.35 薄板 (顶面 sy+0.025)
+if(gh<sy&&sy-gh<1.25) bot=gh-0.06;                 // 贴地封底
+const bh=(sy+0.025)-bot;
+if(bh>0.12) solidBox(MAT.stone,B.w*0.85,bh,rampLen/nSeg+0.05,sx,((sy+0.025)+bot)/2,sz,B.yaw);
 // 坡道木板面
 mesh(boxGeo(B.w*0.8,0.05,rampLen/nSeg),MAT.wood,sx,sy+0.03,sz,B.yaw,false,true);
 }
@@ -1570,7 +1613,7 @@ if(!propFree(x,z,1.1)||!freeSpot(x,z,1.0)) return;
 propTake(x,z,1.1);
 const g0=heightAt(x,z);
 const geo=new THREE.ConeGeometry(0.75,1.05,4);
-const m=new THREE.Mesh(geo,MAT.concrete||MAT.stone);
+const m=new THREE.Mesh(uvGeo(geo,MAT.concrete||MAT.stone),MAT.concrete||MAT.stone);
 m.position.set(x,g0+0.52,z);
 m.rotation.y=ry+HPI/2; // 菱形朝向
 m.castShadow=true;
@@ -1590,6 +1633,8 @@ coverPoints.push({x,z});
 //   材质: 墙=brick / 楼板·梯·屋面=woodDark (统一木构) / 女儿墙·烟囱顶=stone
 //   ★ 不可破坏 (地标恒存): 全部墙/楼板/屋面永久件 (destr:false)
 function silkFactory(x,z,ry){
+bldBatchBegin();
+try{
 const fw=18, fd=12, hw=fw/2, hd=fd/2;
 const f=foundation(x,z,ry,fw,fd,{maxDh:1.2,raise:0.08});
 const ctx=bctx(x,z,ry,f.floor);
@@ -1697,6 +1742,9 @@ addCoverAround(x,z,fw,fd,ry);
 coverPoints.push({x:ctx.L(0,hd+2.4)[0],z:ctx.L(0,hd+2.4)[1]},
 {x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]});
 BUILD_REG.push({type:'silkFactory',x,z,ry,w:fw,d:fd,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT,indestr:true});
+}finally{
+bldBatchEnd();
+}
 }
 // 水车: 江南标识性景观 —— 不可毁纯景观 + 木质矮掩体
 // 空间账: 轮径 2.8m 轴高 2.0; A 字支架; 底部水槽贴地; 可作步兵半身掩体
@@ -1715,7 +1763,7 @@ addBoxCollider(px,g0+1.2,pz,0.25,2.4,0.25);
 solidBox(MAT.woodDark,0.16,0.16,2.6,x,g0+2.0,z,ry+HPI);
 // 轮体: 用扁圆柱近似大轮 (轴沿水平法向)
 {
-const wheel=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,0.22,14),MAT.wood);
+const wheel=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(1.4,1.4,0.22,14),MAT.wood),MAT.wood);
 wheel.position.set(x,g0+2.0,z);
 wheel.rotation.order='YXZ';
 wheel.rotation.y=ry; wheel.rotation.z=HPI; // 轮面垂直于地面、法向沿 ry
@@ -1837,6 +1885,11 @@ solidBox(MAT.wood,0.32,H,t,pR[0],g0+H/2,pR[1],yaw);
 solidBox(MAT.wood,1.5,H-2.05,t,fc[0],g0+2.05+(H-2.05)/2,fc[1],yaw);
 NAV_CLEARS.push({x:fc[0],z:fc[1],r:1.5});
 ctx.doors.push({x:fc[0],z:fc[1],w:1.4,dx:nx*ctx.cs+nz*ctx.sn,dz:-nx*ctx.sn+nz*ctx.cs,g0});
+// 门两侧石砌厚重墩座
+const pL_st=ctx.L(nx*R-1.05*Math.cos(phi),nz*R+1.05*Math.sin(phi));
+const pR_st=ctx.L(nx*R+1.05*Math.cos(phi),nz*R-1.05*Math.sin(phi));
+mesh(boxGeo(0.48,1.35,t+0.12),MAT.stone,pL_st[0],g0+0.675,pL_st[1],yaw);
+mesh(boxGeo(0.48,1.35,t+0.12),MAT.stone,pR_st[0],g0+0.675,pR_st[1],yaw);
 }else if(k===2||k===6){
 // ±x 面: 高窗炮位 (0.7 宽, 台 4.2 楣 5.0) —— 面内偏移: 面中心 + c·切向 (切向=(cosφ,-sinφ))
 const pieces=[[-1.0,1.0,0,4.2],[-1.0,1.0,5.0,H],[-1.0,-0.35,4.2,5.0],[0.35,1.0,4.2,5.0]];
@@ -1845,9 +1898,32 @@ const c=(a+b)/2;
 const p=ctx.L(nx*R+c*Math.cos(phi), nz*R-c*Math.sin(phi));
 solidBox(MAT.wood,b-a,y1-y0,t,p[0],g0+(y0+y1)/2,p[1],yaw);
 }
+// 窗面底层石砌裙边
+mesh(boxGeo(FACE+0.08,1.35,t+0.12),MAT.stone,fc[0],g0+0.675,fc[1],yaw);
+mesh(boxGeo(FACE+0.12,0.12,t+0.16),MAT.stone,fc[0],g0+1.35+0.06,fc[1],yaw);
 }else{
 solidBox(MAT.wood,FACE+0.1,H,t,fc[0],g0+H/2,fc[1],yaw);
+// 底层厚重石砌裙边基座 (stone)
+mesh(boxGeo(FACE+0.08,1.35,t+0.12),MAT.stone,fc[0],g0+0.675,fc[1],yaw);
+mesh(boxGeo(FACE+0.12,0.12,t+0.16),MAT.stone,fc[0],g0+1.35+0.06,fc[1],yaw);
+// 实木墙面对角交叉加固木斜撑 (Half-timber X-bracing)
+mesh(boxGeo(0.12,2.7,0.08),MAT.woodDark,fc[0],g0+2.8,fc[1],yaw+0.48,false,true);
+mesh(boxGeo(0.12,2.7,0.08),MAT.woodDark,fc[0],g0+2.8,fc[1],yaw-0.48,false,true);
 }
+// 分层水平装配横梁 (Timber collar beams)
+if(k!==0) mesh(boxGeo(FACE,0.20,0.10),MAT.woodDark,fc[0],g0+1.48,fc[1],yaw);
+mesh(boxGeo(FACE,0.22,0.10),MAT.woodDark,fc[0],g0+4.15,fc[1],yaw);
+mesh(boxGeo(FACE-0.1,0.22,0.10),MAT.woodDark,fc[0],g0+7.00,fc[1],yaw);
+mesh(boxGeo(FACE-0.2,0.26,0.12),MAT.woodDark,fc[0],g0+8.40,fc[1],yaw);
+}
+// 8 根八角收分倾斜木角梁柱 (Corner posts: 底粗顶微敛, 勾勒经典收分塔形)
+for(let c=0;c<8;c++){
+const cPhi=(c+0.5)*Math.PI/4;
+const c_nx=Math.sin(cPhi), c_nz=Math.cos(cPhi);
+const p_bot=ctx.L(c_nx*2.48,c_nz*2.48);
+const p_top=ctx.L(c_nx*2.16,c_nz*2.16);
+const p_mid=[(p_bot[0]+p_top[0])/2,(p_bot[1]+p_top[1])/2];
+mesh(boxGeo(0.20,7.05,0.20),MAT.woodDark,p_mid[0],g0+1.35+7.05/2,p_mid[1],ry+cPhi);
 }
 // 四角基石 (方足迹四角落地 —— verify-buildings 逐角着地断言; 亦是磨坊石基座观感)
 for(const [sx,sz] of [[-2.75,-2.75],[2.75,-2.75],[2.75,2.75],[-2.75,2.75]]){
@@ -1859,32 +1935,177 @@ const ms=ctx.L(0.9,-0.7);
 mesh(new THREE.CylinderGeometry(0.62,0.66,0.34,10),MAT.stone,ms[0],g0+0.17,ms[1]);
 mesh(new THREE.CylinderGeometry(0.2,0.2,0.5,8),MAT.woodDark,ms[0],g0+0.55,ms[1]);
 CYLS.push({x:ms[0],z:ms[1],r:0.64,y0:g0,y1:g0+0.75});
-// 塔帽: 八棱锥 (锥底 8.4 → 梢 10.3, 锥体内 4.0 方碰撞盒=屋顶碰撞带) + 尾杆 (视觉)
-mesh(new THREE.CylinderGeometry(0.06,2.75,1.9,8),MAT.woodDark,x,g0+9.35,z);
-solidBox(MAT.woodDark,4.0,1.9,4.0,x,g0+9.35,z,0);
-const tail=ctx.L(-0.2,3.6);
-mesh(boxGeo(0.14,0.14,2.6),MAT.woodDark,tail[0],g0+9.1,tail[1],ry+0.35,false,true);
-// 风叶组: 毂 + 4 叶 (木框+帆面) —— 纯视觉, WIND_ROTORS 每帧绕法线轴慢转
+
+// 塔顶机舱 (Cap): 饱满木制风帽机舱 + 回转座圈 + 前挑轴承护罩 + 后偏航风向舵尾架
+// ★ 2026-10-24 修"方顶+构件外浮": ①八角件 (8 段 Cylinder 顶点在 θ=0/45.., 而墙面法向 k*45° 且随 ry 转)
+//    旧版零旋转 ⇒ 帽角顶在每面墙正中、帽面骑在塔角上 = 菱形/方块观感; 现统一转 ry-HPI/4 让帽面与墙面对齐。
+//    ②旧 4.0×1.9×4.0 轴对齐碰撞实体盒角点 (r2.83) 从八角帽体/红锥里戳出 (黑楔="方顶奇丑"主犯) →
+//      换 CYLS 圆柱碰撞体 (04-collision rayCyl/RGRID 全链同权), r2.3 严格藏进帽体轮廓。
+// 机舱回转承重座圈
+const capRy=ry-HPI/4;
+mesh(new THREE.CylinderGeometry(2.55,2.65,0.32,8),MAT.woodDark,x,g0+8.52,z,capRy);
+// 饱满风帽机身与覆顶 (Cap body & dome roof)
+mesh(new THREE.CylinderGeometry(2.28,2.55,1.25,8),MAT.woodDark,x,g0+9.25,z,capRy);
+mesh(new THREE.CylinderGeometry(0.28,2.45,1.55,8),MAT.roof,x,g0+10.35,z,capRy);
+mesh(new THREE.CylinderGeometry(0.04,0.07,0.9,6),MAT.metalDark,x,g0+11.45,z);
+CYLS.push({x,z,r:2.3,y0:g0+8.4,y1:g0+9.9}); // 帽体碰撞 (原实体盒见上注)
+
+// 前挑轴承护罩 (Front Windshaft housing & gable eaves): 与主轴 strict 同轴同高 (统一在 g0+7.0)
+const shaftY=g0+7.0;
+const pBBox=ctx.L(0,2.40);
+mesh(boxGeo(1.20,1.20,1.10),MAT.woodDark,pBBox[0],shaftY,pBBox[1],ry,false,true);
+const pRing=ctx.L(0,2.82);
+mesh(new THREE.CylinderGeometry(0.32,0.32,0.28,8),MAT.metalDark,pRing[0],shaftY,pRing[1],ry+HPI);
+const pShaftSpindle=ctx.L(0,2.65);
+mesh(new THREE.CylinderGeometry(0.18,0.18,0.56,8),MAT.metalDark,pShaftSpindle[0],shaftY,pShaftSpindle[1],ry+HPI);
+const pDorm=ctx.L(0,2.35);
+mesh(boxGeo(1.35,0.24,1.25),MAT.roof,pDorm[0],shaftY+0.72,pDorm[1],ry,false,true);
+const pCorL=ctx.L(-0.45,2.30); const pCorR=ctx.L(0.45,2.30);
+mesh(boxGeo(0.12,0.70,0.12),MAT.woodDark,pCorL[0],shaftY-0.70,pCorL[1],ry,false,true);
+mesh(boxGeo(0.12,0.70,0.12),MAT.woodDark,pCorR[0],shaftY-0.70,pCorR[1],ry,false,true);
+
+// 后部偏航风向舵尾架 (Rear Fantail / Tailpole structure): 统一局部坐标系 Group
+// ★ 2026-10-24 修"构件外浮": 旧版整组悬在塔后 y7.15~8.0 半空 (帽底 8.36 之下、墙顶 8.4 之外, 无任何连接)。
+//   现内端埋入座圈/帽底 (|z|≤2.2 @y8.5 在座圈 r2.55 实体内), 斜梁外挑至尾轴 —— 视觉上从帽后长出来。
+const fantail=new THREE.Group();
+fantail.position.set(x,g0,z);
+fantail.rotation.y=ry;
+
+// 左右斜拉主梁 (Shear legs): 内端埋座圈 (z-2.2,y8.55), 外端 z-4.8 挑出尾舵轴
+const tL_beam=new THREE.Mesh(uvGeo(boxGeo(0.15,0.15,2.6),MAT.woodDark),MAT.woodDark);
+tL_beam.position.set(-0.65,8.45,-3.5);
+tL_beam.rotation.y=0.09;
+tL_beam.rotation.x=-0.20;
+fantail.add(tL_beam);
+
+const tR_beam=new THREE.Mesh(uvGeo(boxGeo(0.15,0.15,2.6),MAT.woodDark),MAT.woodDark);
+tR_beam.position.set(0.65,8.45,-3.5);
+tR_beam.rotation.y=-0.09;
+tR_beam.rotation.x=-0.20;
+fantail.add(tR_beam);
+
+// 中段横向拉梁 (Gallows cross tie): 连接两斜梁中段
+const tMidTie=new THREE.Mesh(uvGeo(boxGeo(1.2,0.12,0.12),MAT.woodDark),MAT.woodDark);
+tMidTie.position.set(0,8.45,-3.2);
+fantail.add(tMidTie);
+
+// 尾端横向拉梁 (载尾轴): 斜梁外端下方
+const tEndTie=new THREE.Mesh(uvGeo(boxGeo(1.4,0.18,0.20),MAT.woodDark),MAT.woodDark);
+tEndTie.position.set(0,8.1,-4.55);
+fantail.add(tEndTie);
+
+// 短吊柱 ×2 (Hangers): 斜梁外段底面 ↔ 尾端拉梁顶面 (0.3 短柱, 闭合框架无悬端)
+const tUnderL=new THREE.Mesh(uvGeo(boxGeo(0.12,0.3,0.12),MAT.woodDark),MAT.woodDark);
+tUnderL.position.set(-0.6,8.12,-4.55);
+fantail.add(tUnderL);
+
+const tUnderR=new THREE.Mesh(uvGeo(boxGeo(0.12,0.3,0.12),MAT.woodDark),MAT.woodDark);
+tUnderR.position.set(0.6,8.12,-4.55);
+fantail.add(tUnderR);
+
+// 尾舵横轴基座与横向轴承 (Transverse axle & bearings at lz = -4.55, y = 8.1)
+const fHubY=8.1, fHubZ=-4.55;
+const fAxle=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.08,0.08,0.65,8),MAT.metalDark),MAT.metalDark);
+fAxle.position.set(0,fHubY,fHubZ);
+fAxle.rotation.z=HPI; // 严格横轴 (X轴)
+fantail.add(fAxle);
+
+const bBlockL=new THREE.Mesh(uvGeo(boxGeo(0.14,0.22,0.16),MAT.metalDark),MAT.metalDark);
+bBlockL.position.set(-0.25,fHubY,fHubZ);
+fantail.add(bBlockL);
+
+const bBlockR=new THREE.Mesh(uvGeo(boxGeo(0.14,0.22,0.16),MAT.metalDark),MAT.metalDark);
+bBlockR.position.set(0.25,fHubY,fHubZ);
+fantail.add(bBlockR);
+
+// 6片小副叶片围绕尾舵横轴均匀分布 (各 60度)
+const fantailRotor=new THREE.Group();
+fantailRotor.position.set(0,fHubY,fHubZ);
+
+const fHubCenter=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.15,0.15,0.18,8),MAT.metalDark),MAT.metalDark);
+fHubCenter.rotation.z=HPI;
+fantailRotor.add(fHubCenter);
+
+for(let fi=0;fi<6;fi++){
+  const fAng=fi*Math.PI/3; // 60度步进
+  const bladeArm=new THREE.Group();
+  bladeArm.rotation.x=fAng; // 围绕横轴 (X) 均匀分布
+
+  // 辐条 (Spoke rod)
+  const spoke=new THREE.Mesh(uvGeo(boxGeo(0.04,0.20,0.04),MAT.metalDark),MAT.metalDark);
+  spoke.position.set(0,0.16,0);
+  bladeArm.add(spoke);
+
+  // 60度对称副叶片
+  const blade=new THREE.Mesh(uvGeo(boxGeo(0.14,0.48,0.024),MAT.woodDark),MAT.woodDark);
+  blade.position.set(0,0.40,0); // 径向延伸
+  blade.rotation.y=0.30;       // 气动偏角 (Pitch)
+  bladeArm.add(blade);
+
+  fantailRotor.add(bladeArm);
+}
+fantail.add(fantailRotor);
+fantail.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
+world.add(fantail);
+
+// 经典十字格栅风叶组 (Sails): 4 叶精致双层木质桁架、横纵方格格栅与折叠帆布蒙皮
 const hub=new THREE.Group();
-hub.position.set(x+Math.sin(ry)*2.9, g0+6.8, z+Math.cos(ry)*2.9);
+hub.position.set(x+Math.sin(ry)*2.9, shaftY, z+Math.cos(ry)*2.9);
 hub.rotation.order='YXZ';                // 先朝向(Y)后自转(Z): R=Ry·Rz, 自转轴=叶面法线
 hub.rotation.y=ry;
-const hubM=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.5,8),MAT.woodDark);
+const hubM=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.24,0.26,0.52,8),MAT.woodDark),MAT.woodDark);
 hubM.rotation.x=HPI; hub.add(hubM);
+const boss=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.12,0.22,0.22,8),MAT.metalDark),MAT.metalDark);
+boss.position.z=0.32; boss.rotation.x=HPI; hub.add(boss);
+const crossA=new THREE.Mesh(uvGeo(boxGeo(0.72,0.18,0.08),MAT.metalDark),MAT.metalDark);
+crossA.position.z=0.18; hub.add(crossA);
+const crossB=new THREE.Mesh(uvGeo(boxGeo(0.18,0.72,0.08),MAT.metalDark),MAT.metalDark);
+crossB.position.z=0.18; hub.add(crossB);
+
 for(let b=0;b<4;b++){
-const arm=new THREE.Group(); arm.rotation.z=b*HPI/2;
-const beam=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.14,3.2,0.1),MAT.woodDark),MAT.woodDark);
-beam.position.y=1.6+0.4; arm.add(beam);
-const sail=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.78,2.3,0.04),MAT.hay),MAT.hay);
-sail.position.set(0.47,1.9,0.05); sail.rotation.z=0.22; arm.add(sail);
+const arm=new THREE.Group();
+arm.position.z=0.18; // 轴向与十字铁架严格共面装配，彻底消除前后浮空错位
+arm.rotation.z=b*HPI; // 严格 90度 正交十字对称 (0°, 90°, 180°, 270°)
+// 主梁桁架 (Main stock whip beam): 嵌合在十字铁架中心
+const beam=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.16,3.85,0.14),MAT.woodDark),MAT.woodDark);
+beam.position.y=2.25; arm.add(beam);
+// 梁根金属箍 (Iron strap collars)
+const strap1=new THREE.Mesh(uvGeo(boxGeo(0.20,0.08,0.18),MAT.metalDark),MAT.metalDark);
+strap1.position.y=0.65; arm.add(strap1);
+const strap2=new THREE.Mesh(uvGeo(boxGeo(0.20,0.08,0.18),MAT.metalDark),MAT.metalDark);
+strap2.position.y=1.05; arm.add(strap2);
+// 横向格栅桁架 (Sail bars / Cross rungs, 7道出挑横木): 紧密安装在主梁正面
+for(let r=0;r<7;r++){
+const ryPos=1.35+r*0.38;
+const rung=new THREE.Mesh(uvGeo(boxGeo(0.92,0.038,0.04),MAT.woodDark),MAT.woodDark);
+rung.position.set(0.44,ryPos,0.07);
+arm.add(rung);
+}
+// 纵向格栅经条 (Longitudinal laths / Grille bars: 外缘边梁与内部分格经条)
+const edgeLath=new THREE.Mesh(uvGeo(boxGeo(0.045,2.65,0.045),MAT.woodDark),MAT.woodDark);
+edgeLath.position.set(0.88,2.50,0.09); arm.add(edgeLath);
+const midLath1=new THREE.Mesh(uvGeo(boxGeo(0.03,2.60,0.03),MAT.woodDark),MAT.woodDark);
+midLath1.position.set(0.32,2.50,0.09); arm.add(midLath1);
+const midLath2=new THREE.Mesh(uvGeo(boxGeo(0.03,2.60,0.03),MAT.woodDark),MAT.woodDark);
+midLath2.position.set(0.60,2.50,0.09); arm.add(midLath2);
+// 帆布折叠蒙皮 (Canvas cloth covering: 欧式半展半收折叠帆面)
+const canvas=new THREE.Mesh(uvGeo(new THREE.BoxGeometry(0.64,2.55,0.024),MAT.plaster),MAT.plaster);
+canvas.position.set(0.42,2.50,0.11);
+canvas.rotation.y=-0.12;
+arm.add(canvas);
+// 帆布折叠压条 (Canvas battens)
+const batten1=new THREE.Mesh(uvGeo(boxGeo(0.66,0.035,0.03),MAT.woodDark),MAT.woodDark);
+batten1.position.set(0.42,1.85,0.125); arm.add(batten1);
+const batten2=new THREE.Mesh(uvGeo(boxGeo(0.66,0.035,0.03),MAT.woodDark),MAT.woodDark);
+batten2.position.set(0.42,3.15,0.125); arm.add(batten2);
+
 hub.add(arm);
 }
 hub.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
 world.add(hub);
 WIND_ROTORS.push({g:hub,w:0.5});
-// 瞭望台 (西北外侧): 平台顶 7.0 与梯顶齐平 + 西/北两侧护栏 (南侧=登临口, 东侧贴塔身)
-// 世界账 (ry=HPI 门朝东时): 梯沿西墙外 world x≈-2.75 由南向北爬升, 梯顶 world(-2.75,-3.2);
-// 台中心 world(-2.9,-4.05), 台面 world x -3.65..-2.15 (贴墙) / z -5.05..-3.05 (接梯顶)
+
+// 瞭望台 (西北外侧): 平台顶 7.0 与梯顶齐平 + 三侧护栏 + 四柱地基承重立柱与横梁框架
 const bx3=4.05, bz3=-2.9;               // 台中心局部 (lx,lz) → world=(lz,-lx), 顶面=g0+7.0
 const pb=ctx.L(bx3,bz3);
 solidBox(MAT.woodDark,2.0,0.24,1.5,pb[0],g0+7.0-0.12,pb[1],ry);
@@ -1892,10 +2113,57 @@ const rw=ctx.L(4.05,-3.65);              // 西护栏 (world x -3.65, 南北向 
 solidBox(MAT.woodDark,2.0,1.0,0.1,rw[0],g0+7.0+0.5,rw[1],ry);
 const rn=ctx.L(5.05,-2.9);               // 北护栏 (world z -5.05, 东西向 1.5)
 solidBox(MAT.woodDark,0.1,1.0,1.5,rn[0],g0+7.0+0.5,rn[1],ry);
+const re=ctx.L(4.05,-2.15);              // 南/内侧护栏 (闭合临空面, 宽2.0)
+solidBox(MAT.woodDark,2.0,1.0,0.1,re[0],g0+7.0+0.5,re[1],ry);
 coverPoints.push({x:pb[0],z:pb[1]});
+
+// 瞭望台四角承重立柱 (地面直通平台底部) 与平台支承边梁
+for(const [cpx, cpz] of [[4.95,-3.55],[4.95,-2.25],[3.15,-3.55],[3.15,-2.25]]){
+  const pPost=ctx.L(cpx,cpz);
+  const gPost=heightAt(pPost[0],pPost[1]);
+  const hPost=(g0+6.88)-gPost;
+  if(hPost>0.5){
+    mesh(new THREE.CylinderGeometry(0.13,0.15,hPost,8),MAT.woodDark,pPost[0],gPost+hPost/2,pPost[1]);
+  }
+}
+// 平台底部加固边梁 (Subframe joists)
+const pFrameW=ctx.L(4.05,-3.55);
+mesh(boxGeo(1.9,0.18,0.14),MAT.woodDark,pFrameW[0],g0+6.80,pFrameW[1],ry,false,true);
+const pFrameE=ctx.L(4.05,-2.25);
+mesh(boxGeo(1.9,0.18,0.14),MAT.woodDark,pFrameE[0],g0+6.80,pFrameE[1],ry,false,true);
+const pFrameN=ctx.L(4.95,-2.90);
+mesh(boxGeo(0.14,0.18,1.4),MAT.woodDark,pFrameN[0],g0+6.80,pFrameN[1],ry,false,true);
+
+// 塔壁对角斜撑木架
+const str1_p=ctx.L(3.1,-2.5);
+mesh(boxGeo(0.18,0.18,2.2),MAT.woodDark,str1_p[0],g0+5.5,str1_p[1],ry+0.45,false,true);
+const str2_p=ctx.L(3.6,-3.2);
+mesh(boxGeo(0.18,0.18,2.2),MAT.woodDark,str2_p[0],g0+5.5,str2_p[1],ry-0.45,false,true);
+
 // 外挂阶梯: 单跑 16 步 (rise 0.4375≤0.45 / tread 0.4 / run 6.4), 顶步 7.0 与台面严格齐平;
 // 默认登顶落点 local(3.55,-2.75) → world(-2.75,-3.55) 落在台面上 (有支撑, 纲领 6.1)
 stairFlight(ctx,{lx:-3.2,lz:-2.75,dir:'x+',width:1.0,base:g0,topY:g0+7.0,maxRise:0.45,tread:0.4});
+
+// 梯顶与瞭望台过梁无缝连接 (Stair-platform junction ledger beam)
+const pLedger=ctx.L(3.10,-2.75);
+mesh(boxGeo(0.20,0.24,1.1),MAT.woodDark,pLedger[0],g0+6.80,pLedger[1],ry,false,true);
+
+// 外挂梯底部承重立柱与剪刀撑木架
+const stP1=ctx.L(-1.2,-3.2);
+const gSt1=heightAt(stP1[0],stP1[1]);
+const hSt1=(g0+2.3)-gSt1;
+if(hSt1>0.4){
+mesh(new THREE.CylinderGeometry(0.12,0.14,hSt1,6),MAT.woodDark,stP1[0],gSt1+hSt1/2,stP1[1]);
+}
+const stP2=ctx.L(1.2,-3.2);
+const gSt2=heightAt(stP2[0],stP2[1]);
+const hSt2=(g0+4.9)-gSt2;
+if(hSt2>0.4){
+mesh(new THREE.CylinderGeometry(0.12,0.14,hSt2,6),MAT.woodDark,stP2[0],gSt2+hSt2/2,stP2[1]);
+}
+const stBr=ctx.L(0.0,-3.2);
+mesh(boxGeo(2.6,0.12,0.12),MAT.woodDark,stBr[0],g0+3.4,stBr[1],ry,false,true);
+
 BUILD_REG.push({type:'windmill',x,z,ry,w:6.6,d:6.6,floor:g0,doors:ctx.doors.slice(),roofY:g0+10.3});
 }
 
@@ -1914,7 +2182,7 @@ CYLS.push({x:x+lx,z:z+lz,r:0.3,y0:g0,y1:g0+6.8});
 for(const [ax,az,bx2,bz2] of [[-1.7,-1.7,1.7,1.7],[1.7,-1.7,-1.7,1.7],[-1.7,-1.7,-1.7,1.7],[1.7,-1.7,1.7,1.7]]){
 mesh(boxGeo(Math.hypot(bx2-ax,bz2-az),0.14,0.14),MAT.woodDark,x+(ax+bx2)/2,g0+5.6,z+(az+bz2)/2,Math.atan2(bz2-az,bx2-ax),false,true);
 }
-const tank=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.2,3.0,12),MAT.metalDark);
+const tank=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(2.2,2.2,3.0,12),MAT.metalDark),MAT.metalDark);
 tank.position.set(x,g0+8.3,z); tank.castShadow=true; world.add(tank);
 CYLS.push({x,z,r:2.2,y0:g0+6.8,y1:g0+9.8});
 mesh(new THREE.CylinderGeometry(0.06,2.4,1.4,12),MAT.woodDark,x,g0+10.5,z);
@@ -2087,7 +2355,7 @@ mesh(new THREE.CylinderGeometry(0.05,0.05,1.4,5),MAT.metalDark,lampP[0],LY+6.6,l
 {
 const p=ctx.L(3.4,3.4);
 mesh(new THREE.CylinderGeometry(0.4,0.5,0.9,8),MAT.metalDark,p[0],LY+0.45,p[1]);
-const drum=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,1.5,10),MAT.metal);
+const drum=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.62,0.62,1.5,10),MAT.metal),MAT.metal);
 drum.rotation.z=HPI; drum.rotation.y=ry+0.6;
 drum.position.set(p[0],LY+1.5,p[1]); drum.castShadow=true; world.add(drum);
 CYLS.push({x:p[0],z:p[1],r:0.5,y0:LY,y1:LY+1.6});
@@ -2519,7 +2787,7 @@ slab(lx-dx/2,lx+dx/2,lz-dz/2,lz+dz/2,g0+RT+parH,parH,true);    // 屋顶女儿�
 {
 const p=ctx.L(-1.8,1.4);
 mesh(new THREE.CylinderGeometry(0.5,0.62,0.9,10),MAT.stone,p[0],g0+RT+0.45,p[1]);
-const drum=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,1.5,10),MAT.metalDark);
+const drum=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(0.4,0.4,1.5,10),MAT.metalDark),MAT.metalDark);
 drum.rotation.z=HPI; drum.rotation.y=ry+0.5; drum.position.set(p[0],g0+RT+1.15,p[1]); drum.castShadow=true; world.add(drum);
 CYLS.push({x:p[0],z:p[1],r:0.55,y0:g0+RT,y1:g0+RT+1.1});
 const q=ctx.L(1.3,-1.7);

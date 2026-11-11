@@ -3,9 +3,10 @@
 // 源: Index.original.html 第 3879-4034 行
 // ─────────────────────────────────────────────
 'use strict';
-const _fwd=V3(), _rgt=V3(), _upv=V3(0,1,0);
-function camForward(){ camera.getWorldDirection(_fwd); return _fwd.clone(); }
-function camRight(){ camera.getWorldDirection(_fwd); _rgt.crossVectors(_fwd,_upv).normalize(); return _rgt.clone(); }
+const _fwd=V3(), _rgt=V3(), _upv=V3(0,1,0), _v3Out=V3();
+if(typeof globalThis!=='undefined') globalThis._v3Out=_v3Out;
+function camForward(out){ camera.getWorldDirection(_fwd); if(out) return out.copy(_fwd); return _fwd.clone(); }
+function camRight(out){ camera.getWorldDirection(_fwd); _rgt.crossVectors(_fwd,_upv).normalize(); if(out) return out.copy(_rgt); return _rgt.clone(); }
 const soldiers=[];
 const combatants=[];
 let gunEvents=[];
@@ -15,7 +16,7 @@ while(d>Math.PI)d-=TAU; while(d<-Math.PI)d+=TAU;
 return cur+clamp(d,-maxStep,maxStep);
 }
 function angDiff(a,b){ let d=b-a; while(d>Math.PI)d-=TAU; while(d<-Math.PI)d+=TAU; return d; }
-const uniformMats=[0,1].map(t=>{
+const uniformMats=(ZOMBIE_MODE?[0,1,2]:[0,1]).map(t=>{   // team2=丧尸档 (00-config TEAM_FACTION 按需挂档, 2026-10-06)
 const F=TEAM_FACTION[t];
 return {
 coat:new THREE.MeshLambertMaterial({color:F.coat, map:TEX.cloth}), pants:new THREE.MeshLambertMaterial({color:F.pants, map:TEX.cloth}),
@@ -62,6 +63,43 @@ cyl(gm,0.085,0.078,0.09, 0,0.12,-0.86,g);
 cyl(gm,0.085,0.078,0.08, 0,0.12,0.52,g);
 bx(wd,0.04,0.08,0.06, 0,-0.02,0.02,g);
 if(team===1) bx(vmMats.gunL,0.34,0.3,0.015, 0.02,0.1,-0.4,g);
+} else if(kind==='pistol'){
+// 手枪 (2026-11-04 副武器差异化批, 用户裁定"三款枪族造型"): 三族与第一人称 buildGunModel 的手枪族谱
+// 一一对应 (09-weapons: 柯尔特式 m1911/p38/tt33 · 驳壳枪 c96 · 南部式 nambu)。坐标系同各枪: 原点≈
+// 扳机位, +z=握把端 / -z=枪口端 (mountGunModel 转 π 后枪口朝角色前方); 抓握点由 gunGeomStations
+// 按本几何现算, 双手 IK 自动落位, 无需另写锚点表。
+const pfam=(key==='c96')?'broom':(key==='nambu'?'nambu':'colt');
+if(pfam==='broom'){
+// 驳壳枪: 方机匣 + 细枪管 + 前置弹匣 + 扫帚柄
+bx(gm,0.034,0.05,0.15, 0,0.02,-0.02,g);
+cyl(gm,0.011,0.011,0.14, 0,0.045,-0.15,g);
+bx(gm,0.028,0.038,0.05, 0,0.046,0.03,g);
+bx(gm,0.024,0.05,0.045, 0,-0.03,-0.05,g);
+cyl(wd,0.016,0.02,0.075, 0,-0.012,0.05,g,0.25);
+bx(gm,0.007,0.015,0.007, 0,0.06,-0.2,g);
+} else if(pfam==='nambu'){
+// 南部十四年式: 细长枪管 + 斜握把
+bx(gm,0.028,0.042,0.14, 0,0.02,-0.01,g);
+cyl(gm,0.009,0.009,0.12, 0,0.036,-0.13,g);
+cyl(gm,0.015,0.015,0.045, 0,0.026,0.05,g,0);
+bx(gm,0.024,0.08,0.045, 0,-0.042,0.04,g).rotation.x=-0.4;
+bx(gm,0.018,0.05,0.03, 0,-0.028,0.038,g);
+bx(gm,0.006,0.015,0.006, 0,0.05,-0.18,g);
+} else {
+// 柯尔特式 (m1911/p38/tt33): 套筒 + 短握把 + 小弹匣
+bx(gm,0.03,0.046,0.17, 0,0.02,-0.02,g);
+cyl(gm,0.012,0.012,0.09, 0,0.03,-0.13,g);
+bx(gm,0.026,0.085,0.045, 0,-0.038,0.045,g).rotation.x=-0.25;
+bx(gm,0.02,0.06,0.032, 0,-0.045,0.04,g);
+bx(gm,0.006,0.016,0.006, 0,0.052,-0.11,g);
+}} else if(kind==='radio'){
+// 通讯仪 (2026-10-27 重做, 用户 7 项需求第 1 条): **不在这里另画一台** —— 整机几何与阵营配色走
+// 09-weapons 的 buildRadioBody 单源 (第一人称 buildGunModel 的 radio 分支调的是同一个函数)。
+// 为什么必须单源: 旧版本函数**根本没有 radio 分支**, 落进下面的步枪默认档 ⇒ 第三人称拿通讯仪时
+// 手里是一把步枪 (用户实报 1.5)。若这里再抄一份建模, 第一/第三人称就会像"两条挂载路径"那样漂移
+// (本仓 2026-09-21 契约 J 已经为挂枪吃过一次这个亏)。11-soldiers 本来就硬依赖 09-weapons 的
+// bx/cyl/vmMats, 所以直接调用不额外加 typeof 守卫。
+buildRadioBody(g,team);
 } else {
 bx(wd,0.05,0.07,0.75,0,0,-0.05,g);
 cyl(gm,0.012,0.012,0.3,0,0.02,-0.55,g);
@@ -73,10 +111,18 @@ return g;
 function gunKindOf(key){
 let d=WPN_DEFS[key];
 if(d.model){ key=d.model; d=WPN_DEFS[key]; }
+// 通讯仪 (2026-10-27, 用户 7 项需求第 1.5 条根因): 工具类手持件必须**先于**下面所有武器档判定。
+// 它的 def 是 type:'tool' + radio:true, 不含 rocket/mortar/atRifle/pistol/auto, 旧版一路落到末尾的
+// 默认档 (return 'rifle') ⇒ worldGunModel 建出步枪、GUN_MOUNT_BY_KIND/PRONE/CARRIED_FWD 也全走
+// 步枪档; 玩家化身与 Bot 共用 mountGunModel, 所以两边一起错 (手里是步枪 + 整套步枪持握动画)。
+if(d.radio) return 'radio';
 if(d.rocket) return 'launcher';
 if(d.mortar) return 'mortar';
 if(d.atRifle) return 'atr';
-if(d.pistol) return 'smg';
+// 2026-11-04 副武器差异化批: 手枪独立 kind (旧版映射 'smg' ⇒ 突击兵主/副武器落同一 smg 分支建出
+// 逐几何一致的网格, 第三人称切副武器零变化, 用户实报)。持握姿态不加表项 = 走默认双手持枪 + armIK
+// 双手反解到枪上 (用户裁定双手持枪), 与 radio (单手工具) 不同。
+if(d.pistol) return 'pistol';
 if(key==='bar'||key==='stg44'||d.wg==='pan'||d.wg==='topmag'||d.wg==='hopper') return 'mg';
 if(d.type==='auto') return 'smg';
 return 'rifle';
@@ -99,6 +145,19 @@ const GUN_MOUNT_BY_KIND={
 launcher:{x:-0.26,y:0.56,z:0.08},
 atr:{x:-0.20,y:0.42,z:0.20},
 mortar:{x:-0.28,y:0.24,z:0.30},
+// 通讯仪 (2026-10-27, 用户 7 项需求第 1.5 条): 短粗手持件 —— 举在**胸前偏右**、贴近躯干前表面。
+// 挂点 y 为什么是 0.40 而不是默认步枪的 0.33: 机模原点在握点, 握点比机身底面再低 0.095 (见 09-weapons
+// buildRadioBody 的 RADIO_GRIP_Y + gunGeomStations 的"取该站位下缘"), 所以挂点 0.40 ⇒ 右手落在躯干
+// 局部 y≈0.305 (胸口), 机身顶面 0.52 / 天线尖 0.72 —— 抬到嘴边而不挡住头盔, 是"举机通话"的姿态。
+// x 收到 -0.17 (比步枪 -0.15 略外) 让天线与头盔盒 (|x|≤0.155) 分开, 臂长校验: 右肩 (-0.28,0.50,0) 到
+// 握点 0.50m < 全伸 0.62m ⇒ armIK 有富余, 不会出现"够不到而把手钉在空气里"。
+radio:{x:-0.17,y:0.40,z:0.30},
+// 手枪 (2026-11-04 副武器差异化批, 挂点经 dev/verify-a21-j 全量复测定位): 手枪**无枪托**, 不适用
+// "枪托抵肩"的躯干接触档 —— 挂点前移到握把端恰好不侵躯干盒 (站姿 I 档 z=0.33: 四姿态×双路径
+// ①″ 零接触 / ④′ 双手 L=R=0), y=0.42 持枪于胸口 (② 约束 y<0.45), x=-0.17 双手合拢。
+// 臂长校验: 右肩 (-0.28,0.50,0) 到握点 ≈0.39m; 左肩到护木点 ≈0.60m —— 后者贴近全伸 0.62m 是有意的
+// (护木站位落在臂展内包络 |vx|≤hy(d) 的边界内; 超界时既有 gunAxisPoint 走 t 回退保手在枪上)。
+pistol:{x:-0.17,y:0.42,z:0.33},
 default:{x:-0.15,y:0.33,z:0.26},
 };
 // ── 匍匐挂点 (2026-09-26 A1 修): 挂点必须**随躯干俯角**给, 否则趴姿下枪与手一起埋进地面 ────────────
@@ -114,6 +173,13 @@ const GUN_MOUNT_PRONE={          // x: 横向(右手侧) · dy: 离骨盆高 · 
 launcher:{x:-0.26,dy:0.12,dz:0.50},
 atr:{x:-0.24,dy:0.10,dz:0.545},
 mortar:{x:-0.28,dy:0.06,dz:0.55},
+// 通讯仪: 趴姿下右手把机子撑在头侧前方 (dy 比步枪高 0.02 = 机子不被地面吞掉; dz 收到 0.40 —— 机模
+// 只有 0.30 高, 按步枪的 0.545 会把它推到臂展外, armIK 只能钳到可达球面 ⇒ 手与机子脱开)。
+radio:{x:-0.22,dy:0.12,dz:0.40},
+// 手枪: 趴姿**双臂前伸**持枪 (dz≈步枪档 0.545 的 0.62) —— 收在胸前 (0.38) 时枪角 rx≈-1.5 把护木
+// 站位旋到躯干正前, 左肩到目标变成纯横向 0.469m, 超出弯肘横向包络 (hy≈0.372m) ⇒ 左手脱枪 0.19m
+// (a21-j ④′ 实测); 前伸到 0.62 后左肩到目标转为斜前向 d≈0.57, 双手 IK 全落枪面, 且枪盒离头/躯干更远。
+pistol:{x:-0.24,dy:0.12,dz:0.62},
 default:{x:-0.24,dy:0.10,dz:0.545},
 };
 // 站↔趴的过渡按**当前**骨盆俯角平滑混合 (站 0.05 / 蹲 0.14 / 疾跑 0.30 / 趴 1.50):
@@ -131,11 +197,37 @@ const c=Math.cos(p), s=Math.sin(p);
 const ly=pr.dy*c+pr.dz*s, lz=-pr.dy*s+pr.dz*c;
 return {x:st.x+(pr.x-st.x)*kk, y:st.y+(ly-st.y)*kk, z:st.z+(lz-st.z)*kk};
 }
+// ═════ 持握姿态表 (单源) — 2026-10-27 通讯仪批 ═════
+// 为什么需要这张表: 姿态机 (20-player updatePlayerAvatar / 14-bots updateMesh) 里的四分支
+// (匍匐/交战/疾跑/警戒) 全部按"长枪双手持握"写死 —— 通讯仪是 5cm 厚的手持工具, 套上去就是
+// "把对讲机当步枪抵肩", 而且还会跟着播换弹/抵肩动作 (用户 7 项需求第 1.5 条)。
+// 口径: **判定只认 gunKindOf() 给出的 kind**, 姿态数值全部集中在这张表里 —— 姿态机不许再写
+// 第二份"if(武器名==='radio')"的硬编码 (那会变成与挂点表并行的第二个漂移源)。
+// 字段语义 (全部是躯干局部角, 与姿态机同一套符号):
+//   shR/elR/shRz/shL/elL/shLz : 右/左肩前后摆 / 肘弯 / 肩外展 (乘 UPPER_MIRROR 之前的基准值)
+//   gunX/gunY/gunZ            : gunG 目标角 (gunY 为负 = 机面转向角色脸侧, 让屏幕朝自己)
+//   handK/handKL              : armIK 权重 (右手 1 = 反解到机身握点; 左手 0 = 自然下垂/扶机, 不抓护木)
+//   noReload/noBrace          : 该 kind 不存在"拉栓换弹 / 抵肩架枪"这两件事, 姿态机据此整段跳过
+const GUN_HOLD_BY_KIND={
+radio:{
+// 举机通话: 右手抬到胸口偏右 (与 GUN_MOUNT_BY_KIND.radio 的挂点同高), 肘弯大 ⇒ 机子贴近脸;
+// 左臂自然下垂略内收 (史实上另一只手多半在按 PTT 或扶腰)。数值按"右肩到挂点 0.50m / 全伸 0.62m"
+// 留 0.12m 富余反推 —— 保证 armIK 不把目标钳到可达球面 (钳了就会出现"手贴不到机身")。
+shR:-1.02, elR:-1.62, shRz:-0.30, shL:-0.30, elL:-0.62, shLz:0.30,
+gunX:0.12, gunY:-0.42, gunZ:0.10,
+handK:1, handKL:0, noReload:true, noBrace:true,
+},
+};
+// 取表: 没有条目的 kind (步枪/冲锋枪/机枪/火箭筒/迫击炮…) 返回 null ⇒ 姿态机走原路径, 逐位不变。
+// 入参就是 gunKindOf() 的返回值, 所以调用方不需要认识武器键, 也不需要再判一次类型。
+function gunHoldOf(kind){ return (kind&&GUN_HOLD_BY_KIND[kind])?GUN_HOLD_BY_KIND[kind]:null; }
 const ARM_SIDE={R:-1,L:1};                 // mkArm 的 side 参数: 右=-1 (-X) / 左=+1 (+X)
 // 枪模在 gunG 内的前推量 (单源): 长武器不给前推量时枪托/管尾会落进躯干 —— 火箭筒管长 1.5、AT 步枪 0.85 尤其明显。
 // launcher 0.20→0.30 (2026-09-21 A#2 扛肩式收尾, 实测取证): 扛肩挂点下 0.20 时匍匐姿态筒尾仍压进头/颈盒 0.012m,
 // 0.30 时四姿态头/颈盒 0 组、躯干仅"抵肩接触" 0.034m(肩窝距 0.136 ≤0.30) —— 见 dev/out/tmp-infantry-gunmount-sweep.txt。
-const CARRIED_FWD={rifle:0.30,smg:0.30,mg:0.30,atr:0.24,launcher:0.30,mortar:0.30};
+// 通讯仪 0.14: 枪模前推量的语义是"把长枪身从躯干里推出来", 而通讯仪只有 5cm 厚、且挂点已在胸前
+// 0.30 —— 沿用 0.30 会让它悬在身前 30cm 处脱离手 (armIK 够不到, 手被钳在可达球面上)。
+const CARRIED_FWD={rifle:0.30,smg:0.30,mg:0.30,atr:0.24,launcher:0.30,mortar:0.30,radio:0.14,pistol:0.06};   // 手枪 0.06 (2026-11-04): 枪短, 沿用步枪 0.30 会把手枪推出手外 (IK 钳臂长 ⇒ 脱手)
 // 上半身镜像符号单源 (契约 §12.2 的数学依据, 别再改回去):
 //   镜像平面 x=0 下旋转矩阵的共轭 M·R·M⁻¹ 为 Rx(θ)→Rx(θ) (不变) / Ry(θ)→Ry(-θ) / Rz(θ)→Rz(-θ);
 //   Euler 顺序 XYZ 时逐分量成立 ⇒ 肩链的 rotation.y / rotation.z **目标值**写回时乘这个符号, rotation.x 不动。
@@ -292,6 +384,9 @@ const inner=Math.acos(clamp((a*a+b*b-D*D)/(2*a*b),-1,1));
 const bend=Math.PI-inner;
 return kneeUp?{hip:hipW,knee:-bend}:{hip:hipW,knee:bend};
 }
+const _soldierFlBaseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:14;
+const _soldierFlGeo=new THREE.ConeGeometry(1.0,_soldierFlBaseL,10,1,true);
+const _soldierFlMat=new THREE.MeshBasicMaterial({color:0xffedd0,transparent:true,opacity:0.12,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false});
 function buildSoldierMesh(team,name){
 const U=uniformMats[team];
 const root=new THREE.Group();
@@ -301,32 +396,38 @@ bx(U.coat,0.44,0.55,0.26, 0,0.28,0, torsoG);
 const headG=new THREE.Group(); headG.position.set(0,0.62,0); torsoG.add(headG);
 bx(U.skin,0.2,0.22,0.2, 0,0.1,0, headG);
 // 阵营特色头盔/军帽
+// ★2026-11-03 穿模修复 (用户实测: 方头四上角总从盔里探出来): 头盒半宽 0.1 → 上角离轴线 0.1414, 而旧盔在
+//   头顶高度的截面半径只有 0.134~0.142, 且 10 段多面体还要再内缩 ~4% ⇒ 四角必然穿出。四盔统一放大球冠
+//   半径并微调冠高 (头顶轮廓位移 ≤6mm, 剪影不变), 保证**多面体化后**的盔面在 [盔沿, 头顶] 全程压住四角
+//   (裕量 ≥3mm, 判据钉 dev/verify-crushhead-20261103.js)。头盒/爆头命中球 (13-combat r=0.26) 均不动。
+//   顺带修: 日军星徽/国军青天白日徽旧 z 值本就埋在盔面内侧 (旧盔该高度截面半径 > 徽章 z) 从未露出,
+//   随新盔尺寸一并挪到盔面上 (前缘出盔面 ~2mm, 后缘埋入固定)。
 let helm;
 const hs=TEAM_FACTION[team].helmet;
 if(hs==='pot'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.15,10,8,0,TAU,0,HPI*1.2),U.helm);
-helm.position.set(0,0.16,0);
+helm=new THREE.Mesh(new THREE.SphereGeometry(0.162,10,8,0,TAU,0,HPI*1.2),U.helm);
+helm.position.set(0,0.154,0);
 headG.add(helm);
 } else if(hs==='stahl'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.155,10,8,0,TAU,0,HPI*1.35),U.helm);
-helm.position.set(0,0.15,0); helm.scale.z=1.15;
+helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.35),U.helm);
+helm.position.set(0,0.145,0); helm.scale.z=1.15;
 headG.add(helm);
-// 国军M35: 正面青天白日徽
+// 国军M35: 正面青天白日徽 (新盔该高度 z 向截面半径 ≈0.1784, 徽章前缘出面 ~1mm / 后缘埋入盔面)
 if(TEAM_FACTION[team].sym==='✷'){
-bx(new THREE.MeshLambertMaterial({color:0x2050b0}),0.032,0.032,0.008, 0,0.17,0.148, headG);
-bx(new THREE.MeshLambertMaterial({color:0xe8e8e8}),0.016,0.016,0.01, 0,0.17,0.15, headG);
+bx(new THREE.MeshLambertMaterial({color:0x2050b0}),0.032,0.032,0.008, 0,0.17,0.1755, headG);
+bx(new THREE.MeshLambertMaterial({color:0xe8e8e8}),0.016,0.016,0.01, 0,0.17,0.1775, headG);
 }
 } else if(hs==='ssh'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.152,10,8,0,TAU,0,HPI*1.28),U.helm);
-helm.position.set(0,0.155,0); helm.scale.y=1.1;
+helm=new THREE.Mesh(new THREE.SphereGeometry(0.167,10,8,0,TAU,0,HPI*1.28),U.helm);
+helm.position.set(0,0.153,0); helm.scale.y=1.1;
 headG.add(helm);
 } else if(hs==='jp'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.142,10,8,0,TAU,0,HPI*1.22),U.helm);
-helm.position.set(0,0.165,0);
+helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.22),U.helm);
+helm.position.set(0,0.146,0);
 headG.add(helm);
 const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.17,0.025,10),U.helm);
 brim.position.set(0,0.1,0); headG.add(brim);
-bx(new THREE.MeshLambertMaterial({color:0xd8b840}),0.02,0.024,0.008, 0,0.16,0.135, headG);
+bx(new THREE.MeshLambertMaterial({color:0xd8b840}),0.02,0.024,0.008, 0,0.16,0.1535, headG);
 } else {
 // 八路军帽: 布帽+短帽檐(朝前)+红星
 const cap=bx(U.helm,0.21,0.09,0.21, 0,0.19,0, headG);
@@ -356,6 +457,19 @@ const legL=mkLeg(-1), legR=mkLeg(1);
 const gunG=new THREE.Group(); gunG.position.set(GUN_MOUNT.x,GUN_MOUNT.y,GUN_MOUNT.z); gunG.rotation.order='YXZ'; torsoG.add(gunG);
 bx(team===0?U.pants:U.coat,0.3,0.34,0.14, 0,0.3,-0.18, torsoG);
 bx(new THREE.MeshLambertMaterial({color:0x3a3428,map:TEX.cloth}),0.4,0.08,0.28, 0,0.02,0, torsoG); // B8/P3-12 装具/背包带
+// 步兵战术手电筒 (右胸挂载, 指向前方)
+const flGrp=new THREE.Group();
+flGrp.position.set(0.12,0.34,0.16);
+bx(new THREE.MeshLambertMaterial({color:0x262624}),0.04,0.04,0.10, 0,0,0, flGrp);
+const flGlow=(typeof _nightGlowSprite==='function')?_nightGlowSprite('rgba(255,250,225,1)','rgba(255,230,160,0.6)',0.45):null;
+if(flGlow){ flGlow.position.set(0,0,0.05); flGrp.add(flGlow); }
+const flCone=new THREE.Mesh(_soldierFlGeo,_soldierFlMat);
+flCone.rotation.x=-HPI;
+flCone.position.set(0,0,_soldierFlBaseL*0.5);
+flGrp.add(flCone);
+flGrp.flCone=flCone; flGrp.baseL=_soldierFlBaseL;
+flGrp.visible=false;
+torsoG.add(flGrp);
 root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
 const c=document.createElement('canvas'); c.width=128; c.height=32;
 const g2=c.getContext('2d');
@@ -367,5 +481,5 @@ const tag=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture
 tag.scale.set(0.9,0.22,1); tag.position.y=2.05; tag.renderOrder=5;
 root.add(tag);
 scene.add(root);
-return {root,pelvis,torsoG,headG,armL,armR,legL,legR,gunG,tag};
+return {root,pelvis,torsoG,headG,armL,armR,legL,legR,gunG,tag,flGrp};
 }

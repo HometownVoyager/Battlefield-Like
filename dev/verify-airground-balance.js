@@ -163,7 +163,7 @@ sandbox.window=window;
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
-for(const f of ['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js']) load(ctx,f);
+for(const f of ['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js']) load(ctx,f);
 
 console.log('R 运行时: 高炮弹伤减档 / 交战距离 / 伞降索敌豁免 (真沙箱, 战役 0)');
 const r=vm.runInContext(`(()=>{
@@ -202,16 +202,21 @@ out.r2b=(fp.hpLost>=34&&fp.hpLost<=58);
 out.r2v2=fp.hpLost;
 flakShots.length=0; planes.splice(0,planes.length); planes.push(...savedP);
 // ── R3 Bot 高炮交战距离单源: ~121m 开火 / ~200m 不开火 ──
+// ★2026-11-01 判据跟走: 交战距离门 2026-10-05 起乘 WX_CFG.rangeMul (天气契约 R6 "天气×夜内联相乘
+//   钉死"), 旧写死米数的样点 (134m 开火/280m 不开火) 在阴天档 (×0.9=126m) 全体漂移。改为在沙箱里
+//   按同一公式算当档有效交战距, 样点取 0.92×eff (必开火) 与 1.15×eff (必不开火), 对任何天气/夜档稳健。
 const savedP2=planes.splice(0,planes.length);
+const effR=EMPL_AA_ENGAGE_R*((typeof NIGHT_MODE!=='undefined'&&NIGHT_MODE&&typeof NIGHT_CFG!=='undefined')?NIGHT_CFG.rangeMul:1)*WX_CFG.rangeMul;
+const zFire=Math.sqrt(Math.max(1,(effR*0.92)**2-3481));
 const foePl={pos:V3(0,60,0),alive:true,team:1,def:{size:1},yaw:0,pitch:0,speed:40};
 planes.push(foePl);
-const gun={kind:'aa',x:0,y:heightAt(0,0)+1,z:120,cd:0,crew:null,yaw:{rotation:{x:0,y:0}},pitch:{rotation:{x:0}}};
-const op={empUse:gun,team:0,pos:V3(0,heightAt(0,0),114),vel:V3(),yaw:0,pitch:0,emplPinT:0,crouch:false,prone:false,
+const gun={kind:'aa',x:0,y:heightAt(0,0)+1,z:zFire,cd:0,crew:null,yaw:{rotation:{x:0,y:0}},pitch:{rotation:{x:0}}};
+const op={empUse:gun,team:0,pos:V3(0,heightAt(0,0),zFire-6),vel:V3(),yaw:0,pitch:0,emplPinT:0,crouch:false,prone:false,
 pinEmpl(){},updateMesh(){},_aaTgt:foePl,aaReactT:0,lastFiredT:0};
 Bot.prototype.updateEmplacement.call(op,0.016);
 out.r3a=(flakShots.length===1);
 out.r3b=(Math.abs(gun.cd-EMPL_AA_CD)<1e-6);
-gun.cd=0; flakShots.length=0; foePl.pos.set(0,60,280);   // 距炮 160m > 140: 炮不响 (旧 220 会响)
+gun.cd=0; flakShots.length=0; foePl.pos.set(0,60,zFire+Math.sqrt(Math.max(1,(effR*1.15)**2-3481)));   // 距炮 1.15×eff (相对炮位取距): 炮不响 (旧 220 会响)
 Bot.prototype.updateEmplacement.call(op,0.016);
 out.r3c=(flakShots.length===0);
 flakShots.length=0; planes.splice(0,planes.length); planes.push(...savedP2);

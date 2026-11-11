@@ -257,18 +257,22 @@ specVehSpawnAtBase();
 return g;
 }
 // 就位到某点**旁边** (部署伴随 / 召唤用): 依次试 4 个方位, 都不通就落在脚下
-function specVehPlaceNear(x,z){
+// yaw 可选 (2026-11-01 用户裁定"召唤时车体炮塔朝玩家所面对的方向"): 透传给 PlaceAt;
+// 缺省仍朝地图中心 (部署伴随等其它路径不受影响)。
+function specVehPlaceNear(x,z,yaw){
 for(const off of [[4.5,0],[-4.5,0],[0,4.5],[0,-4.5]]){
 const tx=x+off[0], tz=z+off[1];
-if(!occBlocked(tx,tz)) return specVehPlaceAt(tx,tz);
+if(!occBlocked(tx,tz)) return specVehPlaceAt(tx,tz,yaw);
 }
-return specVehPlaceAt(x,z);
+return specVehPlaceAt(x,z,yaw);
 }
 // 随叫随到 (2026-09-17 修: 用户实报"开始时不选幽灵坦克就一整局没有"): 观战者在任何地方按 F,
 // 附近没有车时 → 车立刻在身旁显形并直接上车 (观战专属玩具不该被"开局那一次选择"绑死)
+// ★2026-11-01: 车体朝向 = 玩家当前面向 (两套角系差 π: 相机系前向=(-sin,-cos), 载具系前向=(sin,cos)
+// ⇒ veh.yaw=player.yaw+π), 炮塔回中 (turretYaw=0, PlaceAt 单源) —— 旧版朝地图中心/残留朝向, 用着别扭。
 function specVehSummon(){
 const g=specVehEnsureAtBase();
-specVehPlaceNear(player.pos.x,player.pos.z);
+specVehPlaceNear(player.pos.x,player.pos.z,player.yaw+Math.PI);
 specVehBoard(g);
 return g;
 }

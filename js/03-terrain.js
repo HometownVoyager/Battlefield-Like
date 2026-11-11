@@ -40,7 +40,7 @@ const FLATS=[];
 {
 // 百团/许特根等大起伏图: 旗点平台必须取当地全高 (山顶/塬面旗点若取 0.55 会被削成盆地边缘悬崖)
 // 塔拉瓦环礁 (island): 旗点/基地平台同样取全高 —— 0.55 系数会把滩头旗点削到海平面以下 (淹没)
-const fullH=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods'||CAMPAIGN.terr==='island'||CAMPAIGN.terr==='opensea';  // opensea: P4 全海图 (旗/基地平台按海床原样, 不做 0.55 折减)
+const fullH=CAMPAIGN.terr==='loess'||CAMPAIGN.terr==='woods'||CAMPAIGN.terr==='island';  // (opensea 全海图支随 2026-11-10 海战图下架摘除)
 const addFlat=(x,z,r,h)=>FLATS.push({x,z,r,h:h!==undefined?h:rawHeight(x,z)*0.55});
 // 出生平台的高度: 旧口径一律取 rawHeight*0.55 (即削掉当地高度的 45%) —— 平地上只是几厘米的微整形,
 //   但在山坡上就是一个坑: 断崖公路的 7 个伏击点 (terr 'mountain', 无旗点/无基地 ⇒ 没有任何后续平台覆盖)
@@ -284,8 +284,8 @@ function seaChannelMask(x,z){
 // 航道内礁盘段切深到 2.45m
 function seaDepthOfD(x,z,d){
   const S=SEA;
-  // 无离岸剖面表的全海图 (P4 opensea): 岸线放在可玩区之外, 剖面五段 (冲滩/礁盘/礁缘/外坡/海盆)
-  // 在整张图里都不会被走到 —— 直接给**均匀海盆深**, 与 rawHeight 的 opensea 支同源同值。
+  // 无离岸剖面表 (S.shelf 缺省) 的图: 直接给**均匀海盆深** (旧全海图 opensea 走这里, 2026-11-10
+  // 该图下架后此兜底仍为缺省保护分支, island 带完整剖面表不走这一条)。
   // (地形色带/海深/OCC 水障三处都读本函数; 不走这一条会在载入期就 TypeError。)
   if(!S||!S.shelf) return (S&&S.deep)?S.deep:26;
   const A=S.shelf.d*S.shelf.rate;
@@ -662,6 +662,20 @@ case 'steppe':
 return 0.9*Math.sin(x*0.017+0.4)*Math.cos(z*0.015+1.2)
 + 0.45*Math.sin(x*0.052+1.5)*Math.sin(z*0.045+0.8)
 + 0.18*Math.sin(x*0.14+2)*Math.cos(z*0.12+0.4);
+case 'procgen':{
+// 随机战场 v2 (2026-10-07): 00c 预烘焙高度场网格 (三层噪声 + 沿路/核心/旗圈压平, 见 00c §2.5/§6)
+// → 双线性采样。同种子同地形; 与 00c 建筑坡度门/压平带同一单源。PGDATA 缺失 (载入序异常) 时退旧缓丘公式。
+if(typeof PGDATA!=='undefined'&&PGDATA&&PGDATA.hgrid){
+ const H=PGDATA.hgrid,N=PGDATA.gN,GS=PGDATA.gS,GO=PGDATA.gO;
+ const gx=Math.max(0,Math.min(N,(x-GO)/GS)), gz=Math.max(0,Math.min(N,(z-GO)/GS));
+ const i0=Math.min(N-1,Math.floor(gx)), j0=Math.min(N-1,Math.floor(gz)), fx=gx-i0, fz=gz-j0;
+ const h00=H[j0*(N+1)+i0],h10=H[j0*(N+1)+i0+1],h01=H[(j0+1)*(N+1)+i0],h11=H[(j0+1)*(N+1)+i0+1];
+ return (h00*(1-fx)+h10*fx)*(1-fz)+(h01*(1-fx)+h11*fx)*fz;
+}
+return 1.05*Math.sin(x*0.016+PG.ph[0])*Math.cos(z*0.015+PG.ph[1])
++ 0.5*Math.sin(x*0.047+PG.ph[2])*Math.sin(z*0.044+PG.ph[3])
++ 0.18*Math.sin(x*0.11+PG.ph[1])*Math.cos(z*0.095+PG.ph[2]);
+}
 case 'woods':{
 // 雾林守线 (2026-09-13 许特根改版): 林间缓丘基底 + 北谷(卡尔小径)三段剖面 + 谷堑口
 // 剖面数字账: 谷底(gd<5, 泥径平坦) → 崩积坡(5..12, 5.2m落差/7m≈37°湿滑慢爬) → 谷缘陡唇(12..15,
@@ -692,16 +706,7 @@ const d=shoreDist(x,z);
 if(d>0) return -seaDepthOfD(x,z,d);
 return seaLandH(x,z,-d);
 }
-case 'opensea':{
-// 全海图 (2026-09-30 阶段五 P4 · 纯海战): 无陆地 —— 全图一个起伏很小的深海盆, 大舰的立足地。
-//   实现口径: 战役表的四条岸线 (南/北/西/东) 放在**可玩区之外** (±820), 于是
-//   shoreDist 在整个可玩区恒为正 ⇒ 水面单源 (waterYAt / waterStateAt / 游潜 / 弹道入水 /
-//   HUD 海带 / 水下遮蔽) 全部自动生效 —— 一行都不用另写, 也不必新造一套"海面"概念。
-//   本 case 只负责**海床**: 给一点平缓起伏 (纯平面在潜水与水下能见里像一块贴图)。
-const D=(SEA&&SEA.deep)?SEA.deep:26;
-const n=Math.sin(x*0.017)*Math.cos(z*0.013)*2.4+Math.sin((x+z)*0.009)*1.6;
-return -(D+n);
-}
+// (2026-11-10: case 'opensea' 全海图海床支随珊瑚海/铁底湾下架摘除, 原文见 archive/naval-coral-ironbottom-20261110/)
 case 'mountain':{
 // 断崖公路 · 伏击山谷: 谷底走廊随公路蜿蜒(rd<5 低平), 两侧 25° 左右山坡渐起
 // (rd5~21 上叠 ~9m × 沿谷起伏 0.45~1.55), 山肩上缘再拔 ~7m (rd21~32),
@@ -768,6 +773,33 @@ h-=1.3*sstep(k);
 	if(rd<RIVER.w){
 	const k=1-rd/RIVER.w;
 	h-=(RIVER.ice?1.2:(RIVER.d||1.9))*sstep(k)*(1-0.92*fordAt(x,z));
+	}
+	}
+	// 水乡支汊/鱼塘下切 (2026-10-28 修复, 指导 §4.4(1) 红线3): procgen water 群系在 00c 只产折线/圆表
+	// (hgrid 烘焙只含噪声+路/聚落压平, 不含水文) ⇒ 水面条带 (_waterStrip) 与鱼塘圆盘 (都按 heightAt
+	// 取位) 曾浮在未下切的地面上 ~8cm = "塑料片浮水"。补进 heightAt 修正链与 RIVER 同层:
+	//   · hgridClear 已把 DELTA_CHANS (半宽 DELTA.w) 与 ponds (r+1.2) 记入带内特征 ⇒ 快路/精修同源;
+	//   · 支汊 -1.2m: 水深 = wy(bank-0.4) - 床(bank-1.2) ≈ 0.8m 涉渡 (NAV 水障按 SWIM_DEPTH=1.35 记,
+	//     不封格 = 00c "浅折线=软通道" 口径); 与滨河街交叉处自然成徒涉口;
+	//   · 鱼塘 lotus -0.65 / fish -0.85: 塘缘 1.2m sstep 过渡, 05c 圆盘 clamp 到 bank-0.12 恰落盆中。
+	// 仅钉 layout==='procgen' —— 淞沪 delta 的同类水文在 rawHeight case 'delta' 内已有, 严禁双份叠加。
+	if(CAMPAIGN.layout==='procgen'&&DELTA){
+	if(DELTA_CHANS.length){
+	const cw=DELTA.w||3.4;
+	let cd=1e9;
+	for(const ch of DELTA_CHANS){
+	for(let i=0;i<ch.length-1;i++){
+	const dd=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
+	if(dd<cd) cd=dd;
+	}
+	}
+	if(cd<cw) h-=1.2*sstep(1-cd/cw);
+	}
+	if(DELTA.ponds&&DELTA.ponds.length){
+	for(const pd of DELTA.ponds){
+	const pdD=Math.hypot(x-pd.x,z-pd.z);
+	if(pdD<pd.r+1.2) h-=(pd.t==='lotus'?0.65:0.85)*sstep(1-pdD/(pd.r+1.2));
+	}
 	}
 	}
 	// 支流汊港 (淞沪 delta.channels): 浅切, 不进激流语义 (rawHeight 已含, 此处仅 HGRID 带外快路需要)
@@ -1062,17 +1094,9 @@ const t=clamp(((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz),0,1);
 return Math.hypot(px-(ax+abx*t), pz-(az+abz*t));
 }
 let GROUND_GEO=null; // 地形网格几何 (建筑地基平台登记后重刷, 见 refreshTerrainMesh)
-{
-// 顶点密度 ~2.77m/格 (320 地图=130 段; 800 地图≈304 段保持分辨率)
-const seg=Math.max(64,Math.round((MAP_SIZE+40)/2.76));
-const geo=new THREE.PlaneGeometry(MAP_SIZE+40,MAP_SIZE+40,seg,seg);
-geo.rotateX(-HPI);
-const pos=geo.attributes.position;
-const cols=new Float32Array(pos.count*3);
-for(let i=0;i<pos.count;i++){
-const x=pos.getX(i),z=pos.getZ(i);
-// 桥面下埋: 桥矩形内地形渲染面退到桥面之下 (heightAt 物理值不变; 见 terrainRenderY 头注释)
-pos.setY(i, terrainRenderY(x,z));
+const TERRAIN_CHUNKS=[]; // 4x4 分块地形网格 (视锥自动裁剪)
+
+function calcTerrainVertexColor(x, z, hy){
 const rd=roadDist(x,z);
 let r=1,g=1,b=1;
 if(rd<5){ const t=1-rd/5; r=lerp(1,1.16,t); g=lerp(1,0.94,t); b=lerp(1,0.72,t); }
@@ -1148,10 +1172,37 @@ break;
 }
 }
 }
+// 水乡水文色带 (2026-10-28, 与上方 heightAt 支汊/鱼塘下切同批): 塘缘/汊岸露泥滩褐 (下切后不再
+// 是"草坡包着一汪水"), 塘底浸水暗绿 —— 淞沪 delta 色带同参, 仅钉 procgen (delta 已有自己的一份)。
+if(CAMPAIGN.layout==='procgen'&&DELTA){
+if(DELTA_CHANS.length){
+const w2=DELTA.w||3.4;
+let cd2=1e9;
+for(const ch of DELTA_CHANS){
+for(let i=0;i<ch.length-1;i++){
+const d2=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
+if(d2<cd2) cd2=d2;
+}
+}
+if(cd2<w2+2){
+const t2=1-clamp(cd2/(w2+2),0,1);
+r=lerp(r,0.55,t2*0.85); g=lerp(g,0.48,t2*0.85); b=lerp(b,0.36,t2*0.85);
+}
+}
+if(DELTA.ponds&&DELTA.ponds.length){
+for(const pd of DELTA.ponds){
+const d3=Math.hypot(x-pd.x,z-pd.z);
+if(d3<pd.r+1.2){
+const t3=1-clamp(d3/(pd.r+1.2),0,1);
+r=lerp(r,0.30,t3*0.72); g=lerp(g,0.46,t3*0.72); b=lerp(b,0.34,t3*0.72);
+break;
+}
+}
+}
+}
 // 百团黄土沟壑色带 (2026-09-12 立体化): 沟底/渡台暗褐 / 沟壁陡崖崩积坡赭黄(愈深愈红) / 塬面峁顶麦黄 / 川地灰黄
 if(CAMPAIGN.terr==='loess'&&LOESS){
 const gd=gullyDist(x,z);
-const hy=pos.getY(i);
 const W=LOESS.w||14, GB=LOESS.bottom||3;
 if(gd<W){
 if(gd<GB||hy<-3){
@@ -1188,11 +1239,7 @@ r=lerp(r,0.82,0.22*m2); g=lerp(g,0.74,0.18*m2); b=lerp(b,0.6,0.16*m2);
 // 珊瑚礁盘斑驳→礁缘褐→深海床青灰) + 陆上 (白珊瑚沙滩→沙丘脊→草沙过渡→椰林草甸→密林地被) +
 // 岬角岩台/珊瑚岭/珊瑚跑道。水下与陆上都是**乘法**调制 (底图 TEX.island = 中性斑驳 + 珊瑚碎屑),
 // 土路/战壕的人工色带优先 (只叠 25% 地貌色, 不被草绿吃掉)。
-// 复调要点 (用户实机): ① 白珊瑚沙不再过曝 (峰 1.42→1.30) ② 绿带整体前移 (u=20 起就转草甸,
-// 不是等 34m 才绿) ③ 内陆按低频噪声在草甸/密林地被之间斑驳 —— "绿地毯"而不是"沙滩撒树"。
-// opensea (P4 全海图): 复用同一支色带 —— 岸线在可玩区之外 ⇒ d 恒为 400m 级 ⇒ 恒走"外坡→深海床"那一档,
-//   全图自动是深青灰海床 (不需要第二套配色)。
-if((CAMPAIGN.terr==='island'||CAMPAIGN.terr==='opensea')&&SEA){
+if(CAMPAIGN.terr==='island'&&SEA){
 const d=shoreDist(x,z);
 let ir=1,ig=1,ib=1;
 if(d>0){
@@ -1237,7 +1284,6 @@ else { r*=ir; g*=ig; b*=ib; }
 }
 // 莫斯科雪岭分带: 雪线以上裸岩灰白 / 雪线附近松林深绿 / 山麓雪覆浅灰
 if(CAMPAIGN.terr==='alpine'&&ALPINE){
-const hy=pos.getY(i);
 const sl=ALPINE.snowline||14;
 if(hy>sl+4){
 const k=clamp((hy-sl-4)/8,0,1)*0.85;
@@ -1266,14 +1312,56 @@ r*=dr; g*=dg; b*=db;
 }
 const n=Math.sin(x*0.4)*Math.cos(z*0.37);
 r*=1+n*0.05; g*=1+n*0.05; b*=1+n*0.04;
+return [r,g,b];
+}
+
+{
+// 顶点密度 ~2.77m/格 (320 地图=130 段; 800 地图≈304 段保持分辨率)
+const seg=Math.max(64,Math.round((MAP_SIZE+40)/2.76));
+const totalW=MAP_SIZE+40;
+const geo=new THREE.PlaneGeometry(totalW,totalW,seg,seg);
+geo.rotateX(-HPI);
+const pos=geo.attributes.position;
+const cols=new Float32Array(pos.count*3);
+for(let i=0;i<pos.count;i++){
+const x=pos.getX(i),z=pos.getZ(i);
+// 桥面下埋: 桥矩形内地形渲染面退到桥面之下 (heightAt 物理值不变; 见 terrainRenderY 头注释)
+pos.setY(i, terrainRenderY(x,z));
+const [r,g,b]=calcTerrainVertexColor(x,z,pos.getY(i));
 cols[i*3]=r; cols[i*3+1]=g; cols[i*3+2]=b;
 }
 geo.setAttribute('color', new THREE.BufferAttribute(cols,3));
 geo.computeVertexNormals();
-const ground=new THREE.Mesh(geo, MAT.grass);
-ground.receiveShadow=true;
-scene.add(ground);
+if(geo.computeBoundingSphere) geo.computeBoundingSphere();
 GROUND_GEO=geo;
+
+// 4x4 地形网格分块 (16 块) 绑定独立包围球用于 GPU/WebGL 视锥剔除
+const chunkW=totalW/4, chunkD=totalW/4;
+const chunkSegX=Math.max(16,Math.round(seg/4)), chunkSegZ=Math.max(16,Math.round(seg/4));
+for(let iz=0;iz<4;iz++){
+for(let ix=0;ix<4;ix++){
+const cGeo=new THREE.PlaneGeometry(chunkW,chunkD,chunkSegX,chunkSegZ);
+cGeo.rotateX(-HPI);
+const cx=-totalW/2+(ix+0.5)*chunkW;
+const cz=-totalW/2+(iz+0.5)*chunkD;
+cGeo.translate(cx,0,cz);
+const cPos=cGeo.attributes.position;
+const cCols=new Float32Array(cPos.count*3);
+for(let i=0;i<cPos.count;i++){
+const x=cPos.getX(i), z=cPos.getZ(i);
+cPos.setY(i, terrainRenderY(x,z));
+const [cr,cg,cb]=calcTerrainVertexColor(x,z,cPos.getY(i));
+cCols[i*3]=cr; cCols[i*3+1]=cg; cCols[i*3+2]=cb;
+}
+cGeo.setAttribute('color', new THREE.BufferAttribute(cCols,3));
+cGeo.computeVertexNormals();
+if(cGeo.computeBoundingSphere) cGeo.computeBoundingSphere();
+const cMesh=new THREE.Mesh(cGeo, MAT.grass);
+cMesh.receiveShadow=true;
+scene.add(cMesh);
+TERRAIN_CHUNKS.push(cMesh);
+}
+}
 }
 // ── 地形网格重刷 (2026-09-20 建筑地基平台): 网格在本文件载入期先按"无建筑"地形建好,
 //    而建筑地基平台 PADS 是世界布局期登记的 ⇒ 布局结束后把平台影响圈内的顶点高度重算一遍。
@@ -1301,7 +1389,39 @@ if(!near) continue;
 const y=terrainRenderY(x,z);
 if(Math.abs(y-pos.getY(i))>1e-6){ pos.setY(i,y); n++; }
 }
-if(n){ pos.needsUpdate=true; GROUND_GEO.computeVertexNormals(); }
+if(n){
+pos.needsUpdate=true;
+GROUND_GEO.computeVertexNormals();
+if(GROUND_GEO.computeBoundingSphere) GROUND_GEO.computeBoundingSphere();
+}
+
+if(typeof TERRAIN_CHUNKS!=='undefined'){
+for(const cm of TERRAIN_CHUNKS){
+const cpos=cm.geometry.attributes.position;
+let cMod=0;
+for(let i=0;i<cpos.count;i++){
+const x=cpos.getX(i), z=cpos.getZ(i);
+let near=false;
+for(let k=0;k<PADS.length;k++){
+const p=PADS[k];
+const dx=x-p.x, dz=z-p.z;
+if(dx*dx+dz*dz>p.reach2) continue;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+if(ax<=0&&az<=0){ near=true; break; }
+if(Math.hypot(ax>0?ax:0,az>0?az:0)<p.ramp+3){ near=true; break; }
+}
+if(!near) continue;
+const y=terrainRenderY(x,z);
+if(Math.abs(y-cpos.getY(i))>1e-6){ cpos.setY(i,y); cMod++; }
+}
+if(cMod>0){
+cpos.needsUpdate=true;
+cm.geometry.computeVertexNormals();
+if(cm.geometry.computeBoundingSphere) cm.geometry.computeBoundingSphere();
+}
+}
+}
 return n;
 }
 const BOXES=[];
@@ -1359,6 +1479,7 @@ if(tmin<=0.0001) return null;
 _rbR.t=tmin; _rbR.nx=axis===0?sign:0; _rbR.ny=axis===1?sign:0; _rbR.nz=axis===2?sign:0;
 return _rbR;
 }
+const _rcR={t:0,nx:0,ny:0,nz:0};
 function rayCyl(o,dir,c,maxD){
 if(c.dead) return null; // 已倒伏/烧毁的树等: 碰撞体即杀 (r=0 防御 + 显式跳过)
 const ox=o.x-c.x, oz=o.z-c.z;
@@ -1374,7 +1495,8 @@ const y=o.y+dir.y*t;
 if(y<c.y0||y>c.y1) return null;
 const px=o.x+dir.x*t, pz=o.z+dir.z*t;
 const nx=(px-c.x)/c.r, nz=(pz-c.z)/c.r;
-return { t, nx, ny:0, nz };
+_rcR.t=t; _rcR.nx=nx; _rcR.ny=0; _rcR.nz=nz;
+return _rcR;
 }
 const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null, dirty:null, pend:null, _bA:null, _bB:null };
 // buildOccupancy 之外的**直接写** OCC.data 的登记入口 (registerDynCollider / killDynCollider /

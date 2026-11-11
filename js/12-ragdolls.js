@@ -49,10 +49,16 @@ const parts=[];
 function mkPart(mat,sx,sy,sz,mass,px,py,pz){
 const mesh=new THREE.Mesh(new THREE.BoxGeometry(sx*2,sy*2,sz*2),mat);
 mesh.castShadow=true; scene.add(mesh);
-const body=new CANNON.Body({mass});
+const body=new CANNON.Body({mass,collisionFilterGroup:0,collisionFilterMask:0});
 body.addShape(new CANNON.Box(new CANNON.Vec3(sx,sy,sz)));
 body.position.set(px,py,pz); qSet(body.quaternion);
 body.angularDamping=0.4; body.linearDamping=0.08;
+// ★2026-11-04b 时停批 (用户实报: 时停里被击杀的 Bot / 被炸的建筑"直接隐身消失", 取消时停才显现):
+//   旧版网格创建后要等 updateRagdolls(dt>0) 才把刚体位姿贴给网格, 而时停 dt=0 时那条链首行早退
+//   ⇒ 新生成的尸体/碎块整具停在场景原点 (视野外), 看起来就是"隐身"。生成当帧即贴初始位姿。
+//   quaternion.copy 带守卫: 部分沙箱 CANNON/THREE 桩不带 copy, 位置同步不依赖它 (真 THREE 恒有)。
+mesh.position.copy(body.position);
+if(mesh.quaternion&&mesh.quaternion.copy) mesh.quaternion.copy(body.quaternion);
 RAG.world.addBody(body);
 parts.push({mesh,body,hy:Math.min(sy,sz)});
 return body;
@@ -76,11 +82,13 @@ else if(hs==='jp'){ hs2=0.142; hy2=0.175; }
 else{ hs2=0.13; hy2=0.19; } // cap
 const hm=new THREE.Mesh(new THREE.SphereGeometry(hs2,8,6),helmMat);
 hm.castShadow=true; scene.add(hm);
-const hb2=new CANNON.Body({mass:1.8});
+const hb2=new CANNON.Body({mass:1.8,collisionFilterGroup:0,collisionFilterMask:0});
 hb2.addShape(new CANNON.Sphere(hs2*0.8));
 const hp=locP(0,H+ST.head+hy2,0); // 头盔=头部件之上 hy2 (2026-09-12 修复: 原写法把 p.y 重复累加, 头盔初始悬空≈海拔高度, 与头的 P2P 约束初始误差经求解器换算成 ~14×g 的弹射速度 → 坡地/高地死亡尸体飞天; 2026-09-26 A4: 站位改用同一张 ST 表, 腿/蹲/趴三态都不再产生初错)
 hb2.position.set(hp[0],hp[1],hp[2]); qSet(hb2.quaternion);
 hb2.angularDamping=0.3; hb2.linearDamping=0.06;
+hm.position.copy(hb2.position);   // 2026-11-04b 时停批: 生成当帧贴初始位姿 (同 mkPart)
+if(hm.quaternion&&hm.quaternion.copy) hm.quaternion.copy(hb2.quaternion);
 RAG.world.addBody(hb2);
 parts.push({mesh:hm,body:hb2,hy:hs2});
 helmBody=hb2;
@@ -143,11 +151,13 @@ if(DEBRIS.list.length>=96){ removeDebrisEntry(DEBRIS.list.shift()); } // 2026-09
 const mesh2=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
 mesh2.castShadow=true;
 scene.add(mesh2);
-const body=new CANNON.Body({mass:Math.max(2,w*h*d*2.5)});
+const body=new CANNON.Body({mass:Math.max(2,w*h*d*2.5),collisionFilterGroup:0,collisionFilterMask:0});
 body.addShape(new CANNON.Box(new CANNON.Vec3(w/2,h/2,d/2)));
 body.position.set(px,py,pz);
 body.quaternion.setFromEuler(0,ry,0);
 body.angularDamping=0.32; body.linearDamping=0.1;
+mesh2.position.copy(body.position);   // 2026-11-04b 时停批: 生成当帧贴初始位姿 (dt=0 时 updateDebris 不跑)
+if(mesh2.quaternion&&mesh2.quaternion.copy) mesh2.quaternion.copy(body.quaternion);
 if(RAG.world.addBody) RAG.world.addBody(body); else RAG.world.add(body);
 // 从爆心向外倒塌
 const dx=px-cx, dz=pz-cz; const dl=Math.hypot(dx,dz)||1;
@@ -213,41 +223,17 @@ if(vn<0){ b.velocity.x-=vn*dx*1.35; b.velocity.z-=vn*dz*1.35; }
 }
 }
 }
-// ── 大舰甲板: 布娃娃/碎块的落地支撑 + 随舰搬运 (2026-10-01 实机修) ──
-// 实机源: 用户报"船体移动的时候不会带着上面的人一起移动"。人的搬运早就有 (15h capRideCollect/capRideApply),
-//   但**尸体与碎块**这条链没人管: 它们的落地高度只读 heightAt (纯地形), 甲板是移动平台不在其中 ⇒
-//   甲板上被击毙的 Bot 整具穿过舰体掉进海里; 就算撑住了, 舰一开走尸体也留在原地。
-//   ①支撑: 改问 15h 的 capDeckShipAt ("哪艘舰的甲板托着这个点", 唯一判据表, 与 standHeight 的
-//     capDeckY 同表) —— 无舰/不在甲板/在水线以下时逐位退化为 heightAt, 陆战路径零变化。
-//   ②随舰: 按**质心**把整具刚体做一次刚性平移 —— 只加位移, 不动 velocity (逐件重投影或改速度都会变成
-//     约束方程的误差, 被求解器换算成弹射速度, 见下面 :245 "尸体起飞"那条教训)。位移由 15h 的
-//     capCarryDelta 给 (上一帧位姿 → 当前位姿), 与乘员搬运 capRideApply 同一条口径且无状态。
+// ── (2026-11-10: 旧"大舰甲板布娃娃支撑/随舰搬运"段随大舰子系统下架摘除 ——
+//    ragDeckGround 退化为纯 heightAt, ragDeckCarry 整支移除; 原文见 archive/naval-coral-ironbottom-20261110/) ──
 const _ragC={x:0,z:0};
 function ragDeckGround(x,y,z){
-const h=heightAt(x,z);
-if(typeof capDeckShipAt==='function'){
-const s=capDeckShipAt(x,z,y);
-if(s) return s.pos.y+s.deck.y;
-}
-return h;
-}
-function ragDeckCarry(bodies){
-if(!bodies.length||typeof capCarryDelta!=='function') return;
-let cx=0,cy=0,cz=0;
-for(let i=0;i<bodies.length;i++){ const p=bodies[i].position; cx+=p.x; cy+=p.y; cz+=p.z; }
-const inv=1/bodies.length; cx*=inv; cy*=inv; cz*=inv;
-const s=capDeckShipAt(cx,cz,cy);   // 注意实参序: (x, z, curY) —— 与 capDeckY 同规
-if(!s) return;
-capCarryDelta(s,cx,cz,_ragC);
-const ddx=_ragC.x-cx, ddz=_ragC.z-cz;
-if(ddx||ddz) for(let i=0;i<bodies.length;i++){ bodies[i].position.x+=ddx; bodies[i].position.z+=ddz; }
+return heightAt(x,z);
 }
 function updateDebris(dt){
 for(let i=DEBRIS.list.length-1;i>=0;i--){
 const e=DEBRIS.list[i];
 e.t-=dt;
 const b=e.body;
-ragDeckCarry(e.bodies);
 const gh=ragDeckGround(b.position.x,b.position.y,b.position.z);
 if(b.position.y<gh+e.hy){
 b.position.y=gh+e.hy;
@@ -268,13 +254,12 @@ if(e.t<=0){ removeDebrisEntry(e); DEBRIS.list.splice(i,1); }
 }
 }
 function updateRagdolls(dt){
-if(!RAG.world) return;
+if(!RAG.world||dt<=0) return;
 if(!RAG.list.length&&!DEBRIS.list.length) return;
-RAG.world.step(1/60,Math.min(dt,0.05),2);
+RAG.world.step(1/60,Math.min(dt,0.05),4);
 for(let i=RAG.list.length-1;i>=0;i--){
 const r=RAG.list[i];
 r.t-=dt;
-ragDeckCarry(r.bodies);          // 甲板上的尸体: 先随舰平移, 再做落地支撑 (支撑判据自然取到新甲板面)
 for(const p of r.parts){
 const b=p.body;
 const gh=ragDeckGround(b.position.x,b.position.y,b.position.z);

@@ -22,7 +22,8 @@ const vmCamera = new THREE.PerspectiveCamera(56, innerWidth/innerHeight, 0.01, 1
 let SHADOW_RANGE=60;
 function applyQuality(){
 const q = SETTINGS.quality;
-renderer.setPixelRatio(q===0?Math.min(devicePixelRatio,1):(q===1?Math.min(devicePixelRatio,1.5):Math.min(devicePixelRatio,2)));
+// 渲染缩放 (2026-11-08 性能与画面批): 画质档像素比上限之上再乘用户档 RENDER_SCALE_STEPS[renderScaleIdx] (1/.85/.7/.55)
+renderer.setPixelRatio((q===0?Math.min(devicePixelRatio,1):(q===1?Math.min(devicePixelRatio,1.5):Math.min(devicePixelRatio,2)))*(RENDER_SCALE_STEPS[SETTINGS.renderScaleIdx]||1));
 // 紧凑阴影视锥跟随玩家: 大幅减少每帧阴影绘制的物体数
 SHADOW_RANGE=q===0?42:(q===1?60:80);
 sun.shadow.camera.left=-SHADOW_RANGE; sun.shadow.camera.right=SHADOW_RANGE;
@@ -30,6 +31,7 @@ sun.shadow.camera.top=SHADOW_RANGE; sun.shadow.camera.bottom=-SHADOW_RANGE;
 sun.shadow.camera.updateProjectionMatrix();
 sun.shadow.mapSize.setScalar(q===0?1024:(q===1?1536:2048));
 if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
+renderer.shadowMap.needsUpdate=true; // 换档重灌 shadow map 后立即补一帧 (配合下方 shadowRefreshTick 的半频节流)
 // 高画质: 软阴影 + 电影感滤镜; 低画质硬阴影无滤镜
 renderer.shadowMap.type=q===2?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
 renderer.domElement.style.filter=q===2?'saturate(1.1) contrast(1.06) brightness(1.02)':(q===1?'saturate(1.04) contrast(1.02)':'none');
@@ -47,7 +49,9 @@ renderer.setSize(innerWidth,innerHeight);
 function dryFogFar(){
 const q=SETTINGS.quality;
 // 天气槽 (天气设计 §5-2): 原 (rain||storm)?0.78:snow?0.85:1 收编为 WX_CFG.fogFarMul —— 值逐位相同, 乘序不变 (R1/R3)。
-return (q===0?240:(q===1?340:420))*WX_CFG.fogFarMul*(THEME.fogMul||1)*((CAMPAIGN.mapSize||320)>=640?1.35:1)*(NIGHT_MODE?NIGHT_CFG.fogFarMul:1);
+// 视距档 (2026-11-08 性能与画面批): 用户 VIEWDIST_STEPS[viewDistIdx] (1/.8/.6) 在全部既有系数之后相乘 ——
+// 水下雾基准 (22-hud 进入时快照/重采) 与雾色自动继承本函数; AI 索敌距离不在此处, 不受影响。
+return (q===0?240:(q===1?340:420))*WX_CFG.fogFarMul*(THEME.fogMul||1)*((CAMPAIGN.mapSize||320)>=640?1.35:1)*(NIGHT_MODE?NIGHT_CFG.fogFarMul:1)*(VIEWDIST_STEPS[SETTINGS.viewDistIdx]||1);
 }
 function dryFogNear(){
 // 雾起 (天气设计 §4.1 渐变口径, 2026-10-05 口追): 白天 40m ×WX_CFG.fogNearMul —— 40m 内零雾在暴雨里
@@ -80,7 +84,7 @@ const r=(hex>>16)&255, g=(hex>>8)&255, b=hex&255;
 return ((Math.round(r*w)<<16)|(Math.round(g*w)<<8)|Math.round(b*w))>>>0;
 }
 const _fogBase=NIGHT_MODE?nightFogColor(THEME.fog):THEME.fog;
-scene.fog = new THREE.Fog(_fogDimCol(_fogBase,WX_CFG.fogDim), dryFogNear(), 340);
+scene.fog = new THREE.Fog(_fogDimCol(_fogBase,WX_CFG.fogDim), dryFogNear(), dryFogFar());
 let SKY=null;
 {
 const c=document.createElement('canvas'); c.width=16; c.height=256;
@@ -98,14 +102,20 @@ SKY=new THREE.Mesh(new THREE.SphereGeometry(760,24,16), new THREE.MeshBasicMater
 SKY.frustumCulled=false;
 scene.add(SKY);
 }
-const hemi = new THREE.HemisphereLight(THEME.hemi[0], THEME.hemi[1], THEME.hemi[2]*(NIGHT_MODE?NIGHT_CFG.hemiMul:1));
+const hemi = new THREE.HemisphereLight(THEME.hemi[0], THEME.hemi[1], THEME.hemi[2]*(NIGHT_MODE?NIGHT_CFG.hemiMul:1)*WX_CFG.hemiMul);
 scene.add(hemi);
 // 夜档 sun=月光: 冷蓝低强度 (阴影视锥/方向不动, updateSunShadow 照旧); 白天档原色原强度
-const sun = new THREE.DirectionalLight(NIGHT_MODE?NIGHT_CFG.moonCol:THEME.sun, THEME.sunI*(NIGHT_MODE?NIGHT_CFG.sunMul:1));
+const sun = new THREE.DirectionalLight(NIGHT_MODE?NIGHT_CFG.moonCol:THEME.sun, THEME.sunI*(NIGHT_MODE?NIGHT_CFG.sunMul:1)*WX_CFG.sunMul);
 sun.position.set(-90, 120, 40);
 // 影随盘 (口追⑨): 硬影子只在日盘可见时投 (sunVis≥0.5 = 晴朗/细雪); 阴/雨/暴/中雪/暴风雪 = 漫射光无影;
-// 夜档不受此门 (月光影子保持昼改前原样)
-sun.castShadow = NIGHT_MODE?true:WX_CFG.sunVis>=0.5;
+// 夜间无硬影 (用户明确要求: 晴天和阴天夜晚无影子)。
+// ★2026-11-08 性能与画面批: 裁决收编单源 sunShadowAllowed() —— 用户"阴影刷新=关"档压在天气/昼夜之上,
+//   旧版三处内联重写 (本文件此处 / applySceneEnvironment / 08-effects initWeather) 换一处漏一处就会被换天气复活。
+function sunShadowAllowed(){
+if(SETTINGS.shadowFreq===3) return false;
+return NIGHT_MODE?false:(WX_CFG.sunVis>=0.5);
+}
+sun.castShadow = sunShadowAllowed();
 sun.shadow.camera.left=-60; sun.shadow.camera.right=60;
 sun.shadow.camera.top=60; sun.shadow.camera.bottom=-60;
 sun.shadow.camera.far=400; sun.shadow.bias=-0.0012; sun.shadow.normalBias=0.02;
@@ -118,76 +128,195 @@ const cz=Math.round(camera.position.z/texel)*texel;
 sun.target.position.set(cx,0,cz);
 sun.position.set(cx-72,96,cz+32);
 }
-if(!NIGHT_MODE){
-// 白天: 硬编码暖白太阳光晕 (原样, 零回归)
-const c=document.createElement('canvas'); c.width=128; c.height=128;
-const g=c.getContext('2d');
-const gr=g.createRadialGradient(64,64,2,64,64,64);
-gr.addColorStop(0,'rgba(255,250,230,1)'); gr.addColorStop(0.25,'rgba(255,240,200,.55)'); gr.addColorStop(1,'rgba(255,240,200,0)');
-g.fillStyle=gr; g.fillRect(0,0,128,128);
-const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),fog:false,depthWrite:false}));
-// 口追⑥: 太阳盘接天气档 (阴/雨/暴/暴雪整隐, 细雪×0.5/中雪×0.3 减淡; 光照强度另走 sunMul, 互不替代)
-sp.material.opacity=WX_CFG.sunVis; if(WX_CFG.sunVis<=0)sp.visible=false;
-sp.position.set(-380,480,170); sp.scale.setScalar(220); scene.add(sp);
-}else{
-// 夜档 (昼夜设计 §3.3): 太阳光晕换**月亮** (冷白小盘 + 弱晕) + **星星** (Points 一次生成, 走 rand 非种子流)
-const c=document.createElement('canvas'); c.width=128; c.height=128;
-const g=c.getContext('2d');
-const gr=g.createRadialGradient(64,64,2,64,64,64);
-gr.addColorStop(0,'rgba(226,236,255,1)'); gr.addColorStop(0.18,'rgba(210,224,252,.9)'); gr.addColorStop(0.30,'rgba(190,208,244,.30)'); gr.addColorStop(1,'rgba(190,208,244,0)');
-g.fillStyle=gr; g.fillRect(0,0,128,128);
-const moon=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),fog:false,depthWrite:false}));
-// 口追⑥: 月盘/月斑/星空接天气档 (阴天薄云残月稀星, 雨夜几乎不见, 暴风雪全隐; 晴档 ×1 逐位)
-moon.material.opacity=WX_CFG.moonVis; if(WX_CFG.moonVis<=0)moon.visible=false;
-moon.position.set(-380,480,170); moon.scale.setScalar(110); scene.add(moon);
-// 月面暗斑: 同一张画布上再叠一层 (读作月海, 不再是纯白圆盘)
-const mc=document.createElement('canvas'); mc.width=64; mc.height=64;
-const mg=mc.getContext('2d');
-for(let i=0;i<9;i++){
-const x=rand(14,50),y=rand(14,50),r=rand(3,9);
-const mgr=mg.createRadialGradient(x,y,1,x,y,r);
-mgr.addColorStop(0,'rgba(140,156,190,.30)'); mgr.addColorStop(1,'rgba(140,156,190,0)');
-mg.fillStyle=mgr; mg.fillRect(0,0,64,64);
+// ── 阴影刷新节流 (2026-10-24 性能排查批; 2026-11-08 性能与画面批档位化) ──
+// 依据: 太阳方向恒定、视锥按纹素对齐跟随相机, 动态投射者 (士兵/载具/特效) 在 30Hz 刷新下于战术视距
+// 不可感知; 而阴影 pass 是每帧的第二遍全量绘制 (柏林 1694 投射者 + 主 pass 9751 mesh), 半频直接削掉
+// 一半的阴影 draw call。机制: autoUpdate=false + 按 mod-N 帧置 needsUpdate (r152 渲染一次后自动回落 false)。
+// 夜间 sun.castShadow=false 时恒置 false ⇒ 阴影 pass 整体跳过; applyQuality 换档重灌 shadow map 后
+// 就地补一次 needsUpdate, 保证换档当帧就有影子。
+// 档位 SETTINGS.shadowFreq: -1 跟随画质档 (高画质逐帧 / 低中半频 = 旧行为逐位) / 0 逐帧 / 1 半频 /
+// 2 四分之一频 / 3 关闭 (sunShadowAllowed 门已把 sun.castShadow 压 false, 此处再兜底停 autoUpdate)。
+let _shadowParity=0;
+function shadowRefreshTick(){
+const f=SETTINGS.shadowFreq;
+if(f===3){ renderer.shadowMap.autoUpdate=false; renderer.shadowMap.needsUpdate=false; return; }
+if(f===0||(f===-1&&SETTINGS.quality>=2)){ renderer.shadowMap.autoUpdate=true; return; }
+_shadowParity=(_shadowParity+1)%((f===2)?4:2);
+renderer.shadowMap.autoUpdate=false;
+renderer.shadowMap.needsUpdate=(_shadowParity===0)&&sun.castShadow;
 }
-const moonSpots=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(mc),fog:false,depthWrite:false,transparent:true}));
-moonSpots.material.opacity=WX_CFG.moonVis; if(WX_CFG.moonVis<=0)moonSpots.visible=false;
-moonSpots.position.set(-380,480,169); moonSpots.scale.setScalar(110); scene.add(moonSpots);
-// 星空: 半球上半均匀撒点 (Points, sizeAttenuation 关 = 恒定像素大小, 不受雾)
+// 白天太阳光晕
+const sc=document.createElement('canvas'); sc.width=128; sc.height=128;
+const sg=sc.getContext('2d');
+const sgr=sg.createRadialGradient(64,64,2,64,64,64);
+sgr.addColorStop(0,'rgba(255,250,230,1)'); sgr.addColorStop(0.25,'rgba(255,240,200,.55)'); sgr.addColorStop(1,'rgba(255,240,200,0)');
+sg.fillStyle=sgr; sg.fillRect(0,0,128,128);
+const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(sc),fog:false,depthWrite:false}));
+sp.position.set(-380,480,170); sp.scale.setScalar(220); scene.add(sp);
+window.__sunSprite=sp;
+
+// 夜间月亮与暗斑
+const mc=document.createElement('canvas'); mc.width=128; mc.height=128;
+const mg=mc.getContext('2d');
+const mgr=mg.createRadialGradient(64,64,2,64,64,64);
+mgr.addColorStop(0,'rgba(215,228,245,0.92)'); mgr.addColorStop(0.18,'rgba(195,212,240,.68)'); mgr.addColorStop(0.30,'rgba(160,185,225,.18)'); mgr.addColorStop(1,'rgba(160,185,225,0)');
+mg.fillStyle=mgr; mg.fillRect(0,0,128,128);
+const moon=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(mc),fog:false,depthWrite:false}));
+moon.position.set(-380,480,170); moon.scale.setScalar(82); scene.add(moon);
+window.__moonSprite=moon;
+
+const msc=document.createElement('canvas'); msc.width=64; msc.height=64;
+const msg=msc.getContext('2d');
+for(let i=0;i<9;i++){
+  const x=rand(14,50),y=rand(14,50),r=rand(3,9);
+  const msgr=msg.createRadialGradient(x,y,1,x,y,r);
+  msgr.addColorStop(0,'rgba(140,156,190,.30)'); msgr.addColorStop(1,'rgba(140,156,190,0)');
+  msg.fillStyle=msgr; msg.fillRect(0,0,64,64);
+}
+const moonSpots=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(msc),fog:false,depthWrite:false,transparent:true}));
+moonSpots.position.set(-380,480,169); moonSpots.scale.setScalar(82); scene.add(moonSpots);
+window.__moonSpots=moonSpots;
+
+// 星空
 const STAR_N=260, sp2=[];
 for(let i=0;i<STAR_N;i++){
-const a=rand(0,TAU), e=Math.acos(rand(0.08,0.95)); // 高度角 >~4.6°, 地平线附近不撒
-sp2.push(Math.cos(a)*Math.sin(e)*740, Math.cos(e)*740, Math.sin(a)*Math.sin(e)*740);
+  const a=rand(0,TAU), e=Math.acos(rand(0.08,0.95));
+  sp2.push(Math.cos(a)*Math.sin(e)*740, Math.cos(e)*740, Math.sin(a)*Math.sin(e)*740);
 }
 const sgm=new THREE.BufferGeometry();
 sgm.setAttribute('position',new THREE.Float32BufferAttribute(sp2,3));
 const stars=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xcfd8ee,size:2.2,sizeAttenuation:false,transparent:true,opacity:0.85,fog:false,depthWrite:false}));
-stars.material.opacity=0.85*WX_CFG.starVis; if(WX_CFG.starVis<=0)stars.visible=false;
 stars.frustumCulled=false; scene.add(stars);
+window.__starsMesh=stars;
+
+function updateCelestialVisibility(){
+  if(window.__sunSprite){
+    window.__sunSprite.visible = !NIGHT_MODE && (WX_CFG.sunVis > 0);
+    window.__sunSprite.material.opacity = WX_CFG.sunVis;
+  }
+  if(window.__moonSprite){
+    window.__moonSprite.visible = NIGHT_MODE && (WX_CFG.moonVis > 0);
+    window.__moonSprite.material.opacity = WX_CFG.moonVis;
+  }
+  if(window.__moonSpots){
+    window.__moonSpots.visible = NIGHT_MODE && (WX_CFG.moonVis > 0);
+    window.__moonSpots.material.opacity = WX_CFG.moonVis;
+  }
+  if(window.__starsMesh){
+    window.__starsMesh.visible = NIGHT_MODE && (WX_CFG.starVis > 0);
+    window.__starsMesh.material.opacity = 0.85 * WX_CFG.starVis;
+  }
 }
-{
-// 口追⑦⑧ (2026-10-05): 云层数量/浓度随天气档 —— 晴档 9×1 逐位现状; 非晴档加密 (cloudN) 并放宽
-// 幅面压低云底 (_wide: ±750/高150-300, 晴档保持原 ±600/180-280 区间, 逐次 rand 消耗数不变);
-// 云朵画布同率灰化压暗 (_puff = 255×min(1,skyLum)×(1-0.35×skyGrey): 暴雨/暴雪出深灰云盖; 晴档 255 = 原白逐位)。
-const _cn=WX_CFG.cloudN, _co=WX_CFG.cloudOpMul, _wide=_cn>9;
-const _puff=Math.round(255*Math.min(1,WX_CFG.skyLum)*(1-0.35*WX_CFG.skyGrey));
-const _px2=_puff+','+_puff+','+_puff;
-const c=document.createElement('canvas'); c.width=256; c.height=128;
-const g=c.getContext('2d');
-for(let i=0;i<46;i++){
-const x=rand(30,226),y=rand(40,90),r=rand(14,34);
-const gr=g.createRadialGradient(x,y,1,x,y,r);
-gr.addColorStop(0,'rgba('+_px2+',.22)'); gr.addColorStop(1,'rgba('+_px2+',0)');
-g.fillStyle=gr; g.fillRect(0,0,256,128);
+updateCelestialVisibility();
+
+function applySceneEnvironment(){
+  if(typeof renderer!=='undefined'&&renderer){
+    renderer.toneMappingExposure = (NIGHT_MODE ? NIGHT_CFG.exposure : 1.05) * WX_CFG.expoMul;
+  }
+  if(typeof scene!=='undefined'&&scene&&scene.fog){
+    try{
+      const _fogBase = NIGHT_MODE ? nightFogColor(THEME.fog) : THEME.fog;
+      const dimCol = _fogDimCol(_fogBase, WX_CFG.fogDim);
+      if(scene.fog.color){
+        if(typeof scene.fog.color.setHex==='function') scene.fog.color.setHex(dimCol);
+        else if(typeof scene.fog.color.set==='function') scene.fog.color.set(dimCol);
+        else scene.fog.color = dimCol;
+      }
+      scene.fog.near = dryFogNear();
+      scene.fog.far = dryFogFar();
+    }catch(e){}
+  }
+  if(typeof sun!=='undefined'&&sun){
+    try{
+      const _nSun = NIGHT_MODE ? NIGHT_CFG.sunMul : 1;
+      const cVal = NIGHT_MODE ? NIGHT_CFG.moonCol : THEME.sun;
+      if(sun.color){
+        if(typeof sun.color.setHex==='function') sun.color.setHex(cVal);
+        else if(typeof sun.color.set==='function') sun.color.set(cVal);
+        else sun.color = cVal;
+      }
+      sun.intensity = THEME.sunI * _nSun * WX_CFG.sunMul;
+      sun.castShadow = sunShadowAllowed();
+    }catch(e){}
+  }
+  if(typeof hemi!=='undefined'&&hemi){
+    try{
+      const _nHemi = NIGHT_MODE ? NIGHT_CFG.hemiMul : 1;
+      if(hemi.color){
+        if(typeof hemi.color.setHex==='function') hemi.color.setHex(THEME.hemi[0]);
+        else if(typeof hemi.color.set==='function') hemi.color.set(THEME.hemi[0]);
+        else hemi.color = THEME.hemi[0];
+      }
+      if(hemi.groundColor){
+        if(typeof hemi.groundColor.setHex==='function') hemi.groundColor.setHex(THEME.hemi[1]);
+        else if(typeof hemi.groundColor.set==='function') hemi.groundColor.set(THEME.hemi[1]);
+        else hemi.groundColor = THEME.hemi[1];
+      }
+      hemi.intensity = THEME.hemi[2] * _nHemi * WX_CFG.hemiMul;
+    }catch(e){}
+  }
+  if(typeof SKY!=='undefined'&&SKY&&SKY.material&&SKY.material.map){
+    try{
+      const c = document.createElement('canvas'); c.width = 16; c.height = 256;
+      const g = c.getContext('2d');
+      const gr = g.createLinearGradient(0,0,0,256);
+      const st = NIGHT_MODE ? (NIGHT_CFG.sky || THEME.skyNight || THEMES.nightsea.sky) : THEME.sky;
+      const _sw = WX_CFG.skyGrey, _sl = WX_CFG.skyLum;
+      gr.addColorStop(0, _skyGreyMix(st[0], _sw, _sl));
+      gr.addColorStop(0.42, _skyGreyMix(st[1], _sw, _sl));
+      gr.addColorStop(0.62, _skyGreyMix(st[2], _sw, _sl));
+      gr.addColorStop(0.75, _skyGreyMix(st[3], _sw, _sl));
+      gr.addColorStop(1, _skyGreyMix(st[4], _sw, _sl));
+      g.fillStyle = gr; g.fillRect(0,0,16,256);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      if(SKY.material.map.dispose) SKY.material.map.dispose();
+      SKY.material.map = tex;
+      SKY.material.needsUpdate = true;
+    }catch(e){}
+  }
+  updateCelestialVisibility();
+  if(typeof rebuildClouds==='function') rebuildClouds();
+  if(typeof initWeather==='function') initWeather();
+  if(typeof AudioSys!=='undefined'&&AudioSys.updateWeatherAmbient) AudioSys.updateWeatherAmbient();
 }
-const tex=new THREE.CanvasTexture(c);
-const _cOp=(NIGHT_MODE?NIGHT_CFG.cloudMul:1)*_co;   // 夜档云压暗 (白天晴档 ×1 逐位不变)
-for(let i=0;i<_cn;i++){
-const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:Math.min(1,rand(.5,.85)*_cOp),fog:false,depthWrite:false}));
-sp.position.set(rand(_wide?-750:-600,_wide?750:600), rand(_wide?150:180,_wide?300:280), rand(_wide?-750:-600,_wide?750:600));
-sp.scale.set(rand(_wide?220:180,_wide?420:340),rand(_wide?70:60,_wide?120:110),1);
-scene.add(sp);
+const _cloudSprites = [];
+function rebuildClouds(){
+  while(_cloudSprites.length){
+    const s=_cloudSprites.pop();
+    if(s){
+      if(s.parent) s.parent.remove(s);
+      else if(typeof scene!=='undefined'&&scene) scene.remove(s);
+      if(s.material){
+        if(s.material.map&&s.material.map.dispose) s.material.map.dispose();
+        if(s.material.dispose) s.material.dispose();
+      }
+    }
+  }
+  const _cn=WX_CFG.cloudN, _co=WX_CFG.cloudOpMul, _wide=_cn>9;
+  const _puff=Math.round(255*Math.min(1,WX_CFG.skyLum)*(1-0.35*WX_CFG.skyGrey));
+  const _px2=_puff+','+_puff+','+_puff;
+  const c=document.createElement('canvas'); c.width=256; c.height=128;
+  const g=c.getContext('2d');
+  for(let i=0;i<46;i++){
+    const x=rand(30,226),y=rand(40,90),r=rand(14,34);
+    const gr=g.createRadialGradient(x,y,1,x,y,r);
+    gr.addColorStop(0,'rgba('+_px2+',.22)'); gr.addColorStop(1,'rgba('+_px2+',0)');
+    g.fillStyle=gr; g.fillRect(0,0,256,128);
+  }
+  const tex=new THREE.CanvasTexture(c);
+  const _cOp=(NIGHT_MODE?NIGHT_CFG.cloudMul:1)*_co;
+  for(let i=0;i<_cn;i++){
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:Math.min(1,rand(.5,.85)*_cOp),fog:false,depthWrite:false}));
+    sp._isCloud=true;   // 云层标记 (2026-11-01 修复): 云是 applySceneEnvironment 每次整体重建的天气层,
+    //                    与 _isPrecip 同理不进世界快照 —— 旧版云进了快照, 还原把旧云带回、
+    //                    rebuildClouds 又加新云 (登记表里那代已成孤儿移不掉) ⇒ 每轮回菜单云量翻倍。
+    sp.position.set(rand(_wide?-750:-600,_wide?750:600), rand(_wide?150:180,_wide?300:280), rand(_wide?-750:-600,_wide?750:600));
+    sp.scale.set(rand(_wide?220:180,_wide?420:340),rand(_wide?70:60,_wide?120:110),1);
+    scene.add(sp);
+    _cloudSprites.push(sp);
+  }
 }
-}
+rebuildClouds();
 vmScene.add(new THREE.HemisphereLight(0xcfd8e8, 0x5a5844, 0.9*(NIGHT_MODE?NIGHT_CFG.vmLightMul:1)));
 { const l=new THREE.DirectionalLight(0xffeed0,1.6*(NIGHT_MODE?NIGHT_CFG.vmLightMul:1)); l.position.set(-1,1.6,0.6); vmScene.add(l); }
 function makeTex(w,h,fn,repX=1,repY=1){
@@ -308,11 +437,13 @@ speckle(g,w,h,700,'#c8c0aa','#948c76',1,6);
 },2,1.5);
 TEX.stone = makeTex(256,256,(g,w,h)=>{
 g.fillStyle='#8d8a80'; g.fillRect(0,0,w,h);
-for(let y=0;y<h;y+=32){                                // 行高 32 × 8 行 = 256 (整周期; 旧 26px 行高平铺错位)
-const off=((y/32)|0)%2?30:0;
-for(let x=-60;x<w;x+=60){
+// ★2026-11-01 修平铺闭合: 行高 32×8=256 / 列距 64×4=256 整周期 (旧列距 60 不整除 256 ⇒ 每贴右缘
+//   一条 2px 背景缝把花岗岩切断), 砖体过缝时在另一侧补画**同色**副本 (与 brick 的越界取对边同规)。
+for(let y=0;y<h;y+=32){
+const off=((y/32)|0)%2?32:0;
+for(let x=-64;x<w;x+=64){
 g.fillStyle=shade(STONE_C,rand(0.86,1.14),rand(-4,4));
-g.fillRect(x+off+2,y+2,56,28);
+for(const dx of [0,-w,w]) if(x+off+dx+62>0&&x+off+dx<w) g.fillRect(x+off+dx+2,y+2,60,28);
 }
 }
 speckle(g,w,h,900,'#6d6a60','#a5a296',1,3);
@@ -335,12 +466,16 @@ g.beginPath(); g.moveTo(0,rand(0,h)); g.bezierCurveTo(w*.3,rand(0,h),w*.7,rand(0
 },1,1);
 TEX.sandbag = makeTex(128,128,(g,w,h)=>{
 g.fillStyle='#9a8a62'; g.fillRect(0,0,w,h);
-for(let y=0;y<h;y+=22){
-const off=((y/22)|0)%2?22:0;
-for(let x=-44;x<w;x+=44){
-g.fillStyle=`rgb(${randi(140,165)},${randi(125,145)},${randi(88,105)})`;
-g.beginPath(); g.ellipse(x+off+22,y+11,20,9,0,0,TAU); g.fill();
+// ★2026-11-01 修: 与 SVG 版同规 —— ① 行距 32×4 / 列距 42.7×3 整周期平铺闭合 (旧行 22/列 44 不整除
+//   128 ⇒ 每贴边缘切袋), ② 逐袋只抖明度 shade() 单源 (旧式 rgb 三通道各抖各的 → 袋与袋跨色相)。
+for(let ry=0;ry<4;ry++){
+const off=(ry%2)?21.3:0;
+for(let x=-21.3+off;x<w+21.3;x+=42.7){
+g.fillStyle=shade([154,138,98],rand(0.9,1.12),0);
+for(const dx of [0,-w,w]) if(x+dx+20>0&&x+dx-20<w){
+g.beginPath(); g.ellipse(x+dx,ry*32+16,20,12.5,0,0,TAU); g.fill();
 g.strokeStyle='rgba(80,70,45,.6)'; g.stroke();
+}
 }
 }
 },2,2);
@@ -1192,3 +1327,61 @@ const px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr; i?g.lineTo(px,py):g.moveTo(px,
 g.closePath(); g.fill();
 speckle(g,w,h,60,'#b4b4b4','#e0e0e0',1,2);                      // 喷涂颗粒/掉色
 },1,1);
+
+// ── WebGL 资源递归释放器与共享材质白名单 (2026-10-07 显存治理) ──
+const _SHARED_MATS = (typeof globalThis !== 'undefined' && globalThis._SHARED_MATS) || new WeakSet();
+if (typeof globalThis !== 'undefined') globalThis._SHARED_MATS = _SHARED_MATS;
+
+function registerSharedMaterials() {
+  if (typeof MAT !== 'undefined') {
+    for (const k in MAT) if (MAT[k] && MAT[k].isMaterial) _SHARED_MATS.add(MAT[k]);
+  }
+  if (typeof uniformMats !== 'undefined' && Array.isArray(uniformMats)) {
+    for (const u of uniformMats) {
+      if (!u) continue;
+      for (const k in u) if (u[k] && u[k].isMaterial) _SHARED_MATS.add(u[k]);
+    }
+  }
+  if (typeof vmMats !== 'undefined') {
+    for (const k in vmMats) if (vmMats[k] && vmMats[k].isMaterial) _SHARED_MATS.add(vmMats[k]);
+  }
+}
+
+function disposeActorHierarchy(obj) {
+  if (!obj) return;
+  registerSharedMaterials();
+  obj.traverse(child => {
+    // 1. 释放独占几何体 (共享几何体若有缓存需跳过，普通单位几何体均为独占 new)
+    if (child.geometry && typeof child.geometry.dispose === 'function') {
+      try { child.geometry.dispose(); } catch(e) {}
+    }
+    // 2. 释放独占材质与动态贴图
+    if (child.material) {
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const m of mats) {
+        if (!m || typeof m !== 'object') continue;
+        if (_SHARED_MATS.has(m)) continue; // ★ 白名单守卫：跳过共享军装与世界材质！
+        // 头顶 CanvasTexture 或独占动态贴图必释放
+        if (m.map && typeof m.map.dispose === 'function') {
+          let isSharedTex = false;
+          if (typeof TEX !== 'undefined') {
+            for (const tk in TEX) {
+              if (TEX[tk] === m.map) { isSharedTex = true; break; }
+            }
+          }
+          if (!isSharedTex) {
+            try { m.map.dispose(); } catch(e) {}
+          }
+        }
+        if (typeof m.dispose === 'function') {
+          try { m.dispose(); } catch(e) {}
+        }
+      }
+    }
+  });
+}
+
+if (typeof globalThis !== 'undefined') {
+  globalThis.registerSharedMaterials = registerSharedMaterials;
+  globalThis.disposeActorHierarchy = disposeActorHierarchy;
+}

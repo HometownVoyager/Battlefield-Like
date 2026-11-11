@@ -25,7 +25,111 @@ function cyl(mat,r1,r2,h,x,y,z,g,rx=HPI){
 const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,10),mat);
 m.position.set(x,y,z); m.rotation.x=rx; if(g) g.add(m); return m;
 }
-function buildGunModel(key){
+// ═════ 通讯仪 (对讲机) 建模 + 配色 —— 单源 ═════
+// 用户 2026-10-27 第 1 条: 旧通讯仪是"机身盒 + 斜天线 + 垂挂话筒"的随手件, 与参考图 (对讲机参考.jpg)
+// 差得远; 更要命的是第一人称与第三人称**各画各的** (11-soldiers 的 worldGunModel 连 radio 分支都没有,
+// 于是第三人称手里握的是一把步枪)。本块把**几何**与**配色**都收成一份, 两个调用点只传"组 + 阵营":
+//   radioPalette(team)        → 颜色口径 (机身主色由阵营 coat 派生 ⇒ 用户要的"整体配色对齐阵营颜色")
+//   buildRadioBody(G,team)    → 往 G 里塞整机件, 返回剪影锚点
+// 尺寸口径 = 参考图剪影的实测比例 (device0: 总高 379 / 总宽 162 / 上段窄块 45×100 / 天线根 24 /
+// 下段机身 157×277), 按整机总高 RADIO_H=0.30m 折算成米 —— 与仓内其它枪械模型同为真实尺度
+// (加兰德机匣 0.62m), 第一人称贴脸看与第三人称两米外看都不需要额外缩放, 也就不存在"两套尺度"。
+const RADIO_H=0.30;
+const RADIO_BODY_W=RADIO_H*157/379, RADIO_BODY_H=RADIO_H*277/379, RADIO_BODY_D=0.052;
+const RADIO_TOP_W=RADIO_H*45/379, RADIO_TOP_H=RADIO_H*100/379;
+const RADIO_ANT_W=RADIO_H*24/379;
+// 原点 = 握点 (手在机身下三分之一), 机身底面 y=-RADIO_GRIP_Y。与其它枪械一致: 原点在握把附近,
+// 于是第一人称的 HIP 位姿、第三人称的 gunG 挂点都能直接复用, 不需要为工具件另立一套挂载数学。
+const RADIO_GRIP_Y=0.075;
+const _radioPalCache={};
+// 两个 24 位色按 t 线性混合 (只算整数, 沙箱桩里也能跑; 不走 THREE.Color 以免桩的 Color 语义差异)
+function _radioMixHex(a,b,t){
+const ar=(a>>16)&255, ag=(a>>8)&255, ab=a&255;
+const br=(b>>16)&255, bg=(b>>8)&255, bb=b&255;
+return (Math.round(ar+(br-ar)*t)<<16)|(Math.round(ag+(bg-ag)*t)<<8)|Math.round(ab+(bb-ab)*t);
+}
+// 阵营解析: 允许传 team 下标 (0/1, 第三人称 Bot 与玩家只有这个; 丧尸档 2 按 TEAM_FACTION 实际长度)
+// 或阵营键 ('us'/'ger'/…, 供探针跨六阵营对账配色)。两种入参走**同一个**派生函数, 不构成第二份配色口径。
+// ★ 严格解析 (2026-10-27 Lead 复核 4a): 旧写法 `TEAM_FACTION[team|0]` 把 **undefined/null/NaN 都当成 0**
+//   —— 于是"某条路径漏传 team"会静默变成**阵营 0 的颜色** (敌人拿自己人的配色, 画面完全看不出来)。
+//   现在只认"确实能在 TEAM_FACTION 里取到项"的下标, 其余一律 null ⇒ 落到下面的中性兜底档。
+function radioFactionOf(team){
+if(typeof team==='string') return (typeof FACTIONS!=='undefined'&&FACTIONS&&FACTIONS[team])?FACTIONS[team]:null;
+if(typeof team!=='number'||!isFinite(team)) return null;
+const i=team|0;
+if(i!==team||i<0) return null;
+if(typeof TEAM_FACTION!=='undefined'&&TEAM_FACTION&&TEAM_FACTION.length) return TEAM_FACTION[i]||null;
+return null;
+}
+// 配色单源。机身主色 = 阵营 coat 压暗去饱和 (参考图实测 #202020~#505050 的深灰档), 保留色相 ⇒
+// 远看是"深灰军械", 近看能分出敌我; 旋钮/PTT 用 vmMats.brass (任务要求), 天线深色, 指示灯用阵营亮色
+// (频道格) + 绿色电源灯 (参考图的绿色 LED)。四个/六个阵营的 body 必然互不相同 (coat 本来就不同, 且
+// 压暗是线性映射, 不会把两个不同色压成同色)。
+// 中性兜底 coat: 取**无色相**的纯灰 (0x3a3a3a), 与六个阵营的 coat (全带黄/绿/蓝色相) 都不同 ⇒
+// "漏传 team"在画面上是"一台灰色通讯仪", 可辨认; 而不是静默伪装成某个阵营。
+const RADIO_COAT_FALLBACK=0x3a3a3a;
+function radioPalette(team){
+const F=radioFactionOf(team);
+const coat=(F&&typeof F.coat==='number')?F.coat:RADIO_COAT_FALLBACK;
+// 缓存键按**解析后的 coat** 取, 不按入参: 旧写法 `(team|0)` 让 undefined 与 team0 共用同一个缓存槽
+// ⇒ 第一条路径先建好缓存后, 后面所有漏传 team 的调用都会拿到阵营 0 的配色 (同一个坑的第二层)。
+const key='c:'+coat;
+if(_radioPalCache[key]) return _radioPalCache[key];
+const body=_radioMixHex(coat,0x2b2b2b,0.46);      // 机身主色 (深灰, 带阵营色相)
+const bodyL=_radioMixHex(coat,0x585858,0.58);     // 上段窄块 / 面板外框 (比机身亮一档, 出层次)
+const bodyD=_radioMixHex(coat,0x141414,0.66);     // 背夹 / PTT / 格栅底 (最暗档)
+const accent=_radioMixHex(coat,0xffffff,0.46);    // 阵营亮色: 频道信号格 + 侧面识别条
+const M=(c,map)=>new THREE.MeshLambertMaterial(map?{color:c,map:map}:{color:c});
+const pal={
+body:M(body,TEX.metalBrush), bodyL:M(bodyL,TEX.metalBrush), bodyD:M(bodyD,TEX.metalBrush),
+accent:M(accent), knob:vmMats.brass, ant:M(0x1c1c1c), screen:M(0x11150f),
+ledOn:M(0x38e04a), grille:M(_radioMixHex(coat,0x0e0e0e,0.62)),
+bodyHex:body, accentHex:accent,   // 供探针直接对账"四阵营主色互不相同", 不必逐材质摸颜色
+};
+_radioPalCache[key]=pal;
+return pal;
+}
+// 整机建模 (第一人称与第三人称同一份)。坐标系: +Y 上 / -Z 前 (= 与枪械模型同约定, mountGunModel 的
+// rotation.y=PI 才会把正面转到角色胸前), 原点 = 握点。显示面板放在 +Z 面: 第一人称里 +Z 朝向镜头,
+// 第三人称经 rotation.y=PI 后 +Z 朝向角色背后 = 同样朝向观察者 —— 两种视角都看得到屏, 不必分两套朝向。
+function buildRadioBody(G,team){
+const P=radioPalette(team);
+const by=-RADIO_GRIP_Y;                            // 机身底面 y
+const bh=RADIO_BODY_H, bw=RADIO_BODY_W, bd=RADIO_BODY_D;
+const topY=by+bh;
+// ── 下段机身 (占总高 73%) ──
+bx(P.body,bw,bh,bd, 0,by+bh*0.5,0, G);
+bx(P.bodyD,bw*0.97,0.012,bd*1.02, 0,by+0.006,0, G);            // 底盖 (比机身略大, 落地/手握不打滑的一圈棱)
+bx(P.bodyL,bw*0.72,bh*0.30,0.004, 0,by+bh*0.64,bd*0.5+0.002, G);  // 面板外框 (浅色, 参考图中部的显示/频率区)
+bx(P.screen,bw*0.58,bh*0.20,0.003, 0,by+bh*0.66,bd*0.5+0.004, G); // 频率显示屏 (深色内嵌)
+// 信号格: 三根阵营亮色细条, 读作"频道/信号强度"; 也顺带保证任何阵营的屏幕都不是纯黑一块
+for(let i=0;i<3;i++) bx(P.accent,0.008,0.004+i*0.004,0.002, -bw*0.20+i*0.012,by+bh*0.62,bd*0.5+0.0055, G);
+// 扬声器格栅 (面板下方 4 条横向栅缝)
+for(let i=0;i<4;i++) bx(P.grille,bw*0.46,0.0045,0.003, 0,by+bh*0.42-i*0.011,bd*0.5+0.003, G);
+// 绿色电源指示灯 (参考图的绿色 LED): 面板右上角, 凸出 1.5mm ⇒ 侧看也有高光
+bx(P.ledOn,0.008,0.008,0.005, bw*0.30,by+bh*0.74,bd*0.5+0.004, G);
+// 侧面 PTT 按键 (参考图: 机身侧面), 右侧外凸 —— 拇指一按就是通话键, 是"对讲机"最硬的识别特征
+bx(P.knob,0.010,bh*0.16,0.026, bw*0.5+0.004,by+bh*0.40,0.004, G);
+bx(P.bodyD,0.006,bh*0.20,0.030, bw*0.5+0.001,by+bh*0.40,0.004, G);   // PTT 底座 (与机身咬合, 不留缝)
+// 背面携行夹 (第三人称从背后看时唯一的细节, 否则背面是一块纯色平板)
+bx(P.bodyD,bw*0.34,bh*0.52,0.006, 0,by+bh*0.52,-bd*0.5-0.004, G);
+bx(P.bodyD,bw*0.30,0.010,0.010, 0,by+bh*0.78,-bd*0.5-0.008, G);      // 夹口上唇
+// ── 上段 (占总高 26%): 居中窄立块, 由机身顶面收窄成"天线根" ──
+// 参考图量到的上段是 45 宽 × 100 高、顶部再收到 24 宽 —— 这一整段就是**粗天线根部**: 剪影里它不是
+// 一个方盒而是一根上细下粗的杆, 所以按"宽 45 的座 + 收成 24 的杆"两件建, 不用盒体 (盒体会读成"第二个机身")。
+bx(P.bodyD,RADIO_TOP_W,0.014,bd*0.62, 0,topY+0.005,0, G);            // 天线座 (与机身顶面咬合)
+const antLow=cyl(P.ant,RADIO_ANT_W*0.5,RADIO_TOP_W*0.5,RADIO_TOP_H*0.62, 0,topY+0.012+RADIO_TOP_H*0.31,0, G,0);
+const antTop=cyl(P.ant,RADIO_ANT_W*0.5,RADIO_ANT_W*0.5,RADIO_TOP_H*0.38, 0,topY+0.012+RADIO_TOP_H*0.62+RADIO_TOP_H*0.19,0, G,0);
+antLow.rotation.z=0.012; antTop.rotation.z=0.012;                     // 微斜: 纯直立会像一根铅笔
+// 天线根上的**金属旋钮** (参考图: 顶部两枚黄铜旋钮, 一频道一音量) —— 这是对讲机除 PTT 外最好认的件
+cyl(P.knob,0.0095,0.0095,0.011, -0.016,topY+RADIO_TOP_H*0.30,0, G,0);
+cyl(P.knob,0.0075,0.0075,0.009,  0.017,topY+RADIO_TOP_H*0.30,0, G,0);
+// 天线顶端的胶套收头 (细一档, 让剪影在天线末端收口而不是被裁平)
+cyl(P.bodyD,RADIO_ANT_W*0.42,RADIO_ANT_W*0.50,0.012, 0,topY+0.012+RADIO_TOP_H,0, G,0);
+const topYAll=topY+0.012+RADIO_TOP_H+0.006;
+return {topY:topYAll, bodyTopY:topY, wMax:bw, bodyHex:P.bodyHex, accentHex:P.accentHex};
+}
+function buildGunModel(key,team){
 const G=new THREE.Group();
 const parts={gun:G, muzzle:V3(0,0.032,-0.62)};
 const wd=vmMats.wood, gm=vmMats.gun, gl=vmMats.gunL;
@@ -445,6 +549,15 @@ rr.visible=false;
 G.add(rr);
 parts.reloadRocket=rr;
 parts.muzzle.set(0,0.06,-1.02); // 火箭筒/巡飞弹(loiter 复用 bazooka 模型)炮口前移出管口 0.02 (P3-10: audit-gunmodels 枪口前置0.050)
+} else if(key==='radio'){
+// 通讯仪 (2026-10-27 重做, 用户参考图 对讲机参考.jpg): 整机几何与配色走**单源** buildRadioBody() ——
+// 第一人称 (这里) 与第三人称 (11-soldiers worldGunModel 的 kind==='radio') 建的是同一份件、同一份色,
+// 不再像旧版那样两处各写一套 (旧版三人称根本没有 radio 分支, 直接落成步枪, 见 11-soldiers gunKindOf)。
+// 纯工具态无火力 (20-player playerFireTick 的 tool 门), 右键开指挥地图 (19-input 分流)。
+// 返回值: {top} = 天线根的三维落点, 供调用方决定"这个握姿下天线是否戳出画面"。
+const rb=buildRadioBody(G,team);
+parts.muzzle.set(0,0.05,0);   // 无枪口: 保持 origin 附近, 枪口特效对工具件本就不该出现 (tool 门已挡开火)
+parts.radioTop=rb.topY;       // 天线尖高度 (探针据此断言"两段式剪影"; 与 buildRadioBody 返回字段同名)
 } else {
 bx(gm,0.032,0.05,0.19, 0,0.02,-0.02,G);
 parts.slide=bx(gl,0.034,0.032,0.2, 0,0.045,-0.02,G);

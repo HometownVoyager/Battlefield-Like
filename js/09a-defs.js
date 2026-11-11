@@ -30,8 +30,10 @@ mp40:     { name:'MP40', mode:'全自动', type:'auto', snd:'smg', dmg:20, headM
 stg44:    { name:'STG 44', mode:'全自动', type:'auto', snd:'rifle', dmg:24, headMul:1.9, rpm:500, mag:30, reserve:240, reload:2.8, spreadHip:3.4, spreadAds:0.5, recoil:0.7, recSide:0.45, adsFov:54, kick:0.05, vmLegacy:true, tracer:3, fallS:38, fallE:180, fallF:0.5, wSpd:0.94 },
 p38:      { name:'瓦尔特 P38', mode:'半自动', type:'semi', snd:'pistol', dmg:24, headMul:1.7, rpm:430, mag:8, reserve:80, reload:1.9, spreadHip:2.6, spreadAds:0.5, recoil:0.75, recSide:0.4, adsFov:60, kick:0.05, pistol:true, vmLegacy:true, tracer:2, fallS:15, fallE:90, fallF:0.35, wSpd:1 },
 m1903:    { name:'春田 M1903', mode:'栓动', type:'bolt', snd:'sniper', dmg:78, headMul:2.4, rpm:54, mag:5, reserve:100, reload:2.7, spreadHip:4.5, spreadAds:0.1, recoil:2.3, recSide:0.45, adsFov:50, kick:0.1, boltT:0.95, tracer:1, fallS:70, fallE:260, fallF:0.8, wSpd:0.95 },
-bazooka:  { name:'巴祖卡 M9', mode:'单发', type:'atlauncher', snd:'cannon', dmg:24, headMul:1, rpm:10, mag:1, reserve:16, reload:3.6, spreadHip:4.8, spreadAds:1.0, recoil:5.0, recSide:1.5, adsFov:52, kick:0.18, rocket:true, atDmg:360, tracer:1, wSpd:0.9 },
-schreck:  { name:'坦克杀手 RPzB54', mode:'单发', type:'atlauncher', snd:'cannon', dmg:24, headMul:1, rpm:10, mag:1, reserve:16, reload:3.8, spreadHip:4.5, spreadAds:0.9, recoil:5.2, recSide:1.6, adsFov:50, kick:0.19, rocket:true, atDmg:380, tracer:1, wSpd:0.9 },
+// 换弹 3.6→2.4 / 3.8→2.5 (2026-11-04 用户裁定: 火箭筒换弹缩至原 2/3; 消费点全链单源 def.reload,
+// 换弹动画/进度条/连杀增益/受击打断网自动跟随。Bot 打击节奏的 fireT=3.6 再射冷却是独立账, 不随本批变)
+bazooka:  { name:'巴祖卡 M9', mode:'单发', type:'atlauncher', snd:'cannon', dmg:24, headMul:1, rpm:10, mag:1, reserve:16, reload:2.4, spreadHip:4.8, spreadAds:1.0, recoil:5.0, recSide:1.5, adsFov:52, kick:0.18, rocket:true, atDmg:360, tracer:1, wSpd:0.9 },
+schreck:  { name:'坦克杀手 RPzB54', mode:'单发', type:'atlauncher', snd:'cannon', dmg:24, headMul:1, rpm:10, mag:1, reserve:16, reload:2.5, spreadHip:4.5, spreadAds:0.9, recoil:5.2, recSide:1.6, adsFov:50, kick:0.19, rocket:true, atDmg:380, tracer:1, wSpd:0.9 },
 // ---- 苏军 ----
 mosin:    { name:'莫辛-纳甘 M91/30', mode:'栓动', type:'bolt', snd:'sniper', dmg:78, headMul:2.4, rpm:50, mag:5, reserve:100, reload:2.7, spreadHip:4.5, spreadAds:0.08, recoil:2.5, recSide:0.45, adsFov:48, kick:0.11, boltT:1.05, tracer:1, fallS:70, fallE:260, fallF:0.8, wSpd:0.95 },
 mosinpu:  { name:'莫辛-纳甘 PU', mode:'栓动 · 3.5x', type:'bolt', snd:'sniper', dmg:96, headMul:2.5, rpm:48, mag:5, reserve:80, reload:2.8, spreadHip:5, spreadAds:0.02, recoil:2.6, recSide:0.5, adsFov:21, kick:0.12, scoped:true, boltT:1.1, tracer:1, fallS:90, fallE:300, fallF:0.85, wSpd:0.93 },
@@ -68,9 +70,14 @@ laotao:   { name:'老套筒(汉阳早期)', mode:'栓动', type:'bolt', snd:'sni
 loiter:   { name:'巡飞弹发射器', mode:'单发 · TV制导', type:'loiter', snd:'cannon', dmg:24, headMul:1, rpm:10, mag:1, reserve:4, reload:2.6, spreadHip:4.8, spreadAds:1.0, recoil:5.0, recSide:1.5, adsFov:52, kick:0.18, rocket:true, loiter:true, model:'bazooka', tracer:1, wSpd:0.9 },
 // ---- 观战模式专属·非史实 (2026-09-17 观战扩展批) ----
 // 观战模式: 副武器位(2号槽)一律换成这把连狙 (00-config playerClassWeapons / 23-deploy applySpectatorLoadout);
-// 数值按用户裁定: **全自动** (2026-09-17 二改: 原半自动 → 全自动)、300 发/分、20 发弹匣、**后坐力压低** (recoil 1.8→1.0);
+// 数值按用户裁定: **全自动** (2026-09-17 二改: 原半自动 → 全自动)、600 发/分 (2026-11-08 二改: 300→600)、20 发弹匣、**后坐力压低** (recoil 1.8→1.0);
 // scoped:true ⇒ 开镜走 4x 镜片遮罩+窄视场 (10-viewmodel/22-hud 同源), 观战弹药每 0.5s 自动回满 ⇒ 永不换弹。
-specsniper:{ name:'观战连狙', mode:'全自动 · 4x', type:'auto', snd:'sniper', dmg:75, headMul:2.5, rpm:300, mag:20, reserve:200, reload:2.6, spreadHip:4.2, spreadAds:0.05, recoil:1.0, recSide:0.24, adsFov:24, kick:0.05, scoped:true, model:'springfield', vmLegacy:true, tracer:1, fallS:60, fallE:240, fallF:0.7, wSpd:0.95 },
+specsniper:{ name:'观战连狙', mode:'全自动 · 4x', type:'auto', snd:'sniper', dmg:75, headMul:2.5, rpm:600, mag:20, reserve:200, reload:2.6, spreadHip:1.0, spreadAds:0.05, recoil:1.0, recSide:0.24, adsFov:24, kick:0.05, scoped:true, model:'springfield', vmLegacy:true, tracer:1, fallS:60, fallE:240, fallF:0.7, wSpd:0.95 },   // 2026-11-08 实机反馈: 不开镜散布 4.2→1.0 (旧值在全库步枪带里居中, 狙击枪腰射理应远紧于步枪; 开镜 0.05 不动) + 射速 300→600 (用户实报"只有预想的二分之一"; 20-player fireT=60/rpm 单一消费点, 翻倍即实测翻倍)
+// ---- 指挥官兵种主武器 (2026-10-26 指挥官批, 设计 §3) ----
+// 通讯仪 = 非武器的工具 (tool:true): 本身无火力 (20-player playerFireTick 的 tool 门), 右键 = 开/关
+// 指挥地图 (19-input mousedown 分流, 不进 ADS); mag/reserve 全 0 ⇒ 永不触发空仓点击换弹;
+// 不进 readBarActive 交互读条网 (自身无读条操作); 持通讯仪时 G/绷带照常 (不依赖主武器槽)。
+radio:{ name:'通讯仪', mode:'工具 · 右键指挥地图', type:'tool', snd:'pistol', dmg:0, headMul:1, rpm:60, mag:0, reserve:0, reload:2.0, spreadHip:5, spreadAds:5, recoil:0, recSide:0, adsFov:60, kick:0, tool:true, radio:true, tracer:0, wSpd:1 },
 };
 // 兵种 8→5 (2026-09-28 阶段三 P1 首轮, 用户裁定):
 //   冲锋枪手+突击兵 → **突击兵** (主武器只留冲锋枪, 德军例外=STG44; 燃烧弹/AT雷随突击兵保留);
@@ -86,6 +93,9 @@ const CLASSES=[
 { name:'狙击手', nades:2, smoke:2 },
 { name:'反坦克兵', nades:2, smoke:0 },
 { name:'工程兵', nades:2, smoke:2 },
+// 指挥官 (2026-10-26 指挥官批, 设计 §3): 仅玩家可选 (CLS_POOL 不含), 整局双向锁 R10 (26-commander);
+// 主武器=通讯仪(无火力工具) 副武器=冲锋枪 (FACTIONS.cls 第六行), 绷带/手雷同突击兵 (设计 R2)。
+{ name:'指挥官', nades:2, smoke:2, incin:2, atn:4, commander:true },
 ];
 // Bot 兵种池 (14 槽): 支援密度=工程兵×3 (收拢原 迫击炮×1+工程×1+医护×2=4/14),
 // 反坦克×3 (对 5v5 装甲的克制面), 步枪×4 / 突击×3 / 狙击×1。

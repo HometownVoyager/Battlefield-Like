@@ -47,7 +47,7 @@ constructor(c,i,d,dec){ super(); this.color=c; this.intensity=i||0; this.distanc
 };
 // ── 全链文件表 (与 index.html 实载同序; 探针纪律: 载入清单漂移 = 假绿, 改 index.html 必同步这里;
 //    实载脚本数在 T5 里从 index.html 动态解析对账, 不写死数字) ──
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 // index.html 实载脚本数对账 (T5): FILES.length 必须等于 html 里的 <script src="js/...">
 const read=(f)=>fs.readFileSync(path.join(root,f),'utf8');
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
@@ -333,8 +333,8 @@ t.playerDriven=true; t.lightsOn=false;   // 玩家接管: AI 不再代管, L 自
 nightGearTick(1/60);
 res.playerFree=vehHeadlightToggle(t)===true&&t.lightsOn===true;
 nightGearTick(1/60);                     // toggle 后再 tick 一次, 真灯池按新状态竞选
-// 真灯池: ≤headRealN, 全部 visible 且强度>0 的数量不超预算 (1 辆开灯车在场)
-res.poolN=_hlPool.length===NIGHT_GEAR.headRealN;
+// 真灯池: ≤headRealN*2 (2026-11-01 每台左右灯口各 1 盏), 全部 visible 且强度>0 的数量不超预算 (1 辆开灯车在场)
+res.poolN=_hlPool.length===NIGHT_GEAR.headRealN*2;
 res.poolVis=_hlPool.map(s=>!!s.visible);
 res.poolUsedN=_hlPool.filter(s=>s.visible).length;
 res.tLights=!!t.lightsOn;
@@ -343,10 +343,12 @@ res.tNear=t.pos.distanceTo(camera.position);
 res.flareN=FLARES.length>0;
 if(res.flareN){
 const fl=FLARES[0];
-fl.t0=nowT-1;                // 拨到燃烧第 1s (p=(nowT-t0)%period=1 < flareBurn)
+// ★2026-11-05 判据跟走 (时停照明弹批): 照明弹相位钟换 _ngT (nightGearTick 战斗钟, 时停冻结),
+//   nowT 不再是它的表盘 —— 拨相一律拨 _ngT (代码侧 fl.t0 也只与 _ngT 相减)。
+fl.t0=_ngT-1;                // 拨到燃烧第 1s (p=(_ngT-t0)%period=1 < flareBurn)
 nightGearTick(1/60);
 res.flareLit=!!(fl.sp&&fl.sp.visible===true&&fl.lit>0&&fl.disc&&fl.disc.visible===true);
-fl.t0=nowT-(NIGHT_GEAR.flarePeriod+NIGHT_GEAR.flareBurn+1);   // 熄灭窗
+fl.t0=_ngT-(NIGHT_GEAR.flarePeriod+NIGHT_GEAR.flareBurn+1);   // 熄灭窗
 nightGearTick(1/60);
 res.flareDark=!!(fl.sp&&fl.sp.visible===false&&fl.lit===0);
 }
@@ -373,7 +375,7 @@ ok(r.aiOn===true,'T4 大灯 AI: 行进开灯');
 ok(r.aiHlBuilt===true,'T4 大灯: 挂点组件随开灯惰性构建 (_hl.grp)');
 ok(r.aiOffEngaged===true,'T4 大灯 AI: 交战关灯 (简单状态机)');
 ok(r.playerFree===true,'T4 大灯: 玩家车不受 AI 代管, L 自管');
-ok(r.poolN===true&&r.poolUsedN===1,'T4 真 SpotLight 池 ≤headRealN 且在用 (池='+JSON.stringify(r.poolVis)+' 用='+r.poolUsedN+' tLights='+r.tLights+' 近='+r.tNear+')');
+ok(r.poolN===true&&r.poolUsedN===2,'T4 真 SpotLight 池 ≤headRealN*2 且在用 (1 车=左右两盏, 池='+JSON.stringify(r.poolVis)+' 用='+r.poolUsedN+' tLights='+r.tLights+' 近='+r.tNear+')');
 ok(r.flareN===true,'T4 照明弹: 攻防图旗点建弹 (相位走 Math.random 不进种子)');
 ok(r.flareLit===true,'T4 照明弹: 燃烧窗=光点+地面亮斑可见 (lit>0)');
 ok(r.flareDark===true,'T4 照明弹: 熄灭窗全部隐藏');

@@ -158,7 +158,7 @@ for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 for(const f of files) load(ctx,f);
 return ctx;
 }
@@ -182,7 +182,7 @@ else { FAILS++; console.log('  ✘ '+label); }
 //   T7 观战模式照常计分 (2026-09-16 记录批口径①: 计分照常, 只是本局不进历史记录);
 //   T8 结算接线: recMatchValues.demol / REC_STATS 表项 / 新对局复位 / EN 词典五键齐备;
 //   T9 世界还原 (23b) 把 hp 写回满值后权重不变, 且还原只发生在新对局/回主菜单 (同一局内不构成刷分面);
-//   T10 源码接线: 全库 9 个 damageStructures 调用点逐一带归属 (唯一例外=反坦克雷无主), 未来漏传会被抓。
+//   T10 源码接线: 全库 11 个 damageStructures 调用点逐一带归属 (唯一例外=反坦克雷无主), 未来漏传会被抓。(2026-11-10 跟码: +1=三蟲抓① 飞机撞楼)
 // ─────────────────────────────────────────────
 'use strict';
 
@@ -436,7 +436,7 @@ ok(/player\.score=0/.test(src)&&/player\.demol=0/.test(src),'T9 就地开新局�
 
 // ═════ T10 源码接线 ═════
 function t10(){
-console.log('T10 源码接线: 9 个 damageStructures 调用点逐一带归属');
+console.log('T10 源码接线: 11 个 damageStructures 调用点逐一带归属');
 const files=['js/13-combat.js','js/15-vehicles.js','js/15d-naval.js','js/16-aircraft.js','js/05-world.js'];
 let total=0; const noArg=[];
 for(const f of files){
@@ -461,14 +461,17 @@ if(args.split(',').length<4) noArg.push(f+': damageStructures('+args+')');
 }
 }
 }
-ok(total===10,'T10 全库非定义处 damageStructures 调用点 = 10 (实测 '+total+')');
+ok(total===11,'T10 全库非定义处 damageStructures 调用点 = 11 (实测 '+total+') (2026-11-10 跟码: 三蟲抓① 飞机撞楼新调用点)');
 ok(noArg.length===1&&/^js\/15-vehicles\.js: damageStructures\(p,5,130\)$/.test(noArg[0]),
- 'T10 唯一无归属的调用点 = 反坦克雷 (雷没有 owner 字段), 其余 9 处都传了 owner/thrower (实测 '+JSON.stringify(noArg)+')');
+ 'T10 唯一无归属的调用点 = 反坦克雷 (雷没有 owner 字段), 其余 10 处都传了 owner/thrower (实测 '+JSON.stringify(noArg)+')');
 // 2026-09-27N 破坏机制批新增的第 10 处: 油桶连锁引爆 (05-world.barrelBlast) —— 它把触发者的归属透传下去,
 // 所以"有主才有分"这条边界不变 (无主爆炸引爆的油桶同样不给任何加分)。
 const w5=fs.readFileSync(path.join(root,'js/05-world.js'),'utf8');
 ok(/barrelBlast\(c,attacker\)/.test(w5)&&/damageStructures\(p,2\.8,90,attacker\)/.test(w5),
  'T10 第 10 处调用点 = 油桶连锁引爆 (05-world.barrelBlast, 4 参带归属)');
+const s16st=fs.readFileSync(path.join(root,'js/16-aircraft.js'),'utf8');
+ok(/if\(typeof damageStructures==='function'\) damageStructures\(_plSwHit,7,260,this\.lastHitBy\|\|null\)/.test(s16st),
+ 'T10 第 11 处调用点 = 飞机撞楼归属 (2026-11-10 三蟲抓①, 16-aircraft, 4 参带归属)');
 const bat=fs.readFileSync(path.join(root,'js/15f-battery.js'),'utf8');
 ok(/destroyStructure\(this\.reg,false,attacker\)/.test(bat),'T10 炮位自毁链把 attacker 透传给 destroyStructure (直击炮体拆掉的胸墙同样记分)');
 }

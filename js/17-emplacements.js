@@ -520,9 +520,7 @@ function updateSpawnClaims(){
 if(_spawnClaimT!==nowT){ _spawnClaimT=nowT; SPAWN_CLAIMS.length=0; }
 }
 function spawnLandingClear(x,z,margin){
-// 大舰甲板 (2026-09-30 阶段五 P4): 甲板是"海上陆地", 但不在 OCC/NAV 网格里 (舰在巡航) —— 全海图的
-//   OCC 整片是水障 ⇒ 不加这一条, 落在大舰甲板上的出生点会被下面三道闸门全部否掉, 全海图开局无兵可出。
-if(typeof capDeckOf==='function'&&capDeckOf(x,z)) return true;
+// (2026-11-10: 旧"大舰甲板出生豁免"capDeckOf 分支随大舰子系统下架摘除)
 if(occBlocked(x,z)) return false;
 if(!freeSpot(x,z,margin===undefined?0.9:margin)) return false; // 建筑足迹/地铁下沉区 (freeSpot: B_FOOT + METRO_RECTS)
 // 死袋闸 (2026-09-26): 该点所在 5m 格必须"走得出去" —— 判据与 findPath 共用同一张连通分量表 (NAV.spawnSpotOk)。

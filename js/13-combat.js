@@ -11,15 +11,23 @@ function chuteAirborne(p){ return !!(p&&p.chute&&!p.onGround); }
 function chuteDamageMul(p){ return chuteAirborne(p)?CHUTE_DEF.dmgMul:1; }
 // pad (可选, 2026-09-17 观战扩展批): "弹体判定半径" —— 坦克主炮炮弹按 SHELL_R 扩大命中体
 // (头部小球与躯干圆柱同步外扩), 用于"稍作增大坦克炮弹判定"; 子弹/其他调用方不传 = 原判定不变。
-// ===== 无差别火力判定单源 (2026-09-20 观战连狙批) =====
-// 用户口径: **只有观战连狙这一把武器可以打双方, 其余武器保持现状**。
-//   ffAll        = 幽灵坦克驾驶态 (观战专属载具, 2026-09-17 观战扩展批), 主炮/同轴机枪沿用, 不动;
+// ===== 无差别火力判定单源 (2026-09-20 观战连狙批; 2026-11-09 观战中立批扩权) =====
+// 2026-11-09 用户裁定: **观战者本尊的全部步兵武器对双方生效** (枪械/火箭筒/手持迫击炮; 投掷手雷的中立
+//   另在 nadeExplode/explodeAt 按弹种收口)。附身宿主开火仍是宿主 Bot 的弹, 不吃本门。
+//   spectator 门 = shooter.spectator 即放开, 但**真实载具座位上除外**: 艇机炮走 fireBullet(shooter=
+//   player), 不排除就借本门变成无差别火力, 违反"座位武器不含"的裁定。观战者可达的真实座位只有舰船座位
+//   (onNaval): 固定炮位被 tryInteract ③ 挡住, 真坦克/真飞机被"不得征用真载具"
+//   挡住; 幽灵坦克由 ffAll 覆盖, 不依赖 spectator 门。(2026-11-10: capitalGun 门随大舰子系统下架摘除)
+//   ffAll        = 幽灵坦克驾驶态 (观战专属载具, 2026-09-17 观战扩展批), 主炮/同轴机枪沿用;
 //   ffSpecSniper = 观战连狙专属标记, 只在"观战者手上/正在开火的武器 key==='specsniper'"时为 true
 //                  (20-player playerFireTick 每帧同步 + playerShoot 开火瞬间落定; 18-game die / 22-hud 换局复位)。
-// 为什么不直接开 player.ffAll: 那会连带把幽灵坦克主炮、同轴机枪、巡飞弹一起变成无差别火力 —— 违反用户口径。
-// 把两个标记收进 coFfFire 一个函数, 让**步兵判定 / 载具判定 / 压制惊动**三处同源,
-// 避免出现"能打人却不能打坦克"或"打友军惊动全场"这类前后不一致。
-function coFfFire(shooter){ return !!(shooter&&(shooter.ffAll||shooter.ffSpecSniper)); }
+// 判据收进 coFfFire 一个函数, 让**步兵弹道 / 载具刮痕 / 艇舰射线门**同源, 避免"能打人却不能打艇"这类不一致;
+// 压制/惊动有自己的观战早退, 观战开火照旧不压制不惊动任何一方 (含友军)。
+function coFfFire(shooter){
+if(!shooter) return false;
+if(shooter.ffAll||shooter.ffSpecSniper) return true;
+return !!(shooter.spectator&&!shooter.onNaval);
+}
 // ===== 观战者座驾判定单源 (2026-09-26H 观战批, 用户实报) =====
 // "观战者驾驶的载具 = 观战者身体的延伸"。观战者**本体**早已不被索敌/不被伤害 (14-bots 索敌过滤 + damage 早退),
 // 但他坐进的载具是别人的对象 (Tank/Plane/NavalCraft), 旧版一律按普通载具处理, 于是:
@@ -42,13 +50,18 @@ return player.onVehicle===v||player.onNaval===v||player.onCapital===v;   // onCa
 //   · 不做准星/相机牵引: 那会与鼠标抢手感, 且载具/第三人称/观战下没有统一写法 (要的是"轻微更好打", 不是"帮你转视角")。
 //   · **只处理"差一点打中"的那一枪**: 逐目标先算它的角半径 rAng, 只有弹道**擦不到本体**(ang>rAng) 才动手,
 //     且擦出的距离 (over=ang-rAng) 不超过本武器档的容差 cone —— 大偏仍是大偏。
-//   · 已经指着本体的 (ang≤rAng) **一概不动** ⇒ "起点→准星命中点"这条既有契约在"已命中"时逐字保持
+//   · 已经指着本体任一部分的 (ang≤rAng) **一概不动** ⇒ "起点→准星命中点"这条既有契约在"已命中"时逐字保持
 //     (第三人称的准星=落点 / 命中的是腿就是腿, 不会被"抬到胸口")。这也是 dev/verify-specthird T6 的口径。
+//   · ★2026-11-08 爆头批: 士兵双靶点 (爆头球 + 胸口)。旧版只瞄胸口 ⇒ 瞄站立敌人头部时射线在胸球外 0.13m
+//     ⇒ over>0 ⇒ 被向下掰 0.29k 米 (与距离无关; 标准档 0.28~0.33m > 爆头球半径 0.26m ⇒ 站立敌人任何距离
+//     都爆不了头, 蹲/卧敌人的头在胸球内反而没事 —— 用户实测"明明瞄的很准却总是无法爆头"的病根)。
+//     现口径: 头/胸任一"已指着" ⇒ 整兵不掰 (吸附绝不与爆头瞄准对抗); 差一点打中头 ⇒ 掰向**头部** (落点
+//     进球 35% 深 = 距球心 ~0.09m = 真爆头); 差一点打中身体 ⇒ 掰向胸口 (旧行为不变)。
 //   · 掰角 = (over + 0.35·rAng) × k, 再按 cap 与"不得越过目标中心(≤ang)"两道夹:
 //     目标位置 = 落进本体 35% 深 ⇒ 近失误变命中, 而不是"边缘蹭一下"; 硬上限保证看不出拐弯。
 //   · 遮挡检查 (一次世界射线 + 一次人体射线): 隔墙/穿过别人(含队友)的吸附一律不做 —— 吸附绝不制造"打墙/打队友"。
 //   · 档位 = SETTINGS.aim (0 关 / 1 轻度 / 2 标准, 游戏设置里实时改, 默认 1 轻度); 关档时本函数**原样返回入参引用**
-//     (零分配/零漂移)。目标集合: 步兵 (胸口) + 坦克/卡车/战机/舰艇 (车体中心); 巡飞弹/迫击炮/航弹/鱼雷这些
+//     (零分配/零漂移)。目标集合: 步兵 (爆头球+胸口双靶点) + 坦克/卡车/战机/舰艇 (车体中心); 巡飞弹/迫击炮/航弹/鱼雷这些
 //     **曲射·面杀伤**不接 (那几样没有"准星吸附"的语义)。
 // AI 一枪不吃 —— 判据是**调用点**: 只有玩家侧的开火链调本函数 (20-player.playerShoot 两处 / 20a-seats 八处 /
 //   16-aircraft.fireMGBurst 的 shooter===player 分支), 与 specRide/coFfFire 同一种"单源 + 接线点"纪律。
@@ -99,7 +112,11 @@ const me=(typeof player!=='undefined')?player:null;
 AIM_ASSIST.shots++;
 // ── 候选: 取"擦出距离最小"的那一个 (只做一轮, 不排序: 每枪最多一次 acos/候选) ──
 let bAng=1e9,bOver=1e9,bR=0,bEx=0,bEy=0,bEz=0,bObj=null,bTag='';
-const test=(px,py,pz,r,obj,tag)=>{
+// ★2026-11-08 爆头批: 士兵双靶点暂存槽 —— 头/胸两部位都测完、且"已指着"旗未立时才并入全局候选。
+//   必须先暂存: 瞄胸口时头球 over>0 会先抢注全局, 直接写 b* 就绕过了"已指着不动"守卫 (瞄胸被掰上头)。
+let gA=1e9,gO=1e9,gR=0,gX=0,gY=0,gZ=0,gTag='';
+let aaOn=0;   // "已指着"旗: 候选部位 over≤0 时置 1 —— 士兵头/胸任一指中 ⇒ 整兵不掰 (载具同用此旗但只写不读)
+const test=(px,py,pz,r,obj,tag,stg)=>{
 if(obj===self||obj===me||obj===null) return;
 if(!ff&&team!==null&&obj.team===team) return;      // 同队: 不做吸附对象 (避免"帮你打队友")
 const ex=px-origin.x, ey=py-origin.y, ez=pz-origin.z;
@@ -111,14 +128,20 @@ if(dot<=0.5) return;                               // 侧后方 60° 以外直�
 const ang=Math.acos(dot>1?1:dot);
 const rAng=Math.atan2(r,d);                        // 目标角半径 (本体在准星上占多宽)
 const over=ang-rAng;                               // "擦出的距离": >0 才是真的差一点打中
-if(over<=0) return;                                // 已经指着本体 ⇒ 不动 (保"起点→准星命中点"契约, 也不改命中部位)
+if(over<=0){ aaOn=1; return; }                     // 已经指着本体 ⇒ 不动 (保"起点→准星命中点"契约, 也不改命中部位)
 if(over>cone) return;                              // 偏太多: 大偏仍是大偏
-if(over<bOver){ bOver=over; bAng=ang; bR=rAng; bEx=ex; bEy=ey; bEz=ez; bObj=obj; bTag=tag; }
+if(stg){ if(over<gO){ gO=over; gA=ang; gR=rAng; gX=ex; gY=ey; gZ=ez; gTag=tag; } }   // 士兵部位 → 暂存
+else if(over<bOver){ bOver=over; bAng=ang; bR=rAng; bEx=ex; bEy=ey; bEz=ez; bObj=obj; bTag=tag; }
 };
 if(typeof soldiers!=='undefined') for(const s of soldiers){
 if(!s||s.alive===false||s.spectator) continue;
 if(typeof seatShielded==='function'&&seatShielded(s)) continue;   // 在座乘员不是可命中目标 (与命中管线同口径)
-test(s.pos.x,s.pos.y+(s.prone?0.55:1.10),s.pos.z,0.45,s,'sol');
+// 双靶点: ①爆头球 (与 raySoldiers 命中几何同位同径: eyeY+0.06 ⇒ 站1.68/蹲1.21/卧0.56, r=0.26)
+//         ②胸口 (旧行为 y+1.10 r=0.45)。顺序无关 —— 暂存+末尾统一裁决。
+aaOn=0; gO=1e9;
+test(s.pos.x,s.pos.y+(s.prone?0.56:s.crouch?1.21:1.68),s.pos.z,0.26,s,'solHead',1);
+test(s.pos.x,s.pos.y+(s.prone?0.55:1.10),s.pos.z,0.45,s,'sol',1);
+if(!aaOn&&gO<bOver){ bOver=gO; bAng=gA; bR=gR; bEx=gX; bEy=gY; bEz=gZ; bObj=s; bTag=gTag; }
 }
 if(typeof tanks!=='undefined') for(const t of tanks){ if(t&&t.alive) test(t.pos.x,t.pos.y+1.0,t.pos.z,2.6,t,'tank'); }
 if(typeof trucks!=='undefined') for(const t of trucks){ if(t&&t.alive) test(t.pos.x,t.pos.y+1.0,t.pos.z,1.8,t,'truck'); }
@@ -128,11 +151,7 @@ if(pl&&pl.alive) test(pl.pos.x,pl.pos.y,pl.pos.z,planeHitR(pl),pl,'plane'); // 7
 if(typeof navalCraft!=='undefined'&&Array.isArray(navalCraft)) for(const c of navalCraft){
 if(c&&c.alive&&c.state!=='wreck'&&c.state!=='sinking') test(c.pos.x,c.pos.y+1.6,c.pos.z,4.6,c,'naval');
 }
-// 大舰 (2026-09-30 阶段五 P4): 瞄准点取**舷侧/上层建筑**高度而非舰心 —— 150m 的舰用中心点做吸附,
-//   吸附角半径算出来是"整条船那么宽", 会把准星从近处小目标上抢走。取甲板面高 (打得中的那层)。
-if(typeof capitalShips!=='undefined'&&Array.isArray(capitalShips)) for(const s of capitalShips){
-if(s&&s.alive) test(s.pos.x,s.pos.y+s.deck.y*0.75,s.pos.z,Math.max(6,s.spec.hullW*0.5),s,'naval');
-}
+// (2026-11-10: 大舰吸附候选块随大舰子系统下架摘除)
 if(!bObj) return dir;
 const td=Math.sqrt(bEx*bEx+bEy*bEy+bEz*bEz);
 if(td<1.5) return dir;
@@ -143,7 +162,7 @@ const wr=raycastWorld(origin,_aaU,Math.max(0.1,td-0.6));
 if(wr){ AIM_ASSIST.blocked++; return dir; }
 // ② 人体遮挡: 沿该射线的**第一个**被打中的必须是它 (队友/别人挡在前面就不吸; 载具目标不做这一次 ——
 //    子弹打中挡路的步兵本来就该算那一枪, 而挡路的载具由弹道自己裁决)
-if(bTag==='sol'&&typeof raySoldiers==='function'){
+if((bTag==='sol'||bTag==='solHead')&&typeof raySoldiers==='function'){
 const sr=raySoldiers(origin,_aaU,Math.max(0.2,td-0.4),self||me,0,true);
 if(sr&&sr.sol!==bObj){ AIM_ASSIST.blocked++; return dir; }
 }
@@ -196,14 +215,23 @@ if(r){ best={sol:s,t:r.t,head:false}; bestT=r.t; }
 return best;
 }
 function fireRocket(shooter,origin,dir,def,vis){
+// 出生保护清账 (★2026-11-01 判定批, 与 fireBullet 同一契约"开火即解除"): 旧版清账只挂在 fireBullet,
+// 火箭/坦克主炮/固定炮/迫击炮这些**不走 fireBullet 的直接出膛口**不清 —— 部署落地 2s 保护期内照样能开火
+// ("无敌帧内不许输出"漏了这几条路; 探针豁免先清 protUntil, 行为面零波及)。
+if(shooter&&shooter.protUntil) shooter.protUntil=0;
 const vel=dir.clone().multiplyScalar(170); // 2026-09-28 用户裁定弹速×2 (旧 85; 火箭筒/反坦克火箭)
 shooter._src=def.name||''; // 击杀来源: 火箭筒开火即记入 (2026-09-29 修: 玩家火箭分支提前 return 走不到 20-player 的 _src 行, 击杀播报读成上次开火的枪名)
-shells.push({pos:origin.clone(),vel,team:shooter.team,owner:shooter,life:3.6,kind:'at',dmgV:def.atDmg||320,trail:0,rocket:true,src:def.name||''}); // src: 弹体自带标签, 命中时重盖章 (见 updateShells)
+shells.push({pos:origin.clone(),vel,team:(shooter.spectator?-1:shooter.team),owner:shooter,life:3.6,kind:'at',dmgV:def.atDmg||320,trail:0,rocket:true,src:def.name||''}); // src: 弹体自带标签, 命中时重盖章 (见 updateShells); team: 2026-11-09 观战中立批 —— 观战者本尊的火箭无差别 (幽灵坦克 team:-1 同约定); 非观战射手逐位不变
 spawnP(PT.flash,origin.x,origin.y,origin.z, dir.x*2,dir.y*2,dir.z*2, 0.6,6,0.1,1,0,true);
 spawnP(PT.dark,origin.x,origin.y,origin.z, dir.x*2+rand(-1,1),1.5,dir.z*2+rand(-1,1), 0.9,2.5,0.8,0.7,0.5);
 AudioSys.cannon(origin.distanceTo(camera.position));
 shooter.lastFiredT=nowT;
+if(typeof player!=='undefined'&&player&&player.specViewHost&&player.specViewHost===shooter&&typeof svHostFireFx==='function') svHostFireFx(def);   // 真附身 (2026-11-04): 与 fireBullet 同款出膛反馈钩 —— 宿主打火箭视角同样有后坐/枪口焰 (旧版只挂枪械弹)
 }
+// fireBullet 逐发账复用槽 (2026-11-01 性能批): 命中圆柱/立体声 pan 向量, 本函数内串行消费不持有
+const _fbCyl={x:0,z:0,r:2.3,y0:0,y1:0};
+const _fbTrkCyl={x:0,z:0,r:2.2,y0:0,y1:0};
+const _fbPan=V3(0,0,1);
 function fireBullet(shooter,origin,dir,def,visMuzzle){
 // 出生保护清账 (2026-09-28 阶段三 P1): 开火立即解除落地保护 —— fireBullet 是玩家/Bot/炮位共用的
 // 唯一出膛口, 在这里清 = "无敌帧内不许输出"的单源保证 (载具/固定武器射手同样走这里, 字段不存在则空操作)。
@@ -211,6 +239,9 @@ if(shooter&&shooter.protUntil) shooter.protUntil=0;
 // 命中标识档位 (2026-09-30 批): 枪械/机炮档='mg' (无外框白X) —— 每发出膛即盖章, 顺带冲掉上一发
 // 爆炸/炮弹残留的档位戳 (击杀红档经 die 链读戳, 不冲会串档)。typeof 守卫: 21-match 在本文件之后装载。
 if(typeof markHitCls==='function') markHitCls('mg');
+// 真附身 (2026-11-01 → ★2026-11-03 两模式统一): 宿主 Bot 出膛 = 附身者的手在开枪 —— VM 后坐/枪口焰/微震镜
+// (20-player svHostFireFx)。视模式附身同样生效 (updateViewModel 门已在 24-main 放宽到 specViewHost, 反馈不再冻半路)。
+if(typeof player!=='undefined'&&player&&player.specViewHost&&player.specViewHost===shooter&&typeof svHostFireFx==='function') svHostFireFx(def);
 const maxD=400;
 const wr=raycastWorld(origin,dir,maxD);
 let wallD=wr?wr.dist:maxD;
@@ -221,14 +252,15 @@ let uwStop=false;
 if(uwD<wallD){ wallD=uwD; uwStop=true; }
 // 子弹可命中坦克/卡车: 阻挡弹道并溅火花, 重型子弹(vehDmg)刮掉少量装甲
 let hitTank=null, hitTruck=null, tankD=1e9, truckD=1e9;
+// 命中圆柱复用槽 (2026-11-01 性能批): 每发子弹×每辆坦/卡一个新对象 —— 射线只读字段, 两循环串行
 for(const t of tanks){
 if(!t.alive) continue;
-const r=rayCyl(origin,dir,vehHitCyl(t),wallD);
+const r=rayCyl(origin,dir,vehHitCyl(t,_fbCyl),wallD);
 if(r){ wallD=r.t; hitTank=t; tankD=r.t; }
 }
 for(const t of trucks){
 if(!t.alive) continue;
-const r=rayCyl(origin,dir,truckHitCyl(t),wallD);
+const r=rayCyl(origin,dir,truckHitCyl(t,_fbTrkCyl),wallD);
 if(r){ wallD=r.t; hitTruck=t; truckD=r.t; }
 }
 // 轻武器对空 (7c, Q3 裁定): 敌机是实体 —— **挡弹道**并刮血 (BF1942 同款生态位)。判定几何单源
@@ -249,13 +281,7 @@ if(typeof navalRayQuery==='function'){
 const nv=navalRayQuery(origin,dir,wallD,shooter);
 if(nv){ wallD=nv.t; hitNaval=nv.craft; navalD=nv.t; }
 }
-// 大舰 (2026-09-30 阶段五 P4): 与小艇同规 —— 只读查询收窄弹道终点 (舰体/上层建筑/炮塔是硬目标),
-//   扣血由文件尾部那一处 capitalBulletTest 单点施加 (与小艇"只扣一次"的既有口径一致, 不重复结算)。
-let hitCap=null, capD=1e9;
-if(typeof capitalRayQuery==='function'){
-const cv2=capitalRayQuery(origin,dir,wallD,shooter);
-if(cv2){ wallD=cv2.t; hitCap=cv2.ship; capD=cv2.t; }
-}
+// (2026-11-10: 大舰弹道只读收窄块随大舰子系统下架摘除)
 const sr=raySoldiers(origin,dir,wallD,shooter);
 let endD;
 if(sr){
@@ -288,6 +314,7 @@ sr.sol.damage(dmg,shooter,sr.head);
 // 旧版这里无条件 onPlayerHit 会**在同一帧把红档盖回白档**, 表现即"击中有表示、击杀却没有" (用户实报)。
 // 只对打活人出白档; 击杀档由 die() 单源负责。
 if(shooter.isPlayer&&sr.sol.alive) onPlayerHit(sr.sol,sr.head);
+else if(typeof player!=='undefined'&&player&&shooter===player.specViewHost&&sr.sol.alive&&typeof onPlayerHit==='function') onPlayerHit(sr.sol,sr.head);   // 真附身: 宿主命中同款白档 (无分, 2026-11-01)
 } else if(hitNaval&&navalD<=Math.min(tankD,truckD,planeD)){
 // 舰船是最近的硬目标: 弹道止于艇体 (命中特效归海战子系统自己的受创反馈, 与坦克的"刮火花"不同源, 不另加)。
 // 掉血在下面 navalBulletTest 单点完成 —— 那一行现在只承担"扣血", 不再承担"挡弹" (挡弹已由上面的只读查询做掉)。
@@ -301,6 +328,7 @@ const _ab=def.vehDmg>0?AIRMG_SCRATCH_MG:AIRMG_SCRATCH_SOL;
 hitPlane.takeDmg(rand(_ab[0],_ab[1])*(shooter.isPlayer?1:GROUNDGUN_VS_AIR),shooter);
 spawnP(PT.spark,hitPlane.pos.x,hitPlane.pos.y,hitPlane.pos.z,rand(-2,2),rand(-1,1),rand(-2,2),0.2,0,0.2,1,0,true);
 if(shooter.isPlayer&&typeof onPlayerHitVeh==='function') onPlayerHitVeh();
+else if(typeof player!=='undefined'&&player&&shooter===player.specViewHost&&typeof onPlayerHitVeh==='function') onPlayerHitVeh();   // 真附身: 宿主对空刮血同款白档 (2026-11-01)
 } else if(hitTank||hitTruck){
 endD=wallD;
 const hp2=V3(origin.x+dir.x*endD,origin.y+dir.y*endD,origin.z+dir.z*endD);
@@ -314,6 +342,7 @@ veh.takeDmg(def.vehDmg,shooter,def.atRifle);
 // 载具命中反馈 (2026-09-28 D7): 旧 Math.random()<0.2 的随机出声换成确定性档 (白标记 + 0.12s 节流音),
 // 函数在 21-match (与 onPlayerHit 同族) —— 消除"打了没反馈"的抽奖感; typeof 守卫同 21-match 惯例。
 if(shooter.isPlayer&&typeof onPlayerHitVeh==='function') onPlayerHitVeh();
+else if(typeof player!=='undefined'&&player&&shooter===player.specViewHost&&typeof onPlayerHitVeh==='function') onPlayerHitVeh();   // 真附身: 宿主刮装甲同款白档 (2026-11-01)
 }
 } else if(uwStop){
 // 弹道被水面截停: 溅水花, 不产生命中 (水面对子弹=硬遮蔽)
@@ -326,18 +355,16 @@ impactFX(wr.point,wr.normal,wr.kind);
 // 海战: 上面那条 if/else 链里的 wr/uwStop/maxD 都是"收窄前"的世界距离 ⇒ 若挡在中间的是艇体, 终点不得越过它
 // (曳光弹/超声压制都读 endD; 缺这一行会出现"弹道穿艇而过、只是艇掉了血")
 if(hitNaval&&navalD<endD) endD=navalD;
-if(hitCap&&capD<endD) endD=capD;   // 大舰同理: 挡在中间的舰体不得被弹道穿过 (曳光/压制都读 endD)
 // 海战批 (§11.9④): 子弹对艇 —— 命中则扣血 (减速口径与坦克同源), 判定全在 15d-naval。
 // 2026-09-26 起这一行**只扣血**: "弹道止于艇体"改由上面的只读 navalRayQuery 在裁决前收窄 wallD 完成
 // (否则艇后的人会与艇一起挨这一弹)。这里的 maxD=endD 天然与那次裁决一致: 艇最近时 endD==艇体距离 (同一枚胶囊,
 // t 被 clamp 到 maxD, 命中点仍然落在艇面上), 艇不最近时 endD 已被前面的目标截短 ⇒ 本行查不到它。
 if(typeof navalBulletTest==='function'){ navalBulletTest(origin,dir,endD,shooter,def.vehDmg||0); }
-if(typeof capitalBulletTest==='function'){ capitalBulletTest(origin,dir,endD,shooter,def.vehDmg||0); } // P4: 大舰同理 —— 只扣血, 弹道止于舰体已由上面的只读查询完成
 if(Math.random()<1/(def.tracer||3)) spawnTracer(origin.clone().addScaledVector(dir,1.2),dir,Math.max(1,endD-1.5),shooter); // 4参=射手 (2026-09-27M 时停: 玩家自己的曳光照飞, AI 的随战场冻住)
 if(visMuzzle) muzzleFXWorld(visMuzzle,dir);
 const dCam=origin.distanceTo(camera.position);
 const rv=camRight();
-const pan=clamp(rv.dot(V3(origin.x-camera.position.x,0,origin.z-camera.position.z).normalize()),-1,1);
+const pan=clamp(rv.dot(_fbPan.set(origin.x-camera.position.x,0,origin.z-camera.position.z).normalize()),-1,1);
 if(!shooter.isPlayer) AudioSys.gunshot(def.snd,dCam,pan*0.7);
 if(!shooter.isPlayer&&shooter.team!==player.team&&player.alive){
 const relX=player.pos.x-origin.x, relY=player.pos.y+1.5-origin.y, relZ=player.pos.z-origin.z;
@@ -394,6 +421,7 @@ const dh=(dy||0);
 return V3((tx-ox)/tof,(dh+0.5*9.8*tof*tof)/tof,(tz-oz)/tof);
 }
 function emplMortarShell(mo,shooter,tx,tz){
+if(shooter&&shooter.protUntil) shooter.protUntil=0; // 出生保护清账 (★2026-11-01 判定批, 与 fireBullet"开火即解除"同契约)
 const dH=Math.hypot(tx-mo.x,tz-mo.z);
 const tof=mortarArcTof(dH);
 const dy=(heightAt(tx,tz)+0.05)-(mo.y+0.25);   // 弹体出膛于炮口 (mo.y+0.25), 落点判据=地面+0.05
@@ -407,7 +435,8 @@ spawnP(PT.dark,mo.x,mo.y+0.4,mo.z,0,1.4,0,0.5,1.6,0.6,0.5,0.2);
 // 反坦克炮: 单源开炮 (炮口前移统一 2.7、弹壳出生 g.y —— 旧 Bot +0.25/2.6 vs 玩家 +0.25/2.7 分叉已统一);
 // 弹速引 SHELL_SPD (15-vehicles 常量, B7a 单源化同口径); LOS 检查只 Bot 需要, 留在 Bot 调用方
 function emplATFire(g,shooter,dir){
-g.cd=5.2+rand(0,1.4); // 炮上冷却, 换人不重置
+if(shooter&&shooter.protUntil) shooter.protUntil=0; // 出生保护清账 (★2026-11-01 判定批, 与 fireBullet"开火即解除"同契约)
+g.cd=3.6+rand(0,0.8); // 炮上冷却, 换人不重置 (CD优化降至3.6+rand(0,0.8))
 const o=V3(g.x,g.y,g.z).addScaledVector(dir,2.7);
 shooter._src='反坦克炮';
 AudioSys.cannon(o.distanceTo(camera.position));
@@ -437,6 +466,33 @@ thrower,team:thrower.team,spin:V3(rand(-6,6),rand(-6,6),rand(-6,6)),bounces:0,at
 // 只认敌方**步兵**: ① 普通手雷无坦克伤害圈 (既有裁定), 撞载具即炸是白炸; ② 在座乘员 (seatShielded)
 // 不是可命中目标 (与命中管线同口径), 与载具同理整机交给反坦克炸药 (它有 2.6m 触发圈)。
 // 时停/预演同吃: 纯函数 + 只读, 无副作用 (预演逐帧调它, 不许出声/出粒子)。
+// ★2026-11-03 死亡掉雷批 (用户裁定"死亡时手里捏的雷掉落在原地, 并继承读条时间"):
+// 死亡瞬间手里那颗就地脱手 —— 位置=胸口带微抖, 速度=小抛落 (照常翻滚/弹跳), 弹种/归属/队伍/击杀账
+// 与出手件完全同链 (throwNade 单源; 死者照记击杀, 与"死亡弹道留存"同规, 见 verify-deathflight)。
+// 引信继承读条: 普通雷带 nadeFuse **余值** (举起即烧的厨雷账, 20-player 每帧烧减; 烧到 0 = 已武装 ⇒
+// 掉地即炸, 与持雷"武装+接触"双条件一致); 烟雾/燃烧/反坦克无厨雷账 (nadeFuse=99 哨兵),
+// 掉落带各自标准引信 —— **绝不把哨兵 99 带出去** (否则引信到点永不武装, 掉落即哑弹)。
+// Bot 前摇 (14-bots state 'nade'/'atnade', nadeAnimT 0.8→0) 同语义按比例继承: 掉落引信 = 全长 × 前摇剩余比
+// —— 前摇越接近出手被杀, 尸体上的雷越烫 (杀进投掷前摇的贴脸击杀要吃这口爆)。
+// 保险丝: 载具内死亡不落雷 (登车路径本就会收雷, 这里只兜"车里捏雷"的账目残留; 2026-11-10 大舰项随大舰子系统下架摘除)。
+// 调用方: 玩家 die() (18-game, 持雷+出手弧两态) / Bot die() (14-bots, 前摇两态)。受创>25 打断**不掉**
+// (人没死, 雷收回 —— 与 2026-10-25 打断网口径一致)。
+function dropHeldNade(u){
+if(!u||!u.pos) return;
+if(u.onVehicle||u.onNaval) return;
+const o=u.pos.clone(); o.y+=1.15; o.x+=rand(-0.15,0.15); o.z+=rand(-0.15,0.15);
+const v=V3(rand(-0.9,0.9),1.3,rand(-0.9,0.9));
+if(u.isPlayer){
+if(u.nadeIsAT) throwNade(u,o,v,1.6,true);
+else if(u.nadeIsSmoke) throwNade(u,o,v,1.8,false,true);
+else if(u.nadeIsIncin) throwNade(u,o,v,1.6,false,false,true);
+else { u._src='手雷'; throwNade(u,o,v,Math.max(0,u.nadeFuse||0)); }
+}else{
+const rem=clamp((u.nadeAnimT||0)/0.8,0,1);   // 0.8 = 14-bots 三处前摇字面量 (state 置位时的 nadeAnimT 初值)
+if(u.state==='atnade'){ u._src='反坦克雷'; throwNade(u,o,v,1.6,true); }
+else { u._src='手雷'; throwNade(u,o,v,3.4*rem); }
+}
+}
 function nadeContactTarget(x,y,z,team,thrower){
 if(typeof soldiers==='undefined') return null;
 for(const s of soldiers){
@@ -456,6 +512,20 @@ return null;
 // ★2026-09-30 批2 (用户裁定"保留计时, 但只有触地或命中合法目标才爆炸"): 引信到点**不再**返回 'blow',
 //   而是转入"武装完成"——引爆一律要"武装 + 接触"双条件 (见函数尾触发判据)。于是普通手雷没有空炸,
 //   举雷期引信烧到 0 也不炸手; 反坦克炸药/航弹/迫击炮弹 (armOnFuse 假) 出手即武装, 行为与老口径等价。
+// ── nadeStep 逐帧账复用 (2026-11-01 性能批) ──
+// 盒候选回调提升 (旧版每雷每帧 1 个捕获闭包, bounced/nx/ny/nz/st 经 _ndBoxCtx 传递;
+// 回调体内无重入路径)。(_ndL/_ndW 模块级 scratch 2026-11-10 随大舰超结构反弹块下架一并摘除)
+const _ndBoxCtx={st:null,nx:0,ny:0,nz:0,bounced:false};
+function _ndBoxCb(b){
+const C=_ndBoxCtx;
+if(C.bounced) return;
+if(C.nx>b.minX-0.06&&C.nx<b.maxX+0.06&&C.ny>b.minY-0.06&&C.ny<b.maxY+0.06&&C.nz>b.minZ-0.06&&C.nz<b.maxZ+0.06){
+const dl=Math.min(C.nx-b.minX,b.maxX-C.nx), dv=Math.min(C.ny-b.minY,b.maxY-C.ny), dd=Math.min(C.nz-b.minZ,b.maxZ-C.nz);
+if(dv<=dl&&dv<=dd){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; }
+else if(dl<=dd){ C.st.vel.x*=-0.5; } else { C.st.vel.z*=-0.5; }
+C.bounced=true;
+}
+}
 function nadeStep(st,dt){
 st.fuse-=dt;
 st.vel.y-=9.8*dt;
@@ -482,18 +552,11 @@ let nx=st.pos.x+st.vel.x*dt, ny=st.pos.y+st.vel.y*dt, nz=st.pos.z+st.vel.z*dt;
 let bounced=false;
 // 2026-09-06 B5/P0-2: 手雷撞盒全量扫描改 RGRID 邻近候选 (±0.06 判定 + 0.02 采样余量);
 // 原实现命中首个盒即 break —— 以 bounced 旗复刻, 候选次序差异由等价探针覆盖
-eachBoxNear(nx-0.08,nz-0.08,nx+0.08,nz+0.08,b=>{
-if(bounced) return;
-if(nx>b.minX-0.06&&nx<b.maxX+0.06&&ny>b.minY-0.06&&ny<b.maxY+0.06&&nz>b.minZ-0.06&&nz<b.maxZ+0.06){
-const dl=Math.min(nx-b.minX,b.maxX-nx), dv=Math.min(ny-b.minY,b.maxY-ny), dd=Math.min(nz-b.minZ,b.maxZ-nz);
-if(dv<=dl&&dv<=dd){ st.vel.y*=-0.4; st.vel.x*=0.7; st.vel.z*=0.7; }
-else if(dl<=dd){ st.vel.x*=-0.5; } else { st.vel.z*=-0.5; }
-bounced=true;
-}
-});
+{const C=_ndBoxCtx; C.st=st; C.nx=nx; C.ny=ny; C.nz=nz; C.bounced=false;
+eachBoxNear(nx-0.08,nz-0.08,nx+0.08,nz+0.08,_ndBoxCb);
+bounced=C.bounced;}
 // 反坦克炸药/航弹/迫击炮弹的载具触发圈: 2.6m 内即算"接触" (老口径; 它们出手即武装, 由下面统一收口)
-// hitVehY (2026-10-01b): 大舰甲板接触时 = 爆点高度 (甲板面) —— 触发回写 st.pos 用它, 否则爆点沉进舰体
-let hitVeh=false, hitVehY=null;
+let hitVeh=false;   // (2026-11-10: hitVehY 随大舰甲板接触账下架摘除, 原文见 archive/naval-coral-ironbottom-20261110/)
 if(st.at||st.bomb||st.mortar){
 for(const t of tanks){
 if(!t.alive||t.team===st.team) continue;
@@ -509,72 +572,15 @@ if(!hitVeh&&typeof navalCraft!=='undefined') for(const c of navalCraft){
 if(!c||!c.alive||c.team===st.team||c.state==='sinking'||c.state==='wreck') continue;
 if(Math.hypot(nx-c.pos.x,nz-c.pos.z)<2.6&&ny<c.pos.y+2.6){ hitVeh=true; break; }
 }
-// 大舰甲板接触 (2026-10-01b): 弹在舰体矩形内且降到甲板面附近 ⇒ 在甲板面高度引爆 ——
-//   不补这条, 对舰投弹会穿过飞行甲板/主甲板直落海里 (入水哑火), 航弹对大舰完全无效。
-//   ★2026-10-01d: 带顶 +2.6 → +0.25 (与 capitalSolidAt 同一口径"甲板上空是空域") —— 旧值让航弹在
-//   离甲板还有 2.6m 的半空就炸 (用户口径: 没有接触不炸); 0.25 容差足够吃住高速落弹的穿帧。
-if(!hitVeh&&typeof capitalShips!=='undefined'&&typeof capDeckOf==='function'){
-const s=capDeckOf(nx,nz);
-if(s&&s.alive&&s.team!==st.team&&ny<s.pos.y+s.deck.y+0.25){ hitVeh=true; hitVehY=s.pos.y+s.deck.y; }
+// (2026-11-10: 大舰甲板接触块随大舰子系统下架摘除)
 }
-}
-// 大舰实体接触 (2026-10-01c, 用户复报"手雷、巡飞弹等命中大船会穿过去"): **全弹种、不分敌我** ——
-//   旧版只在 at/bomb/mortar 档生效且只认敌舰甲板矩形: 普通手雷/烟雾/燃烧直穿舷侧与甲板 (舰体
-//   对它们不存在), 扔己方甲板的雷更是直接落海哑火。现在走 capitalSolidAt 单源 (点查询, 舰体矩形
-//   比甲板大一圈 ⇒ 舷侧也拦; 不分敌我 —— 自己甲板也是陆地); 爆点/落点高度 = surf (甲板带内=
-//   甲板面, 舷侧低处夹回水线+1)。上面载具触发圈的敌我判定维持旧口径不动。
-if(!hitVeh&&typeof capitalSolidAt==='function'){
-const cs=capitalSolidAt(nx,ny,nz);
-if(cs){ hitVeh=true; hitVehY=cs.surf; }
-}
-// 甲板建筑 (超结构) 实体 (★2026-10-03 修"手雷等实体穿甲板上的建筑"): 桥楼/烟囱/炮塔盒
-//   (capSuperSolidAt, 舰局部 slab) —— capitalSolidAt 的"甲板上空是空域"豁免让弹从超结构正中穿过。
-//   武装弹 (反坦克/航弹/迫击炮, 撞墙即炸档) 触盒即炸, 爆点=命中点高度 (hitVehY=ny);
-//   未武装表内弹 (手雷/烟雾/燃烧) 在舰局部空间按最小穿透轴弹出反弹 (与地面盒 eachBoxNear 同款:
-//   y 轴 ×-0.4 全阻尼 / 侧轴 ×-0.5), 并把候选点弹回盒外 —— 不许它穿进桥楼里等引信。
-const _ndL={x:0,z:0}, _ndW={x:0,z:0};
-if(!hitVeh&&typeof capSuperSolidAt==='function'){
-const ss=capSuperSolidAt(nx,ny,nz);
-if(ss){
-if(st.at||st.bomb||st.mortar){ hitVeh=true; hitVehY=ny; }
-else{
-const s=ss.ship, b=ss.b, c=Math.cos(s.yaw), n=Math.sin(s.yaw);
-capToLocal(s,nx,nz,_ndL);
-const lvx=st.vel.x*c-st.vel.z*n, lvz=st.vel.x*n+st.vel.z*c;   // 世界→局部速度 (capToLocal 同式)
-const lx=_ndL.x, ly=ny-s.pos.y, lz=_ndL.z;
-const px=(b.hw+0.06)-Math.abs(lx-b.lx), py=(b.hh+0.06)-Math.abs(ly-b.ly), pz=(b.hd+0.06)-Math.abs(lz-b.lz);
-let nlx=lx, nly=ly, nlz=lz;
-if(py<=px&&py<=pz){ nly=ly>b.ly?b.ly+b.hh+0.061:b.ly-b.hh-0.061; st.vel.y*=-0.4; st.vel.x*=0.7; st.vel.z*=0.7; }
-else if(px<=pz){ nlx=lx>b.lx?b.lx+b.hw+0.061:b.lx-b.hw-0.061; lvx*=-0.5; }
-else{ nlz=lz>b.lz?b.lz+b.hd+0.061:b.lz-b.hd-0.061; lvz*=-0.5; }
-st.vel.x=lvx*c+lvz*n; st.vel.z=-lvx*n+lvz*c;                  // 局部→世界 (capToWorld 同式)
-if(st.spin) st.spin.multiplyScalar(0.6);
-capToWorld(s,nlx,nlz,_ndW);
-// 改写候选点 (不是 st.pos —— 尾部默认回写会用它): 下游 gh/touchG/入水判据/尾部落账全部
-// 统一用弹出后的点, 否则本步结尾 st.pos.set(nx,...) 又把弹写回盒里 (T15 二轮红根因)。
-nx=_ndW.x; ny=s.pos.y+nly; nz=_ndW.z;
-bounced=true;
-}
-}
-}
-// 未武装的表内弹 (手雷/烟雾/燃烧, 引信未到) 落到甲板上: 甲板面休息/弹跳 (与触地同款衰减),
-//   不许它穿进舰体内部等引信 —— 武装后第一次接触即在此甲板面引爆 (上面 armed 分支收口)。
-if(hitVeh&&hitVehY!==null&&!st.at&&!st.bomb&&!st.mortar&&ny<hitVehY+0.08&&st.vel.y<0){
-st.pos.set(nx,hitVehY+0.05,nz);
-if(st.vel.y<-0.5) bounced=true;
-st.vel.y*=-0.38; st.vel.x*=0.68; st.vel.z*=0.68;
-if(st.spin) st.spin.multiplyScalar(0.6);
-}
+// (2026-11-10: 未武装弹大舰甲板弹跳块随大舰子系统下架摘除)
 const gh=heightAt(nx,nz);
 // 入水哑火 (2026-09-18 塔拉瓦批): 落进 >0.6m 深的水里即失效 (水花+气泡由调用方出), 不产生爆炸伤害 ——
 // 于是"往水里扔手雷"炸不到潜水者; 浅水(<0.6m)照旧落地爆炸。**必须排在触发引信之前** ——
 // 深水里的底在 gh, 若先判触地, 弹体就会在海底引爆 (潜水者反被炸)。
-// ★顺序细节 (2026-10-01b): 大舰甲板接触 (hitVehY) 优先于哑火 —— 甲板面在水面上 12~17m,
-//   触发回写的爆点也在甲板面; 不让"贴舷的弹尚未过水面就被判进水"误哑。
-if(hitVehY===null){
 const wy=waterYAt(nx,nz);
 if(wy>-1e8&&Math.max(ny,gh+0.05)<wy&&waterDepthAt(nx,nz)>0.6){ st.pos.set(nx,Math.max(ny,gh+0.05),nz); return 'fizzle'; }
-}
 // ★触发判据 (2026-09-30 批2, 单源, 用户裁定): 武装完成 **且** 接触 ⇒ 该点即爆点, 立即引爆。
 //   武装完成: 表内弹种 (手雷/烟雾/燃烧) = 引信到点 —— 举雷期间引信照烧, 烧到 0 手里那颗也不炸 (无接触),
 //     只是出手后"第一次碰到什么就炸什么"; 表外 (反坦克炸药/航弹/迫击炮弹) = 出手即武装。
@@ -585,8 +591,7 @@ const armed=!st.armOnFuse||st.fuse<=0;
 const touchG=ny<=gh+0.05;
 if(armed){
 const touchT=st.armOnFuse?!!nadeContactTarget(nx,ny,nz,st.team,st.thrower):false;
-// 爆点高度: 大舰甲板接触 = 甲板面 (hitVehY), 其余照旧贴地 (2026-10-01b; gh 在海图是海床, 不能用)
-if(touchG||touchT||hitVeh||(!st.armOnFuse&&bounced)){ st.pos.set(nx,(hitVehY!==null?hitVehY+0.1:Math.max(ny,gh+0.05)),nz); return 'blow'; }
+if(touchG||touchT||hitVeh||(!st.armOnFuse&&bounced)){ st.pos.set(nx,Math.max(ny,gh+0.05),nz); return 'blow'; }
 }
 if(touchG){
 st.pos.y=gh+0.05;
@@ -604,6 +609,7 @@ function updateNades(dt,rdt){
 // 否则引信在冻结期间照跑 (旧版 dt=0 时 fuse 不动, 但观战者扔出的弹壳会冻在半空) 且 nades 表项常驻。
 // 物理全在 nadeStep (单源, 与预演共用); 本函数只做**副作用**: 引爆/水花/音效/网格同步/威胁提示。
 const ND=(typeof specTimeShotDt==='function')?specTimeShotDt:null;
+let nearNadeMin=Infinity;
 for(let i=nades.length-1;i>=0;i--){
 const n=nades[i];
 const ndt=ND?ND(n.thrower,rdt,dt):dt;
@@ -619,7 +625,14 @@ if(!(n.at||n.bomb||n.mortar)&&n.bounces++<4) AudioSys.nadeBounce(n.pos.distanceT
 }
 n.m.position.copy(n.pos);
 n.m.rotation.x+=n.spin.x*ndt; n.m.rotation.y+=n.spin.y*ndt; n.m.rotation.z+=n.spin.z*ndt;
-if(n.team!==player.team&&player.alive&&n.pos.distanceTo(player.pos)<7) nadeWarnT=0.2;
+if(n.team!==player.team&&player.alive&&!n.smokeN){
+const nd=n.pos.distanceTo(player.pos);
+if(nd<7&&nd<nearNadeMin) nearNadeMin=nd;
+}
+}
+if(nearNadeMin<7){
+nadeWarnT=0.2;
+nadeMinDist=nearNadeMin;
 }
 }
 function nadeExplode(n){
@@ -636,8 +649,11 @@ if(typeof markHitCls==='function') markHitCls('explo'); // 命中标识档: 投�
 if(n.mortar){
 explosionFXSmall(n.pos);
 AudioSys.explosion(n.pos.distanceTo(camera.position)*0.85);
-splashDamage(n.pos,n.thrower,n.team,7.5,135,150,false,'explo');
-damageStructures(n.pos,7,210,n.thrower);   // 4参 = 破坏得分归属 (2026-09-26 破坏得分批)
+// ★2026-10-30 迫击炮削弱 (用户裁定⑤"标准档+半径5.25+伤害≤100"): 半径 7.5→5.25m (原为手雷圈的1.36倍,
+//   现与手雷/反坦克炸药 5.5 同级偏小), 步兵 135→100 (中心命中满血不再一击致死, 边缘由衰减进一步收敛);
+//   载具 150 与 ap=false 不动 (对装甲本来刮痧); 结构半径随爆径同比例 7→5 (伤害 210 不动)。
+splashDamage(n.pos,n.thrower,(n.thrower&&n.thrower.spectator)?-1:n.team,5.25,100,150,false,'explo'); // team: 2026-11-09 观战中立批 —— 观战者本尊的手持迫击炮无差别, Bot 迫击炮不动; 不在弹体上盖章, 保住敌雷接近警告与载具触发圈的旧口径
+damageStructures(n.pos,5,210,n.thrower);   // 4参 = 破坏得分归属 (2026-09-26 破坏得分批)
 crater(n.pos.x,n.pos.z,1.3,true);
 return;
 }
@@ -646,7 +662,7 @@ spawnP(PT.flash,n.pos.x,n.pos.y+0.4,n.pos.z,0,2,0,2.4,15,0.14,1,0,true);
 for(let i=0;i<7;i++) spawnP(PT.dark,n.pos.x,n.pos.y+0.4,n.pos.z,rand(-2,2),rand(1,4),rand(-2,2),1.0,2.4,rand(0.8,1.4),0.85,0.6);
 AudioSys.explosion(n.pos.distanceTo(camera.position));
 // 爆圈 5→5.5 (2026-09-30 批, 用户裁定"微量增加手雷爆炸范围"; 反装甲全额/伤害表不动)
-splashDamage(n.pos,n.thrower,n.team,5.5,95,340,true,'explo'); // 反坦克炸药: 反装甲全额
+splashDamage(n.pos,n.thrower,-1,5.5,95,340,true,'explo'); // 反坦克炸药: 反装甲全额; team=-1 = 2026-11-09 用户裁定"投掷手雷中立" (与地雷/油桶同约定; 仅爆炸伤害中立, 触发引信仍只认敌方)
 damageStructures(n.pos,5,130,n.thrower);
 crater(n.pos.x,n.pos.z,1.1,true);
 } else if(n.bomb){
@@ -660,7 +676,7 @@ damageStructures(n.pos,12,460,n.thrower);
 crater(n.pos.x,n.pos.z,2.4,true);
 explodeAt(n.pos,n.thrower);
 } else {
-explodeAt(n.pos,n.thrower);
+explodeAt(n.pos,n.thrower,undefined,true);   // noFF (2026-11-09 用户裁定"投掷手雷中立"): 普通手雷爆炸伤双方; 触发引信仍只认敌方, 自炸(s!==attacker)照旧
 }
 }
 // attacker 可为 null = **无主爆炸** (2026-09-25 修): 钢水包等场景破坏物 g.onDead 就是叠了 null 调进来的
@@ -668,7 +684,7 @@ explodeAt(n.pos,n.thrower);
 // 第一个存活单位就抛 TypeError, 异常被 05-world 的 try/catch 吞掉 ⇒ 现象是"爆了但周围零伤害、火区也不生成"。
 // 全链其余环节本来就支持无主 (18-game damage/die 用 `if(attacker)` 守卫、04b igniteCell 写 FATT=attacker||null),
 // 所以这里只需同规守卫: 无主时不做友军免伤、不做威胁广播 (与 splashDamage 的"无主=对双方生效"一致)。
-function explodeAt(p,attacker,R){
+function explodeAt(p,attacker,R,noFF){   // noFF (2026-11-09 投掷手雷中立批): 跳过同队免伤 —— 仅手雷 frag 分支传 true; boomer殉爆/航弹叠爆/钢水包/丧尸链不传=旧口径
 // 爆圈半径 (2026-09-30 批, 用户裁定"微量增加手雷爆炸范围"): 缺省 NADE_BLAST_R=10 (旧 9, 00-config 单源);
 // 航弹分支的叠爆/场景破坏物殉爆同吃此缺省 —— 航弹主伤圈是上面 splashDamage 的 13, 这里只微涨边缘。
 R=R||NADE_BLAST_R;
@@ -678,7 +694,8 @@ AudioSys.explosion(p.distanceTo(camera.position));
 if(typeof markHitCls==='function') markHitCls('explo');
 let _fbAny=false;
 damageStructures(p,4.5,45,attacker);   // 手雷/巡飞弹/自爆共用: 归属交给击毁者 (无主则不加分)
-for(const s of combatants){
+const victims=combatants.slice();
+for(const s of victims){
 if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员 (旧版只认 onVehicle)
 const d=Math.hypot(s.pos.x-p.x,(s.pos.y+0.9)-p.y,s.pos.z-p.z);
 if(d<R){
@@ -686,7 +703,7 @@ const dir=V3(s.pos.x-p.x,s.pos.y+0.9-p.y,s.pos.z-p.z).normalize();
 const block=raycastWorld(V3(p.x,p.y+0.25,p.z),dir,d);
 let dmg=(1-d/R)*135;
 if(block&&block.dist<d-0.5) dmg*=0.25;
-if(attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;
+if(!noFF&&attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;
 if(dmg>2){
 s.damage(dmg,attacker,false);
 if(s.isPlayer){ addTrauma(clamp(dmg/60,0.3,1)); }
@@ -734,12 +751,16 @@ const mesh=buildLoiterMesh();
 mesh.position.copy(origin);
 scene.add(mesh);
 const d={ pos:origin.clone(), yaw:shooter.yaw, pitch:shooter.pitch, mesh,
-owner:shooter, team:shooter.team, life:24, t:0, spd:13, trail:0, dead:false, grace:0.8 };
+owner:shooter, team:shooter.team, life:24, lifeMax:24, t:0, spd:13, trail:0, dead:false, grace:0.8 };
 player.loiter=d;
-// 吞掉发射时按住的鼠标: 松开后左键才重新作为"自爆"/右键才作为"加速"触发, 避免刚出膛就误操作
-player._ltClick=true; player._ltRClick=true;
+// 吞掉发射时按住的鼠标与空格: 松开后左键才重新作为"自爆"/空格才作为"加速"触发, 避免刚出膛就误操作 (2026-11-06 加速键右键→空格)
+player._ltClick=true; player._ltRClick=true; player._ltSpace=!!keys.Space;
+// ★2026-11-07 实机反馈批 (用户裁定③ "H键飞行自动切换为悬停"): 气动飞行中发射 ⇒ 就地切悬停并清速度 ——
+// 操控期间本体定身 (updatePlayer 制导分支), 消灭旧写"操控中本体继续 specFlightMove 沿视线 40m/s 前飞"
+// (= 用户实报"巡飞弹视角内自己一个人向前飞出"); _aeroSpd 一并清零, 退场后再按 H 从巡航 13 起步不吃残 40。
+if(shooter.flying&&shooter.flyAero){ shooter.flyAero=false; shooter.vel.set(0,0,0); shooter._aeroSpd=0; }
 player.loiterView=0;
-d.mesh.visible=false; // 默认弹头第一视角: 隐藏弹体 (F 切第三人称时恢复显示)
+d.mesh.visible=!(shooter.alive&&!player.loiterView); // 初始可见性 = 单写者同式 (updateLoiters 逐帧接管, 2026-11-05 批): TV档默认藏, 真观战(alive=false)出膛即可见
 VM.root.visible=false;
 const ov=document.getElementById('tvOv');
 if(ov) ov.style.display='block';
@@ -747,9 +768,12 @@ loiterEng.update(150,0.2);
 if(!shooter.spectator) gunEvents.push({x:origin.x,z:origin.z,team:shooter.team,t:nowT,shooter}); // 观战发射不上报枪声
 return d;
 }
+// 巡飞弹前向复用槽 (2026-11-01 性能批): 两处调用 (updateLoiters 每帧 / updateCamera 巡飞视角每帧)
+// 都在本帧内串行消费, 不跨调用持有 —— 旧版每帧 1~2 个新 V3。
+const _loF=V3(0,0,1);
 function loiterForward(d){
 const cp=Math.cos(d.pitch);
-return V3(-Math.sin(d.yaw)*cp, Math.sin(d.pitch), -Math.cos(d.yaw)*cp);
+return _loF.set(-Math.sin(d.yaw)*cp, Math.sin(d.pitch), -Math.cos(d.yaw)*cp);
 }
 // 不分敌我溅射: 圈内所有步兵(含发射者与友军)、坦克/卡车/飞机(含友军)一律受伤
 // 溅射单源 (2026-09-06 B7b/P2-6: 旧 splashDamage(15-vehicles,队伤) 与 splashDamageFF(13-combat,无差别) 90% 同构合并;
@@ -762,7 +786,8 @@ const vehFloor=ff?20:10;
 if(typeof markHitCls==='function') markHitCls(fbCls||'explo');
 const _fbP=attacker&&attacker.isPlayer;
 let _fbAny=false;
-for(const s of combatants){
+const victims=combatants.slice();
+for(const s of victims){
 if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员 (旧版只认 onVehicle)
 if(!ff&&s.team===team&&s!==attacker) continue; // 不误伤队友, 但炸自己会受伤
 const d=Math.hypot(s.pos.x-p.x,(s.pos.y+0.9)-p.y,s.pos.z-p.z);
@@ -799,7 +824,7 @@ if(d<radius+planeHitR(pl)){ pl.takeDmg(lerp(dmgVeh,20,d/(radius+planeHitR(pl))),
 }
 if(_fbAny&&typeof onPlayerHitAny==='function') onPlayerHitAny(fbCls||'explo');
 if(typeof navalSplash==='function') navalSplash(p,attacker,team,radius,dmgMax,dmgVeh,ap,fbCls); // 海战批 (§11.9④): 溅射对艇 —— 衰减口径与上面的坦克圈逐式对齐, 逻辑全在 15d-naval (既有函数体一行未动)
-if(typeof capitalSplash==='function') capitalSplash(p,attacker,team,radius,dmgMax,dmgVeh,ap,fbCls); // P4 (2026-09-30): 溅射对大舰 —— 用**舰体胶囊表面距离**衰减 (150m 的舰按中心距算等于永远炸不到), 逻辑全在 15h
+// (2026-11-10: 溅射对大舰 capitalSplash 钩随大舰子系统下架摘除)
 if(player.alive&&p.distanceTo(camera.position)<18) addTrauma(0.5);
 }
 function updateLoiters(dt,rdt){
@@ -811,8 +836,8 @@ if(!d||d.dead) return;
 const ldt=(typeof specTimeShotDt==='function')?specTimeShotDt(d.owner,rdt,dt):dt;
 if(!(ldt>0)) return;                 // 世界冻结且这枚不属于玩家 ⇒ 整枚停住 (不推进也不判定)
 d.t+=ldt; d.life-=ldt;
-// 右键加速: 尾推引擎全速冲刺 (3×巡航 13=40 m/s), 松开后回落到巡航速度 (转向角速度不变, 高速下盘旋半径更大)
-const boost=mouse2Down&&!player._ltRClick;
+// 空格加速 (2026-11-06 右键→空格, 右键让位开镜放大): 尾推引擎全速冲刺 (3×巡航 13=40 m/s), 松开后回落到巡航速度 (转向角速度不变, 高速下盘旋半径更大)
+const boost=keys.Space&&!player._ltSpace;
 d.spd=dampF(d.spd, boost?40:13, boost?2.2:3.0, ldt);
 // ── TV制导 (2026-09-28 重做): 鼠标增量**直接**转成弹体姿态, 逐帧限角速度; 超出的增量**丢弃**。 ──
 // 用户实报: "现在巡飞弹转向十分生硬还随机失控，原因不明。" 原因就是旧版这两行 ——
@@ -822,13 +847,19 @@ d.spd=dampF(d.spd, boost?40:13, boost?2.2:3.0, ldt);
 //   松手后弹体仍朝那个角继续拐 (甩过头就"自己拐", 玩家读作"随机失控")。
 // 现在: 视角与弹体是**同一个量** —— 鼠标直接掰弹体的角 (即时响应), 只有超出角速度上限的部分被丢。
 // 单源: 19-input 在制导期间只把 movementX/Y 记进 player.tvDX/tvDY (不再碰本体 yaw/pitch), 这里消费并清零。
-const sens=0.0022*((typeof SETTINGS!=='undefined'&&SETTINGS.sens)||1)*(85/74); // TV 视场 85 vs 步行 74: 屏幕位移手感一致
+const sens=0.0022*((typeof SETTINGS!=='undefined'&&SETTINGS.sens)||1)*(camera.fov/74); // TV 视场 85 vs 步行 74: 屏幕位移手感一致; 2026-11-06 改跟当前 fov (右键开镜 fov 30 时灵敏度等比收窄, 过渡平滑)
 const rateYaw=2.5, ratePitch=1.9;                    // 角速度上限 (旧 1.9/1.4 太钝; 仍留油门感: 冲刺 40m/s 时盘旋半径更大)
 d.yaw+=clamp(-(player.tvDX||0)*sens,-rateYaw*ldt,rateYaw*ldt);
 d.pitch+=clamp(-(player.tvDY||0)*sens,-ratePitch*ldt,ratePitch*ldt);
 player.tvDX=0; player.tvDY=0;
 d.pitch=clamp(d.pitch,-1.2,1.2);                     // 弹体俯仰包线 (与旧版对目标角的上限同档)
-player.yaw=d.yaw; player.pitch=clamp(d.pitch,-1.45,1.45); // 本体姿态跟随弹体 ⇒ 退出 TV 视角时画面不跳
+// ★2026-11-05 实机反馈批 (用户实报"巡飞弹视角内转向会带着本体一起转向"): 制导期间**不再**把弹体姿态
+//   持续回写成本体角 (旧版这里两行 = 弹体角每帧覆写本体角, 本体全程跟着弹体转向 —— 本体第三人称/
+//   附身呈现层里看得见原地转圈, WASD 移动方向也被弹体朝向带跑)。
+// ★2026-11-06 二次裁定 (用户实报"引爆/消失后玩家朝向仍是弹体末向, 应为发射时朝向"): 11-05 批据此
+//   反馈加的"退场一次性对齐"(detonate/despawn 清账行把本体角对到弹体末态) 同日撤销 —— 退场只清账,
+//   本体角自发射起纹丝不动, 引爆/静默消失/T 弃弹三路退场后都停在**发射时朝向** ("退出画面不跳"原意
+//   让位于"本体朝向不被弹体污染"; 退场瞬间视角从弹体末向跳回本体 = 裁定直接结果, 有意为之)。
 // (旧版那句 `-0.06*ldt` 的"轻微低头"删掉: 它靠"弹体追本体角"这个闭环才有界, 改成鼠标直控后会变成
 //  每秒 3.4° 的持续下沉 —— 玩家得一直往上拽鼠标, 正是"生硬"的一部分。)
 const dir=loiterForward(d);
@@ -852,16 +883,9 @@ if(d.pos.y<gh+0.35) d.pos.y=gh+0.35;
 let hitD=step+0.45, hitTank=null, hitSol=null, hitPlane=null, hit=null;
 const wr=raycastWorld(d.pos,dir,hitD);
 if(wr){ hitD=wr.dist; hit=wr; }
-// 大舰实体 (2026-10-01c, 用户复报"巡飞弹命中大船会穿过去"): 舰体命中盒+甲板面+舷侧胶囊,
-//   不分敌我 (友军舰体同样挡弹, 与坦克/士兵同口径) —— 命中即按爆点起爆, 舰体伤害走
-//   loiterDetonate → explodeAt → capitalSplash 既有链。
-if(typeof capitalRayHit==='function'){
-const cr=capitalRayHit(d.pos,dir,hitD,-1,0);
-if(cr&&cr.t<hitD){ hitD=cr.t; hitTank=null; hitSol=null; hitPlane=null; hit={t:cr.t}; }
-}
 for(const t of tanks){
 if(!t.alive) continue;
-const r=rayCyl(d.pos,dir,vehHitCyl(t),hitD);
+const r=rayCyl(d.pos,dir,vehHitCyl(t,_fbCyl),hitD);
 if(r){ hitD=r.t; hitTank=t; hitSol=null; hitPlane=null; hit=r; }
 }
 // 空中目标 (7c: 判定几何单源 planeHitTest —— 旧 2.3×size 圆柱绝迹; 不分敌我, 友军机体同样挡弹,
@@ -882,24 +906,6 @@ return;
 // 未命中: 只按本帧步长精确前进 (不再把命中检测的0.45m前瞻也算进位移)
 d.pos.x+=dir.x*step; d.pos.y+=dir.y*step; d.pos.z+=dir.z*step;
 const nx=d.pos.x, ny=d.pos.y, nz=d.pos.z;
-// 大舰实体兜底 (2026-10-01c): 高速弹单帧掠过时射线可能从盒间穿过去 —— 位置已进舰体即碰炸
-//   (爆点抬到 surf 面; 与上面载具近距兜底同一语义)。
-if(typeof capitalSolidAt==='function'){
-const cs=capitalSolidAt(nx,ny,nz);
-if(cs){
-if(d.owner&&d.owner.spectator){ loiterDespawn(d); return; }
-loiterDetonate(d,V3(nx,cs.surf+0.1,nz)); return;
-}
-}
-// 甲板建筑实体 (★2026-10-03, 与 nadeStep 同批修): 桥楼/烟囱/炮塔盒 —— capitalSolidAt 的甲板上空
-//   空域豁免让巡飞弹从超结构正中穿过 (一头扎进海里才炸)。
-if(typeof capSuperSolidAt==='function'){
-const ss=capSuperSolidAt(nx,ny,nz);
-if(ss){
-if(d.owner&&d.owner.spectator){ loiterDespawn(d); return; }
-loiterDetonate(d,V3(nx,ss.surf+0.1,nz)); return;
-}
-}
 if(ny<=heightAt(nx,nz)+0.12){
 if(d.owner&&d.owner.spectator){ loiterDespawn(d); return; } // 观战: 触地即消失, 不炸
 loiterDetonate(d,V3(nx,heightAt(nx,nz)+0.3,nz)); return;
@@ -918,6 +924,12 @@ if(Math.abs(nx)>MAP_SIZE/2-2||Math.abs(nz)>MAP_SIZE/2-2||d.life<=0){
 if(d.owner&&d.owner.spectator){ loiterDespawn(d); return; } // 观战: 到期/出界同样静默消失
 loiterDetonate(d,d.pos.clone()); return;
 }
+// ★2026-11-05 实机反馈批 (用户问"巡飞弹在其他视角下可见吗"): 弹体可见性收拢为**单写者** —— 唯一隐藏态
+//   = "镜头真的在弹鼻上" (玩家活着 + TV 档); 其余一切视角 (F 背追 / 本体第三人称 / 真观战自由视角 /
+//   死亡镜头) 弹体一律可见。旧版 fireLoiter 出膛写 visible=false、只有 updateCamera 的 loiter 两分支能翻
+//   回来 ⇒ 真观战 (alive=false, 进不了那个分支) 自由视角里弹体永隐。
+const lz=mouse2Down&&!player._ltRClick;   // 开镜放大中强制第一视角 (与 20-player 相机分支同判据): 弹体同 TV 档一起藏, 防第三人称档开镜时弹体糊脸
+d.mesh.visible=!(player.alive&&(!player.loiterView||lz));
 d.mesh.position.copy(d.pos);
 d.mesh.rotation.order='YXZ';
 d.mesh.rotation.set(d.pitch,d.yaw,Math.sin(nowT*2.2)*0.05);
@@ -927,7 +939,9 @@ if(d.dead) return;
 d.dead=true;
 d.mesh.visible=true;
 scene.remove(d.mesh);
-if(player.loiter===d) player.loiter=null;
+// ★2026-11-06 二次裁定 (用户实报"引爆/消失后玩家朝向仍是弹体末向"): 退场只清账, **不写**本体角 ——
+//   制导全程零回写 ⇒ 本体角自然停在发射时朝向, 引爆/静默消失/T 弃弹三路一致 (11-05 批"退场一次性对齐"撤销, 见 updateLoiters 制导段注)。
+if(player.loiter===d){ player.loiter=null; player._ltSpace=!!keys.Space; }   // 2026-11-07: 退场吞空格边沿 —— 退场瞬间仍按着空格(加速惯用), 本体松开前不吃残跳/残升/残加速 (清账行只剩退场+吞边沿, 退场朝向裁定 2026-11-06 不变)
 player.tvDX=0; player.tvDY=0;   // 制导结束: 丢掉未消费的鼠标增量 (2026-09-28, 否则下一枚出膛会先"拐一下")
 VM.root.visible=true;
 const ov=document.getElementById('tvOv');
@@ -944,7 +958,7 @@ damageStructures(p,9,300,d.owner);           // 4参 = 破坏得分归属 (观�
 crater(p.x,p.z,1.6,true);
 if(directTank){ directTank.takeDmg(900,d.owner,true); if(d.owner&&d.owner.isPlayer&&directTank.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('explo'); } // 巡飞弹直击: 反装甲全额
 if(directPlane){ directPlane.takeDmg(900,d.owner); if(d.owner&&d.owner.isPlayer&&directPlane.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('explo'); }
-if(directSol){ directSol.damage(400,d.owner,false); if(d.owner&&d.owner.isPlayer&&directSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('explo'); }
+if(directSol&&directSol.alive){ directSol.damage(400,d.owner,false); if(d.owner&&d.owner.isPlayer&&directSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('explo'); }
 }
 if(player.alive&&player.curW&&player.curW.mag<=0&&player.curW.reserve>0) setTimeout(tryReload,450);
 }
@@ -954,7 +968,9 @@ if(d.dead) return;
 d.dead=true;
 d.mesh.visible=true;
 scene.remove(d.mesh);
-if(player.loiter===d) player.loiter=null;
+// ★2026-11-06 二次裁定 (用户实报"引爆/消失后玩家朝向仍是弹体末向"): 退场只清账, **不写**本体角 ——
+//   制导全程零回写 ⇒ 本体角自然停在发射时朝向, 引爆/静默消失/T 弃弹三路一致 (11-05 批"退场一次性对齐"撤销, 见 updateLoiters 制导段注)。
+if(player.loiter===d){ player.loiter=null; player._ltSpace=!!keys.Space; }   // 2026-11-07: 退场吞空格边沿 —— 退场瞬间仍按着空格(加速惯用), 本体松开前不吃残跳/残升/残加速 (清账行只剩退场+吞边沿, 退场朝向裁定 2026-11-06 不变)
 player.tvDX=0; player.tvDY=0;   // 同上: 静默退场同样清账
 VM.root.visible=true;
 const ov=document.getElementById('tvOv');
@@ -964,7 +980,9 @@ loiterEng.stop();
 // ===== 观战模式 · 弃弹传送 (2026-09-17 观战扩展批, 用户指定) =====
 // T 键: 正在操控巡飞弹时 —— 弹体**立刻静默消失** (复用 loiterDespawn: 不爆炸/不伤害/收回TV视角),
 // 自身**瞬移到弹体所在位置**。定案 (用户裁定 A + 一条补充):
-//   · 位置传送 + **速度清零** (不带着弹速冲出去), 视角朝向 (yaw/pitch) 不变;
+//   · 位置传送 + **速度清零** (不带着弹速冲出去), 视角朝向 = **发射时朝向** (2026-11-06 二次裁定:
+//     退场不写本体角 ⇒ 本体角全程不被弹体污染; 传送瞬间视角从弹体末向跳回发射向, 有意为之。
+//     2026-11-05 批前这条"视角朝向不变"实际是弹体朝向 —— 旧版本体角在制导期间被持续回写成弹体角);
 //   · 保持当时的飞行/行走状态 (悬停飞行 / 气动飞行 / 落地行走各自延续, 只是位置变了);
 //   · 落点做保护: y 抬到该点地面之上 (standHeight), 并跑一次 collideMove 把落点从墙体里挤出来 ——
 //     "传送进墙里" 是这类瞬移最典型的观感事故;

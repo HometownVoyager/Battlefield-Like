@@ -81,7 +81,12 @@ Object3D:Obj3,Sprite:class extends Obj3{constructor(m){super();this.material=m||
 Vector3:V3,Color:_Color,
 Fog:class{constructor(c){this.color=_colorOf(c);this.near=0;this.far=0;}},
 SphereGeometry:Geo,PlaneGeometry:Geo,BoxGeometry:Geo,CylinderGeometry:Geo,
-MeshLambertMaterial:_mat(class{constructor(){}}),MeshBasicMaterial:_mat(class{constructor(){}}),SpriteMaterial:_mat(class{constructor(){}}),
+// ★2026-11-01 桩补 (非回归): 02-scene 天体批起 boot 期直建星空 Points(new THREE.BufferGeometry + Float32BufferAttribute),
+//   本轻桩缺这三样 ⇒ 探针载入即 TypeError 整篇崩。只补载入面, 不影响本探针的材质/UV 断言。
+BufferGeometry:class extends Geo{setAttribute(n,a){this.attributes=this.attributes||{};this.attributes[n]=a;return this;}setIndex(){return this;}},
+Float32BufferAttribute:class{constructor(arr,sz){this.array=arr;this.itemSize=sz;}},
+Points:class extends Obj3{constructor(g,m){super();this.geometry=g;this.material=m;}},
+MeshLambertMaterial:_mat(class{constructor(){}}),MeshBasicMaterial:_mat(class{constructor(){}}),SpriteMaterial:_mat(class{constructor(){}}),PointsMaterial:_mat(class{constructor(){}}),
 CanvasTexture:class{constructor(c){this.image=c;this.repeat={set(){}};this.needsUpdate=false;this.wrapS=this.wrapT=0;}clone(){const t=new THREE.CanvasTexture(this.image);return t;}dispose(){}},
 DirectionalLight:class extends Obj3{constructor(c,i){super();this.intensity=i||1;this.color=_wrapColor(c);this.target=new Obj3();this.shadow={mapSize:{setScalar(){}},map:null,bias:0,camera:{updateProjectionMatrix(){},left:0,right:0,top:0,bottom:0,far:0,near:0}};}},
 HemisphereLight:class extends Obj3{constructor(a,b,i){super();this.intensity=i||1;}},
@@ -149,7 +154,7 @@ roof:(a,t)=>t==='path'&&/^rgb\(/.test(a.fill||''),
 };
 const CV_SEL={
 brick:(rec)=>rec.kind==='fillRect'&&Math.abs(rec.w-30)<0.01&&Math.abs(rec.h-14)<0.01,   // ★2026-09-28B: 砖 30×14 (排除 1px 高光/阴影条)
-stone:(rec)=>rec.kind==='fillRect'&&Math.abs(rec.w-56)<0.01,
+stone:(rec)=>rec.kind==='fillRect'&&Math.abs(rec.w-60)<0.01,   // ★2026-11-01: 石砌块 60×28 (列距 64 整除 256 修平铺闭合; 砖体过缝另有同色副本件, 同宽同算一块)
 wood:(rec)=>rec.kind==='fillRect'&&Math.abs(rec.w-30)<0.01&&Math.abs(rec.h-256)<0.01,
 woodDark:(rec)=>rec.kind==='stroke'&&/^#|^rgba?\(/.test(String(rec.col||'')),
 roof:(rec)=>rec.kind==='fillRect'&&Math.abs(rec.w-30)<0.01&&Math.abs(rec.h-30)<0.01,
@@ -277,7 +282,7 @@ console.log('\n── ④ 帐篷帆布密度归一 (TEX.cloth 登记 UV_DENSITY 
 chk(UV_DENSITY.cloth>0, `  UV_DENSITY.cloth = ${UV_DENSITY.cloth} m/贴 (2026-09-27 补登)`);
 {
 // 重沙箱: 真 three + 全脚本链 → 建世界 → 量帆布材质的盒面密度
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const RSTUB=`
 class StubRenderer{
 constructor(o){ this.domElement=(o&&o.canvas)||document.createElement('canvas'); this.domElement.style=this.domElement.style||{};

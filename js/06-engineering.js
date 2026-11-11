@@ -100,14 +100,16 @@ return best;
 function startDemolish(pl,b){
 if(pl.demolish) return;
 pl.demolish={b,t:0,mortar:false};
-if(pl.isPlayer) showScorePop(t2('拆除中: {0} … (受击/移动/再按取消)',t2(BUILD_NAMES[b.type])));
+if(pl.isPlayer) showScorePop(t2('拆除中: {0} … (受击/移动取消 · 再按B加快)',t2(BUILD_NAMES[b.type])));   // ★2026-10-30: 同键再按=加快 (原"再按取消"口径已废)
 }
 function startMortarRecover(pl){
 if(pl.demolish) return;
 const m=MORTARS.find(mt=>mt.owner===pl&&mt.alive&&!mt.user&&Math.hypot(mt.x-pl.pos.x,mt.z-pl.pos.z)<3.5);
 if(!m){ if(pl.mortarPlaced) showScorePop('需靠近自己的迫击炮才能回收'); return; }
+// ★2026-10-25 反馈轮①: 找到炮=确认起步才抢读条 (离炮太远不白丢); ★2026-10-30 读条交互批: 改双击确认 (起步前)
+if(pl.isPlayer&&player.readBarActive()){ if(!player.barStealArmed('Digit6')) return; player.stealBar(); }
 pl.demolish={b:null,t:0,mortar:true};
-if(pl.isPlayer) showScorePop('回收中: 迫击炮 … (受击/移动/再按取消)');
+if(pl.isPlayer) showScorePop('回收中: 迫击炮 … (受击/移动取消 · 再按6加快)');   // ★2026-10-30: 同键再按=加快 (原"再按取消"口径已废)
 }
 function stopDemolish(pl,quiet){
 if(!pl.demolish) return;
@@ -122,6 +124,7 @@ if(!cx||(d.b&&!d.b.alive)||Math.hypot(cx.x-pl.pos.x,cx.z-pl.pos.z)>3.6){ stopDem
 d.t+=dt;
 if(d.t<DEMOLISH_T) return;
 pl.demolish=null;
+if(pl.isPlayer) pl.barArmKey=null;   // ★2026-10-30: 拆除/回收自然走完清打断确认账 (旧键不得残留到下一条读条的双击窗里)
 if(d.mortar){ recoverMortar(pl); return; }
 const b=d.b; b.alive=false;
 if(b.type==='sandbag'){ for(const bb of b.boxes) killBox(bb); }
@@ -166,6 +169,9 @@ return g2;
 const BUILD_MENU=['sandbag','wire','hedge','mg','medkit'];
 const BUILD_NAMES={sandbag:'沙袋墙',wire:'铁丝网',hedge:'拒马',mg:'重机枪',medkit:'医疗箱'};
 const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2};
+// 丧尸模式商店件 ZP 价 (2026-10-28 单源): 建造弹窗 (19-input Digit5) 与 engBuild 扣款同读此表 ——
+// 旧版价目内联在 engBuild 里, Digit5 提示拿 BUILD_COST[tower/ammoc] 查空 ⇒ "消耗undefined点" 穿帮。
+const BUILD_ZP={mg:150,tower:250,ammoc:80};
 const BUILD_TIME={sandbag:2.2,wire:2.2,hedge:1.8,mg:3.4,medkit:2.0};
 // 建造升起动画: 新建工事从地里逐渐升起
 const RISERS=[];
@@ -192,7 +198,17 @@ if(VM.state!=='idle') return;
 const bc=pl.buildCount||0;
 const type=BUILD_MENU[pl.buildSel||0];
 const cost=BUILD_COST[type]||1;
-if(bc<cost){ showScorePop(t2('建造点数不足 ({0}/{1}) — 弹药箱旁按F补给可回满',bc,cost)); return; }
+// 丧尸模式点数商店 (2026-10-06 裁定④): mg/瞭望塔/弹药箱走 ZP 点数 (击杀丧尸/占旗所得), 不吃建造点;
+// 基础工事免费件 (2026-10-28 修复, 指导 §4.6(2)): 沙袋/铁丝/拒马在丧尸模式**全职业免费** ——
+// 不扣建造点不扣 ZP (读条建造照旧), 医疗箱仍吃建造点。普通模式 (非丧尸) 零变化。
+let zpCost=0;
+const isFreeItem=ZOMBIE_MODE&&(type==='sandbag'||type==='wire'||type==='hedge');
+if(isFreeItem){
+ // 免费放行: pendingBuild 记 cost:0 ⇒ 落成扣款/拆除退款都按 0 对账
+}else if(ZOMBIE_MODE&&pl.isPlayer&&BUILD_ZP[type]!==undefined){
+zpCost=BUILD_ZP[type];
+if((player.pz|0)<zpCost){ showScorePop(t2('ZP 点数不足 ({0}/{1}) — 击杀丧尸 / 占领旗点可得',player.pz|0,zpCost)); return; }
+}else if(bc<cost){ showScorePop(t2('建造点数不足 ({0}/{1}) — 弹药箱旁按F补给可回满',bc,cost)); return; }
 const o=pl.pos.clone(); const dir=camForward(); dir.y=0;
 if(dir.lengthSq()<0.1) return;
 dir.normalize();
@@ -200,7 +216,9 @@ const tx=o.x+dir.x*2.4, tz=o.z+dir.z*2.4;
 if(occBlocked(tx,tz)){ showScorePop(t2('此处无法建造')); return; }
 const lim=MAP_SIZE/2-4;
 if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop(t2('超出战场边界')); return; }
-pl.pendingBuild={type,cost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
+if(!player.barStealArmed('KeyB')) return;   // ★2026-10-30 读条交互批: 建造起步=双击确认 (定位在全部早退之后=确认起造; 首按不建不置 pendingBuild, 只亮提示)
+pl.pendingBuild={type,cost:isFreeItem?0:cost,zp:zpCost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 定位在全部早退之后=确认起造才抢; 读条账目旗(nadeHeld/bandaging)与模型层一起收
 VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmResetSndFlags();
 showScorePop(t2('建造中: {0} … (移动取消)',t2(BUILD_NAMES[type])));
 }
@@ -224,6 +242,8 @@ if(tk.type==='sandbag'){ sandbagWall(tk.tx,tk.tz,4,tk.ry); }
 else if(tk.type==='wire'){ barbedWire(tk.tx,tk.tz,tk.ry,4.2,pl); }
 else if(tk.type==='hedge'){ hedgehog(tk.tx,tk.tz); }
 else if(tk.type==='mg'){ mg42(tk.tx,tk.tz,tk.ry,pl.team); }
+else if(tk.type==='tower'){ watchtower(tk.tx,tk.tz,tk.ry); }          // 丧尸模式商店件: 瞭望塔 (2026-10-06)
+else if(tk.type==='ammoc'){ ammoCrate(tk.tx,tk.tz,true); }            // 丧尸模式商店件: 弹药箱 (force 绕道具互斥)
 else if(tk.type==='medkit'){
 // 医疗箱: placeMedkit 自带落点避让 (多偏移兜底), 仍失败则**退还点数** (锤击动画已播, 不白扣)
 if(!placeMedkit(pl,tk.tx,tk.tz)){
@@ -233,7 +253,8 @@ return;
 }
 }
 riseNewMeshes(ci,0.85);
-pl.buildCount=(pl.buildCount||0)-tk.cost;
+if(tk.zp){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(-tk.zp); }   // ZP 扣款 (商店件)
+else pl.buildCount=(pl.buildCount||0)-tk.cost;
 // 读条回收登记 (2026-09-28 阶段三 P1): 记下归属/落点/成本 + 类型专属引用, 拆除时按型走单源
 const entry={type:tk.type,cost:tk.cost,tx:tk.tx,tz:tk.tz,ry:tk.ry,owner:pl,alive:true,
 boxes:BOXES.slice(bi),meshes:world.children.slice(ci),wire:null,crate:null,mg:null};
@@ -241,6 +262,13 @@ if(tk.type==='wire') entry.wire=wires.find(w=>w.alive&&Math.hypot(w.x-tk.tx,w.z-
 if(tk.type==='medkit') entry.crate=MED_CRATES.find(c=>c.uses>0&&Math.hypot(c.x-tk.tx,c.z-tk.tz)<2.5&&c.owner===pl)||null;
 if(tk.type==='mg') entry.mg=MG42S.find(m=>Math.hypot(m.x-tk.tx,m.z-tk.tz)<3)||null;
 BUILDS.push(entry);
+// 增量插入碰撞空间网格 (Phase 1 任务 1.5)
+if(typeof spatialIndexAddBox==='function'){
+for(let b=bi;b<BOXES.length;b++) spatialIndexAddBox(b);
+}
+// 工事血量 (2026-10-06 裁定④"工事可被破坏"): 登记为轻量 DESTRUCTIBLES 组 —— 命中走
+// damageStructures 的 boxDist3 既有通道, hp 归零走 destroyStructure 通用拆毁 (碎石/Nav脏区)。
+if(ZOMBIE_MODE&&typeof registerFortHP==='function') registerFortHP(entry,bi);
 const gy=heightAt(tk.tx,tk.tz);
 for(let i=0;i<7;i++) spawnP(PT.dirt,tk.tx+rand(-1.6,1.6),gy+rand(0.1,0.4),tk.tz+rand(-1.6,1.6),rand(-1,1),rand(0.5,1.6),rand(-1,1),rand(0.3,0.5),0.8,rand(0.5,0.9),0.85,2);
 if(pl.isPlayer){ showScorePop(t2('{0} · 建成 (剩余 {1} 点)',t2(BUILD_NAMES[tk.type]),pl.buildCount)); AudioSys.metalSlide(0.25,0.2,300,150); }
@@ -273,6 +301,7 @@ if(s.isPlayer) AudioSys.hurt();
 // 先建一次占用网格用于落点避障(不撞进建筑/沙袋), 摆完再重建把机枪沙袋墙纳入碰撞
 buildOccupancy();
 buildSpatialIndex();
+const _mgPreBoxes=BOXES.length;
 const mgSpot=(x,z,spread)=>{
 for(let t=0;t<14;t++){
 const px=x+rand(-spread,spread), pz=z+rand(-spread,spread);
@@ -299,4 +328,7 @@ const sp=mgSpot(fm.x,fm.z,14);
 if(sp) mg42(sp[0],sp[1],rand(0,TAU));
 }
 buildOccupancy();
-buildSpatialIndex();
+// 增量插入碰撞空间网格 (Phase 1 任务 1.5, 废除全量 buildSpatialIndex)
+if(typeof spatialIndexAddBox==='function'){
+for(let b=_mgPreBoxes;b<BOXES.length;b++) spatialIndexAddBox(b);
+}

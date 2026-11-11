@@ -21,10 +21,12 @@ const MATCH_END_DELAY=1.5;
 // 无头模拟实测: 沙箱/纯Bot局里敌机常驻高空, 若把飞行员计入清场会导致只能靠超时兜底
 // (2026-09-04 经用户裁定口径, 如需"击落敌机才清场"可翻转)。
 const wipeAnnounced=[false,false];
+const zBleedAnnounced=[false,false]; // 丧尸模式: 各队票数自然流失播报状态 (2026-10-11)
 const WIPE_GRACE=30;     // 最后一人清场倒计时秒数
 const wipeT=[null,null]; // 各队倒计时剩余秒数, null=未进入 (仅归零方且场上仅剩1人时启动)
 function resetMatchState(){ // 对局态复位唯一入口 (2026-09-06 B7b/P2-14: 替代 22-hud startGame 的跨文件直写)
 wipeAnnounced[0]=false; wipeAnnounced[1]=false;
+zBleedAnnounced[0]=false; zBleedAnnounced[1]=false;
 wipeT[0]=null; wipeT[1]=null;
 // 终局前奏哨兵复位 (2026-09-17 P0 修 — 用户实机"一局结束后按原配置开新游戏会等 1.5S 直接进入结算"):
 // 上局的 matchEndPending 若不清, 就地重开的新一局第一帧就命中 updateFlags 的"胜负已定倒计时"分支 ——
@@ -70,6 +72,7 @@ if(!s.capturable) continue;   // 己方固定出生点: 不参与占领 (永不�
 let c0=0,c1=0;
 for(const c of combatants){
 if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入
+if(c.zombie) continue;                                         // 丧尸不计强点占领 (2026-10-06 丧尸模式)
 if(Math.hypot(c.pos.x-s.x,c.pos.z-s.z)<s.r&&Math.abs(c.pos.y-s.gy)<10){
 if(c.team===0)c0++; else c1++;
 }
@@ -107,51 +110,60 @@ if(prev!==-1&&prev!==attacker) addKillMsg(t('⚠ 强点「{0}」失守',s.name),
 }
 }
 function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
-if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team&&(typeof capFlagActive!=='function'||capFlagActive(f))).length;
+if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
 return 0;
 }
 function fieldCount(team){ // 在场人数: 存活地面士兵(含坦克乘员/跳伞/未登机飞行员) + 存活玩家 (观战者不计)
 let n=0;
-for(const s of soldiers) if(s.alive&&s.team===team&&!s.capCrew&&!(s.onVehicle&&s.pilotOf)) n++;   // capCrew: 大舰炮手是编制件, 不算在场兵力 (2026-10-01c)
+for(const s of soldiers) if(s.alive&&s.team===team&&!(s.onVehicle&&s.pilotOf)) n++;
 if(player.alive&&player.team===team&&!player.spectator) n++;
 return n;
 }
+function isTeamEliminated(team){
+	if(typeof matchRunning!=='undefined'&&!matchRunning) return false;
+	if(typeof fieldCount==='function'&&fieldCount(team)>0) return false;
+	if(tickets[team]<=0) return true;
+	return false;
+}
+if(typeof window!=='undefined') window.isTeamEliminated=isTeamEliminated;
 function requestEnd(forceWinner){
-if(matchOver||matchEndPending!==null) return;
+if((typeof matchRunning!=='undefined'&&!matchRunning)||matchOver||matchEndPending!==null) return;
 const winner=forceWinner!==undefined?forceWinner:(tickets[0]===tickets[1]?-1:(tickets[0]>tickets[1]?0:1));
 matchEndPending=winner; matchEndT=MATCH_END_DELAY;
-addKillMsg(t('胜负已定 · {0} · {1} 秒后结算',winner===-1?t('平局'):(winner===player.team?t('胜利在望'):t('败局在即')),MATCH_END_DELAY),winner);
+// ★2026-11-01 终局横幅中性化 (用户裁定): 观战态 (调试模式/自由观战共用 spectator) 在最后 1.5s 里
+//   "胜利在望/败局在即"是错的 —— 观战者不属于任何一方; 改出中性"胜方 X"。普通存活玩家保持原样。
+addKillMsg(t('胜负已定 · {0} · {1} 秒后结算',winner===-1?t('平局'):(player.spectator?t('胜方')+' '+t(TEAM_FACTION[winner].short):(winner===player.team?t('胜利在望'):t('败局在即'))),MATCH_END_DELAY),winner);
 }
 function updateFlags(dt){
-let owned=[0,0];
+if(typeof matchRunning!=='undefined'&&!matchRunning) return;
+let owned=[0,0,0];
 for(const f of FLAGS){
-// 瘫舰旗点 (2026-10-01b 用户裁定"瘫舰=无阵营的陆地, 无法被占领"): 所在大舰瘫痪 ⇒ 本旗退出
-//   占领结算 (进度/争夺态清零; 旗面已由 15h cripple 就地转灰)。非海战图 capFlagActive 恒真/缺席时按真处理。
-const fActive=(typeof capFlagActive!=='function')?true:capFlagActive(f);
 // 占领规则: 任意旗点双方均可随时直接占领, 不再有顺序限制 (攻防模式防守方也可反夺)
-let c0=0,c1=0;
-if(fActive){
+// (2026-11-10: 瘫舰旗点 fActive 门随大舰子系统下架摘除 —— 大舰不在了, 旗点恒可占)
+// 丧尸机制: 丧尸会在无意中占领无人值守的旗点 (c0===0&&c1===0&&c2>0), 人类在场则阻占/交火
+let c0=0,c1=0,c2=0;
 for(const c of combatants){
 if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入占旗/阻占
-if(c.capCrew) continue;                                        // 大舰炮手不计占旗 (2026-10-01c): 编制站桩不算"在场兵力"
 // 高度容差: 见 00-config 的 FLAG_DY_TOL (2026-09-26E 审计 30: 旧值 10m 让桥下泳者能占桥面旗)
 if(Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r&&Math.abs(c.pos.y-f.gy)<FLAG_DY_TOL){
-if(c.team===0)c0++; else c1++;
+if(c.zombie) c2++;
+else if(c.team===0) c0++;
+else if(c.team===1) c1++;
 }
 }
 for(const t of tanks){
 if(!t.alive) continue;
 if(Math.hypot(t.pos.x-f.x,t.pos.z-f.z)<f.r){
-if(t.team===0)c0++; else c1++;
+if(t.team===0)c0++; else if(t.team===1) c1++;
 }
 }
-}else{ f.cap=0; f.capTeam=-1; f.present=[0,0]; }
-f.present=[c0,c1];
+f.present=[c0,c1,c2];
 let attacker=-1;
-if(c0>0&&c1===0) attacker=0;
-else if(c1>0&&c0===0) attacker=1;
+if(c0>0&&c1===0&&c2===0) attacker=0;
+else if(c1>0&&c0===0&&c2===0) attacker=1;
+else if(c0===0&&c1===0&&c2>0) attacker=2; // 无人值守旗点: 丧尸无意占领
 if(attacker>=0&&attacker!==f.owner){
-const n=attacker===0?c0:c1;
+const n=attacker===0?c0:(attacker===1?c1:c2);
 const rate=(0.07+0.035*Math.min(n,3))*(f.owner===-1?1.35:1);
 if(f.capTeam!==attacker){
 f.cap-=rate*dt*1.6;
@@ -162,18 +174,19 @@ if(f.cap>=1){
 f.cap=0;
 f.owner=attacker; f.capTeam=-1;
 drawFlagTex(f);
-addKillMsg(t('{0} 占领了 {1} 点',t(TEAM_NAME[attacker]),f.id),attacker);
+const teamStr=attacker===2?t('丧尸'):t(TEAM_NAME[attacker]||'阵营');
+addKillMsg(t('{0} 占领了 {1} 点',teamStr,f.id),attacker);
 for(const c of combatants){
-if(c.alive&&c.team===attacker&&!c.capCrew&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
+if(c.alive&&c.team===attacker&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
 c.score=(c.score||0)+SCORE_TABLE.flag;
-if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; } // caps: 结算占领数 (2026-09-13)
+if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; if(ZOMBIE_MODE) pzGain(ZCFG.zp.flag); } // caps: 结算占领数 (2026-09-13); ZP: 丧尸模式占旗给点 (2026-10-06 裁定④)
 }
 }
 	// 占满全部旗点 → 敌方兵力立即归零进入清场 (2026-09-04 用户指定: 攻防/征服任一方占满都生效 —
 	// 修复淞沪会战防守方(国军)占满全旗毫无反应的旧缺陷, 旧版只认进攻方)
-	if(GAMEMODE==='assault'||GAMEMODE==='conquest'){
-		// 瘫舰旗点不算"须占满"的份 (2026-10-01b): 无阵营陆地的旗永远灰色, 不能卡死占满全旗的胜负判定
-		if(FLAGS.every(ff=>ff.owner===attacker||(typeof capFlagActive==='function'&&!capFlagActive(ff)))){
+	// 丧尸模式: 占满全旗不触发兵力归零 (胜负只认 撑过时限/全灭出局, 2026-10-06 设计 §3.5)
+	if(!ZOMBIE_MODE&&(GAMEMODE==='assault'||GAMEMODE==='conquest')){
+		if(FLAGS.every(ff=>ff.owner===attacker)){   // (2026-11-10: 瘫舰旗点豁免项随大舰子系统下架摘除)
 	if(tickets[1-attacker]>0){
 	tickets[1-attacker]=0;
 	wipeAnnounced[1-attacker]=true;
@@ -186,9 +199,9 @@ if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.c
 	}
 }
 }
-} else if(c0>0&&c1>0&&f.capTeam!==-1){
-// 双方同时在圈内: 争夺中, 进度冻结等待分出胜负 (HUD会提示"争夺中")
-} else if(f.owner>=0&&f.capTeam!==-1&&f.capTeam!==f.owner&&((f.owner===0&&c0>0)||(f.owner===1&&c1>0))){
+} else if(((c0>0&&c1>0)||(c0>0&&c2>0)||(c1>0&&c2>0))&&f.capTeam!==-1){
+// 圈内存在多方势力: 争夺中, 进度冻结等待分出胜负 (HUD会提示"争夺中")
+} else if(f.owner>=0&&f.capTeam!==-1&&f.capTeam!==f.owner&&((f.owner===0&&c0>0)||(f.owner===1&&c1>0)||(f.owner===2&&c2>0))){
 // 守方回到圈内且圈内无敌军: 快速回落敌方占领进度 (攻防模式防守方同样生效)
 f.cap-=dt*0.5;
 if(f.cap<=0){ f.cap=0; f.capTeam=-1; }
@@ -217,21 +230,84 @@ if(!matchOver){
 	if(matchEndT<=0) endMatch(matchEndPending);
 	return;
 	}
+	// ── 丧尸模式胜负专门流 (2026-10-06 §3.5 & 2026-10-11 用户裁定重构) ──
+	// 规则单源: 失败判定恒为“无票数 (tickets <= 0) + 无在场人员 (fieldCount === 0)”;
+	// 若一方在场人员全部被丧尸感染/阵亡却仍有票数，则赋予票数自然流失状态 (2票/秒)，期间仍可消耗票数正常重生；
+	// 单队模式: 我方淘汰即败, 撑过时限胜利由 25-zombies 导演判定;
+	// 双队对抗: 某队淘汰出局则剩余存活队立即获胜, 双方同帧淘汰则平局。
+	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
+		const bleedRate=(typeof ZCFG!=='undefined'&&ZCFG.ticketBleedRate)||2.0;
+		for(let tt=0;tt<2;tt++){
+			if(ZOMBIE_MODE==='solo'&&tt!==player.team) continue;
+			const fc=fieldCount(tt);
+			if(fc===0&&tickets[tt]>0){
+				tickets[tt]=Math.max(0,tickets[tt]-bleedRate*dt);
+				if(!zBleedAnnounced[tt]){
+					zBleedAnnounced[tt]=true;
+					if(ZOMBIE_MODE==='solo'){
+						addKillMsg(t('⚠ 全员覆灭 · 兵力票持续流失中 · 尽快部署！'),player.team);
+					}else{
+						addKillMsg(t('⚠ {0} 全员覆灭 · 兵力票持续流失中 · 尽快重整旗鼓！',t(TEAM_NAME[tt])),tt);
+					}
+				}
+			}else if(fc>0){
+				zBleedAnnounced[tt]=false;
+			}
+		}
+
+		if(ZOMBIE_MODE==='solo'){
+			if(isTeamEliminated(player.team)){
+				requestEnd(1-player.team);
+				return;
+			}
+		}else if(ZOMBIE_MODE==='teams'){
+			const elim0=isTeamEliminated(0), elim1=isTeamEliminated(1);
+			if(elim0&&elim1){ requestEnd(-1); return; }
+			if(elim0){ requestEnd(1); return; }
+			if(elim1){ requestEnd(0); return; }
+		}
+		return;
+	}
 	// 清场判定: 兵力归零方封重生, 对方须 占满全旗(攻防/征服)+歼灭场上全部残兵 才判胜 (2026-09-05: 坦克不再计入);
 	// 双方同归零时旗权条件豁免 (2026-10-06 用户实机反馈"双方0剩余无法结束战局": 两边都封重生了,
 	// 没人有票力去完成占满全旗, 再要求它=死局), 以场上残余为准: 先被清空者负, 同帧清空=平局
 	const z0=tickets[0]<=0, z1=tickets[1]<=0;
-	if(z0&&!wipeAnnounced[0]){ wipeAnnounced[0]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),(z1?0:flagsLostOf(1))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1); }
-	if(z1&&!wipeAnnounced[1]){ wipeAnnounced[1]=true; addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),(z0?0:flagsLostOf(0))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0); }
+	if(z0&&!wipeAnnounced[0]){
+		wipeAnnounced[0]=true;
+		if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
+			if(ZOMBIE_MODE==='solo') addKillMsg(t('⚠ 兵力耗尽 · 全灭即出局'),1);
+			else addKillMsg(t('⚠ {0} 兵力耗尽 · 消灭其场上残兵方可获胜',t(TEAM_NAME[0])),1);
+		}else{
+			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),(z1?0:flagsLostOf(1))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1);
+		}
+	}
+	if(z1&&!wipeAnnounced[1]){
+		wipeAnnounced[1]=true;
+		if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
+			addKillMsg(t('⚠ {0} 兵力耗尽 · 消灭其场上残兵方可获胜',t(TEAM_NAME[1])),0);
+		}else{
+			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),(z0?0:flagsLostOf(0))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0);
+		}
+	}
 	if(z0&&z1){
 	const f0=fieldCount(0), f1=fieldCount(1);
 	if(f0===0&&f1===0){ requestEnd(-1); return; }
-	if(f0===0){ requestEnd(1); return; }
-	if(f1===0){ requestEnd(0); return; }
+	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='teams'){
+		// 丧尸双队对抗: 单方全灭不立即宣告胜利, 存活队仍需撑过10分钟由 25-zombies 判定
+	}else{
+		if(f0===0){ requestEnd(1); return; }
+		if(f1===0){ requestEnd(0); return; }
+	}
 	}else if(z0){
-	if(fieldCount(0)===0&&flagsLostOf(1)===0){ requestEnd(1); return; }
+	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='teams'){
+		// 丧尸双队对抗: 队0出局, 队1仍需抵抗尸潮撑过10分钟由 25-zombies 判定
+	}else if(ZOMBIE_MODE){ if(fieldCount(0)===0){ requestEnd(1); return; } }   // 丧尸模式: 票尽且全灭=出局 (无旗权门槛, 2026-10-06 §3.5)
+	else if(fieldCount(0)===0&&flagsLostOf(1)===0){ requestEnd(1); return; }
 	}else if(z1){
-	if(fieldCount(1)===0&&flagsLostOf(0)===0){ requestEnd(0); return; }
+	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='teams'){
+		// 丧尸双队对抗: 队1出局, 队0仍需抵抗尸潮撑过10分钟由 25-zombies 判定
+	}else if(ZOMBIE_MODE){ if(fieldCount(1)===0){ requestEnd(0); return; } }
+	else if(fieldCount(1)===0&&flagsLostOf(0)===0){ requestEnd(0); return; }
 	}
 	// 最后一人清场倒计时 (2026-09-04 用户指定; 2026-09-05 加触发门槛: 须对方已占满全部旗点[无旗模式忽略]才启动,
 	// 旗权未占满时对方须先完成占旗; 倒计时期间旗权被翻回 → 倒计时复位, 重新占满后从 30s 重来)
@@ -275,7 +351,7 @@ if(!matchOver){
 	}
 	// 旗权压制 2026-09-02 用户指定: 需同时满足 ①一方占领超过一半旗点 ②另一方点位少于2个 才掉人数;
 	// 否则开局就近拆分(诺曼底2-3/淞沪1-3)一触即压, 开场就掉人数
-	if(GAMEMODE==='conquest'){
+	if(GAMEMODE==='conquest'&&!ZOMBIE_MODE){
 	const n=FLAGS.length;
 	const lead=owned[0]>owned[1]?0:(owned[1]>owned[0]?1:-1);
 	if(lead>=0&&owned[lead]*2>n&&owned[1-lead]<2){
@@ -300,7 +376,7 @@ if(!matchOver){
 	}
 	}
 	matchTime-=dt;
-	if(matchTime<=0){
+	if(matchTime<=0&&!ZOMBIE_MODE){   // 丧尸模式无时限结算 (单队=撑过时限由 25-zombies 导演判, 多队=打到出局)
 	if(GAMEMODE==='convoy'&&CONVOY_STATE&&!CONVOY_STATE.over){
 	CONVOY_STATE.over=true;
 	requestEnd(CONVOY_STATE.destroyed>=CONVOY_STATE.esc?ATK:DEF);
@@ -312,6 +388,8 @@ if(!matchOver){
 const END_SVG_WIN=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endWg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#c8963c"/></linearGradient></defs><g fill="none" stroke="url(#endWg)" stroke-width="2.6" stroke-linecap="round"><path d="M14 46 C10 34 14 20 26 13"/><path d="M50 46 C54 34 50 20 38 13"/><path d="M15 41 q-6 -1 -8 -6"/><path d="M13 33 q-6 -2 -7 -8"/><path d="M14 25 q-5 -3 -5 -9"/><path d="M18 18 q-4 -4 -3 -10"/><path d="M49 41 q6 -1 8 -6"/><path d="M51 33 q6 -2 7 -8"/><path d="M50 25 q5 -3 5 -9"/><path d="M46 18 q4 -4 3 -10"/></g><path d="M32 17 L34.7 24.28 L42.46 24.6 L36.37 29.42 L38.47 36.9 L32 32.6 L25.53 36.9 L27.63 29.42 L21.54 24.6 L29.3 24.28 Z" fill="url(#endWg)"/></svg>`;
 const END_SVG_LOSE=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endLg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d87a6a"/><stop offset="1" stop-color="#8a3428"/></linearGradient></defs><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="url(#endLg)" stroke-width="3.4" stroke-linejoin="round"/><path d="M32 11 L27 23 L34 29 L28 41 L33 54" fill="none" stroke="#38110b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const END_SVG_DRAW=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="M32 8 L52 15 V32 C52 45 43 54 32 58 C21 54 12 45 12 32 V15 Z" fill="none" stroke="#9fb6c9" stroke-width="3.2" stroke-linejoin="round"/><path d="M22 27 H42 M22 37 H42" stroke="#9fb6c9" stroke-width="3.2" stroke-linecap="round"/></svg>`;
+// 观战结算图标 (★2026-10-30 中性观战结算, 用户裁定④): 钢灰"观战之眼" —— 非胜负配色, 与 END_SVG_DRAW 同族中性灰
+const END_SVG_SPEC=`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="endSg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8c4ce"/><stop offset="1" stop-color="#6b7a88"/></linearGradient></defs><path d="M8 32 C18 18 46 18 56 32 C46 46 18 46 8 32 Z" fill="none" stroke="url(#endSg)" stroke-width="3" stroke-linejoin="round"/><circle cx="32" cy="32" r="7.5" fill="none" stroke="url(#endSg)" stroke-width="3"/><circle cx="32" cy="32" r="2.6" fill="url(#endSg)"/></svg>`;
 // ═════ 历史战绩记录 (2026-09-16 记录批): 结算全项判纪录 + 主菜单「战绩数据」数据源 ═════
 // 口径 (用户 2026-09-16 指示):
 //   ①结算页每一项战绩 (得分/击杀/阵亡/K·D/最大连杀/爆头/占领) 都判「新纪录」—— 越低越好的项 (阵亡数)
@@ -357,7 +435,10 @@ function recBetter(st,v,best){ return best===undefined?true:(st.lower?v<best:v>b
 function recCommit(){ // 结算唯一入口: 判定 → (非观战才) 落盘 → 返回结算页所需的一切
 const vals=recMatchValues();
 const id=CAMPAIGN.id;
-const counted=!player.spectator&&!player.specUsed; // 观战不计入历史 (口径③)
+// ★2026-11-01 计入口径 (用户裁定): 自由观战视模式 (specView, 只看不动 ⇒ 不干涉战局) **计入历史**;
+//   旧调试观战 (能召幽灵坦克/开火/时停 = 能干涉战局) 维持不计入。两者共享 spectator=true,
+//   差异只在 specView 标记; specUsed 仍只由调试观战部署盖单源 (23-deploy deployPlayer)。
+const counted=!(player.spectator&&player.specView)&&!player.specUsed;
 const prev=recKnown(recLoad(id));
 const best={}, isNew={};
 isNew.score=prev.score===undefined?true:vals.score>prev.score;
@@ -406,12 +487,54 @@ html+=`<div class="recRow${played?'':' empty'}"><div class="recMap">`
 }
 return html;
 }
+// ── 终身累计统计 (2026-11-11 数据批): sf_stats = 历局总计 (击毁载具/击杀/死亡/胜利/失败/占领旗点)。
+//    结算 funnel 唯一: endMatch 在 recCommit 之后调 statsAccumulate(winner) —— winner 判定与结算页同源;
+//    观战局 (counted 判据与 recCommit 同一行口径) 不累计, 免得观战免伤刷数。击毁载具账来自
+//    坦克/卡车/战机/舰艇 die 链四处钩 (15-vehicles/15b-trucks/16-aircraft/15d-naval)。 ──
+function statsLoad(){
+try{ const r=JSON.parse(localStorage.getItem('sf_stats')||'{}'); return (r&&typeof r==='object'&&!Array.isArray(r))?r:{}; }catch(e){ return {}; }
+}
+let LIFE_STATS=statsLoad();
+function statsSave(){ try{ localStorage.setItem('sf_stats',JSON.stringify(LIFE_STATS)); }catch(e){} }
+function statsAccumulate(winner){ // winner: endMatch 判定的胜方队伍号 (平局=-1); 观战局自判不累计
+const counted=!(player.spectator&&player.specView)&&!player.specUsed;
+if(!counted) return LIFE_STATS;
+LIFE_STATS.kills=(LIFE_STATS.kills||0)+(player.kills||0);
+LIFE_STATS.deaths=(LIFE_STATS.deaths||0)+(player.deaths||0);
+LIFE_STATS.caps=(LIFE_STATS.caps||0)+(player.caps||0);
+LIFE_STATS.veh=(LIFE_STATS.veh||0)+(player.vehKills||0);
+if(winner===player.team) LIFE_STATS.wins=(LIFE_STATS.wins||0)+1;
+else if(winner!==-1) LIFE_STATS.losses=(LIFE_STATS.losses||0)+1;
+statsSave();
+return LIFE_STATS;
+}
+function recLifeHTML(){ // 数据统计面板「终身累计」六格 (22-hud renderRecordsPanel 每次打开重算)
+const L=LIFE_STATS||{};
+const item=(k,label)=>`<div class="lifeCell"><div class="lifeV">${Math.floor(Number(L[k])||0)}</div><div class="lifeK">${t(label)}</div></div>`;
+return '<div class="lifeGrid">'
++item('veh','总共击毁载具')+item('kills','总共击杀')+item('deaths','总共死亡')
++item('wins','总共胜利')+item('losses','总共失败')+item('caps','总共占领旗点')
++'</div>';
+}
+function clearGameData(){ // 清除游戏数据 (2026-11-11 数据批): 战绩记录/最高分/成就/统计全清, 设置类 (语言/画质/灵敏度...) 保留
+const kill=[];
+try{
+for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
+if(k&&(k.indexOf('sf_rec_')===0||k.indexOf('sf_best_')===0||k==='sf_ach'||k==='sf_stats')) kill.push(k); }
+}catch(e){}
+for(let i=0;i<kill.length;i++){ try{ localStorage.removeItem(kill[i]); }catch(e){} }
+LIFE_STATS=statsLoad();
+if(typeof ACH!=='undefined'&&ACH&&ACH.resetAll) ACH.resetAll(); // 成就内存账+弹框闩同步清 (重达成可再弹)
+return kill.length;
+}
 function endMatch(forceWinner){
 matchOver=true;
 // 观战时停随战局结束收尾 (2026-09-27M 时停修复批, 审计 P1-4): specTimeFrozen 本身就要求 !matchOver ⇒
 // 结算起时停已自动失效; 这里显式复位的是**状态残留** (SPEC_TIME.paused), 免得"结算 → 返回主界面 →
 // 下一局"这条链上把上一局的暂停态带进新局 (换局路径另有 resetPlayerForNewMatch 的复位, 两处同源)。
 if(typeof specTimeReset==='function') specTimeReset();
+// 指挥地图随结算强制关 (2026-10-26 指挥官批, D20): 减速态同帧自愈 (cmdFrameTick 的 matchOver 门)。
+if(typeof cmdMapForceClose==='function') cmdMapForceClose();
 // 终局前奏哨兵就地消费 (2026-09-17 P0 修, 与 resetMatchState 同一族): 结算已落地, 哨兵留着就是"下一次开新局
 // 第一帧再判一次胜负"; 这里清掉让哨兵的生命周期严格等于"一次终局前奏"。
 matchEndPending=null; matchEndT=0;
@@ -431,8 +554,9 @@ const winner=forceWinner!==undefined?forceWinner:(tickets[0]===tickets[1]?-1:(ti
 // 历史战绩落盘在"冻结那一刻"立即完成 (2026-09-16 记录批): 结算画面还要等 0.9s 才画出来,
 // 那段时间关页/返回/直接开新局都不该把这一局的记录丢掉 —— 故 recCommit 提到 setTimeout 之外, 画面只消费它的结果。
 const REC=recCommit();
+if(typeof statsAccumulate==='function') statsAccumulate(winner); // 终身累计 (2026-11-11 数据批): winner 与结算页同源; 观战局 counted 门在函数内自判 (与 recCommit 同口径)
 document.exitPointerLock&&document.exitPointerLock();
-setTimeout(()=>{
+(typeof addMatchTimeout==='function'?addMatchTimeout:setTimeout)(()=>{
 document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
 const end=document.getElementById('end');
 end.classList.remove('hidden');
@@ -440,22 +564,47 @@ document.body.classList.add('inMenu'); // 结算画面同菜单: 隐藏战斗 HU
 if(typeof syncDeployHud==='function') syncDeployHud(); // 结算也收起了 .screen(含部署界面) ⇒ 摘掉 inDeploy (2026-09-20 第6条)
 // 结算改版 (2026-09-13) + 全项记录 (2026-09-16 记录批): SVG 胜负图标 + 本局得分卡 + 六张战绩卡,
 // 每一项都带本图历史最佳与「新纪录」徽章; 观战局照常显示本局数据, 但历史不动并明写"不计入历史记录"
-const win=winner===player.team, draw=winner===-1;
-document.getElementById('endIcon').innerHTML=draw?END_SVG_DRAW:(win?END_SVG_WIN:END_SVG_LOSE);
+// ★2026-10-30 中性观战结算 (用户裁定④): 观战局 (判据与 recCommit 同源 = !REC.counted) 不再出胜利/战败 ——
+//   图标换"观战之眼" (END_SVG_SPEC, 钢灰配色), 标题「对 局 结 束」 (沿用 draw 的中性配色),
+//   副标题末段的己方阵营位换成「胜方 · X」 (平局=「平局」); 得分卡/战绩卡/兵力条/不计入历史说明全保留。
+const win=winner===player.team, draw=winner===-1, _specMatch=!REC.counted;
+document.getElementById('endIcon').innerHTML=_specMatch?END_SVG_SPEC:(draw?END_SVG_DRAW:(win?END_SVG_WIN:END_SVG_LOSE));
 const title=document.getElementById('endTitle');
+if(_specMatch){ title.textContent=t('对 局 结 束'); title.className='draw'; }
+else{
 title.textContent=draw?t('平  局'):(win?t('胜  利'):t('战  败'));
 title.className=draw?'draw':(win?'win':'lose');
-document.getElementById('endSub').textContent=`${t(CAMPAIGN.title)} · ${t(CAMPAIGN.modeName)} · ${t(TEAM_FACTION[player.team].short)}`;
+}
+// 副标题模式名 (2026-10-07c): procgen 的 modeName 是"征服·程序化战场", 丧尸局照搬会写出
+// "胜利 · 征服·程序化战场"这种错位字样 —— 丧尸局改显玩法名 (单队生存/双队对抗)。
+const _facTail=_specMatch?(draw?t('平局'):t('胜方')+' '+t(TEAM_FACTION[winner].short)):t(TEAM_FACTION[player.team].short);
+document.getElementById('endSub').textContent=`${t(CAMPAIGN.title)} · ${t(ZOMBIE_MODE?t('丧尸模式 · '+(ZOMBIE_MODE==='solo'?'单队生存':'双队对抗')):CAMPAIGN.modeName)} · ${_facTail}`;
 document.getElementById('endScore').textContent=REC.vals.score;
 document.getElementById('endBest').textContent=recBestText(null,REC.best.score);
 document.getElementById('endNewRec').classList.toggle('hidden',!REC.isNew.score);
 document.getElementById('endSpecNote').classList.toggle('hidden',REC.counted); // 观战: 明确写出不计入历史
+if(typeof syncEndSeedLine==='function') syncEndSeedLine();
 document.getElementById('endGrid').innerHTML=recStatCardsHTML(REC);
 const mx=Math.max(1,tickets[0],tickets[1]);
 const bar=z=>`<div class="tRow"><div class="tName t${z}">${t(TEAM_NAME[z])}</div>`+
 `<div class="tBarWrap"><div class="tBar t${z}" style="width:${Math.max(0,Math.min(100,tickets[z]/mx*100))}%"></div></div>`+
 `<div class="tInfo">${Math.ceil(tickets[z])} ${t('票')} · ${fieldCount(z)} ${t('在场')}</div></div>`;
-document.getElementById('endTickets').innerHTML=bar(0)+bar(1);
+// 单队生存 (2026-10-07c 修"结算页严重不合理"): 局里根本没有第二支队伍 —— 旧版无条件渲染两军兵力条,
+// 结算页出现"德军 330票·0在场"这种无中生有的对面 (丧尸是 ZTEAM=2 假想队, 零票务, tickets[1] 只是
+// startGame 预填的死数)。第二行改显丧尸战果: 条=清剿进度 (已消灭/全场累计), 文本=已消灭+场上剩余。
+if(ZOMBIE_MODE==='solo'&&typeof ZOMBIES!=='undefined'){
+ const zAlive=ZOMBIES.filter(z=>z.alive).length;
+ const zKilled=(typeof zStats!=='undefined'&&zStats)?zStats.killed:0;
+ const zAll=Math.max(1,zAlive+zKilled);
+ // bar(player.team) (2026-10-28 修复, 指导 §4.7): 旧 bar(0) 在玩家选 1 队开局时, 结算页兵力条
+ // 照样渲染未参战的 0 队 —— 改读玩家真实阵营。
+ document.getElementById('endTickets').innerHTML=bar(player.team)+
+  `<div class="tRow"><div class="tName" style="color:#a8d890">☣ ${t('丧尸')}</div>`+
+  `<div class="tBarWrap"><div class="tBar" style="background:#7cb464;width:${Math.round(zKilled/zAll*100)}%"></div></div>`+
+  `<div class="tInfo">${t('已消灭 {0} · 场上 {1}',zKilled,zAlive)}</div></div>`;
+}else{
+ document.getElementById('endTickets').innerHTML=bar(0)+bar(1);
+}
 },900);
 }
 const el=id=>document.getElementById(id);
@@ -612,6 +761,7 @@ function resetKillStreak(){ killStreakN=0; player.streakBuff=null; killStreakRef
 function onPlayerKill(victim,isHead){
 const got=registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 player.score+=got;
+if(ZOMBIE_MODE&&victim&&victim.zombie) pzGain(victim.kind==='brute'?ZCFG.zp.bruteKill:(victim.kind==='boomer'?ZCFG.zp.boomerKill:ZCFG.zp.kill)); // ZP: 击杀丧尸给点 (2026-10-06 裁定④; boomer 2026-10-07d)
 if(isHead) player.headKills=(player.headKills||0)+1; // 爆头数: 结算卡 (2026-09-13)
 player.lifeKills=(player.lifeKills||0)+1;
 hmShow(_hitCls,true);
@@ -621,6 +771,12 @@ const now=nowT;
 if(now-_lastKillSndT>=0.25){ _lastKillSndT=now; AudioSys.hitmarkSnd(true); }
 }
 let _lastKillSndT=-9;
+// 附身击杀反馈 (2026-11-01 真附身批): 宿主 Bot 的击杀只出屏中红档+音 —— **不记分/不进连杀/爆头账**
+// (onPlayerKill 是玩家记分唯一入口; 附身是只读借眼, 玩家本人的战绩一分不沾)。
+function onHostKill(){
+hmShow(_hitCls,true);
+if(nowT-_lastKillSndT>=0.25){ _lastKillSndT=nowT; AudioSys.hitmarkSnd(true); }
+}
 // ═══ 三档命中/击杀标识 (2026-09-30 批, 用户定案"同X加外框") ═══
 // _hitCls = 待结算弹种档: 'mg'(枪械/机炮·无框) / 'shell'(炮弹·火箭·高炮·鱼雷·琥珀括号) / 'explo'(手雷·航弹·爆炸·黄锯齿环)。
 // 各伤害结算点在 damage/takeDmg **之前**盖章 (markHitCls); 击杀红档经 die()→onPlayerKill 读到它 ⇒ 击杀标识与命中标识同档。
@@ -704,9 +860,14 @@ return;
 // 调用点在 22-hud.updateHUD 逐帧段 (typeof 守卫同 21-match 惯例)。
 function updateDirHits(){
 const box=el('dirHits');
-for(const d of box.children){
+const kids=box.children, py=player.yaw;
+for(let i=0;i<kids.length;i++){
+const d=kids[i];
 if(d._wAng===undefined) continue;
-d.style.transform=`rotate(${-(d._wAng-player.yaw+Math.PI)}rad)`;
+const rot=-(d._wAng-py+Math.PI);
+if(d._lRot===rot) continue;   // 去重写 (2026-11-01 性能批): 朝向未变时逐帧 transform 写全是白开
+d._lRot=rot;
+d.style.transform=`rotate(${rot}rad)`;
 }
 }
 // 座驾受击的方向指示 (2026-09-28 D8): 玩家在载具/艇上时本体 player.damage 不经过 (伤的是载具),
@@ -720,7 +881,7 @@ addDirHit(Math.atan2(attacker.pos.x-player.pos.x,attacker.pos.z-player.pos.z));
 function updateScoreboard(){
 const mk=(team,tb)=>{
 const rows=[];
-const list=combatants.filter(c=>c.team===team&&!c.capCrew);   // 大舰炮手不上记分板 (编制件, 2026-10-01c)
+const list=combatants.filter(c=>c.team===team);
 list.sort((a,b)=>(b.score||0)-(a.score||0));
 for(const c of list){
 rows.push(`<tr class="${c.isPlayer?'meRow':''}"><td>${c.isPlayer?'★ 你':c.name}</td><td>${c.kills||0}</td><td>${c.deaths||0}</td><td>${c.score||0}</td></tr>`);

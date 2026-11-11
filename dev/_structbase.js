@@ -23,7 +23,10 @@ this.attributes={ uv:{ array:uv, itemSize:2, count:24, needsUpdate:false } }; }
 clone(){ const g=new Geo(this.parameters.width,this.parameters.height,this.parameters.depth); g.attributes.uv.array=this.attributes.uv.array.slice(); return g; }
 translate(){return this;} rotateX(){return this;} rotateY(){return this;} setAttribute(n,a){ this.attributes[n]=a; return this; } setIndex(i){ this.index={array:(i&&i.length!==undefined)?i:[]}; return this; } computeVertexNormals(){ return this; } }
 // 非盒几何桩: 只改 type (uvGeo 据此跳过), parameters 形状保持旧版不变 (probe-struct 的柱体识别依赖它)
-class NonBoxGeo extends Geo{ constructor(t,...a){ super(...a); this.type=t; } }
+class NonBoxGeo extends Geo{ constructor(t,...a){ super(...a); this.type=t; }
+// clone 必须保类型: 基类 clone() 用 new Geo(...) 会把 type 翻成 BoxGeometry —— 2026-11-01 贴图批里
+//   uvGeo 的圆柱失败路径曾把这种类型翻转的克隆顶替给网格, 探针"非盒构件"判据被静默清空 (假绿)。
+clone(){ const g=new NonBoxGeo(this.type,this.parameters.width,this.parameters.height,this.parameters.depth); if(this.attributes&&this.attributes.uv) g.attributes.uv.array=this.attributes.uv.array.slice(); return g; } }
 class PlaneGeo extends Geo{ constructor(w=1,h=1,sg=1,sh=1){ super(w,h); this.type='PlaneGeometry'; const gx=(sg||1)+1, gy=(sh||1)+1; this.attributes={position:{count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}}}; this.index=null; } }
 return {
 Group:class extends Obj3{}, Mesh:class extends Obj3{ constructor(g,m){ super(); this.geometry=g||new Geo(); this.material=m||{}; } },

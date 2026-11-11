@@ -73,7 +73,7 @@ T3.Object3D.prototype.updateMatrix=function(){
   Wrap.prototype=PG.prototype; T3.PlaneGeometry=Wrap; }
 
 // 全链加载表 (与 probe-bots.js 完全一致; 15c-specveh/22a/23b 由 typeof 守卫, 探针不载)
-const FULL=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
+const FULL=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 // 核心链 (probe-hukawng 同款): 只到 05c —— 该链不含 14/15/16, 因此不受他人改 AI/载具影响
 const CORE=['js/00-config.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js'];
 
@@ -431,9 +431,13 @@ console.log('\n⑥ 不挡子弹 (判据 = 引用所在函数体, 不是文件名
   const bots=refs.filter(r=>r.f==='14-bots.js');
   if(!BASELINE&&!refs.some(r=>r.f==='04b-fire.js'&&r.fn==='foliageBlocksLOS')) fail('04b-fire.js 未定义 foliageBlocksLOS');
   if(BASELINE) skip('14-bots 接线断言 (基线模式)');
-  else if(bots.length!==1) fail('14-bots.js 引用数='+bots.length+' (只允许 perceive() 一处)');
-  else if(bots[0].fn!=='perceive') fail('14-bots.js 的调用不在 perceive() 内 (实际 ['+bots[0].fn+'])');
-  else ok('14-bots.js 恰好 1 处, 且所在函数 = perceive()');
+  // ★2026-11-03 判据跟码修钉 (一.89 遗留): 一.89 的 perceive 当前目标优先复核在 perceive() 内**合法地**
+  //   加了第二处 foliageBlocksLOS 调用 (循环外复核 + 循环内粗筛, 同一函数同一语义) —— 护栏本意是
+  //   "引用只许落在感知层、不许进弹道函数体" (上一条断言), "恰好 1 处"只是当年实现细节。改为:
+  //   数量 ≥1 且**全部**在 perceive() 内。
+  else if(bots.length<1) fail('14-bots.js 引用数=0 (perceive 内至少应有植被遮蔽粗筛)');
+  else if(bots.some(r=>r.fn!=='perceive')) fail('14-bots.js 的调用不全在 perceive() 内 (实际 ['+bots.map(r=>r.fn).join('/')+'])');
+  else ok('14-bots.js 共 '+bots.length+' 处, 全部在 perceive() 内 (循环外复核+循环内粗筛)');
 }
 
 // ── ⑦ 接线: perceive() 里紧随 cropBlocksLOS ──

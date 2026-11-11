@@ -59,7 +59,7 @@ constructor(c,i,d,dec){ super(); this.color=c; this.intensity=i||0; this.distanc
 };
 // ── 全链文件表 (与 index.html 实载同序; 探针纪律: 载入清单漂移 = 假绿, 改 index.html 必同步这里;
 //    实载脚本数在 T7 里从 index.html 动态解析对账, 不写死数字) ──
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const read=f=>fs.readFileSync(path.join(root,f),'utf8');
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
 const PRELUDE=`var __AA=(function(){
@@ -460,7 +460,7 @@ ok(bad===0,'T7 ★ R7 全库审计: '+files+' 个 js 文件零 WEATHER===/!== �
 // 火势: 常量/单点/三常数未动
 ok(s04.includes('const FIRE_SPREAD_NERF=0.8;')&&s04.includes('const FIRE_SPREAD=FIRE_SPREAD_NERF*WX_CFG.fireMul;'),'T7 04b-fire: 总削×天气 合成常量单源');
 ok(s04.includes('FHEAT[nj2]+=dt*(di&&dj?0.42:0.85)*FIRE_SPREAD;'),'T7 04b-fire: 积热率单消费点 (R9)');
-ok(s04.includes('FHEAT[nj2]>=0.8) igniteCell')&&s04.includes('FHEAT[ci]-=dt*0.25')&&s04.includes('FUEL[ci]-=dt*0.12'),'T7 04b-fire: 阈值0.8/冷却0.25/燃料0.12 三常数未动 (R9)');
+ok(s04.includes('FHEAT[nj2]>=0.8) igniteCell')&&s04.includes('FHEAT[ci]-=dt*0.25')&&s04.includes('FUEL[ci]-=dt*0.055*bRate'),'T7 04b-fire: 阈值0.8/冷却0.25 未动 & 燃料消耗受受潮乘子控制');
 // 火势行为学: 双格引燃 晴朗 ~1.9s / 小雨 ~5s / 暴雨 8s 不引燃
 // 探针坑③: FIRE_SPREAD=0.8×0.35 浮点 ≠ 字面 0.28 ⇒ 乘积断言用容差
 const fireSnap=`(()=>{try{

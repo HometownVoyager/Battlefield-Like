@@ -169,7 +169,7 @@ for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
 ctx.localStorage={_s:{sf_campaign:String(campIdx),sf_exp:'1'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};   // sf_exp=1: 观战开关的前提 (实验模式)
-const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];   // 与 index.html 同序 (全链)
+const files=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];   // 与 index.html 同序 (全链)
 for(const k in handlers) delete handlers[k];   // 每个 boot 先清空监听表, 再跑脚本链 (否则把刚注册的 keydown 也清了)
 for(const f of files) load(ctx,f);
 // 真键位链派发: 与浏览器同形的最小 KeyboardEvent (code/repeat/preventDefault)
@@ -683,15 +683,17 @@ sp2=read('js/22b-speclayer.js'), nvl=read('js/15d-naval.js'), dep=read('js/23-de
 // ① D1: 观战运行文案 9 条 (审计漏网名单) + 本批新增文案, 一条不缺
 //   2026-09-27I: 时间控制的 3 条旧词条随"只留时停"一起换掉 (旧键已删, 新键必须齐)
 const need=['创造悬停飞行 · WASD移动 空格升/Shift降 · 落地退出','切换: 创造悬停 (空格升/Shift降)','飞行关闭',
-'气动飞行 · 沿视线前飞 · 右键加速 · 俯冲触地落地','幽灵坦克已就位 · 观战专属载具','落地 · 行走状态',
+'气动飞行 · 沿视线前飞 · 空格加速 · 俯冲触地落地','幽灵坦克已就位 · 观战专属载具','落地 · 行走状态',
 '座驾被毁 · 观战者安全脱离','观战模式 · 不指挥小队','观战信息层: 开','观战信息层: 关',
 '观战时停: 开 (K 继续 · 你本人仍可走动/飞行)','观战时停: 关',' (观战不可征用)',
-'观战模式将于下次部署生效','开启观战模式？本局将: 免伤 · 不被索敌 · 弹药无限 · 副武器换观战连狙, 且可对双方开火。注意: 下一次部署才生效; 生效(以观战者身份进入战场)后本局不计入历史记录 —— 只点开开关又取消的不算。'];
+'调试模式将于下次部署生效','开启调试模式？本局将: 免伤 · 不被索敌 · 弹药无限 · 副武器换观战连狙, 且可对双方开火。注意: 下一次部署才生效; 生效(以调试观战身份进入战场)后本局不计入历史记录 —— 只点开开关又取消的不算。'];
 // ★2026-09-27 判据随文案收窄同步更新: 确认框文案按"判据收窄"改写 (只点开开关又取消 ⇒ 不算观战局),
 //   中文原文即键 ⇒ 这里必须与 22-hud 的 t('...') 一字不差, 否则 EN 界面会闪中文 (本条的靶子)。
+// ★2026-11-01 判据跟走 (观战更名批): 旧「观战模式」系文案整体更名「调试模式」(用户裁定: 能干涉战局才不计历史;
+//   新"自由观战"另有文案), 本清单尾部两条 + D1 键随 22-hud:2613/2637/2638 走新串。
 const miss=need.filter(k=>i18n.indexOf("'"+k+"'")<0);
 ok(miss.length===0,'T10 ★ 观战运行文案全部有 EN 词条 ('+need.length+' 条齐全)'+(miss.length?(' 缺: '+miss.join(' | ')):''));
-ok(i18n.indexOf("'观战模式已关闭':'Spectator mode off'")>=0,'T10 ★ D1 漏网名单里的「观战模式已关闭」已补 (EN 界面不再闪中文)');
+ok(i18n.indexOf("'调试模式已关闭':'Debug mode off'")>=0,'T10 ★ D1 漏网名单里的「调试模式已关闭」已补 (EN 界面不再闪中文)');
 const dead=['观战时间: ×{0}','观战时间: 单步 {0} 帧','观战时间: 暂停 (K 继续 · L 单步)','慢放','单步'];
 const alive=dead.filter(k=>k.indexOf('慢放')<0&&k.indexOf('单步')<0);
 const deadLeft=alive.filter(k=>i18n.indexOf("'"+k+"'")>=0);

@@ -50,7 +50,7 @@ C0.prototype.clone=function(){ const m=Object.create(Object.getPrototypeOf(this)
 }
 }
 
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 function boot(campIdx,files,extraQuery){
 for(const k in stub.byId) delete stub.byId[k];
 const ctx=vm.createContext(Object.assign({},stub.sandbox));
@@ -211,6 +211,11 @@ const results=[];
 for(const id of IDS){
 const idx=campIdx(id);
 const ctx=boot(idx);
+// ★ 2026-11-01 贴图批: 海战图的大舰/艇是 boot 消解器跑完才进 world 的 (15h:452 / 15d:271) ——
+//   浏览器里它们由**运行期模型消解器** (resolveModelSurfaces, 24-main 逐根预算) 接管; 本沙箱不跑帧循环。
+//   旧版这里直接扫描 ⇒ coral/ironbottom 每图 80~170 条"同单位残留"全是测量时点伪红 (实机自愈)。
+//   补一次与世界级消解器同一套数学的**追赶消解** (幂等: 已落档件按预着色纪律读回只当约束), 再扫描。
+G(ctx,'resolveCoplanarConflicts()');
 const stats=G(ctx,'JSON.parse(JSON.stringify(SURF_STATS))');
 const lanes=G(ctx,'JSON.parse(JSON.stringify(SURF_LANES))');
 const conf=G(ctx,'JSON.parse(JSON.stringify(SURF_CONFLICT))');
@@ -310,7 +315,8 @@ const maxL=Math.max(...results.map(r=>r.stats.maxLevel));
 const tms=results.map(r=>r.stats.tMs);
 chk(maxL<=main.conf.maxLevel,`③ 全图最大档位 ${maxL} ≤ ${main.conf.maxLevel} (档位用满说明约束图很密, 需要复查)`);
 chk(involved>0&&involved<writes,`③ 累计落档件数 ${involved} 落在 (0, 写深度件数 ${writes}) 区间 ⇒ 只改动冲突件, 未全量加偏移`);
-chk(Math.max(...tms)<2000,`③ 单图建场消解耗时上界 ${Math.max(...tms)}ms < 2000ms (一次性成本, 不进每帧; 莫斯科 8711 件)`);
+// 2026-11-01 贴图批: 每图跑两遍 (boot + 追赶消解, 见本文件 per-map 段批注) ⇒ 耗时上界同比 ×2
+chk(Math.max(...tms)<4000,`③ 单图建场消解耗时上界 ${Math.max(...tms)}ms < 4000ms (boot+追赶两遍, 一次性成本不进每帧; 莫斯科 8711 件)`);
 const varPool=Math.max(...results.map(r=>r.stats.clones));
 chk(varPool<=96,`③ 材质变体池上界 ${varPool} ≤ 96 (材质×档位的克隆总量, 不是件数)`);
 { // 幂等性 (2026-09-27): 再调一次消解器 —— 已落档件作为"预着色节点"重新纳入图, 新件不得落到与邻居同档。

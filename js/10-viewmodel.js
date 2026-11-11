@@ -24,8 +24,17 @@ VM.inner.add(VM.muzzleLight);
 const HIP={ pos:V3(0.17,-0.185,-0.38), rot:V3(0.02,0.03,0) };
 const HIP_PISTOL={ pos:V3(0.15,-0.16,-0.32), rot:V3(0.02,0.02,0) };
 const HIP_ROCKET={ pos:V3(0.15,-0.14,-0.56), rot:V3(0.02,0.04,0) };
+// 通讯仪 (2026-10-27): 工具件不是枪 —— 枪的 HIP 位姿把"枪身轴"指向正前方, 而对讲机是**立着**拿的。
+// 位置压到右下并略远 (0.46m): 整机 0.30m 高 (真实尺度, 见 09-weapons RADIO_H), 贴到步枪那个
+// 0.38m 会让机身糊住半个屏幕; 后倾 0.06 + 外旋 0.14 让面板朝向镜头 ⇒ 一眼认出"这是对讲机",
+// 天线指向画面中心偏上而不是戳出画面。
+const HIP_RADIO={ pos:V3(0.19,-0.30,-0.46), rot:V3(0.06,0.14,0.10) };
 function adsPoseFor(key){
 const d=WPN_DEFS[key];
+// 通讯仪 (2026-10-27): 工具件没有"开镜", 但右键是开指挥地图 (19-input 分流) ⇒ 正常路径到不了 ADS。
+// 这里仍给一档"举到胸前细看"的位姿, 兜住触屏/手柄/外部直接置 ads 的路径: 位置比 HIP 抬高一截、
+// 机面正对镜头 (rot.y 回 0), 不会像枪那样出现"半张脸埋在枪身里"的怪画面。
+if(d.radio) return { pos:V3(0.10,-0.20,-0.40), rot:V3(0.10,0,0.06) };
 if(d.rocket) return { pos:V3(0.052,-0.148,-0.3), rot:V3(0,0,0) };
 if(d.atRifle) return { pos:V3(0.05,-0.105,-0.28), rot:V3(0,0.05,0) }; // 反坦克枪: 顶部弹匣挡视线, 侧偏机瞄(同火箭筒)
 if(d.scoped) return { pos:V3(0,-0.085,-0.22), rot:V3(0,0,0) };
@@ -39,9 +48,24 @@ return { pos:V3(0,-0.077,-0.3), rot:V3(0,0,0) };
 }
 function vmEquip(key,team){
 VM.key=key;
+if(VM.inner&&VM.inner.children.length){
+const keep=new Set([VM.muzzleFlash,VM.muzzleLight,VM.bandageM,VM.grabitemM,VM.hammerM].filter(Boolean));
+for(let i=0;i<VM.inner.children.length;i++){
+const child=VM.inner.children[i];
+if(keep.has(child)) continue;
+child.traverse(node=>{
+if(node.geometry&&typeof node.geometry.dispose==='function'){
+try{ node.geometry.dispose(); }catch(e){}
+}
+});
+}
 VM.inner.clear();
+}
 VM.inner.add(VM.muzzleFlash); VM.inner.add(VM.muzzleLight);
-VM.gunParts=buildGunModel(key);
+// team 透传 (2026-10-27 通讯仪重做): 阵营配色要按阵营取 (radioPalette 由 FACTIONS[...].coat 派生),
+// 而本函数是全库 buildGunModel 的**唯一**调用点 (vmEquip(key,team) 手上就有 team)。其它枪械不使用该参数,
+// 传进去是零副作用 —— 但通讯仪的机身主色必须与第三人称同源, 所以这条透传不能省。
+VM.gunParts=buildGunModel(key,team);
 VM.inner.add(VM.gunParts.gun);
 VM.arms=buildArms(team);
 VM.inner.add(VM.arms.L); VM.inner.add(VM.arms.R);
@@ -101,6 +125,11 @@ function vmHandDefault(key,side){
 const d=WPN_DEFS[key]||{};
 if(d.rocket) return side? {pos:V3(-0.089,-0.099,-0.16),rot:V3(0.5,-0.95,0)} : {pos:V3(0.01,-0.09,0.16),rot:V3(0.35,0,0)};
 if(d.pistol) return side? {pos:V3(-0.103,-0.09,0.082),rot:V3(0.5,-0.6,0)} : {pos:V3(0.015,-0.06,0.13),rot:V3(0.25,0,0)};
+// 通讯仪 (2026-10-27): 握位必须贴着**机身**, 不能沿用枪的默认握位 —— 枪的右手位在 z=+0.2 (枪托),
+// 而通讯仪机身只有 5cm 厚 (z ±0.026), 照抄会让两只手悬在机子后面 20cm 的空气里。
+// 右手握机身下部 (握点 = 建模原点), 左手托在机底偏左 (托举姿态), 左臂 rotY 保持 -0.95 基准带内
+// (袖管朝画面左下, 见 vmHandLSnap 的基准 VM_LARM_Y)。
+if(d.radio) return side? {pos:V3(-0.055,-0.105,0.02),rot:V3(0.45,-0.95,0)} : {pos:V3(0.012,-0.075,0.015),rot:V3(0.28,0,0)};
 return side? {pos:V3(-0.08,-0.075,-0.24),rot:V3(0.5,-1.0,0)} : {pos:V3(0.02,-0.07,0.2),rot:V3(0.32,0,0)};
 }
 function positionHands(key){
@@ -179,6 +208,76 @@ return V3(px-o.x,py-o.y,pz-o.z);
 function vmPalmOf(pos,rot){              // 腕位 → 掌位 (默认握位的掌点, 供收尾融回)
 const o=vmRotXyzV(0,0,-VM_PALM_L,rot.x,rot.y,rot.z);
 return {x:pos.x+o.x, y:pos.y+o.y, z:pos.z+o.z};
+}
+// ── 左臂位姿单源 (2026-10-12 用户实报"很多动作左臂仍太靠右, 看起来像长在右肩上") ───────────────
+// 病根: buildArms (09-weapons) 的臂组**枢轴在手腕**, 袖管沿手局部 +z (镜头方向) 后延 0.25m。
+//   动作分支里的 handLOverride 字面量当年是"腕位 + rotY=0"手调的 ⇒ 袖管正对镜头后方缩成画面中部
+//   一团, 而 VM.root 的根姿态 (HIP.pos.x=0.17) 把整个 inner 推到画面右侧 ⇒ 读作"左臂长在右肩上"。
+//   2026-10-05 已在**默认握位**上修过 (vmHandDefault 左手 rotY=-1.0), 但各动作分支的覆盖位姿漏改:
+//   grab(取弹药)/火箭筒换弹/旧版换匣/建锤/举雷/包扎 六处仍是 rotY=0, 其中包扎还是 **+1.2** (反的)。
+// 口径: 左臂 rotY 恒取**负值** (袖管朝画面左下 = 肩端出画或贴左缘), 而**掌心落点逐位不变**。
+//   为什么必须"吃掌位反解腕位"而不是直接把 rot.y 改成负角: 臂组枢轴在手腕, Ry 负角会把掌心沿 x 甩出
+//   0.09·sin(0.95)≈7cm (手从道具上滑走) —— 反过来由"旧字面量的实际掌位"反解新腕位, 才是"手不动、袖管动"。
+const VM_LARM_Y=-0.95;   // 左臂袖管朝向基准 (负 = 画面左下); 单源 = 下面 vmHandLSnap
+// ★2026-10-12 袖管归位单源 (两个入口, 同一份数学): 把**已解算好的**左臂位姿的 rotY 拉回基准带,
+//   掌心落点逐位不变 (只把袖管转到画面左下, 手不从道具上滑走)。
+//   为什么要连 vmHoldPose 解算出来的位姿也过这一道: 左下置弹匣的**物理**换匣 (BAR / 百式 / …) 走
+//   `side=1` 的左手持匣路径, 它的 rotY 来自"枪系抓握角 × 收束插值" —— 中途段实测只有 -0.09~-0.24
+//   ⇒ 袖管 (肩端) 落在 x=+0.13~+0.17 (画面**右**半), 与用户实报①同款; 而端点段本来就是默认握位
+//   (rotY=-1.0, 在带内) ⇒ 归位对端点是恒等映射, 只修中途段。
+function vmHandLSnap(pose){
+const r=pose.rot;
+if(r.y<=-0.6&&r.y>=-1.05) return pose;                // 已在带内: 原样返回 (默认握位/端点零漂移)
+const palm=vmPalmOf(pose.pos,V3(r.x,r.y||0,r.z||0));
+const nr=V3(r.x,VM_LARM_Y,r.z||0);
+return {pos:vmWristFor(palm.x,palm.y,palm.z,nr.x,nr.y,nr.z), rot:nr};
+}
+function vmHandLFix(pos,rot){                 // 旧版字面量 (腕位 + 旧姿态角) → 修正位姿
+const r0=rot||V3(0,0,0);
+return vmHandLSnap({pos:pos, rot:V3(r0.x,r0.y||0,r0.z||0)});   // 非法带 (含 0/正角) 由单源拉回基准
+}
+// ── 动作态终结单源 (2026-10-12 用户实报"读条被打断后模型滞留") ───────────────────────────────
+// 病根: 外部 (20-player 的 F 交互/19-input 的按键) 直接改 VM.state 就把当前动作**丢掉**了, 而手上件与
+//   手臂显隐的收尾只写在各自状态分支的"正常走完/自己判定被打断"路径里 ⇒ 被抢走的状态永远不执行收尾:
+//     包扎 → 绷带卷 (VM.bandageM) 与左臂白色缠臂环 (arms.L.userData.wrap) 永久留在手上;
+//     刺刀 → 左臂整条 VM.arms.L.visible=false 永久不还 (nade/build/grab 有各自计时器能自愈, 不在本列)。
+// 口径: **任何要抢 VM.state 的入口, 抢之前先调 vmAbortAction()** (幂等, 无害)。它按"当前处于哪个动作态"
+//   做收尾并退回 idle; 若只剩残留件 (状态早已被抢走) 也照样把残留件收掉。
+function vmBandageHide(){                 // 包扎残留 (手上卷 + 缠臂环), 与状态机无关, 幂等
+if(VM.bandageM) VM.bandageM.visible=false;
+const w=(VM.arms&&VM.arms.L)?VM.arms.L.userData.wrap:null;
+if(w) w.visible=false;
+}
+// 换弹收尾还原单源 (★2026-10-25 换弹可取消批): 换弹分支会把弹匣/弹夹沿关键帧搬走、枪栓抽开、
+//   火箭弹举在半路 —— 自然走完 (nt>=1) 与被取消/被抢走 (vmAbortAction) 必须走**同一份**还原,
+//   否则取消后枪上永远缺一只弹匣 (与包扎"绷带卷滞留"同族病)。栓/滑轨静止位走更新循环捕获的 z0
+//   (三把手枪 slide 静止位各不同, 不能写死; 捕获口径见 updateViewModel 预捕获段注释)。
+function vmReloadRestore(){
+const g=VM.gunParts; if(!g) return;
+if(g.mag&&g.mag.userData.p0){ g.mag.position.copy(g.mag.userData.p0); if(g.mag.userData.r0) g.mag.rotation.copy(g.mag.userData.r0); g.mag.visible=true; }
+if(g.clip&&g.clip.userData.p0){ g.clip.position.copy(g.clip.userData.p0); if(g.clip.userData.r0) g.clip.rotation.copy(g.clip.userData.r0); g.clip.visible=false; }
+if(VM.reloadRocket) VM.reloadRocket.visible=false;
+if(g.bolt&&g.bolt.userData.z0!==undefined) g.bolt.position.z=g.bolt.userData.z0;
+if(g.boltHandle) g.boltHandle.rotation.z=0;
+if(g.slide) g.slide.position.z=g.slide.userData.z0??-0.02;
+}
+function vmAbortAction(){
+let hit=false;
+if(VM.bandageM&&VM.bandageM.visible){ vmBandageHide(); hit=true; }
+const st=VM.state;
+// steal = 本轮要抢下状态机的态 (收尾后统一回 idle)。举雷只收**哨兵持雷段** (stateDur>10);
+//   出手弧 (松手后 0.55s, nadeHeld 已 false) 里的雷已经/即将脱手, 不属于可中止段, 不在此列。
+let steal=false;
+if(st==='bandage'){ vmBandageHide(); steal=true; }
+else if(st==='melee'){ if(VM.knifeM) VM.knifeM.visible=false; if(VM.arms) VM.arms.L.visible=true; steal=true; }
+else if(st==='nade'&&VM.stateDur>10){ if(VM.nadeM) VM.nadeM.visible=false; steal=true; }   // 收雷回枪 (与状态机哨兵自愈同一份收尾)
+else if(st==='reload'){ vmReloadRestore(); steal=true; }
+if(steal){
+if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true;
+VM.state='idle'; VM.stateT=0; VM.stateDur=0; vmSndFlags={};
+hit=true;
+}
+return hit;
 }
 // ★2026-10-05 六裁定 (抓握偏移): 实机"弹夹穿模卡在右手腕上"的病根 = 掌位偏移量照抄了"手贴住道具"的
 //   直觉 (夹 + (0.008,-0.022,-0.038)) —— 拳盒半深 0.05 已越过夹半深 0.03, 夹后半截被拳吞掉、前半截被
@@ -272,7 +371,7 @@ const adsTgt=(player.ads&&(VM.state==='idle'||VM.state==='fire'||VM.state==='bol
 VM.adsBlend=dampF(VM.adsBlend,adsTgt,14,dt);
 const sprTgt=(player.sprinting&&VM.state==='idle')?1:0;
 VM.sprintBlend=dampF(VM.sprintBlend,sprTgt,8,dt);
-const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:HIP);
+const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:(d.radio?HIP_RADIO:HIP));
 const px=lerp(hip.pos.x,VM.ads.pos.x,VM.adsBlend);
 const py=lerp(hip.pos.y,VM.ads.pos.y,VM.adsBlend);
 const pz=lerp(hip.pos.z,VM.ads.pos.z,VM.adsBlend);
@@ -322,7 +421,11 @@ VM.kickZ+=VM.kickV*dt;
 rx+=VM.recoilP; oz+=VM.kickZ;
 const g=VM.gunParts;
 let handLOverride=null, handROverride=null;
-if(g.bolt&&!g.boltHandle) g.bolt.position.z=g.bolt.userData.z0??(g.bolt.userData.z0=g.bolt.position.z);
+// ★2026-10-25 换弹可取消批: 栓 z0 改为**无条件下捕获** (旧版只捕无拉机柄的枪 —— 带拉机柄的栓动枪
+//   z0 永远空着, 取消还原时无从归位); slide 三把手枪静止位各不同 (-0.03/0.01/-0.02), 同样捕 z0。
+//   捕获发生在 vmEquip 后第一帧 (draw 态, 部件都在静止位) ⇒ 值恒为真静止位, 之后各分支的位移在其后执行不受影响。
+if(g.bolt) g.bolt.position.z=g.bolt.userData.z0??(g.bolt.userData.z0=g.bolt.position.z);
+if(g.slide) g.slide.userData.z0??(g.slide.userData.z0=g.slide.position.z);
 if(g.mag){ g.mag.userData.p0??(g.mag.userData.p0=g.mag.position.clone()); g.mag.userData.r0??(g.mag.userData.r0=g.mag.rotation.clone()); }
 if(g.clip){ g.clip.userData.p0??(g.clip.userData.p0=g.clip.position.clone()); g.clip.userData.r0??(g.clip.userData.r0=g.clip.rotation.clone()); }
 if(VM.state==='draw'){
@@ -359,14 +462,14 @@ const k=ss(Math.min(t,0.3),0,0.3);
 shown.position.set(0.14,-0.12+k*0.04,-0.3+k*0.05);
 shown.rotation.set(0,0,0);
 handROverride={pos:V3(0.13,-0.15,-0.22),rot:V3(0.5,0,0)};
-handLOverride={pos:V3(-0.1,-0.2,-0.2),rot:V3(0.3,0,0)};
+handLOverride=vmHandLFix(V3(-0.1,-0.2,-0.2),V3(0.3,0,0));
 } else {
 const k=nt;
 const back=pulse(k,0,0.3,0.55), fwd=ss(k,0.35,0.6);
 shown.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.55);
 shown.visible=k<0.55;
 handROverride={pos:V3(0.13+back*0.08,-0.12+back*0.14-fwd*0.18,-0.18+back*0.2-fwd*0.35),rot:V3(0.5+back*1.2-fwd*2.2,0,0)};
-if(k>0.5) vmPlayOnce('nadeThrow',()=>player.releaseNade());
+if(k>0.5&&!VM.mirrorHost) vmPlayOnce('nadeThrow',()=>player.releaseNade());   // ★2026-11-03: 镜像态不出真雷 (真附身举雷镜像只走哨兵段, 本行是兜底保险)
 if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; }
 }
 }
@@ -394,7 +497,7 @@ if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags=
       if(k>0.46) vmPlayOnce('rrk2',()=>AudioSys.metalSlide(0.18,0.16,600,1200));
       if(k>0.66) vmPlayOnce('rrk3',()=>AudioSys.click(1100,0.3,0.05));
       if(k>0.78) vmPlayOnce('rrk4',()=>AudioSys.metalSlide(0.2,0.08,1400,700));
-      handLOverride={pos:V3(-0.04,-0.09,-0.24),rot:V3(0.42,0,0)};
+      handLOverride=vmHandLFix(V3(-0.04,-0.09,-0.24),V3(0.42,0,0));
       if(k<0.74&&rr){
         handROverride={pos:V3(rr.position.x+0.015,rr.position.y-0.05,rr.position.z+0.13),rot:V3(-0.5+fetch*0.15-insert*0.25,0,0)};
       } else {
@@ -542,8 +645,8 @@ if(g.mag&&p0){
 g.mag.position.set(p0.x, p0.y-out*0.18-(1-inn)*(k>0.36?0.18:0), p0.z+out*0.03);
 g.mag.visible=!(k>0.34&&k<0.4);
 }
-if(k>0.06&&k<0.7) handLOverride={pos:V3(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13),rot:V3(0.5,0,0)};
-else if(k>=0.7&&k<0.97) handLOverride={pos:V3(0.02,-0.02,-0.05),rot:V3(0.3,0,0)};
+if(k>0.06&&k<0.7) handLOverride=vmHandLFix(V3(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13),V3(0.5,0,0));
+else if(k>=0.7&&k<0.97) handLOverride=vmHandLFix(V3(0.02,-0.02,-0.05),V3(0.3,0,0));
 } else if(g.mag&&mp0){
 // 机枪/反坦克枪/弹盘/漏斗/BAR (非 vmLegacy): 走 vmMagCarry 搬运单源 —— 提/抽出榫 → 带到携行位
 // (画面外, 到此隐) → 新匣自携行位返场 → 送到匣口外 → 推入入榫。旧版把"显/隐"做在枪身上
@@ -567,13 +670,12 @@ if(g.slide) g.slide.position.z=-0.02+ch*0.055;
 vmPlayOnce('r4',()=>AudioSys.metalSlide(0.3,0.1,1200,700));
 }
 }
-// 收尾还原 (2026-10-05): 弹匣/弹夹在换弹里被搬走, 归位前先物归原位 —— 旧版靠曲线末端恰好
-// 回到原点"碰巧"不穿帮, 显式还原后加塞新动作才不会把枪留在缺匣状态。
-if(nt>=1){
-if(g.mag&&g.mag.userData.p0){ g.mag.position.copy(g.mag.userData.p0); if(g.mag.userData.r0) g.mag.rotation.copy(g.mag.userData.r0); g.mag.visible=true; }
-if(g.clip&&g.clip.userData.p0){ g.clip.position.copy(g.clip.userData.p0); if(g.clip.userData.r0) g.clip.rotation.copy(g.clip.userData.r0); g.clip.visible=false; }
-VM.state='idle'; vmSndFlags={}; player.finishReload();
-}
+	// 收尾还原 (2026-10-05 → ★2026-10-25 收进 vmReloadRestore 单源): 弹匣/弹夹在换弹里被搬走, 归位前先
+	//   物归原位 —— 与"被取消/被抢走" (vmAbortAction) 同一份还原, 加塞新动作才不会把枪留在缺匣状态。
+	if(nt>=1){
+	vmReloadRestore();
+	VM.state='idle'; vmSndFlags={}; player.barArmKey=null; VM.mirrorHost=false; player.finishReload();   // ★2026-10-30: 换弹自然走完清打断确认账; ★2026-11-03: 镜像标记随走完清账
+	}
 }
 else if(VM.state==='bolt'){
 const k=nt;
@@ -599,8 +701,11 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       // 整体抬高到视野中部, 避免包扎动作太低几乎看不见
       oy+=0.03; rx+=0.05;
       // 左前臂横抬在胸前, 右手持绷带卷绕臂缠绕
-      const armPos=V3(-0.125,-0.038,-0.05), armRotY=1.2;
-      handLOverride={pos:armPos,rot:V3(0.12,armRotY,0.08)};
+      // ★2026-10-12 阶段一修左臂朝向: vmHandLFix 把左袖管甩向画面左下 (肩端 x=-0.267, 掌心逐位反解);
+      //   整体位姿微调中置 (x: -0.125 → -0.08), 让双手互动处于准星中下方黄金分割区。
+      const armL=vmHandLFix(V3(-0.08,-0.035,-0.05),V3(0.12,1.2,0.08));
+      const armPos=armL.pos, armRotY=armL.rot.y;
+      handLOverride=armL;
       // 前臂轴向与缠绕平面
       const ax=-Math.sin(armRotY), az=-Math.cos(armRotY);
       const raise=ss(bk,0,0.1);
@@ -627,17 +732,24 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       );
       VM.bandageM.rotation.order='YXZ';
       VM.bandageM.rotation.set(phi,armRotY+HPI,0);
-      // 右手跟随绷带卷
-      handROverride={pos:V3(VM.bandageM.position.x+0.035,VM.bandageM.position.y-0.055,VM.bandageM.position.z+0.05),rot:V3(0.3+Math.cos(phi)*0.25,-0.2,0)};
+      // ★2026-10-12 阶段二 (用户实报"包扎右臂太靠左"): 旧版写死 rotY=-0.2 (反向偏左), 袖管沿 +z
+      //   后延导致肩端落点在 x=-0.082 (甚至比手腕更偏左), 右臂立在视野中左侧。
+      //   修法 = 右臂袖管指向右下 (rotY 动态保持在 +0.66~+0.82 正角带, 袖管向画面右下延伸, 肩端
+      //   世界 x=+0.16~+0.28m 稳居右下角); 掌心严格贴合绷带卷反解腕位 (vmWristFor), 保证手不滑脱。
+      const rRot=V3(0.28+Math.cos(phi)*0.20, 0.74+Math.sin(phi)*0.08, -0.06);
+      const rPalm=V3(VM.bandageM.position.x+0.016, VM.bandageM.position.y-0.015, VM.bandageM.position.z+0.010);
+      handROverride={pos:vmWristFor(rPalm.x,rPalm.y,rPalm.z,rRot.x,rRot.y,rRot.z), rot:rRot};
       if(bk>0.12) vmPlayOnce('bd1',()=>AudioSys.metalSlide(0.07,0.14,320,520));
       if(bk>0.4) vmPlayOnce('bd2',()=>AudioSys.metalSlide(0.06,0.13,300,480));
       if(bk>0.66) vmPlayOnce('bd3',()=>AudioSys.metalSlide(0.06,0.13,340,500));
       if(bk>0.9) vmPlayOnce('bd4',()=>AudioSys.click(900,0.2,0.04));
-      // 被打断(受击)提前收起
-      const interrupted=player.bandaging<=0&&bk<0.9;
+      // 被打断(受击/外部中止)提前收起 —— 走残留收尾单源 (与 vmAbortAction 同一份, 不再各写一行)
+      // ★2026-11-03: 镜像态 (VM.mirrorHost, 真附身包扎镜像) 不吃玩家 bandaging 账 —— 镜像的完成/打断
+      //   全由 20-player svHostActionMirror 按宿主 bandageT 驱动, 这里只管动画。
+      const interrupted=!VM.mirrorHost&&player.bandaging<=0&&bk<0.9;
       if(nt>=1||interrupted){
-        VM.state='idle'; g.gun.visible=true; VM.bandageM.visible=false;
-        wrap.visible=false; vmSndFlags={};
+        VM.state='idle'; g.gun.visible=true;
+        vmBandageHide(); vmSndFlags={}; VM.mirrorHost=false;
       }
     }
     else if(VM.state==='grab'){
@@ -648,7 +760,8 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       VM.grabitemM.position.set(0.02,-0.02-reach*0.15+back*0.05,-0.14-reach*0.25+back*0.15);
       VM.grabitemM.rotation.set(0,gk*1.6,0);
       handROverride={pos:V3(0.1+reach*0.1,-0.06-reach*0.14,-0.1-reach*0.28+back*0.2),rot:V3(0.3+reach*0.8,0,0)};
-      handLOverride={pos:V3(-0.04,-0.08,-0.22),rot:V3(0.4,0,0)};
+      // 左手扶箱沿 (补给箱取弹药/从运输车补给/取绷带同一条 grab 分支): 掌位与旧字面量逐位相同, 只把袖管摆到左下
+      handLOverride=vmHandLFix(V3(-0.04,-0.08,-0.22),V3(0.4,0,0));
       if(gk>0.45) vmPlayOnce('grab',()=>player.doGrabResolve());
       if(nt>=1){ VM.state='idle'; g.gun.visible=true; VM.grabitemM.visible=false; vmSndFlags={}; }
     }
@@ -667,7 +780,7 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       VM.hammerM.position.set(0.09,-0.16+swing*0.2,-0.22);
       VM.hammerM.rotation.set(-0.35-swing*1.25,0.3,0.15);
       handROverride={pos:V3(0.09,-0.17+0.25*(Math.sin(th)-Math.sin(-0.2)),-0.14-0.25*(Math.cos(th)-Math.cos(-0.2))),rot:V3(th,0.15,0)};
-      handLOverride={pos:V3(-0.06,-0.13,-0.2),rot:V3(0.35,0,0)};
+      handLOverride=vmHandLFix(V3(-0.06,-0.13,-0.2),V3(0.35,0,0));
       rx+=0.12; oy-=0.02;
       const ki=Math.floor(VM.stateT*2.6);
       if(cyc>0.72) vmPlayOnce('bk'+ki,()=>{
@@ -709,7 +822,7 @@ if(vmHandGun){
 const hg=vmHandGun; vmHandGun=null;
 const hp=vmHoldPose({x:hg.c.x+hg.off[0], y:hg.c.y+hg.off[1], z:hg.c.z+hg.off[2]},
 hg.mid, V3(rx+hg.grip[0], ry+hg.grip[1], rz+hg.grip[2]), hg.midRot, hg.b0,hg.b1,hg.b2, VM.key, hg.side);
-if(hg.side) handLOverride=hp; else handROverride=hp;
+if(hg.side) handLOverride=vmHandLSnap(hp); else handROverride=hp;   // 左手持匣也过袖管归位 (BAR/百式实测同款)
 }
 positionHands(VM.key);
 if(handLOverride){ VM.arms.L.position.copy(handLOverride.pos); VM.arms.L.rotation.set(handLOverride.rot.x,handLOverride.rot.y,handLOverride.rot.z); }

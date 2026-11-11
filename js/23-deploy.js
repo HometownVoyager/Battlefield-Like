@@ -2,6 +2,54 @@
 // 23-deploy.js —— 部署界面/开局
 // 源: Index.original.html 第 8324-8530 行
 // ─────────────────────────────────────────────
+// 兵种卡锁定样式刷新 (2026-10-27 需求「确认之后兵种锁定不可更换」) —— 从 showDeploy 里抽成单源函数。
+//
+// 为什么必须抽出来: 「哪些卡该显示 🔒」这件事现在有两个触发时刻, 而不是一个 ——
+//   ① 打开部署页 (showDeploy): 这是老路径, 死亡重生/回菜单再进来都走它;
+//   ② 布势里点「确认开战」之后**部署页还开着** (cmdDeployConfirm 只在 dep 是 hidden 时才调 showDeploy):
+//      确认那一刻 R10 盖章把 lockedDir 从 null 改成 'in'/'out' (26-commander cmdDeployConfirm 的提交点语义),
+//      但部署页没被重建 ⇒ 卡片样式停留在「全部可选」的样子。玩家看得见能点的卡, 点下去却被
+//      22-hud 的 cmdClassCardGate 拦下弹「本局已锁定指挥官」—— 「样式说能点、点了说不能」是最典型的
+//      反馈与状态不符。旧实现把这段样式逻辑内联在 showDeploy 里, 于是它只有一个触发点, 只能靠
+//      「重建整个部署页」才能刷新, 而确认开战这条路径恰恰不重建。
+// 单源口径: 判据仍是 cmdClassCardGate (R10 门) + isAliveDeployed/nearCrate (整备门), 这里只负责
+// 把判据结果画到 DOM 上; 调用点 = showDeploy (整页重建) 与 22-hud updateHUD 的锁定态对账 (就地刷新)。
+function syncClassCardLock(){
+// 两个门所需的事实就地取 (本函数要能被 showDeploy 之外的地方单独调用):
+// isAliveDeployed = 活着且已落地 (此时兵种卡按「战地整备」口径处理, 需靠近补给箱才可换装);
+// nearCrate 取 isNearSupplyCrate 单源 (typeof 守卫: 20-player 未加载的沙箱里退化为 false)。
+const isAliveDeployed=!!(typeof player!=='undefined'&&player&&player.alive&&player.deployed);
+const nearCrate=isAliveDeployed&&(typeof isNearSupplyCrate==='function')&&!!isNearSupplyCrate(player.pos);
+for(let i=0;i<CLASSES.length;i++){
+const card=document.querySelectorAll('.classCard')[i];
+if(!card) continue;
+let lockIcon = card.querySelector('.lock-icon');
+if(!lockIcon){
+lockIcon = document.createElement('span');
+lockIcon.className = 'lock-icon';
+lockIcon.style.cssText = 'position:absolute;top:4px;right:6px;font-size:14px;';
+lockIcon.textContent = '🔒';
+card.style.position = 'relative';
+card.appendChild(lockIcon);
+}
+// R10 双向锁 (2026-10-26 指挥官批): 指挥官位仅局内首次部署可选, 此后按方向禁选 —— 与 22-hud
+// 卡片 onclick 的 cmdClassCardGate 同一单源 ('in'=已锁指挥官全卡锁 / 'out'=指挥官卡锁)。
+const cmdLocked=(typeof cmdClassCardGate==='function')?cmdClassCardGate(i):null;
+if((isAliveDeployed && !nearCrate)||cmdLocked){
+card.classList.add('locked');
+card.style.opacity = '0.5';
+card.style.cursor = 'not-allowed';
+lockIcon.style.display = 'inline';
+card.setAttribute('title', cmdLocked?('指挥官: '+cmdLocked):'[战地整备受限: 需在友方补给箱 2.8m 内方可调配装备]');
+} else {
+card.classList.remove('locked');
+card.style.opacity = '1';
+card.style.cursor = 'pointer';
+lockIcon.style.display = 'none';
+card.removeAttribute('title');
+}
+}
+}
 'use strict';
 // 兵种卡武器行文本 (2026-09-17 观战扩展批: 由 showDeploy 内联抽成单源) —— 供部署界面渲染与
 // "在兵种卡上开/关观战"时即时刷新共用: 武器列表一律走 playerClassWeapons (实验模式换巡飞弹兵 +
@@ -9,18 +57,85 @@
 function classCardWeaponText(i){
 const ws=playerClassWeapons(player.team,i);
 let d2=ws.map(k=>t(WPN_DEFS[k].name)).join(' · ');
+if(player.spectator) return d2+' · '+t('手雷[G]×{0}',4)+' · '+t('AT雷[3]×{0}',4)+' · '+t('烟雾弹[4]×{0}',4)+' · '+t('燃烧弹[6]×{0}',4); // 观战: 四弹种全给 (2026-10-24, 卡片显示与 specGear 落装一致)
 if(i===1){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[3]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 2026-09-28 兵种8→5: 突击兵=原cls2 配置随合并迁到 cls1
+if(i===5){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[3]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 指挥官 (2026-10-26): 绷带/手雷配置同突击兵 (设计 R2)
 if(i===0) d2+=' · '+t('AT雷[3]×{0}',clsGear(i,player.team).atn); // 2026-10-05: 步枪兵新增 AT雷×2 (键位同突击兵的 3)
 if(i===3) d2+=EXPERIMENT?' · '+t('燃烧弹[6]×2'):' · '+t('AT雷×{0}',(TEAM_FACTION[player.team].atn5||3));
 return d2;
 }
+// ★2026-11-04b 部署记忆批 —— 兵种卡选择态 DOM 单源对账 (showDeploy 每次打开页面都调一次):
+//   卡面 (.sel 高亮 / 调试卡的 .spec 金边与「调试中·待生效」后缀 / 武器行文本) 在 initMenuUI 里建一次就
+//   不再与状态对账 ⇒ 上一局选过的兵种/调试开关会整块留到下一局的部署页 (用户实报"点进去选的就是调试模式")。
+//   这里以 player.cls / player.spectator / player.specWant 为唯一事实重刷一遍; 沙箱空 DOM
+//   (querySelectorAll 返 []) 自动空转, 与 syncClassCardLock 同款防护。
+function syncDeploySelectionDOM(){
+const cards=document.querySelectorAll('.classCard');
+if(!cards||!cards.length) return;
+for(let i=0;i<cards.length;i++){
+const card=cards[i]; if(!card) continue;
+card.classList.toggle('sel',i===player.cls);
+card.classList.remove('spec');
+if(card.style) card.style.outline='';
+const cn=card.querySelector?card.querySelector('.cname'):null;
+if(i===3&&typeof EXPERIMENT!=='undefined'&&EXPERIMENT){
+const pend=(typeof player.specWant==='boolean');
+card.classList.toggle('spec',!!(player.spectator||pend));
+if(card.style) card.style.outline=(player.spectator||pend)?'2px solid #ffd76b':'';
+if(cn) cn.textContent='巡飞弹兵'+(player.spectator?' · 调试中':(pend?' · 调试待生效':''));
+}else if(cn&&typeof t2==='function'&&typeof CLASSES!=='undefined'&&CLASSES[i]){
+cn.textContent=t2(CLASSES[i].name);
+}
+const cw=el('cw'+i); if(cw) cw.textContent=classCardWeaponText(i);
+}
+}
 function showDeploy(isDead){
+// ★2026-11-04b 部署记忆批: 每次打开页面先按**当前状态**单源重刷卡面 —— 上一局残留的 .sel 高亮 /
+//   调试卡金边「调试中」后缀 / 武器行文本都是开局建一次就再也不对账的 DOM, 会一直留到下一局部署页。
+//   状态变量 (player.cls/selectedSpawn) 只在**新对局**由 22-hud resetPlayerForNewMatch 清回默认 ——
+//   这里不能顺手清: 指挥官点卡→布势图→Esc 收图回部署页 这条链还会再进 showDeploy, 清掉等于把玩家
+//   这一屏刚选的兵种抹成步枪兵; R10 盖章后 (整局锁兵种) 同样不许改。
+if(typeof syncDeploySelectionDOM==='function') syncDeploySelectionDOM();
 document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
 el('deploy').classList.remove('hidden');
+if(typeof gamePaused!=='undefined'&&gamePaused){
+  const ov=document.getElementById('pauseOv');
+  if(ov) ov.classList.remove('hidden');
+}
 el('blackOv').style.opacity=0;
+if(document.pointerLockElement) document.exitPointerLock();
+const isAliveDeployed = !!(player.alive && player.deployed && !isDead);
+const nearCrate = isAliveDeployed && (typeof isNearSupplyCrate==='function' && isNearSupplyCrate(player.pos));
+let depotBadge = el('depotBadge');
+if(!depotBadge){
+depotBadge = document.createElement('div');
+depotBadge.id = 'depotBadge';
+const pnl = el('deploy') ? el('deploy').querySelector('.panel') : null;
+if(pnl) pnl.insertBefore(depotBadge, el('deathInfo'));
+}
+if(depotBadge){
+if(isAliveDeployed && !nearCrate){
+depotBadge.style.display = 'block';
+depotBadge.style.cssText = 'color:#ff9c8a;font-size:14px;margin-bottom:8px;font-weight:bold;text-align:center;';
+depotBadge.textContent = '[战地整备受限: 需在友方补给箱 2.8m 内方可调配装备]';
+} else if(isAliveDeployed && nearCrate){
+depotBadge.style.display = 'block';
+depotBadge.style.cssText = 'color:#ffd76b;font-size:14px;margin-bottom:8px;font-weight:bold;text-align:center;';
+depotBadge.textContent = '[补给站整备中 - 换装立即生效]';
+} else {
+depotBadge.style.display = 'none';
+}
+}
 CLASSES.forEach((c,i)=>{
-el('cw'+i).textContent=classCardWeaponText(i);
+// ★2026-10-26 排查轮 P1 修复: el('cw'+i) 可能为 null —— 丧尸局/海战图按 D3 不建指挥官卡
+//   (22-hud 的 class grid 只建 5 张), 而 CLASSES 有 6 行 (index 5 = 指挥官) ⇒ i=5 时 el('cw5') 为 null,
+//   旧写直接 .textContent 抛 TypeError, 循环在这里中断 ⇒ 后面的 deathInfo/spawnList/drawDeployMap/
+//   syncDeployHud 全不执行, 但 deploy 的 hidden 已在上面摘掉 = **空壳部署页** (看得见、没内容、没出口)。
+//   下一行 :53 本来就有 if(card) 守卫, 唯独这一行漏了 —— 补同样的守卫。
+const _cw=el('cw'+i); if(_cw) _cw.textContent=classCardWeaponText(i);
 });
+// 兵种卡锁定样式 (R10 门 + 整备门) —— 单源在 23-deploy syncClassCardLock (见其函数注释)
+syncClassCardLock();
 el('deathInfo').innerHTML=(()=>{
 if(!isDead) return '';
 const lifeT=Math.max(0,nowT-(player.lifeStartT||nowT));
@@ -29,22 +144,134 @@ const lk=player.lifeKills||0, ls=(player.score||0)-(player.lifeScoreStart||0);
 return (player.killerName?t('你被 {0} 击杀了',`<b>${player.killerName}</b>${player.killerSrc?` <span style="font-size:12px;color:#cfd8c2">[${t(player.killerSrc)}]</span>`:''}`)+'<br>':'')+
 `<span style="font-size:13px;color:#cdd8c8">${t('本次存活 {0} · 击杀 {1} · 获得 +{2} 分',mm2+':'+(ss3<10?'0':'')+ss3,lk,ls)} &nbsp;|&nbsp; ${t('本局总计 {0} 杀 / {1} 死 / {2} 分',player.kills,player.deaths,player.score)}</span>`;
 })();
-el('resumeBtn').style.display=(player.alive&&player.deployed)?'inline-block':'none';
-// 返回主界面入口 (2026-09-16 本批): 战局已结束时不显示 —— 那条路径归结算页的「返 回 主 界 面」;
-// 在"战局进行中"才显示: 开局选兵种时是唯一出口, 战斗中按 Esc 查看部署界面时同样可用
-el('deployMenuBtn').style.display=matchOver?'none':'inline-block';
-el('deployBtn').style.display=player.alive&&player.deployed?'none':'inline-block';
-// 己方兵力归零 → 本局不可再部署 (清场阶段: 你阵亡后只能观看清场结算, 2026-09-04)
-el('deployBtn').disabled=tickets[player.team]<=0;
-if(tickets[player.team]<=0){
-el('deathInfo').innerHTML+='<br><span style="font-size:13px;color:#ff9c8a">'+t('⚠ 己方兵力已耗尽 · 本局无法再部署 · 等待清场结算')+'</span>';
+if(isAliveDeployed){
+el('deployBtn').style.display='none';
+el('resumeBtn').style.display='inline-block';
+el('resumeBtn').textContent = nearCrate ? '确认换装并返回' : '返 回 战 斗';
+} else {
+el('deployBtn').style.display='inline-block';
+el('resumeBtn').style.display='none';
+el('resumeBtn').textContent = '返 回 战 斗';
 }
+// 己方兵力归零 → 按钮换字「观 战」(2026-11-01 用户裁定): 未开调试观战 ⇒ 点它进自由观战视模式
+// (enterSpecView 单源 20-player; 22-hud/24-main 同判据); 开着调试观战 ⇒ 仍显「部 署」, 部署将以
+// 观战身份入场 —— 不耗票、不影响清场判定 (specWillBe 单源见 18-game)。
+// 两种态按钮都**可用**; 标签交换必须 data-i18n 属性与 textContent 同改, 否则切语言被 applyI18n 盖回。
+{
+const _exh=tickets[player.team]<=0;
+const _specBtn=(_exh&&!player.specWillBe())?'观 战':'部 署';
+const _sp=el('deployBtn').querySelector('[data-i18n]');
+// getAttribute 守卫: 探针沙箱的桩元素可能给出无 DOM 方法的对象 (真浏览器恒为 Element/null)
+if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!==_specBtn){ _sp.setAttribute('data-i18n',_specBtn); _sp.textContent=t(_specBtn); }
+el('deployBtn').disabled=false;
+}
+if(tickets[player.team]<=0){
+const _note=player.specWillBe()?'⚠ 己方兵力已耗尽 · 部署将以调试观战身份入场':(player.specView?'⚠ 自由观战中 · 点「观战」返回观战视角':'⚠ 己方兵力已耗尽 · 点「观战」进入自由观战 · 等待清场结算');
+el('deathInfo').innerHTML+='<br><span style="font-size:13px;color:#ff9c8a">'+t(_note)+'</span>';
+}
+const spList=el('spawnList');
+const spLabel=spList?spList.previousElementSibling:null;
+if(isAliveDeployed){
+if(spList) spList.style.display='none';
+if(spLabel) spLabel.style.display='none';
+}else{
+if(spList) spList.style.display='';
+if(spLabel) spLabel.style.display='';
 buildSpawnList();
+}
 drawDeployMap();
 // 部署界面期隐藏战斗 HUD (2026-09-20 第6条修复): 本函数是"部署界面显示"的唯一入口 (全库只有这里摘 #deploy 的 hidden),
 // 所以 inDeploy 的挂载点也收在这里 —— 判据与写 DOM 都走 22-hud 的 syncDeployHud 单源 (完整根因见那里的注释)。
 // (typeof 守卫: 部分沙箱/探针只加载子集脚本, 缺 22-hud 时不该让部署界面报错)
 if(typeof syncDeployHud==='function') syncDeployHud();
+}
+// ═══ 布势撤销 (2026-10-27 需求「布势状态允许撤销布局 + 退出并重选兵种」) ═══
+// 全局函数名固定为 cmdDeployUndo (26-commander 的布势面板按钮以 typeof 守卫调它, 不反向依赖本文件)。
+// 语义 = **这一次布势作废**: 收起布势地图 → 兵种配比复位 → 回到「选兵种」状态 (可重选, 不盖章)。
+//
+// 为什么这件事不能拆成「关图 + 手写几行状态」散落在调用点: 撤销要同时回收五份账 ——
+//   ① 布势地图 (宿主在 body, 必须走 cmdMapClose 才会搬回 #ui 压制网);
+//   ② 配比 (cmdRatioAdj/cmdRatioApply 已经把组内 Bot 的 cls **真改了**, 光清 s.ratio 会留下
+//      「配比读数=旧分布 / 实际兵种=被改过的」的错位, 面板与战场两头都对不上);
+//   ③ 玩家落地态 (player.deployed, 决定部署页显示「部 署」还是「返 回 战 斗」);
+//   ④ R10 锁定方向 CMD.lockedDir (撤销 = 这次选择作废, 必须回到 null, 否则玩家被永久锁在指挥官位);
+//   ⑤ 部署页本身 (inDeploy 显隐网、出生列表、兵种卡锁定样式)。
+// 五份账任何一份漏掉都会留下「半撤销」状态 (最典型: 布势关了、部署页没回来 ⇒ 只剩 3D 画面, 玩家点不到出口)。
+// 所以本函数是撤销的**唯一**实现, 按钮只调它。
+function cmdDeployUndo(){
+// ── ⓪ 边界: 只对「还没落地」的选兵阶段有效 ──
+// 落地之后人已经站在战场上, 任何把 player.deployed 打回 false 的路径都会让玩家凭空变成「未落地」
+// (部署页弹出来盖住战斗、重生链按"未落地"重算) —— 那不是撤销布势, 那是把战斗中的人踢出战场。
+// 正常走不到这里: 撤销按钮只存在于布势面板 (26-commander cmdMapPanelTick 的 CMD.mapDeploy 分支),
+// 而布势只在选兵阶段开 (cmdDeployOpen 由兵种卡点击的 !player.deployed 门把关)。这道门是给
+// "将来有人把撤销接到别的路径上"兜底的 —— 与本库全量 typeof/门禁守卫同一纪律。
+if(typeof player!=='undefined'&&player&&player.deployed) return false;
+// ── ① 收起布势地图 ──
+// 必须走 cmdMapClose(false) 而不是自己写 CMD.mapOn=false:
+//   · close 内部按「当时」的 CMD.mapDeploy 决定是否把 wrap 从 body 搬回 #ui (cmdMapReparent(false)) ——
+//     先清标志再收图 = 宿主永久滞留 body, 之后战斗期开指挥地图会绕过 inDeploy/inMenu/hudHide 整张压制网;
+//   · relock 传 false: 撤销后玩家仍在**选兵阶段** (人没落地), 不该抢指针锁 (cmdMapClose 的 relock 自带
+//     player.alive&&player.deployed 上限, 这里显式传 false 只是把「选兵阶段不锁指针」写成明账)。
+if(typeof cmdMapClose==='function'){ cmdMapClose(false); }
+if(typeof CMD!=='undefined'){ CMD.mapDeploy=false; }   // close 已清 (兼容只加载子集脚本的沙箱: 缺 26 时至少把本地标志归位)
+// ── ② 兵种配比复位成「按当前实际 cls 统计」──
+// 撤销的语义是「玩家这次调整的期望配比作废」, 而布势里每点一次 ＋/− 都经 cmdRatioApply 真调 setClass 改过
+// 组员的 cls (见 26-commander cmdRatioApply) —— 所以「当前实际分布」就是**被撤销的那份期望值**, 直接
+// 清空 s.ratio 并不能回到布势前的样子, 只会让下一次 cmdRatioOf 用被改过的分布重建期望值。
+// 正确口径: 把配比按撤销后的真实分布重算一份 (cmdRatioOf 的「按实际 cls 统计」分支), 让
+// 「期望分布 == 实际分布」重新成立 —— 玩家重新进布势时看到的就是当前战场的真实兵种构成, 从这里再调。
+// 注意不做「把 cls 改回布势前」的逆向回放: 撤销的边界是**布局**, 不是「把已经生成好的兵种再掷一次骰子」
+// (布势前那份分布本来就只是开局随机池的产物, 没有保存价值, 也没有任何地方记过它)。
+if(typeof CMD!=='undefined'&&CMD&&CMD.orbat&&typeof cmdRatioOf==='function'){
+try{
+for(const s of (CMD.orbat.squads||[])){
+if(!s) continue;
+s.ratio=null;                     // 清掉缓存 ⇒ cmdRatioOf 下一次按成员当前 cls 重建 (单源统计在 26-commander)
+cmdRatioOf(s);                    // 立即重算并写回 s.ratio (面板 2Hz 重建时读的就是这份)
+}
+}catch(e){}
+}
+// ── ③ 回到「选兵种」状态: 玩家未落地 ──
+// deployed=false 是部署页显示「部 署」按钮的判据 (showDeploy 的 isAliveDeployed), 也是
+// cmdMapCanOpen / cmdMapMustClose / 兵种卡重进布势门 (player.cls===5&&!player.deployed) 的共同判据。
+// alive 保持原值: 撤销发生在布势期 (人根本没落地), 这里不伪造生死 —— 死亡重生期不该被这条路径改活。
+if(typeof player!=='undefined'&&player){ player.deployed=false; }
+// ── ④ R10 锁定方向复位 ──
+// 「in」= 本局已锁指挥官。撤销的语义是「这次选择作废」⇒ 必须回 null, 否则玩家点别的兵种卡会被
+// cmdClassCardGate 拦成「本局已锁定指挥官」, 撤销按钮等于没效果。
+// ★2026-10-27 (与 26-commander 的确认盖章接线同步): 确认开战 (cmdDeployConfirm) 现在就是 R10 的语义
+//   **提交点** —— 它在收图后调 cmdLockStamp(player.cls) 盖 'in'/'out', 于是「确认了就不能再换兵种」
+//   在落地之前也成立。代价是撤销这条路径**必须**自己把章撤掉: 不复位的话, 玩家撤销后指挥官卡会被
+//   gate(5) 判成「本局未选指挥官」/ 其余卡被判成「本局已锁定指挥官」—— 撤销按钮等于把人锁死在原地。
+//   这正是「撤销 = 本次选择作废」的完整语义: 盖章与撤章必须成对出现在同一条链上, 单源只有 CMD.lockedDir。
+// 「out」同样归 null (异常路径提前盖了章也属本次作废)。
+if(typeof CMD!=='undefined'&&CMD){ CMD.lockedDir=null; }
+// ── ④b 「这次看图」临时账归零 ──
+// CMD.hl/sel/cursor/focusFire 是 26-commander 交互重做批新增的**看图期**临时账 (高亮单位 / 点选单位 /
+// 鼠标世界坐标 / 集火点)。它们与布势同生共死: 撤销后布势界面没了, 任何一项残留都会带进下一次进图 ——
+// 最典型的是 focusFire (带 until 时间戳的集火令), 留着它等于玩家撤销之后还有一份「没人下过」的集火在跑。
+// cmdMapClose 只清 pick/sel, 不管 hl/cursor/focusFire, 所以在这里一次清干净 (与 cmdDeployOpen 进图时的
+// 归零同源, 见 26-commander cmdDeployOpen 的 CMD.hl=null; CMD.cursor=null; CMD.focusFire=null 一行)。
+if(typeof CMD!=='undefined'&&CMD){ CMD.hl=null; CMD.sel=null; CMD.cursor=null; CMD.focusFire=null; }
+// ── ④b-2 编制全令归 free (2026-10-27 排查批): 初始令也是布势交付的一部分 ──
+// 撤销=这次布势作废: 玩家用 E/F/R 下过的初始令 (hold/attack/strike) 同样属于"这次布局", 不能留着。
+// 不清的话最典型的半撤销: 撤销→改选普通兵种 ⇒ 玩家不再是指挥官 (开不了图), 全军却仍按布势期的令
+// 行动 —— 一份没人能取消的幽灵令打满整局。单源 cmdOrbatClearOrders (26-commander), 幂等可反复撤销。
+if(typeof cmdOrbatClearOrders==='function'){ try{ cmdOrbatClearOrders(); }catch(e){} }
+// ── ④c 私人小队还原 (2026-10-26 反馈批, 用户需求 4): 撤销=本次选择作废 —— 若玩家为进布势解散过
+//   私人小队 (cmdDeployOpen 的 cmdDisbandPlayerSquad 收编链, 单源见 26-commander), 这里原样还编:
+//   出编制、回 SQUAD.members。之后再选其他兵种时 'out' 盖章路径的还原是幂等的 (SQUAD 已有人=零操作)。
+if(typeof cmdSquadRestore==='function'){ try{ cmdSquadRestore(); }catch(e){} }
+// ── ⑤ 部署页叫回来 + 兵种卡重新可选 ──
+// 直接走 showDeploy(false) 单源: 它是「部署界面显示」的唯一入口 (摘 #deploy 的 hidden / 重建出生列表 /
+// 画部署图 / 过 cmdClassCardGate 重刷每张卡的 locked 样式 / 挂 inDeploy)。手写 DOM 会漏掉后四项 ——
+// 最典型的漏法就是卡片样式还留着 🔒, 玩家看得见卡却以为不能点。
+// typeof 守卫: 只加载子集脚本的沙箱 (本文件被单独装载) 里 showDeploy 恒在, 但保留守卫与全文件同规。
+if(typeof showDeploy==='function') showDeploy(false);
+// 撤销反馈 (与确认开战/选卡同一套点击音, 音高下行走「撤回」语感)
+try{ if(typeof AudioSys!=='undefined'&&AudioSys.click){ AudioSys.click(900,0.28,0.05); AudioSys.click(650,0.22,0.07); } }catch(e){}
+if(typeof showScorePop==='function') showScorePop(t2('布势已撤销 · 可重新选择兵种'));
+return true;
 }
 // 随车队出生点: 取最靠后的存活车, 沿行进方向的反方向(车尾后方) 9m 解算
 function convoyDeployPt(){
@@ -77,8 +304,8 @@ if(BASES.length){
 const bp=basePos(player.team);
 opts.push({name:t('主基地'),x:bp.x,z:bp.z,id:-1});
 }
-// 瘫舰甲板旗不是出生点 (2026-10-01b 用户裁定"瘫舰=无阵营陆地, 无法作为重生点"): capFlagActive 单源
-FLAGS.forEach((f,i)=>{ if(f.owner===player.team&&(typeof capFlagActive!=='function'||capFlagActive(f))) opts.push({name:t('{0} 点',f.id),x:f.x,z:f.z,id:i}); });
+// (2026-11-10: 瘫舰甲板旗出生门随大舰子系统下架摘除)
+FLAGS.forEach((f,i)=>{ if(f.owner===player.team) opts.push({name:t('{0} 点',f.id),x:f.x,z:f.z,id:i}); });
 // 无旗点战役 (遭遇/劫道): 部署选项=本方当前持有的强点 (草原库尔斯克改版: 占领获得出生权, 随战线进退)
 (CAMPAIGN.spawns||[]).forEach((sp,si)=>{
 const own=(typeof SPOTS!=='undefined'&&SPOTS[si])?SPOTS[si].own:sp.team;
@@ -126,7 +353,7 @@ list.appendChild(b);
 // 载具重生倒计时实时走秒, 冷却走完的按钮即刻亮起可选 (2026-09-01 用户指定)
 function refreshDeployList(){
 const list=el('spawnList');
-if(!list) return;
+if(!list||list.style.display==='none') return;
 const st=list.scrollTop;
 buildSpawnList();
 list.scrollTop=st;
@@ -150,6 +377,17 @@ for(const r of CAMPAIGN.roads){
 c.beginPath();
 const [ax,ay]=toM(r[0],r[1]), [bx2,by2]=toM(r[2],r[3]);
 c.moveTo(ax,ay); c.lineTo(bx2,by2);
+c.stroke();
+}
+// 随机战场·镇集铁路货线 (2026-10-07e): 与战术小地图同口径 (深底+细亮轨; 世界端 railLine 纯视觉)
+if(typeof PGDATA!=='undefined'&&PGDATA&&PGDATA.rail&&PGDATA.rail.length>1){
+c.strokeStyle='rgba(60,48,34,.95)'; c.lineWidth=3;
+c.beginPath();
+for(let i=0;i<PGDATA.rail.length;i++){ const [px,py]=toM(PGDATA.rail[i][0],PGDATA.rail[i][1]); i?c.lineTo(px,py):c.moveTo(px,py); }
+c.stroke();
+c.strokeStyle='rgba(198,178,140,.95)'; c.lineWidth=1;
+c.beginPath();
+for(let i=0;i<PGDATA.rail.length;i++){ const [px,py]=toM(PGDATA.rail[i][0],PGDATA.rail[i][1]); i?c.lineTo(px,py):c.moveTo(px,py); }
 c.stroke();
 }
 // 城市街道 (语义分区): 轴对齐矩形直接填充 —— 部署图读出街廊网格
@@ -271,22 +509,7 @@ c.moveTo(px,py);
 c.stroke();
 }
 }
-// ★2026-10-03 (海战图部署图): 大舰轮廓 (随艏向的矩形, 瘫舰转灰) —— 旧版部署图上没有舰,
-// 而甲板旗圈画在随舰移动的 f.x/f.z 上, 玩家对着空海面看旗。画在旗圈之下, 语义分区一目了然。
-if(typeof capitalShips!=='undefined'&&capitalShips.length){
-for(const s of capitalShips){
-const chl=s.spec.hullL*0.5, chw=s.spec.hullW*0.5;
-const cc=Math.cos(s.yaw), nn=Math.sin(s.yaw);
-c.beginPath();
-[[chw,chl],[-chw,chl],[-chw,-chl],[chw,-chl]].forEach((p2,i)=>{
-const [qx,qy]=toM(s.pos.x+p2[0]*cc+p2[1]*nn, s.pos.z-p2[0]*nn+p2[1]*cc);
-i===0?c.moveTo(qx,qy):c.lineTo(qx,qy);
-});
-c.closePath();
-c.fillStyle=s.state==='crippled'?'rgba(120,120,118,.4)':(s.team===0?'rgba(74,112,176,.5)':'rgba(176,90,74,.5)');
-c.fill();
-}
-}
+// (2026-11-10: 部署图大舰轮廓渲染段随大舰子系统下架摘除)
 if(BASES.length) [0,1].forEach(t=>{
 // ★2026-10-03 (与主基地按钮同族): 海战图基地方块跟随基地舰当前位置, 不再钉在静态海点
 const bp2=(typeof basePos==='function')?basePos(t):BASES[t];
@@ -306,12 +529,9 @@ c.fillRect(px-4,py-4,8,8);
 }
 for(const f of FLAGS){
 const [px,py]=toM(f.x,f.z);
-// 瘫舰甲板旗 (2026-10-01b): 灰色 + 斜杠 (读作"不可占领/不可出生"的中立陆地)
-const dead=(typeof capFlagActive==='function')&&!capFlagActive(f);
 c.beginPath(); c.arc(px,py,13,0,TAU);
-c.fillStyle=dead?'rgba(120,120,118,.55)':(f.owner===0?'rgba(90,140,220,.85)':f.owner===1?'rgba(220,110,90,.85)':'rgba(150,150,140,.7)');
+c.fillStyle=(f.owner===0?'rgba(90,140,220,.85)':f.owner===1?'rgba(220,110,90,.85)':f.owner===2?'rgba(120,185,140,.85)':'rgba(150,150,140,.7)');   // (2026-11-10: 瘫舰灰显/斜杠随大舰子系统下架摘除)
 c.fill();
-if(dead){ c.strokeStyle='rgba(40,40,40,.85)'; c.lineWidth=2; c.beginPath(); c.moveTo(px-8,py-8); c.lineTo(px+8,py+8); c.stroke(); }
 c.fillStyle='#fff'; c.font=f.id.length>1?'bold 9px sans-serif':'bold 13px sans-serif'; c.textAlign='center';
 c.fillText(f.id,px,py+(f.id.length>1?3:4));
 }
@@ -321,7 +541,7 @@ const own=(typeof SPOTS!=='undefined'&&SPOTS[si])?SPOTS[si].own:sp.team;
 const contested=typeof SPOTS!=='undefined'&&SPOTS[si]&&SPOTS[si].capTeam!==-1;
 const [px,py]=toM(sp.x,sp.z);
 c.save(); c.translate(px,py); c.rotate(HPI/4);
-c.fillStyle=own===0?'#4a70b0':own===1?'#b05a4a':'#9a968a';
+c.fillStyle=own===0?'#4a70b0':own===1?'#b05a4a':own===2?'#5ea878':'#9a968a';
 c.fillRect(-6,-6,12,12);
 if(contested){ c.lineWidth=2; c.strokeStyle='#ffd77a'; c.strokeRect(-7,-7,14,14); }
 c.restore();
@@ -329,7 +549,7 @@ c.restore();
 for(const s of soldiers){
 if(!s.alive||s.onVehicle) continue;
 const [px,py]=toM(s.pos.x,s.pos.z);
-c.fillStyle=s.team===0?'#7da8e8':'#e8907d';
+c.fillStyle=(s.zombie||s.team===2)?'#9ecfa0':(s.inSquad?'#ffffff':(s.team===player.team?'#5a9eff':'#ff5040'));
 c.beginPath(); c.arc(px,py,2,0,TAU); c.fill();
 }
 // 海战载具 (2026-09-20N 海战批): 部署图用与陆上坦克不同的艏向三角符号 —— 画法与
@@ -339,15 +559,29 @@ if(typeof sfNavalMapSymbols==='function') sfNavalMapSymbols(toM,c,S,0);
 }
 function deployPlayer(){
 const p=player;
-if(tickets[p.team]<=0){ addKillMsg('兵力已耗尽 · 本方无法再部署',p.team); return; } // 清场阶段禁止部署 (2026-09-04)
+// ★2026-11-04b 免着火批: 上一次部署/阵亡残留的燃烧账 (burnTimer/burnTickT/burnAttacker) 不带进新生;
+//   尤其"活人→观战"这类切换, 让免疫与清账同处收口 (燃烧主循环另有逐帧兜底)。
+p.burnTimer=0; p.burnTickT=0; p.burnAttacker=null;
+// ★2026-11-01: 调试观战附身中直接再部署 ⇒ 先脱离还原 (specViewHost 冻结门不清掉会把新生也钉死在 Bot 身上)
+if(p.specViewHost){
+if(typeof svHostModelRestore==='function') svHostModelRestore();   // 真附身: 宿主模型收纳还原 (再部署顶替脱离单源; 显隐守卫单源 2026-11-02: mesh 是包装对象, 真身 .root)
+p.specViewHost=null; p._svSaved=null; p._svCurW=undefined; p.thirdPerson=false; p.prone=false; p.crouch=false;   // 姿态旗一并清 (附身期间镜像的是宿主)
+if(typeof VM!=='undefined'&&VM.root) VM.root.visible=true;
+}
+// ★2026-10-30 票尽门给观战放行 (specWillBe 单源见 18-game): 观战开关开着 = 部署将以观战身份入场,
+//   不耗票不清场; 观战关着 (含 specWant=false 显式关) 照旧拦下 —— 不放行"票尽复活成普通步兵"。
+if(tickets[p.team]<=0&&!p.specWillBe()){ addKillMsg('兵力已耗尽 · 本方无法再部署',p.team); return; } // 清场阶段禁止部署 (2026-09-04)
 	// 观战意图结算 (2026-09-26H 观战批, 审计 #3/A3): 战斗中在兵种卡上点开的观战开关**记在意图里**
 	// (player.specWant), 到这一刻才真的落到 player.spectator —— 旧版二次点击当场生效, 一个正在交战的活人
 	// 可以在不阵亡的情况下瞬间变成"免伤+无限弹+可打双方"。放函数最前: 下面的配枪 (playerClassWeapons)、
 	// 副武器换装 (applySpectatorLoadout)、重生提示全都读 player.spectator。
-	if(typeof p.specWant==='boolean'){
-	p.spectator=p.specWant;
-	p.specWant=null;
-	}
+		if(typeof p.specWant==='boolean'){
+		p.spectator=p.specWant;
+		p.specWant=null;
+		}
+		// R10 盖章 (2026-10-26 指挥官批, 单源 = 26-commander cmdLockStamp): 局内首次部署定方向 ——
+		// 选了指挥官 = 'in' (此后含死亡重生再部署永远换不出), 否则 = 'out' (本局中途换不进指挥官)。
+		if(typeof cmdLockStamp==='function') cmdLockStamp(p.cls);
 	// ★观战局盖章 (判据 2026-09-27 收窄, 用户实报"选了一下观战再取消也被判观战不予计量"): 本局是否**真的
 	//   顶着观战态落进战场** —— 只有这一刻记 specUsed, 结算才据此判"不计入历史记录" (21-match recCommit)。
 	//   收在部署这一处是单源: 三条进入观战态的路径 (战斗中开开关走 specWant 待生效 / 选兵阶段开开关当场生效 /
@@ -395,14 +629,8 @@ const lp=(typeof pickSpawnPoint==='function'&&typeof pickSpawnFor==='function')
 ? pickSpawnPoint(p.team,{x:sx,z:sz,base:isBaseSpot(),r:12})
 : null;
 const fp2=lp?[lp.x,lp.z]:findFreeSpawn(sx,sz);
-// 全海图 (P4): 出生参考点在大舰甲板上 ⇒ 落点夹进甲板矩形 (否则环采样会把一半落点甩到舷外海面)
-// ★2026-10-03 (P0 级补参): 旧版漏传第 5 参 team —— 参考点不在甲板上 (全队大舰瘫痪后 basePos 回退
-//   静态 BASES 海点 / 部署到已瘫舰场景) 时, 无 team 就没有"夹进本队旗舰甲板"的兜底 ⇒ 玩家直接
-//   出生在水面上 standHeight 给出的**海床**上, 每次部署都是水下出生 → 溺水 ×3 的死亡循环。
-//   (Bot 路径 14-bots.spawn 一直传着 team, 玩家路径漏了 —— 同一函数两条调用链只差这一个实参。)
-if(typeof capSnapToDeck==='function'){ const sn=capSnapToDeck(fp2[0],fp2[1],sx,sz,p.team); if(sn){ fp2[0]=sn.x; fp2[1]=sn.z; } }
 p.pos.set(fp2[0],0,fp2[1]);
-p.pos.y=(typeof capSpawnGroundY==='function')?capSpawnGroundY(p.pos.x,p.pos.z,10):standHeight(p.pos.x,p.pos.z,10);  // P4: 全海图甲板出生 (无大舰时逐位等价)
+p.pos.y=standHeight(p.pos.x,p.pos.z,10);   // (2026-11-10: 甲板吸附/甲板出生高度随大舰子系统下架摘除)
 // 观战专属载具 (2026-09-26H 用户裁定): 部署时**不做任何预置** —— 旧版在这里 (以及 buildSpawnList 里)
 // 把幽灵坦克召到落点/主基地旁, 于是"观战者的白车"一开局就停在场地上。现在车只在按 F 时按需显形
 // (20-player tryInteract ③ → specVehSummon: 就位在脚下并直接上车), 这里一行也不做。
@@ -427,7 +655,7 @@ const _sy=(typeof spawnYawAt==='function')?spawnYawAt(p.pos.x,p.pos.z,p.team,fal
 p.yaw=(_sy!==null)?_sy:Math.atan2(-sx,-sz); p.pitch=0;
 }
 const wkeys=playerClassWeapons(p.team,p.cls);
-const gear=clsGear(p.cls,p.team);
+const gear=p.spectator?specGear():clsGear(p.cls,p.team); // 观战: 四弹种全给 (2026-10-24 用户指定, 与补给回满同源)
 p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEFS[k].reserve}));
 p.curSlot=0; p.curW=p.slots[0];
 p.nadeCount=gear.nades;
@@ -436,6 +664,10 @@ p.maxBandages=CLASSES[p.cls].bandages||4; // 2026-09-06 B7a/P2-13: 绷带上限�
 p.bandages=p.maxBandages;
 p.smokeCount=gear.smoke;
 p.incinCount=gear.incin;
+// ★2026-10-12 读条残留随再部署一次收干净: 旧版只抹字段 (bandaging=0/useCast=null) —— 若死亡那一刻
+//   读条还在跑, VM.state 仍停在 'bandage', 绷带卷与缠臂环会跟到下一次出生 (用户实报②的另一条入口)。
+//   cancelReadBar 是唯一出口 (账目 + vmAbortAction 模型层一起收), quiet 免得盖掉部署提示。
+if(p.readBarActive()) p.cancelReadBar(null,true);
 p.bandaging=0;
 p.useCast=null;
 p.grabAction=null;
@@ -450,16 +682,18 @@ if(p.onNaval){ if(typeof navalSeatRelease==='function') navalSeatRelease(false);
 // A#9 岸防炮座位随部署复位 (与上面 onNaval 同型): 在炮位上阵亡/直接改部署点时, 炮位占用必须交还 ——
 // 否则 player.onBattery 停在上一门炮上, 复活后 updatePlayerBattery 会把刚落地的玩家重新钉回炮位。
 if(p.onBattery){ if(typeof batteryDismountPlayer==='function') batteryDismountPlayer(); else p.onBattery=null; }
-// ★2026-10-03: 大舰座位/炮位账随部署复位 (与上面 onNaval/onBattery 同族) —— 上一命在甲板炮位上
-// 阵亡后, capitalGun/onCapital 若不清, capGunTick 会把新命当作"仍在操炮"继续开火 (幽灵炮位);
-// onCapital 残留还会让 capPlayerTick 拿旧舰的甲板高做落水判据。
-p.onCapital=null; p.capitalGun=null;
+// (2026-11-10: 大舰座位/炮位账复位随大舰子系统下架摘除 —— 两字段全库无写入点)
 p.onVehicle=null; p.onMG=null; p.onAT=null; p.onAA=null; p.tankView=false; p.braced=false;
+if(typeof isDarkEnvironment==='function'&&isDarkEnvironment()) p.flashlight=true;
 document.getElementById('heatWrap').style.display='none';
 vmEquip(p.curW.key,p.team);
 VM.root.visible=true;
+// 详细操作开关 (2026-11-09 批): 关=部署页兵种键位提示不弹 (cmdDeployHint 同规, 见 26-commander)
+if(SHOW_CTL_HINTS){
 if(p.cls===4) showScorePop('工程兵 · 按 5 选工事 · B 建造(靠近自己工事 B 读条拆除退点) · 6 架设/读条回收迫击炮');
 else if(isLoiterClass()) showScorePop('巡飞弹兵 · 左键发射后进入TV制导 · 按 6 扔燃烧弹');
+}
+if(typeof cmdDeployHint==='function') cmdDeployHint();   // 指挥官: 通讯仪右键开图/下令/减速提示 (2026-10-26)
 if(vehSpawn){
 // 海战载具 (kind 'amph'|'boat'): 座位初始化走 navalBoard 单源 (与"走到艇边按 F"同一份代码),
 // 车组交还/玩家态/武器槽暂存都在那里 —— 这里不再按坦克那套写一遍 (那是第二条上船路径, 正是要避免的)。
@@ -471,23 +705,9 @@ vehSpawn.crewBot=null;
 cb.onVehicle=null;
 // A#8 契约 §7: 用 chuteBegin 统一开伞 (同帧置 chuting/chute/onGround 三态, 与玩家 p.chute 口径一致);
 // 旧版只写 cb.chuting=true, 缺 chute/onGround 会让 chuteAirborne() 判不出"伞降中"。
-// ★2026-10-03 (纯海图): 被顶掉的 AI 飞行员旧版一律跳伞 —— 舰载机的停放/巡航点都在海上,
-// 伞兵落水后 seaSwimDrain 7.7s 耗尽 → 溺亡, 玩家每征用一次飞机就白沉一个兵 + 一票。
-// 有大舰就把他放到本队舰甲板上 (capSnapToDeck 的 team 兜底会挑最近本队舰); 无大舰保持跳伞。
-let decked=false;
-if(typeof capitalShips!=='undefined'&&capitalShips.length&&typeof capSnapToDeck==='function'){
-const sn3=capSnapToDeck(vehSpawn.pos.x,vehSpawn.pos.z,vehSpawn.pos.x,vehSpawn.pos.z,vehSpawn.team);
-if(sn3){
-decked=true;
-cb.pos.set(sn3.x,(typeof capSpawnGroundY==='function')?capSpawnGroundY(sn3.x,sn3.z,10):10,sn3.z);
-cb.mesh.root.visible=true; cb.path=null; cb.state='idle'; cb.target=null;
-if(typeof cb.pickObjective==='function') cb.pickObjective();
-}
-}
-if(!decked){
+// (2026-11-10: 被顶掉的 AI 飞行员改投本队舰甲板段随大舰子系统下架摘除 —— 恢复一律跳伞)
 if(typeof cb.chuteBegin==='function') cb.chuteBegin(vehSpawn.pos.x,Math.max(vehSpawn.pos.y-2,heightAt(vehSpawn.pos.x,vehSpawn.pos.z)+3),vehSpawn.pos.z);
 else { cb.chuting=true; cb.pos.set(vehSpawn.pos.x,Math.max(vehSpawn.pos.y-2,heightAt(vehSpawn.pos.x,vehSpawn.pos.z)+3),vehSpawn.pos.z); cb.mesh.root.visible=true; cb.path=null; cb.state='idle'; cb.target=null; }
-}
 } else cb.dismountVehicle(false);
 }
 if(isNaval){
@@ -506,7 +726,19 @@ document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
 el('blackOv').style.opacity=0;
 if(p.spectator){ p.flying=false; p.flyAero=false; p._aeroSpd=0; }
 lockPointer();
-if(p.spectator) showScorePop('观战中 · 双击空格=悬停飞行 · H=气动飞行 · F=召唤幽灵坦克 · K=时停 · J=信息层');
+// ★2026-10-26 排查轮二审 修复 (H4/P3): 观战提示行里的减速键词条改为向 26-commander 取。
+//   ①现象: 减速键 (V, 2026-10-26 交互重做批由 N 换来) 是指挥官批新加的观战共用功能 (R8: 观战免读条),
+//     提示行里这一句 "... · V=减速" 若**手写死**就是第二份副本 —— 键位或词条将来一改, 这里不会跟着改。
+//   ②根因 (旧写为什么错): "减速键该怎么提示"这条判据在 26-commander 有单源函数 (cmdSpecHudKeys),
+//     本行却自己抄一份同样的字面量 = 同一词条两处实现 (改一处漏另一处的那种双源)。
+//   ③现在的单源口径: 词条来自 cmdSpecHudKeys() (typeof 守卫: 极端沙箱缺 26-commander 时退回字面量,
+//     字面量随码走保持现键 V)。**整句仍是同一个键**: 前缀 + 取回的词条恰好拼回 00b-i18n 里那条整句键
+//     '调试模式 · 双击空格=悬停飞行 · H=气动飞行 · F=召唤幽灵坦克 · K=时停 · J=信息层 · V=减速'
+//     (showScorePop 内部对整句 t() 一次), 所以英文界面照旧命中整句翻译, 不新增裸中文键。
+//     注意拼接顺序: 词条必须是整句的**后缀** (cmdSpecHudKeys 返回 ' · V=减速', 正是后缀形态)。
+//     ★2026-10-27 排查批: fallback 与本注释里的键名从 N 纠正为 V (换键批漏改的后缀副本)。
+//     ★2026-11-01 改名: 观战→调试模式 (旧观战职能; 新"自由观战"无这些工具键, 提示走 enterSpecView)。
+if(p.spectator&&SHOW_CTL_HINTS) showScorePop('调试模式 · 双击空格=悬停飞行 · H=气动飞行 · F=召唤幽灵坦克 · K=时停 · J=信息层 · Q=附身Bot · E=脱离 · L=手电/大灯'+((typeof cmdSpecHudKeys==='function')?cmdSpecHudKeys():' · V=减速'));   // 词条与 26-commander cmdSpecHudKeys 同源 (V=减速 / R8: 观战共用键, 免读条); ★2026-11-05 补 L (调试模式手电/大灯批, 词典键同步 00b-i18n); 2026-11-09 批: 键位提示受详细操作开关管
 // 落地 = 部署界面收起 (上面那句把全部 .screen 收进 hidden) → 立刻摘掉 inDeploy, 战斗 HUD 随之上场 (2026-09-20 第6条)
 if(typeof syncDeployHud==='function') syncDeployHud();
 }
@@ -541,6 +773,10 @@ function applyFlagOwnership(){
 	//   态 (= CSS 的灰底灰字) —— "一方显示灰色而非该有的蓝/红"。id 改按 FLAGS 索引, 与
 	//   22-hud updateHUD 的 el('fi'+i) 同一序 (forEach 双参), 陆战图 A..E 也逐位兼容。
 	el('flagIcons').innerHTML=FLAGS.map((f,i)=>`<span id="fi${i}">${f.id}</span>`).join('');
+	// ★2026-10-07d 幻影敌旗修复: solo 生存无敌方队伍 —— 05c 已删 own, 但旧版会落进 conquest
+	//   "就近拆分"兜底 (最近2旗给0队/最远2旗给1队) ⇒ 单队伍局凭空出现 2 面敌方旗 (HUD 红标 +
+	//   坦克去"夺回")。solo 只建 HUD 图标、旗保持中立 (可占给 ZP, 21-match 占领钩子); teams 照常。
+	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo') return;
 	if(GAMEMODE==='conquest'){
 	if(FLAGS.some(f=>f.own!==undefined)){
 	// 显式归属 (2026-09-06 斯大林格勒改版): 两翼 home 点开局各归其主, 中央拉锯带中立 —— 草图开局态势
@@ -564,7 +800,8 @@ function applyFlagOwnership(){
 	}
 	// 防守方兵力=进攻方×1.25 (2026-09-05 用户指定下调: 防守优势改由"防御工事模板"承担阵地强度,
 	// 人数只保留小幅倾斜; 原为 ×1.75, 阵地+人海双优势过重)
-	tickets[DEF]=Math.round(tickets[ATK]*1.25);
+	// 丧尸模式例外 (2026-10-07d 用户裁定): 尸潮是两军共同威胁, "不再纯粹是两队对抗" ⇒ 初始票数对等, ×1.25 失去前提。
+	tickets[DEF]=Math.round(tickets[ATK]*(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE?1:1.25));
 // 攻防限时: 默认 18 分钟; 战役条目 matchMin 覆盖 (柏林大地图 22 分钟)
 // ★2026-10-04 (海战审计 F4): 征服分支旧版写死 16*60 —— coral matchMin:20 是死配置。与攻防/遭遇
 //   同一口径: 战役条目覆盖, 缺省 16 (既有陆战征服图无 matchMin 的逐位不变)。
@@ -659,21 +896,16 @@ function startMatch(){
 // (工程兵工事/迫击炮/医疗箱/残骸…)。就地换局时 retireMatchActors 按这条边界整段摘除, 不必逐个系统去记。
 // 只在第一次开局时记录: 换局时沿用首次的边界值, 才能把"上一局新增的一切"连同本局新增一起清掉。
 if(typeof window.__sfMatchWorldStart!=='number') window.__sfMatchWorldStart=world.children.length;
+if(typeof ACH!=='undefined'&&ACH.onFreshMatch) ACH.onFreshMatch(); // 成就普查账 (2026-11-11 成就批): startMatch = 新局世界必然 pristine 的唯一漏斗
 const names0=[...TEAM_FACTION[0].names].sort(()=>Math.random()-0.5);
 const names1=[...TEAM_FACTION[1].names].sort(()=>Math.random()-0.5);
 const nameIdx=[0,0];
 const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).length];
 	// 开局批量生成的位置修正 (2026-09-20): 归属必须先算, 否则候选出生点位只剩主基地 1 个。
 	applyFlagOwnership();
-		// 大舰编制 (P4 2026-09-30; ★2026-10-01b 改"载入期已生成, 此处只复位"): 全海图的"陆地"只有舰甲板 ——
-		//   大舰现在在 24-main 启动段 (capturePristineWorld 快照之前) 就已生成, 主菜单航拍能看到编队巡航。
-		//   开局时若已在场 ⇒ capitalEnsureOrbat 走 capitalReset 复位+重绑甲板旗; 不在场 (探针/旧路径) ⇒ 照旧生成。
-		//   Bot 出生 (14-bots spawn) 与舰载机停放 (capParkPlanes) 都要按队找到本队大舰并把落点吸附上去,
-		//   晚一步就是"兵落海 / 飞机还在天上"的静默降级 (capSnapToDeck 与 capParkPlanes 都按空表早退)。
-		//   非海战图 capSpawnList 为空 ⇒ 一个对象都不建, 既有 13 张图零变化。
-		if(typeof capitalEnsureOrbat==='function') capitalEnsureOrbat();
-		else if(typeof capitalSpawnOrbat==='function') capitalSpawnOrbat();   // 只载部分脚本的沙箱兜底
+		// (2026-11-10: 开局大舰编制 ensure/spawn 钩随大舰子系统下架摘除)
 	for(let t=0;t<2;t++){
+	if(ZOMBIE_MODE==='solo'&&t!==player.team) continue;   // 单队合作: 只生成玩家一队 (丧尸潮=第三方, 2026-10-06)
 	const bMul=CAMPAIGN.botMul||[1,1];
 	const bN=[Math.max(2,Math.round(BOTS_PER_TEAM*bMul[0])),Math.max(2,Math.round(BOTS_PER_TEAM*bMul[1]))];
 	const n=bN[t]-(t===player.team?1:0);
@@ -694,10 +926,10 @@ const nextName=t=>(t===0?names0:names1)[nameIdx[t]++%(t===0?names0:names1).lengt
 // (契约 §4 v3: 后 2 人是 Tank.crewSlots 轻量名额, 不在 soldiers 里, 无需在此排除)
 for(const s of soldiers){
 if(SQUAD.members.length>=3) break;
-if(s.team===player.team&&!s.onVehicle&&!s.pilotOf&&!s.inSquad&&!s.capCrew){   // capCrew: 大舰炮手不进小队 (2026-10-01c)
+if(s.team===player.team&&!s.onVehicle&&!s.pilotOf&&!s.inSquad){   // (2026-11-10: capCrew 项随大舰子系统下架摘除)
 s.inSquad=true;
 SQUAD.members.push(s);
-s.mesh.tag.material.color.set(0x86ffa6);
+s.mesh.tag.material.color.set(0xffffff);
 // 开局站位: 以玩家为圆心均匀铺开 (旧版直接贴玩家落点, 3 个人叠在 1m 内)
 const ang=(SQUAD.members.length-1)/3*TAU+rand(-0.3,0.3);
 const rr=rand(6,9);
@@ -708,14 +940,14 @@ if(!occBlocked(wx,wz)&&(typeof freeSpot!=='function'||freeSpot(wx,wz,0.6))){
 // 与出生筛选同源: NAV.spawnSpot 把落点就近搬到"走得出去"的位置 (最多 12m, 小队仍在玩家视野内)。
 let sx=wx, sz=wz;
 if(typeof NAV!=='undefined'&&NAV.spawnSpot){ const sp=NAV.spawnSpot(wx,wz,12); sx=sp[0]; sz=sp[1]; }
-s.pos.set(sx,0,sz); s.pos.y=(typeof capSpawnGroundY==='function')?capSpawnGroundY(sx,sz,12):standHeight(sx,sz,12);  // P4: 甲板上铺开小队
+s.pos.set(sx,0,sz); s.pos.y=standHeight(sx,sz,12);   // (2026-11-10: 甲板出生高度随大舰子系统下架摘除)
 }
 s.pickObjective();
 }
 }
 	// 坦克数量: 按战役配置 (默认每队2辆; 遭遇战翻倍; 劫道护运方有坦克/劫道方无)
 	const tN=CAMPAIGN.tankN||[2,2];
-	for(let t=0;t<2;t++) for(let v=0;v<tN[t];v++) new Tank(t,v%2);
+	for(let t=0;t<2;t++){ if(ZOMBIE_MODE==='solo'&&t!==player.team) continue; for(let v=0;v<tN[t];v++) new Tank(t,v%2); }
 	// 飞机数量 (2026-09-20N 海战批): 删掉旧硬编码的 4 架 (new Plane(0,0);new Plane(0,1);new Plane(1,0);
 	//   new Plane(1,1);), 改读战役数据表 CAMPAIGN.airN —— 塔拉瓦 airN=1 (用户裁定"飞机也缩减"
 	//   ⇒ 全图 1 架, 全归主攻方美军 team0)。
@@ -725,18 +957,14 @@ s.pickObjective();
 	// P4 (2026-09-30): airN 允许写成数组 = **双方**各多少架 (全海图两边都从自家航母起飞, 没有"只有攻方有
 	//   飞机"的不对称可言)。标量仍旧口径 [airT,0] = 只有攻方有飞机 —— 既有 13 张图逐字不变。
 	const airPerTeam=Array.isArray(airT)?[airT[0]|0,airT[1]|0]:((airT===undefined)?[2,2]:[airT,0]);
-	for(let t=0;t<2;t++) for(let v=0;v<airPerTeam[t];v++) new Plane(t,v%2);
-	// 舰载机开局停放到本队航母飞行甲板 (P4 2026-09-30 用户裁定① 简化起降): 此刻大舰已在上面生成好。
-	//   无航母的战役: 本函数首行返回 0, 飞机保持"基地上空 40m"的既有出生口径 (既有 13 图零变化)。
-	if(typeof capParkPlanes==='function') capParkPlanes();
-	// 海战载具编制 (2026-09-20N 海战批, 用户裁定"每队 2 坦克 + 2 两栖车 + 3 艇"): 只在有海面且战役显式
+	for(let t=0;t<2;t++){ if(ZOMBIE_MODE==='solo'&&t!==player.team) continue; for(let v=0;v<airPerTeam[t];v++) new Plane(t,v%2); }
+	// (2026-11-10: 舰载机甲板停放 capParkPlanes 钩随大舰子系统下架摘除)
+// 海战载具编制 (2026-09-20N 海战批, 用户裁定"每队 2 坦克 + 2 两栖车 + 3 艇"): 只在有海面且战役显式
 	//   给了 navalN 的图生成 (塔拉瓦); 其余 12 图 SEA=null ⇒ 零海战载具、零新增世界对象。
 	//   typeof 守卫: 15d-naval 未加载的脚本链 (dev/verify-boot 的 12 图 LOAD 断言、部分探针) 不许因它报错。
 	if(SEA&&CAMPAIGN.navalN&&typeof NavalCraft==='function') spawnNavalOrbat();
-	// 大舰编制 (2026-09-30 阶段五 P4): 由战役的 CAMPAIGN.capital 声明 (声明序 = 索引, 甲板旗点用 ship:<索引>
-	//   回指)。与大舰同批生成的还有甲板旗点绑定 (capitalFlagBind: 把旗位换算成舰体局部坐标, 之后由
-	//   updateCapital → capitalFlagTick 每帧跟随)。非全海图战役 capSpawnList() 为空 ⇒ 一个对象都不建。
-	// 劫道模式: 沿公路生成护运车队 (纯AI, 不可驾驶)
+	// (2026-11-10: 大舰编制生成段随大舰子系统下架摘除 —— CAMPAIGN.capital 已随两海战图取消)
+// 劫道模式: 沿公路生成护运车队 (纯AI, 不可驾驶)
 	if(GAMEMODE==='convoy'&&CAMPAIGN.convoy) spawnConvoy(CAMPAIGN.convoy);
 // 每车 1 名真实 AI 车组 (契约 §4 **v3 修订**: 三人的"人"不从士兵池里出)。
 // v3 口径: 每车 = 1 名真实 Bot 驾驶员 (crewBot, 唯一跑 AI 的) + 2 个"乘员名额"(Tank.crewSlots 轻量记录,
@@ -764,4 +992,8 @@ navalCrewFill();
 // 本页已开过局的标记 (2026-09-16 本批): 对局实体只增不减, 就地重开前必须先让上一局整体退场 ——
 // beginFreshMatch (22-hud) 据此判断"世界还干净, 直接开局"还是"已经开过一局, 要先 retireMatchActors 退场"
 window.__sfMatchSpawned=true;
+// 指挥官编制生成 (2026-10-26 指挥官批, 设计 §5): 挂**世界构建尾** —— 此刻步兵/坦克/飞机/车组全部
+// 落成而玩家尚未部署 (探针口径: 编制在玩家未部署时即存在)。步兵 3~5 人一组 ceil(n/5), 载具各成单位;
+// 不开放图 (丧尸/海战) 也照建 (编制本身无副作用), 是否出兵种卡由 cmdClassAvailable 另管。
+if(typeof cmdOrbatBuild==='function') cmdOrbatBuild();
 }

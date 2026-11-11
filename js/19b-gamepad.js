@@ -37,11 +37,11 @@ PAD.held={};
 mouseDown=false; mouse2Down=false; player.ads=false; keys.ShiftLeft=false;
 keys.KeyW=keys.KeyS=keys.KeyA=keys.KeyD=false;
 }
-// LT = 瞄准: 门与键鼠右键/触屏瞄准逐条同款 (座位/巡飞弹/飞行中一律不进 ADS)
+// LT = 瞄准: 门与键鼠右键/触屏瞄准逐条同款 (座位/巡飞弹中不进 ADS; 2026-11-06 起两种观战飞行中=瞄准, 巡飞弹制导中 mouse2Down=开镜); 附身中也不进 (借眼只读, 2026-11-02)
 function padAds(on){
 if(on){
 mouse2Down=true;
-if(player.alive&&!player.loiter&&!player.flying&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery) player.ads=true;
+if(player.alive&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onNaval&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery&&!player.specViewHost) player.ads=true;
 }else{ mouse2Down=false; player.ads=false; }
 }
 const PAD_DZ=0.22;
@@ -57,8 +57,8 @@ const PAD_MAP=[   // i = standard mapping 按钮号; dn 在"战斗中"的按下�
 {b:7, dn:()=>{mouseDown=true;},  up:()=>{mouseDown=false;}},                           // RT 开火
 {b:8, dn:()=>padKd('Tab'),   up:()=>padKu('Tab')},                                     // Back 战况 (按住)
 {b:9, dn:()=>{ if(gamePaused||(player.deployed&&player.alive&&!matchOver)) togglePause(); }, up:null}, // Start 暂停
-{b:10,dn:()=>{ if(player.alive&&player.deployed) switchSlot(player.curSlot===0?1:0); }, up:null},       // LS 切枪
-{b:11,dn:()=>padKd('KeyV'),  up:()=>padKu('KeyV')},                                    // RS 近战
+{b:10,dn:()=>{ if(player.alive&&player.deployed) switchSlot(player.curSlot===0?1:0,true); }, up:null},   // LS 切枪 (viaKey: 读条中切枪=打断读条, 2026-10-25 反馈轮①)
+{b:11,dn:()=>padKd('KeyN'),  up:()=>padKu('KeyN')},                                    // RS 近战 (2026-10-26 交互重做批: 近战键 V→N, V 让给减速)
 {b:12,dn:()=>padKd('KeyH'),  up:()=>padKu('KeyH')},                                    // 十字上 绷带/气动飞行
 {b:13,dn:()=>padKd('KeyZ'),  up:()=>padKu('KeyZ')},                                    // 十字下 趴
 {b:14,dn:()=>padKd(player.cls===4?'Digit5':'Digit4'), up:()=>{padKu('Digit4'); padKu('Digit5');}},      // 十字左 烟雾/选工事 (2026-09-28 兵种8→5: 工程=4; 迫击炮走 Digit6)

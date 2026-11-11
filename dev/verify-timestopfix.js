@@ -73,7 +73,7 @@ document.createElement=(t)=>patchStyle(c(t));
 document.querySelector=(s)=>patchStyle(q(s));
 }
 // ── 全链文件表 (与 index.html 同序; 含 15c/15d/15e/15f 与 22b) ──
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
 // 沙箱内小工具 (顶层 var: 桩的 globalThis 指向共享 sandbox, 写 globalThis.x 会落到别的 context 上)
 const PRELUDE=`var __TSF=(function(){
@@ -350,7 +350,7 @@ const on2=ind();
 specTimeReset();
 updateHUD(1/60);
 const off2=ind();
-// 顶部栏 10Hz 段的冻结不该影响读数: 它现在只承载兵力/旗点/罗盘 (世界数据, 冻结时本就该是静止的)
+// 顶部栏 10Hz 段不承接本读数 (它在逐帧段); 该段 2026-11-08 起节流钟吃观察者帧长 (时停中小地图/罗盘随人重绘, 见 verify-timestophud-20261108), 兵力/旗点等世界数据冻结时值本就不变
 return {off,on,on2,off2,text:document.getElementById('specTimeInd').textContent,hasEl:!!document.getElementById('specTimeInd')};
 }catch(e){ return 'EXC:'+(e&&e.stack||e); }})()`);
 if(typeof r==='string'){ exc('T7',r); } else {

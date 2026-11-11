@@ -2,9 +2,12 @@
 // dev/verify-phase3-20260928.js —— 阶段三 P1 平衡首轮验收 (2026-09-28, 缺陷登记 P1/阶段三)
 // 断言:
 //   S1 源码/数据断言:
-//     P1-a 兵种 8→5 (步枪/突击/狙击/反坦克/工程), 医护/迫击炮/冲锋枪手退场 ·
-//     P1-b 各方兵种表 5 槽: 德军突击兵=STG44, 其余=阵营冲锋枪; bar/dp28/type96/zb26/type11/m1903 全部退场 ·
-//     P1-c 距离衰减生态位表 (fallS/fallE/fallF): 冲锋枪 < STG44 < 半自动 < 栓动/狙击; 全现役武器带表 ·
+//     P1-a 兵种 8→5 (步枪/突击/狙击/反坦克/工程), 医护/迫击炮/冲锋枪手退场
+//          (2026-10-26 指挥官批锚随码走: +指挥官=6, 仅玩家可选, CLS_POOL 仍 0..4) ·
+//     P1-b 各方兵种表 6 槽 (2026-10-26 前为 5): 德军突击兵=STG44, 其余=阵营冲锋枪;
+//          第 6 槽=通讯仪 radio+阵营冲锋枪副武器; bar/dp28/type96/zb26/type11/m1903 全部退场 ·
+//     P1-c 距离衰减生态位表 (fallS/fallE/fallF): 冲锋枪 < STG44 < 半自动 < 栓动/狙击; 全现役武器带表
+//          (通讯仪 tool:true 无火力不吃衰减 — 2026-10-26 豁免同火箭弹) ·
 //     P1-d 移速系数 wSpd: 手枪 1.0 最快, 火箭筒/反坦克枪 0.9 最慢 ·
 //     P1-e 栓动换弹 ≤3.0 (原 3.1~3.8) ·
 //     P1-f CLS_POOL/AT_POOL 只含 0..4 ·
@@ -37,7 +40,7 @@ sandbox.confirm=()=>true;
 const handlers={};
 sandbox.addEventListener=(t,f)=>{ (handlers[t]=handlers[t]||[]).push(f); };
 sandbox.removeEventListener=()=>{};
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const Quat=class{ constructor(){this.x=0;this.y=0;this.z=0;this.w=1;} set(x,y,z,w){this.x=x;this.y=y;this.z=z;this.w=w;return this;} setFromEuler(){return this;} setFromAxisAngle(){return this;} copy(q){Object.assign(this,q);return this;} mult(){return this;} normalize(){return this;} };
 const CV3=sandbox.THREE.Vector3;
 const CANNON_STUB={Vec3:CV3,Quaternion:Quat,
@@ -69,21 +72,25 @@ console.log('══ 阶段三 P1 平衡首轮验收 (dev/verify-phase3-20260928.
 console.log('S1 源码/数据断言');
 {
 const names=R('CLASSES.map(c=>c.name)');
-ok(JSON.stringify(names)===JSON.stringify(['步枪兵','突击兵','狙击手','反坦克兵','工程兵']),'P1-a 兵种 8→5: '+names.join('/'));
+ok(JSON.stringify(names)===JSON.stringify(['步枪兵','突击兵','狙击手','反坦克兵','工程兵','指挥官']),'P1-a 兵种 8→5, 2026-10-26 +指挥官=6: '+names.join('/'));
 }
 {
 const KEYS=['us','ger','sov','jp','kmt','cpc'];
 const SMG={us:'thompson',ger:'stg44',sov:'ppsh',jp:'type100',kmt:'mp18',cpc:'c96auto'};
+// 通讯仪副武器 = 阵营冲锋枪 (ger=mp40, 非突击兵的 stg44)
+const SEC={us:'thompson',ger:'mp40',sov:'ppsh',jp:'type100',kmt:'mp18',cpc:'c96auto'};
 let allOk=true, det=[];
-for(const k of KEYS){
-const f=R(`FACTIONS['${k}'].cls`);
-const okN=f.length===5;
-const okSmg=f[1][0]===SMG[k];
-const okNoDead=!JSON.stringify(f).match(/"?(bar|dp28|type96|zb26|type11|m1903)"?/);
-if(!(okN&&okSmg&&okNoDead)) allOk=false;
-det.push(k+':'+f.length+'槽/'+f[1][0]);
-}
-ok(allOk,'P1-b 各方兵种表 5 槽 + 德军突击兵=stg44 + 自动武器退场   ['+det.join(' ')+']');
+	for(const k of KEYS){
+	const f=R(`FACTIONS['${k}'].cls`);
+	// 2026-10-26 指挥官批: 5→6 槽, 第 6 槽 = ['radio', 阵营冲锋枪] (副武器沿用阵营枪, 单源 00-config)
+	const okN=f.length===6;
+	const okSmg=f[1][0]===SMG[k];
+	const okRadio=f[5][0]==='radio'&&f[5][1]===SEC[k];
+	const okNoDead=!JSON.stringify(f).match(/"?(bar|dp28|type96|zb26|type11|m1903)"?/);
+	if(!(okN&&okSmg&&okRadio&&okNoDead)) allOk=false;
+	det.push(k+':'+f.length+'槽/'+f[1][0]+'/'+f[5][0]);
+	}
+	ok(allOk,'P1-b 各方兵种表 6 槽 (2026-10-26 前为 5) + 德军突击兵=stg44 + 第6槽=radio + 自动武器退场   ['+det.join(' ')+']');
 }
 {
 const defs=R('WPN_DEFS');
@@ -91,8 +98,10 @@ const defs=R('WPN_DEFS');
 const carried=new Set();
 for(const fk of ['us','ger','sov','jp','kmt','cpc']) for(const slot of R(`FACTIONS['${fk}'].cls`)) carried.add(slot[0]);
 carried.add('specsniper');
-// 火箭筒(bazooka/schreck)与巡飞弹发射器走炮弹链 (fireRocket→updateShells), 不吃子弹衰减 — 豁免
-for(const k of [...carried]) if(R('WPN_DEFS')[k].rocket) carried.delete(k);
+	// 火箭筒(bazooka/schreck)与巡飞弹发射器走炮弹链 (fireRocket→updateShells), 不吃子弹衰减 — 豁免
+	for(const k of [...carried]) if(R('WPN_DEFS')[k].rocket) carried.delete(k);
+	// 通讯仪 tool:true 无火力 (2026-10-26 指挥官批), 子弹衰减无意义 — 同火箭弹豁免
+	for(const k of [...carried]) if(R('WPN_DEFS')[k].tool) carried.delete(k);
 const noFall=[...carried].filter(k=>R('WPN_DEFS')[k].fallS===undefined);
 ok(noFall.length===0,'P1-c1 全部现役武器带距离衰减表 (缺: '+(noFall.join(',')||'无')+')');
 const g=(k,f)=>defs[k][f];
@@ -133,7 +142,7 @@ ok(strip(veh).includes('const AT_SHELL_PAD=0.45')&&strip(veh).includes("(s.kind=
 {
 const eng=read('js/06-engineering.js'), inp=read('js/19-input.js'), idx=read('index.html'), mn=read('js/24-main.js'), dep=read('js/23-deploy.js');
 ok(strip(eng).includes("'sandbag','wire','hedge','mg','medkit'")&&strip(eng).includes('medkit:2'),'P1-i1 医疗箱=建造菜单第5件 (2点)');
-ok(strip(inp).includes("if(e.code==='Digit5'&&player.cls===4)")&&strip(inp).includes("if(e.code==='KeyB')")&&strip(inp).includes("else if(player.cls===4&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter){\nif(!player.mortarPlaced){"),'P1-i2 工程兵键位: B=建造 / 5=选型 / 6=架设回收迫击炮');
+ok(strip(inp).includes("if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE))")&&strip(inp).includes("if(e.code==='KeyB')")&&strip(inp).includes("else if(player.cls===4&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter){\nif(!player.mortarPlaced){"),'P1-i2 工程兵键位: B=建造 / 5=选型 (2026-10-28a 批: 丧尸局全职业放行, 锚随码走) / 6=架设回收迫击炮');
 ok(idx.includes("id=\"tMortar\"")&&strip(mn).includes("bindBtn('tMortar'")&&strip(mn).includes("show('tMortar'"),"P1-i3 触屏迫击炮键 tMortar 已接线");
 ok(strip(dep).includes("if(p.cls===4) showScorePop('工程兵"),"P1-i4 部署提示重映射");
 }

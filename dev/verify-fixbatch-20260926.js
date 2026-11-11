@@ -79,7 +79,9 @@ assert('13: splashDamage 掩体遮挡与 explodeAt 同式', has(cbt,'const block
 assert('13: 海战命中分支已进裁决链', has(cbt,'} else if(hitNaval&&navalD<=Math.min(tankD,truckD,planeD)){')); // 7c 空对地平衡收口: 近距裁决面收 planeD (2026-09-30)
 
 const veh=SRC('js/15-vehicles.js');
-assert('15: VEH_HIT_TOP 具名常量 (坦克/两栖车同源)', has(veh,'const VEH_HIT_TOP=2.6;')&&has(veh,'y1:t.pos.y+VEH_HIT_TOP'));
+// ★2026-11-01 锚跟走: 命中柱构建 7c 批起抽成 vehHitCyl 单源, `y1:t.pos.y+VEH_HIT_TOP` 字面量变成
+//   `o.y0=…/o.y1=t.pos.y+VEH_HIT_TOP` 赋值式 (坦克/两栖车同源语义不变) —— 锚随码走。
+assert('15: VEH_HIT_TOP 具名常量 (坦克/两栖车同源)', has(veh,'const VEH_HIT_TOP=2.6;')&&has(veh,'t.pos.y+VEH_HIT_TOP'));
 // ★2026-09-26H: 该判据由 `const feedName=driver?` 扩为 `const feedName=(driver&&!spec)?` —— 观战者座驾
 //   与空车同规 (不吹"乘员×3", 因为 spec 分支不结算任何乘员)。判据仍然守"战报里的乘员数必须与结算口径一致"。
 assert('15: 空车不再吹"乘员×3"', has(veh,'const feedName=')&&has(veh,'&&!spec)')&&!has(veh,"this.name+' · 乘员×3',team"));
@@ -116,7 +118,7 @@ assert('i18n: 新增提示「此处无法架设」已入词典', has(SRC('js/00b
 const HEAD=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js',
 'js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js',
 'js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js',
-'js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js',
+'js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js',
 'js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js',
 'js/22a-menuart.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const {sandbox,document,window}=require('./_bootstub.js');

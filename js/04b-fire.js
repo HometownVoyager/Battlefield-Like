@@ -28,6 +28,65 @@ const FUEL_MAX=1.15;
 // 引燃阈值 0.8 / 冷却率 / 燃料消耗一律不动; 暴雨档 0.85×0.8×0.35≈0.24/s < 冷却 0.25 ⇒ 积热追不上冷却, 火不成链。
 const FIRE_SPREAD_NERF=0.8;
 const FIRE_SPREAD=FIRE_SPREAD_NERF*WX_CFG.fireMul;
+// ── 火势与天气深化辅助 (二期: 伤害/燃烧时间/受潮消耗速率/暴雨熄灭单源) ──
+function wxFireDmg(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.fireDmgMul!==undefined)?WX_CFG.fireDmgMul:1.0; }
+function wxBurnRate(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.burnRateMul!==undefined)?WX_CFG.burnRateMul:1.0; }
+function wxStormExt(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.stormExtinguish)?WX_CFG.stormExtinguish:0; }
+
+// ===== 生物附着燃烧系统 (Ignite / Burning DOT) =====
+// ★2026-11-04b 免着火批 (用户实报: 调试模式/自由观战模式下玩家"不会被着火"):
+//   player.damage() 早对 spectator 免伤, 但燃烧链是另一套 —— igniteCreature 照样写 burnTimer,
+//   updateCreaturesBurning / fireDamageTick / 燃烧弹云 / 树爆 照样跑火焰粒子与 addTrauma,
+//   于是观战者身上冒火、屏幕抖、掉血调用空转, 视觉上就是"观战者被点着了"。
+//   这里立单一判据: 观战态 (含调试 spectator 与自由观战 specView/spectator) 一律不进入任何燃烧路径。
+//   与 18-game damage 的 this.spectator 同谓词, 不另立第二套"谁算观战"。
+function creatureIgnitable(s){
+return !!(s&&s.alive&&!s.spectator);
+}
+if(typeof window!=='undefined') window.creatureIgnitable=creatureIgnitable;
+function igniteCreature(s, attacker){
+  if(!creatureIgnitable(s)||(typeof seatShielded==='function'&&seatShielded(s))) return;
+  if(typeof waterYAt==='function'){
+    const wy=waterYAt(s.pos.x,s.pos.z);
+    if(wy>-1e8&&(s.pos.y||0)<wy+0.3) return; // 涉水灭火/免疫
+  }
+  const dur=(typeof WX_CFG!=='undefined'&&WX_CFG.burnDur!==undefined)?WX_CFG.burnDur:3.5;
+  if(dur<=0) return;
+  s.burnTimer=Math.max(s.burnTimer||0, dur);
+  if(attacker) s.burnAttacker=attacker;
+  if(!s.burnTickT) s.burnTickT=0.4;
+}
+if(typeof window!=='undefined') window.igniteCreature=igniteCreature;
+
+function updateCreaturesBurning(dt){
+  const dmgMul=wxFireDmg();
+  if(typeof combatants==='undefined'||!combatants) return;
+  for(const s of combatants){
+    // 观战者不着火 (2026-11-04b): 免疫期间顺手清掉残留账 (从活人切成观战的那条路径), 解冻/关闭调试后不带火
+    if(s&&s.spectator&&(s.burnTimer||s.burnTickT)){ s.burnTimer=0; s.burnTickT=0; s.burnAttacker=null; }
+    if(!creatureIgnitable(s)||!s.burnTimer||s.burnTimer<=0) continue;
+    if(typeof waterYAt==='function'){
+      const wy=waterYAt(s.pos.x,s.pos.z);
+      if(wy>-1e8&&(s.pos.y||0)<wy+0.3){
+        s.burnTimer=0;
+        continue;
+      }
+    }
+    s.burnTimer-=dt;
+    s.burnTickT=(s.burnTickT||0.4)-dt;
+    if(s.burnTickT<=0){
+      s.burnTickT=0.4;
+      const dmg=3.2*dmgMul;
+      s.damage(dmg, s.burnAttacker||null, false);
+      if(s.isPlayer&&typeof addTrauma==='function') addTrauma(0.08);
+    }
+    if(typeof camera!=='undefined'&&camera&&Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<70&&Math.random()<0.55){
+      const gy=s.pos.y||(typeof heightAt==='function'?heightAt(s.pos.x,s.pos.z):0);
+      spawnP(PT.flash,s.pos.x+rand(-0.2,0.2),gy+rand(0.4,1.2),s.pos.z+rand(-0.2,0.2),rand(-0.15,0.15),rand(1.0,1.8),rand(-0.15,0.15),rand(0.3,0.5),1.0,rand(0.2,0.35),0.85,-1,true);
+      if(Math.random()<0.25) spawnP(PT.dark,s.pos.x,gy+rand(0.8,1.4),s.pos.z,rand(-0.1,0.1),rand(0.8,1.4),rand(-0.1,0.1),0.6,1.2,rand(0.8,1.3),0.4,0.08);
+    }
+  }
+}
 const fCellI=(x,z)=>{
 const i=clamp(Math.floor((x+FOFF)/FRES),0,FN-1), j=clamp(Math.floor((z+FOFF)/FRES),0,FN-1);
 return j*FN+i;
@@ -69,10 +128,17 @@ if(dx*dx+dz*dz<=(r+1.4)*(r+1.4)) igniteCell(ci,attacker,lifeCap);
 }
 }
 // ===== 持续火源 (坦克残骸/坠机残骸): 自身喷射火焰 + 点燃周围植被 + 灼烧圈内单位 =====
-// follow (★2026-10-03 修"船开走火/烟浮空"): {ship,an} —— 舰只在航行中着火 (hp<fireHp, 15h:553/561)
-//   就点常燃火源, 旧版把世界坐标一次烤死 ⇒ 船一开, 火焰/烟雾/灼烧圈全漂在原地海面上。带 follow 的源
-//   每帧在 updateFires 里重投影到锚点 (烟囱口局部坐标) 的世界位姿; an 可为 {position:{x,y,z}} 形状的
-//   局部锚 (capAnchorWorld 只读 .position)。舰没了 (复位/移除) 则当场掐火。
+// follow (★2026-10-03 修"船开走火/烟浮空"): {ship,an} —— 载具航行中着火就点常燃火源, 旧版把世界
+//   坐标一次烤死 ⇒ 车一开, 火焰/烟雾/灼烧圈全漂在原地。带 follow 的源每帧在 updateFires 里重投影到
+//   锚点 (局部坐标) 的世界位姿; an 可为 {position:{x,y,z}} 形状的局部锚 (capAnchorWorld 只读 .position)。
+//   载具没了 (复位/移除) 则当场掐火。大舰子系统 (15h, 原 capAnchorWorld 定义处) 已于 2026-11-10
+//   随纯海战图下架归档, 本函数自那起**落籍本文件** (坦克/卡车/小艇燃烧 follow 仍在用)。
+// 锚点世界坐标 (烟囱口等局部锚): 用载具位姿手算 —— 不依赖 grp 的 matrixWorld (沙箱里 updateMatrixWorld 是桩)
+function capAnchorWorld(s,an){
+const c=Math.cos(s.yaw), n=Math.sin(s.yaw);
+const ax=an.position.x, az=an.position.z;
+return V3(s.pos.x+ax*c+az*n, s.pos.y+an.position.y, s.pos.z-ax*n+az*c);
+}
 function addFireSource(x,z,y,r,ttl,dps,attacker,follow){
 const s={x,z,y,r,ttl,dps,attacker:attacker||null,acc:0,smk:0,igniteT:0,follow:follow||null};
 FIRE_SOURCES.push(s);
@@ -82,6 +148,19 @@ function removeFireSource(s){
 if(!s) return;
 const i=FIRE_SOURCES.indexOf(s);
 if(i>=0) FIRE_SOURCES.splice(i,1);
+}
+// ===== 载具残血起火 (2026-11-09 批): hp<maxHp×VEH_BURN_FRAC 时点火; 燃烧掉血账在载具自己的 update 里走 =====
+// 地面/舰艇载具带 follow 火源, dps=0 —— 火源只做视觉+点燃植被, 车体伤害走燃烧账 (update 每 tick 直扣 hp),
+// 不与火源圈的灼烧结算叠加。follow 锚走 capAnchorWorld 通用位姿换算 (本文件上方, 只读 pos+yaw, 对坦克/卡车/
+// 舰艇一律成立), 载具 die 置 alive=false ⇒ updateFires 的 follow 块当帧 ttl=0 自动掐火, 残骸火源无缝接管。
+// 飞机不带火源 (飞行拖火会沿航线点燃全图), 视觉由 Plane.update 燃烧分支直喷粒子。
+function vehBurnIgnite(v,attacker){
+if(v.burning) return;
+v.burning=true;
+v.burnBy=attacker||null;
+v.burnSrc=(v.kind!=='plane'&&typeof addFireSource==='function')
+?addFireSource(v.pos.x,v.pos.z,(v.pos.y||0)+1.3,2.6,VEH_BURN_TIME+3,0,v.burnBy,{ship:v,an:{position:{x:0,y:1.3,z:0}}})
+:null;
 }
 // ===== 火情查询 (Bot 躲避/选点用): 距最近燃烧格/火源圈的净距 < clear 即视为威胁 =====
 // 返回 {dx,dz} 指向最近火心的向量 (bot 据此背火逃离), 无火 null。clear=需保持的净距(m):
@@ -149,6 +228,7 @@ const n=BUSH_BATCH.length;
 BUSH_IM=new THREE.InstancedMesh(treeLeafGeo,MAT.leaves,n*2);
 BUSH_IM.castShadow=false; BUSH_IM.receiveShadow=false;
 BUSH_IM.frustumCulled=false;
+instColorInit(BUSH_IM); // 灌木烧毁染焦黑的前置 (与 registerBurnableInst 同一口径, 见该函数注)
 const _m=new THREE.Matrix4(), _p=new THREE.Vector3(), _q=new THREE.Quaternion(), _e=new THREE.Euler(), _s=new THREE.Vector3();
 BUSH_BATCH.forEach((b,bi)=>{
 const rec={kind:'bush',x:b.x,z:b.z,s:b.s,g0:b.g0,im:BUSH_IM,li0:bi*2,alive:true,dead:false};
@@ -195,8 +275,20 @@ placed++;
 }
 flushBushes();
 }
-// 注册草丛/庄稼实例批: 烧毁时按格零缩放隐藏
+// 注册草丛/庄稼实例批: 烧毁时按格染焦黑 + 沉入 (旧注释"零缩放隐藏"为史前口径, 现走 queueSink)
+// 实例批 instanceColor **建模期白初始化** (2026-10-24 用户报"被烧毁的植物没变黑炭色就消失"):
+// 烧尽路径的染色守卫是 "instanceColor 非空才 setColorAt" —— 而这三类批 (草丛/庄稼/灌木) 建模期
+// 从未初始化 instanceColor ⇒ 守卫恒假, 烧尽只沉入不变黑。全白 (1,1,1) 与旧观感逐位一致
+// (instanceColor 是乘法项); 放在建模期而不是烧毁瞬间, 还免去运行中 null→非null 触发
+// 该材质 getProgram 重编译的一次性卡顿 (树干批 643 行的惰性创建是既有已验收行为, 不动)。
+function instColorInit(im){
+if(!im||!im.setColorAt||im.instanceColor) return;
+const c=new THREE.Color(1,1,1);
+for(let i=0;i<im.count;i++) im.setColorAt(i,c);
+im.instanceColor.needsUpdate=true;
+}
 function registerBurnableInst(im,byCell){
+instColorInit(im);
 BURN_INST.push({im,byCell,dirty:false});
 }
 // ═══════════ 植被软遮蔽 (2026-09-20 I5: 灌木/树冠挡视野 · 玩家与 Bot 同规则) ═══════════
@@ -313,18 +405,47 @@ if(Math.min(tI,tJ)>1) stop=true;
 }
 return false;
 }
+let _fm=null,_fp=null,_fs=null,_fq=null,_fq2=null,_fa=null,_fe=null,_fc=null,_charCol=null;
+let _charredFloraMat=null; // 焦黑材质单例 (2026-10-24f: 原挂 window —— 无 window 的裸 Node 沙箱 verify-fire 在烧尽路径直接 ReferenceError, 收编模块级; 名字不变, verify-fixes 字符串断言仍命中)
+function fireTmp(){
+if(_fm) return;
+_fm=new THREE.Matrix4(); _fp=new THREE.Vector3(); _fs=new THREE.Vector3();
+_fq=new THREE.Quaternion(); _fq2=new THREE.Quaternion(); _fa=new THREE.Vector3();
+_fe=new THREE.Euler(); _fc=new THREE.Vector3(); _charCol=new THREE.Color(0x241d16);
+_wlQ=new THREE.Quaternion(); // 柳实例批运行期四元数载体 (懒建, 2026-11-11; compose 读 ._x 故必须真实例+分量赋值)
+}
 // ===== 植被消失 (烧尽/被炸/被碾): 碰撞即死, 视觉残留 → 停留一段时间后沉入地下消失 =====
 // 各类植被沉入深度 (盖过自身高度): 灌木矮/竹丛高
 const FLORA_SINK_DEPTH={bush:1.9,fern:1.6,hedge:3.8,dead:4.6,bamboo:8.4,palm:10.5};
-function vanishFlora(rec,blasted){
+// blasted=炸没 (爆风/碾压, 直接消失不出残株黑炭); charred=**烧毁** (2026-10-24 用户指定:
+// 只有火烧进来的消亡才染焦黑炭色 —— 旧版把染色挂在 !blasted 上, 碾碎枯树/碾没灌木也会走黑炭材质,
+// 语义混线; 且实例批因 instanceColor 未初始化而恒不生效, 两条一起修)。
+function vanishFlora(rec,blasted,charred){
 if(rec.dead) return;
 rec.dead=true; rec.alive=false;
 if(rec.box) killBox(rec.box);
 if(rec.cyl){ killCyl(rec.cyl); if(typeof markNavDirty==='function') markNavDirty(); }
-// 视觉残留: 停留数秒后沉入地下 (残株逐渐没入土中, 全沉后删除)
+// 视觉残留: 停留数秒后沉入地下 (残株逐渐没入土中, 全沉后删除; 被烧毁时染焦黑色)
 if(rec.kind==='bush'&&rec.im){
+fireTmp();
+if(charred&&rec.im.setColorAt&&rec.im.instanceColor){
+  rec.im.setColorAt(rec.li0,_charCol);
+  rec.im.setColorAt(rec.li0+1,_charCol);
+  rec.im.instanceColor.needsUpdate=true;
+}
 queueSink({inst:{im:rec.im,idxs:[rec.li0,rec.li0+1]},depth:FLORA_SINK_DEPTH.bush,rest:rand(4,8),sink:2.2});
 } else if(rec.meshes){
+if(charred){
+  fireTmp();
+  if(!_charredFloraMat){
+    _charredFloraMat = new THREE.MeshLambertMaterial({color:0x241d16});
+  }
+  for(const m of rec.meshes){
+    if(m&&m.material){
+      try{ m.material=_charredFloraMat; }catch(e){}
+    }
+  }
+}
 const ms=rec.meshes.filter(m=>m&&m.parent);
 if(ms.length) queueSink({objs:ms,depth:FLORA_SINK_DEPTH[rec.kind]||3.2,rest:rand(4,8),sink:2.4});
 }
@@ -382,18 +503,13 @@ function treeIgnite(tr,attacker){
 if(tr.burnT>=0||(!tr.alive&&!tr.fall)) return;
 if(tr.burnT<0){
 tr.burnT=0;
-tr.burnDur=rand(2.6,4.4);
+// 烧毁时间总体增加 (基准 6.0~8.5s), 受天气受潮系数缩放
+const bRate=wxBurnRate();
+tr.burnDur=rand(6.0,8.5)/Math.max(0.2,bRate);
 tr.igniter=attacker||null;
 tr.fT=0; tr.iT=0;
 BURNING_TREES.push(tr);
 }
-}
-let _fm=null,_fp=null,_fs=null,_fq=null,_fq2=null,_fa=null,_fe=null,_fc=null,_charCol=null;
-function fireTmp(){
-if(_fm) return;
-_fm=new THREE.Matrix4(); _fp=new THREE.Vector3(); _fs=new THREE.Vector3();
-_fq=new THREE.Quaternion(); _fq2=new THREE.Quaternion(); _fa=new THREE.Vector3();
-_fe=new THREE.Euler(); _fc=new THREE.Vector3(); _charCol=new THREE.Color(0x241d16);
 }
 function treeInstanceMatrices(tr,th,dy=0){
 fireTmp();
@@ -432,6 +548,51 @@ lm.instanceMatrix.needsUpdate=true;
 rot(0,3.6*tr.s,0,_fc); _fc.y+=dy;
 tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
 }
+// 垂柳倒伏姿态 (2026-11-10 柳树批): 与 treeInstanceMatrices 同一套 Rodrigues 旋转 (绕根部水平轴
+// 轴=(dz,0,-dx)), 只是柳树在 05b 的 WLOW_IM 三张实例批 (干1/枝3/叶冠19) 里, 部件表 (wt/wb/wl:
+// 相对株根的偏移+基础四元数+缩放) 由 05b 建模期算好挂在记录上 —— 这里只做"整体绕根翻转"一件事:
+// 偏移按 Rodrigues 手算旋转, 姿态 = 倒伏四元数 R⊗q0 (Hamilton 积手算, ax.y=0 展开 —— 沙箱桩
+// Quaternion 无 set/multiply, 与 floraObjMatrices 同款纪律)。焦黑后叶冠不再重写 (实例已被零缩放
+// 隐藏, 烧尽沉入期只写干/枝让残骸下沉 —— 与乔木 charred 只跳叶面同义)。
+let _wlQ=null; // 真实例懒建 (fireTmp): vendor compose 读 ._x 私有字段, 普通对象四元数=旋转全 NaN=实机整批隐形 (2026-11-11 实机回归病根); 顶层 new THREE 会炸无 THREE 装载器 (verify-firecap 同日实录) → 库纪律=let null+fireTmp 懒建, 分量赋值走 setter 落 _x
+function willowInstanceMatrices(tr,th,dy=0){
+fireTmp();
+const f=tr.fall;
+const axx=f.dz, axz=-f.dx;                    // 轴 = (dz,0,-dx), ax.y 恒为 0
+const cs=Math.cos(th), sn=Math.sin(th);
+const hw=Math.sin(th*0.5), cw=Math.cos(th*0.5); // 半角 → R=(axx·hw, 0, axz·hw, cw)
+const rqx=axx*hw, rqz=axz*hw;
+const px=tr.x, py=tr.g0, pz=tr.z;
+const imT=WLOW_IM.trunks, imB=WLOW_IM.branches, imL=WLOW_IM.leaves;
+const put=(im,ii,p)=>{
+const ox=p.ox, oy=p.oy, oz=p.oz;
+const k=(axx*ox+axz*oz)*(1-cs);
+_fp.set(
+px+ox*cs-axz*oy*sn+axx*k,
+py+oy*cs+(axz*ox-axx*oz)*sn+dy,
+pz+oz*cs+axx*oy*sn+axz*k);
+// R ⊗ q0 (Hamilton 积; R.y=0 的展开) —— 与 floraObjMatrices 同式
+const q=p.q;
+_wlQ.x=cw*q[0]+rqx*q[3]-rqz*q[1];
+_wlQ.y=cw*q[1]-rqx*q[2]+rqz*q[0];
+_wlQ.z=cw*q[2]+rqx*q[1]+rqz*q[3];
+_wlQ.w=cw*q[3]-rqx*q[0]-rqz*q[2];
+_fs.set(p.sx,p.sy,p.sz);
+_fm.compose(_fp,_wlQ,_fs);
+im.setMatrixAt(ii,_fm);
+};
+put(imT,tr.wi,tr.wt);
+for(let k=0;k<3;k++) put(imB,tr.wi*3+k,tr.wb[k]);
+if(!tr.charred) for(let k=0;k<19;k++) put(imL,tr.wi*19+k,tr.wl[k]);
+imT.instanceMatrix.needsUpdate=true;
+imB.instanceMatrix.needsUpdate=true;
+imL.instanceMatrix.needsUpdate=true;
+// 燃烧树冠世界坐标 (火焰跟随): 冠带中点 (0,3.5,0) 绕根旋转 —— 与 treeInstanceMatrices 尾段同义
+const kc=axz*3.5*(1-cs);
+_fc.set(px-axz*3.5*sn+axx*kc, py+3.5*cs+dy, pz+axx*3.5*sn+axz*kc);
+tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
+}
+
 // 对象式植被 (枯树/椰树) 的倒伏姿态: 与 treeInstanceMatrices 同一套 Rodrigues 旋转公式与同一角度曲线,
 // 只是把结果写给各网格的 position/quaternion。四元数按分量手算 (R ⊗ q0) —— 沙箱 THREE 桩没有
 // clone/copy/set, 而这条路径要在 dev/verify-fire 的桩里跑, 所以不依赖任何实例方法。
@@ -489,7 +650,9 @@ if(!f.hit){ f.hit=true; treeFallImpact(tr); }
 const u=f.t-f.dur;
 th=clamp(1.5-0.09*Math.exp(-3.5*u)*Math.sin(10.5*u),1.32,1.5);
 }
-if(f.obj) floraObjMatrices(tr,th); else treeInstanceMatrices(tr,th);
+if(f.obj) floraObjMatrices(tr,th);
+else if(tr.kind==='willow') willowInstanceMatrices(tr,th);   // 柳=实例批 (WLOW_IM), 与乔木同曲线不同批
+else treeInstanceMatrices(tr,th);
 if(f.t>=f.dur+0.7){
 tr.restCrown={x:tr.cx||tr.x,y:tr.cy||tr.g0+3.4*(tr.s||f.s||1),z:tr.cz||tr.z};
 FALLING.splice(i,1);
@@ -521,11 +684,23 @@ const s=TREE_SINKS[i];
 s.t+=dt;
 if(s.t<s.rest) continue;
 const k=Math.min(1,(s.t-s.rest)/s.dur);
-treeInstanceMatrices(s.tr,1.5,-3.6*k);
+if(s.tr.kind==='willow') willowInstanceMatrices(s.tr,1.5,-3.6*k);   // 柳: 三张实例批同沉 (焦黑叶冠已零缩放, 只写干/枝)
+else treeInstanceMatrices(s.tr,1.5,-3.6*k);
 if(k>=1){
 // 全沉: 树干/叶面实例零缩放删除, 记录标死 (floraNear 不再返回该树)
 fireTmp();
 _fm.makeScale(0,0,0);
+if(s.tr.kind==='willow'){
+WLOW_IM.trunks.setMatrixAt(s.tr.wi,_fm);
+for(let k2=0;k2<3;k2++) WLOW_IM.branches.setMatrixAt(s.tr.wi*3+k2,_fm);
+for(let k2=0;k2<19;k2++) WLOW_IM.leaves.setMatrixAt(s.tr.wi*19+k2,_fm);
+WLOW_IM.trunks.instanceMatrix.needsUpdate=true;
+WLOW_IM.branches.instanceMatrix.needsUpdate=true;
+WLOW_IM.leaves.instanceMatrix.needsUpdate=true;
+s.tr.dead=true;
+TREE_SINKS.splice(i,1);
+continue;
+}
 TREE_IM.trunks.setMatrixAt(s.tr.ti,_fm);
 const lm=TREE_IM.leaves;
 for(let k2=0;k2<3;k2++) lm.setMatrixAt(s.tr.li+k2,_fm);
@@ -538,8 +713,17 @@ TREE_SINKS.splice(i,1);
 }
 function updateBurningTrees(dt){
 fireTmp();
+const sExt=wxStormExt();
 for(let i=BURNING_TREES.length-1;i>=0;i--){
 const tr=BURNING_TREES[i];
+// 暴雨博弈 (情况 A): 暴雨有概率在树木倒伏前将树冠火浇灭 (树木幸存)
+if(sExt>0&&!tr.fall&&Math.random()<dt*sExt*0.8){
+  tr.burnT=-1;
+  BURNING_TREES.splice(i,1);
+  const cr=tr.restCrown||{x:tr.x,y:tr.g0+3.6*tr.s,z:tr.z};
+  spawnP(PT.smoke,cr.x,cr.y+0.5,cr.z,0,1.2,0,1.2,1.8,rand(1.2,2.0),0.5,0.06);
+  continue;
+}
 tr.burnT+=dt;
 const crown=(tr.restCrown||(tr.fall?{x:tr.cx||tr.x,y:tr.cy||tr.g0+2,z:tr.cz||tr.z}:{x:tr.x,y:tr.g0+3.6*tr.s,z:tr.z}));
 tr.fT-=dt;
@@ -562,11 +746,25 @@ treeFall(tr,Math.sin(a),Math.cos(a));
 }
 	if(tr.fall&&!FALLING.includes(tr)&&tr.burnT>tr.burnDur+2.6){
 	// 烧尽: 树冠消失, 树干焦黑留在原地 (残骸随后与倒树一同沉入地下)
+	if(tr.kind==='willow'){
+	// 柳 (2026-11-10 批): 叶冠 19 实例零缩放隐藏 + 干/枝实例染焦黑 —— 实例批在 WLOW_IM, 与乔木平行
+	_fm.makeScale(0,0,0);
+	const lm2=WLOW_IM.leaves;
+	for(let k2=0;k2<19;k2++) lm2.setMatrixAt(tr.wi*19+k2,_fm);
+	lm2.instanceMatrix.needsUpdate=true;
+	WLOW_IM.trunks.setColorAt(tr.wi,_charCol);
+	WLOW_IM.branches.setColorAt(tr.wi*3,_charCol);
+	WLOW_IM.branches.setColorAt(tr.wi*3+1,_charCol);
+	WLOW_IM.branches.setColorAt(tr.wi*3+2,_charCol);
+	WLOW_IM.trunks.instanceColor.needsUpdate=true;
+	WLOW_IM.branches.instanceColor.needsUpdate=true;
+	}else{
 	const lm=TREE_IM.leaves;
 	for(let k2=0;k2<3;k2++){ _fm.makeScale(0,0,0); lm.setMatrixAt(tr.li+k2,_fm); }
 	lm.instanceMatrix.needsUpdate=true;
 	TREE_IM.trunks.setColorAt(tr.ti,_charCol);
 	TREE_IM.trunks.instanceColor.needsUpdate=true;
+	}
 	tr.charred=true;
 	spawnP(PT.smoke,tr.x,tr.g0+0.5,tr.z,0,1,0,1.4,2,rand(1.5,2.5),0.6,0.1);
 	BURNING_TREES.splice(i,1);
@@ -584,9 +782,9 @@ const hits=[];
 floraNear(p.x,p.z,radius+3,rec=>hits.push(rec));
 for(const rec of hits){
 const d=Math.hypot(rec.x-p.x,rec.z-p.z);
-if(rec.kind==='tree'||rec.kind==='dead'||rec.kind==='palm'){
+if(rec.kind==='tree'||rec.kind==='dead'||rec.kind==='palm'||rec.kind==='willow'){
 if(!rec.alive) continue;                         // 已倒伏/已炸没: 不再响应 (倒树残骸由沉入系统收尾)
-const obj=rec.kind!=='tree';
+const obj=rec.kind!=='tree'&&rec.kind!=='willow'; // 柳与乔木同为实例批 (04b willowInstanceMatrices), 不走对象网格 floraTopple
 if(d<radius*0.75+0.9){
 const dx=rec.x-p.x+rand(-0.5,0.5), dz=rec.z-p.z+rand(-0.5,0.5);
 if(obj) floraTopple(rec,dx,dz); else treeFall(rec,dx,dz);
@@ -624,7 +822,7 @@ const d=Math.hypot(rx-sn*aC,rz-cs*aC);
 // 各向异性接触半径: 树在舱段端点之外 (正对车头/车尾) 用鼻端精确半径 1.55 (与三圆碰撞模型一致,
 // 不提前压树); 树在车身侧旁用 1.9 (贴合履带/挡泥板视觉半宽 ~2.0, 旧版侧擦可碾的量级)
 const rad=(Math.abs(aRaw)>1.95?1.55:1.9);
-if(rec.kind==='tree'){
+if(rec.kind==='tree'||rec.kind==='willow'){
 if(!rec.alive) continue;
 if(d<rad+0.35*rec.s){
 treeFall(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2));
@@ -658,6 +856,7 @@ const FFX=new Float32Array(FN*FN); // 每格火苗喷发计时
 let fireDmgT=0, fireFlameN=0;
 function updateFires(dt){
 fireFlameN=0;
+updateCreaturesBurning(dt); // 生物附着燃烧推进 (每帧)
 // ── 持续火源 ──
 for(let i=FIRE_SOURCES.length-1;i>=0;i--){
 const s=FIRE_SOURCES[i];
@@ -686,14 +885,28 @@ igniteArea(s.x,s.z,s.r*0.85,s.attacker);
 }
 }
 // ── 燃烧格子: 耗燃料/积热蔓延/视觉 ──
+const sExt=wxStormExt(), bRate=wxBurnRate();
 for(let i=FIRE_ACTIVE.length-1;i>=0;i--){
 const ci=FIRE_ACTIVE[i];
 let age=FBURN[ci]+dt;
 FBURN[ci]=age;
-FUEL[ci]-=dt*0.12;
+const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
+
+// 暴雨博弈 (情况 A): 暴雨有概率在植被烧毁前浇灭火焰 (植被幸存)
+if(sExt>0&&Math.random()<dt*sExt){
+  FBURN[ci]=0; FHEAT[ci]=0; FATT[ci]=null;
+  FIRE_ACTIVE[i]=FIRE_ACTIVE[FIRE_ACTIVE.length-1]; FIRE_ACTIVE.pop();
+  if(Math.hypot(cx-camera.position.x,cz-camera.position.z)<90){
+    const gy=heightAt(cx,cz);
+    spawnP(PT.smoke,cx,gy+0.4,cz,0,1.0,0,1.0,1.6,rand(1.0,1.8),0.45,0.05);
+  }
+  continue;
+}
+
+// 烧毁需要时间总体增加: 基准消耗速率 0.055, 且乘以天气受潮乘子 burnRateMul
+FUEL[ci]-=dt*0.055*bRate;
 // 寿命上限: 燃烧弹火系到点强制熄灭 (满燃料格自然烧尽需 ~8.4-9.6s, 上限使其提前熄火)
 if(FEXPIRE[ci]>0&&age>=FEXPIRE[ci]) FUEL[ci]=0;
-const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
 // 向 8 邻格积热 (斜向减半): 受热≥0.8 且有燃料 → 蔓延
 // 参数按"稀草也能成链"校验: 邻格净受热≈0.6/s, 草格烧尽前(~2-4s)必引燃下一格
 const cxi=ci%FN, czi=(ci/FN)|0;
@@ -722,7 +935,7 @@ if(Math.random()<0.3) spawnP(PT.dark,cx,gy+0.8,cz+rand(-0.5,0.5),rand(-0.3,0.3),
 else if(SETTINGS.quality>=1&&Math.random()<0.35) spawnP(PT.spark,cx,gy+0.4,cz,rand(-1.5,1.5),rand(1.5,4),rand(-1.5,1.5),0.09,-0.03,rand(0.25,0.55),1,3,true);
 }
 }
-// 烧尽: 清格 + 该格植被视觉消失 (草丛/灌木/庄稼/枯树等)
+// 烧尽 (情况 B): 清格 + 该格植被视觉变为焦黑色并沉入 (草丛/庄稼/灌木/枯树等)
 if(FUEL[ci]<=0){
 FUEL[ci]=0; FBURN[ci]=0; FHEAT[ci]=0;
 FEXPIRE[ci]=0;
@@ -733,17 +946,22 @@ const gy2=heightAt(cx2,cz2);
 if(Math.hypot(cx2-camera.position.x,cz2-camera.position.z)<90){
 spawnP(PT.dark,cx2,gy2+0.5,cz2,rand(-0.2,0.2),rand(0.8,1.4),rand(-0.2,0.2),1.0,1.8,rand(1.4,2.2),0.5,0.1);
 }
-	// 草丛/庄稼实例: 烧尽后残株停留数秒, 随后沉入地下消失 (原为零缩放瞬隐)
+	// 草丛/庄稼实例: 烧尽后染焦黑炭色, 残株停留数秒, 随后沉入地下消失
 	for(const bi of BURN_INST){
 	const arr=bi.byCell.get(ci);
 	if(arr&&arr.length){
+	fireTmp();
+	if(bi.im&&bi.im.setColorAt&&bi.im.instanceColor){
+	for(let idx of arr) bi.im.setColorAt(idx,_charCol);
+	bi.im.instanceColor.needsUpdate=true;
+	}
 	queueSink({inst:{im:bi.im,idxs:arr},depth:1.6,rest:rand(3.5,6.5),sink:2.0});
 	bi.byCell.delete(ci);
 	}
 	}
 // 格内灌木等对象植被消失 (枯树/椰树若已倒伏则跳过: 残骸已挂在自己的沉入任务上, 见 scheduleFloraObjSink)
 const arr=FLORA_HASH.get(ci);
-if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree') vanishFlora(rec,false);
+if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree'&&rec.kind!=='willow') vanishFlora(rec,false,true); // 烧尽 ⇒ 染焦黑 (灌木/蕨丛/树篱/枯树; 乔木/柳走自己的树冠-树干链, 柳被格子火点燃由 treeIgnitePass 认领)
 if(fireNavT<=0) fireNavT=5;
 }
 }
@@ -767,23 +985,33 @@ if(fireNavT<=0&&typeof markNavDirty==='function') markNavDirty();
 }
 // 倒树/沉树残骸动画 (与火同帧推进, 避免在 24-main 另挂更新点)
 updateTreeSinks(dt);
+// 火源动态光照推进 (残骸/燃烧弹/植被火动态点光源与自然跳动)
+if(typeof updateFireLights==='function') updateFireLights(dt);
+}
+// 候选去重 Set/回调复用 (2026-11-01 性能批): 火情期每 0.4s 一轮, 旧版每轮 new Set + 每格一个新闭包。
+// Set/游标/回调全在模块级, treeIgnitePass 只做装载与遍历。
+const _tiSeen=new Set();
+let _tiCx=0, _tiCz=0, _tiFatt=0;
+function _tiFloraCb(rec){
+if((rec.kind!=='tree'&&rec.kind!=='willow')||_tiSeen.has(rec)) return;
+_tiSeen.add(rec);
+const d=Math.hypot(rec.x-_tiCx,rec.z-_tiCz);
+if(d<3.0&&rec.alive&&rec.burnT<0) treeIgnite(rec,_tiFatt);
 }
 function treeIgnitePass(){
-const seen=new Set();
+_tiSeen.clear();
 for(const ci of FIRE_ACTIVE){
 const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
-floraNear(cx,cz,3.2,rec=>{
-if(rec.kind!=='tree'||seen.has(rec)) return;
-seen.add(rec);
-const d=Math.hypot(rec.x-cx,rec.z-cz);
-if(d<3.0&&rec.alive&&rec.burnT<0) treeIgnite(rec,FATT[ci]);
-});
+_tiCx=cx; _tiCz=cz; _tiFatt=FATT[ci];
+floraNear(cx,cz,3.2,_tiFloraCb);
 }
 }
-// 火焰伤害: 燃烧格/火源圈内的步兵 (含玩家) 与坦克持续掉血, 击杀归点火者
+// 火焰伤害: 燃烧格/火源圈内的步兵 (含玩家) 与坦克持续掉血, 击杀归点火者 (受天气伤害乘子缩放与附着燃烧点燃)
 function fireDamageTick(){
-for(const s of combatants){
-if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员
+const dmgMul=wxFireDmg();
+const victims=combatants.slice();
+for(const s of victims){
+if(!creatureIgnitable(s)||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员; 2026-11-04b: 含观战者免着火
 let att=null, fireDmg=0;
 const ci0=fCellI(s.pos.x,s.pos.z);
 const cxi=ci0%FN, czi=(ci0/FN)|0;
@@ -793,15 +1021,16 @@ if(ni<0||nj<0||ni>=FN||nj>=FN) continue;
 const ci=nj*FN+ni;
 if(FBURN[ci]<=0) continue;
 const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
-if(Math.hypot(s.pos.x-cx,s.pos.z-cz)<2.7){ fireDmg=5.2; att=FATT[ci]; break; }
+if(Math.hypot(s.pos.x-cx,s.pos.z-cz)<2.7){ fireDmg=5.2*dmgMul; att=FATT[ci]; break; }
 }
 if(!fireDmg){
 for(const fs of FIRE_SOURCES){
-if(Math.hypot(s.pos.x-fs.x,s.pos.z-fs.z)<fs.r+0.4&&Math.abs((s.pos.y||0)-fs.y)<3.5){ fireDmg=fs.dps*0.4; att=fs.attacker; break; }
+if(Math.hypot(s.pos.x-fs.x,s.pos.z-fs.z)<fs.r+0.4&&Math.abs((s.pos.y||0)-fs.y)<3.5){ fireDmg=fs.dps*0.4*dmgMul; att=fs.attacker; break; }
 }
 }
 if(!fireDmg) continue;
 s.damage(fireDmg,att,false);
+igniteCreature(s,att);
 if(s.isPlayer){ addTrauma(0.12); }
 if(Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<80){
 const gy=s.pos.y||heightAt(s.pos.x,s.pos.z);
@@ -824,7 +1053,7 @@ const ci2=nj*FN+ni;
 if(FBURN[ci2]>0&&FUEL[ci2]>0){ onFire=true; att=FATT[ci2]; break; }
 }
 }
-if(onFire) t.takeDmg(3,att);
+if(onFire) t.takeDmg(3*dmgMul,att);
 }
 }
 
@@ -943,7 +1172,7 @@ if(typeof crater==='function'&&dCam<150) crater(x,z,1.5,true);
 }
 // 杀伤: 半径内暴露人员 (玩家+Bot 一视同仁; 载具内乘员由车体承伤), 中心线性平方衰减
 for(const s of combatants){
-if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员
+if(!creatureIgnitable(s)||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员; 2026-11-04b: 含观战者免着火
 const d=Math.hypot(s.pos.x-x,s.pos.z-z);
 if(d>=TB.r) continue;
 if(tbSheltered(s.pos.x,s.pos.y,s.pos.z,gy)) continue;

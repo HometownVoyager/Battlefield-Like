@@ -25,7 +25,7 @@ sandbox.removeEventListener=()=>{};
 const patchStyle=el=>{ if(el&&el.style&&typeof el.style.setProperty!=='function') el.style.setProperty=function(k,v){this[k]=v;}; return el; };
 { const g=document.getElementById.bind(document),c=document.createElement.bind(document),q=document.querySelector.bind(document);
   document.getElementById=id=>patchStyle(g(id)); document.createElement=t=>patchStyle(c(t)); document.querySelector=s=>patchStyle(q(s)); }
-const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/15g-capmodels.js','js/15h-capital.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
+const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/19b-gamepad.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document; ctx.window=window;
 ctx.__evH=handlers;
@@ -50,8 +50,8 @@ has(m,'if(!pointerLocked||!player.alive||!player.deployed) return;','T1c 捕获�
 has(m,"b.addEventListener('touchcancel',fin",'T1d bindBtn 补 touchcancel (系统手势打断不再卡死按下态)');
 has(m,"bindBtn('tJump',()=>kd('Space'),()=>ku('Space'))",'T1e tJump 走 kd/ku (观战双击空格悬停触屏可达)');
 has(m,'skb.textContent=t2(sk)','T1f tSkill 文案走 t2 查表 + 变更才写');
-has(m,'!player.onMortar&&!player.onBattery) player.ads=true','T1g 触屏 ADS 门含 onBattery');
-has(inp,'!player.onBattery&&!player.capitalGun) player.ads=true','T1h 键鼠 RMB ADS 门含 onBattery+capitalGun (锚随 2026-10-04 海战批: 炮位右键=副炮/防空扳机, 同门)');
+has(m,'!player.onMortar&&!player.onBattery&&!player.specViewHost) player.ads=true','T1g 触屏 ADS 门含 onBattery (★2026-11-03 跟码: 一.88 补 specViewHost 同门)');
+has(inp,'!player.onBattery) player.ads=true','T1h 键鼠 RMB ADS 门含 onBattery (2026-11-10 跟码: capitalGun 项随大舰子系统下架摘除; 原锚随 2026-10-04 海战批: 炮位右键=副炮/防空扳机, 同门)');
 has(inp,'function lookZoomMul()','T1i lookZoomMul 单源定义于 19-input');
 has(inp,'0.0022*SETTINGS.sens*lookZoomMul()','T1j 键鼠 mousemove 引用单源');
 has(m,'0.0052*SETTINGS.sens*lookZoomMul()','T1k 触屏 touchmove 引用单源');
