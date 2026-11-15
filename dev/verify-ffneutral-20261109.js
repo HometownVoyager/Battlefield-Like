@@ -62,11 +62,11 @@ const NEG_PATCHES=[
 // N1 同队×0 回灌 (noFF 门拆): T1 frag 友军红
 ['js/13-combat.js','if((!noFF||!EXPLO_FF)&&attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;','if(attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;'],
 // N2 frag 分支 noFF 实参拆: T1 红 (双保险 —— 注入回旧调用形态)
-['js/13-combat.js','explodeAt(n.pos,n.thrower,undefined,true);','explodeAt(n.pos,n.thrower);'],
+['js/13-combat.js',"explodeAt(n.pos,n.thrower,undefined,true,'frag');","explodeAt(n.pos,n.thrower);"],
 // N3 反坦克炸药 -1 回灌: T2 红
 ['js/13-combat.js',"splashDamage(n.pos,n.thrower,-1,5.5,95,340,true,'explo');","splashDamage(n.pos,n.thrower,n.team,5.5,95,340,true,'explo');"],
-// N4 coFfFire spectator 门拆: T4/T7/T8 红
-['js/13-combat.js','return !!(shooter.spectator&&!shooter.onNaval&&!shooter.capitalGun);','return false;'],
+// N4 coFfFire spectator 门拆: T4/T7/T8 红 (2026-11-10 海战下架跟码: capitalGun 项已摘)
+['js/13-combat.js','return !!(shooter.spectator&&!shooter.onNaval);','return false;'],
 // N5 火箭盖章拆: T5 红
 ['js/13-combat.js','team:(shooter.spectator?-1:shooter.team),owner:shooter,life:3.6','team:shooter.team,owner:shooter,life:3.6'],
 // N6 手持迫击炮门拆: T6 红
@@ -431,8 +431,8 @@ ok(t8.restored,'T8 摘座位立刻恢复 (排除门跟座位态走, 不是一次
 console.log('T9 源码防回退锚 (与 NEG 七补丁一一对应)');
 {
 const s13=srcOf('js/13-combat.js'), s20=srcOf('js/20-player.js');
-ok(s13.includes('function explodeAt(p,attacker,R,noFF)'),'T9 锚1 explodeAt noFF 形参在位');
-ok(s13.includes('explodeAt(n.pos,n.thrower,undefined,true);'),'T9 锚2 frag 分支 noFF 实参在位');
+ok(s13.includes('function explodeAt(p,attacker,R,noFF,kind)'),'T9 锚1 explodeAt noFF 形参在位 (2026-11-15c 音效批跟码: 增第 5 参 kind=爆炸音档)');
+ok(s13.includes("explodeAt(n.pos,n.thrower,undefined,true,'frag');"),'T9 锚2 frag 分支 noFF 实参在位 (2026-11-15c 音效批跟码: 传 kind=frag)');
 ok(s13.includes("splashDamage(n.pos,n.thrower,-1,5.5,95,340,true,'explo');"),'T9 锚3 AT 雷溅射 -1 在位');
 ok(s13.includes('return !!(shooter.spectator&&!shooter.onNaval);'),'T9 锚4 coFfFire spectator 门+座位排除在位 (2026-11-10 跟码: capitalGun 项随大舰子系统下架摘除)');
 ok(s13.includes('team:(shooter.spectator?-1:shooter.team)'),'T9 锚5 fireRocket 盖章门在位');

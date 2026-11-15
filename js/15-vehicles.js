@@ -819,7 +819,10 @@ this.tTarget=null; this.tMemT=0; this.threatYaw=null;
 this.respawnT=0; this.wheels=[];
 this.buildMesh();
 this.muzzle=V3();
-this.engine=AudioSys.createEngine('tank');
+// 引擎三档 (★2026-11-15c 音效推倒重写批, 用户裁定口径): 轻=日系全系 (chiha 形不分尺寸, 一式 wc=med 也归此档)
+//   / 大=重坦 (潘兴/黑豹/KV-1, tk.wc==='heavy') / 小=其余轻中坦。判据 shape 在前 (用户令"轻此处特指全部尺寸的日本坦克")。
+//   ★权重档读 tk.wc 不读 def.heavy —— heavy 是槽位标记非车重 (T-26/一式 heavy:true 实为轻/中坦, 2026-10-24 批口径)。
+this.engine=AudioSys.createEngine((this.def.tk&&this.def.tk.shape==='chiha')?'tankJp':(this.def.tk&&this.def.tk.wc==='heavy')?'tankBig':'tankSmall');
 tanks.push(this);
 this.respawn(true,true); // 开局首次生成不播报 (initial=true: 恒走主基地, 厂房产能只作用于战损重生)
 }
@@ -1578,7 +1581,7 @@ const origin=this.muzzle.clone();
 const shooter=this.playerDriven?player:(this.crewBot||this.crew);
 if(shooter&&shooter.protUntil) shooter.protUntil=0; // 出生保护清账 (★2026-11-01 判定批): 主炮不走 fireBullet, 旧版保护期内照样开炮
 shooter._src=this.name; // 坦克炮击杀来源: 载具名 (射手进炮即记入)
-AudioSys.cannon(this.pos.distanceTo(camera.position));
+AudioSys.cannon((this.def.tk&&this.def.tk.shape==='chiha')?'tkJp':(this.def.tk&&this.def.tk.wc==='heavy')?'tkHeavy':'tkMed',this.pos.distanceTo(camera.position),AudioSys.panOf(this.muzzle)); // 坦克炮三档 (★2026-11-15c: 日系 57mm 浅咣/中型 75mm/重坦 88-90mm 深锤; wc 权重档不读 heavy 槽位标记) + 真声像
 spawnP(PT.flash,origin.x,origin.y,origin.z, dir.x*3,dir.y*3,dir.z*3, 1.0,10,0.12,1,0,true);
 spawnP(PT.dark,origin.x,origin.y,origin.z, dir.x*3+rand(-1,1),1.5,dir.z*3+rand(-1,1), 1.0,3,0.9,0.7,0.5);
 if(this.playerDriven) addTrauma(0.5);
@@ -1597,7 +1600,7 @@ const o=this.coaxMuzzle();
 player._src=this.name; // 玩家同轴机枪击杀来源: 载具名
 fireBullet(player,o,dir,MG_BULLET_DEF,o);
 vehMgHeatAdd(this); // A#3 每发积热 (heatPS; 玩家开火不散热)
-AudioSys.gunshot('mg',0,0);
+AudioSys.gunshot('vcoax',0,0); // 同轴机枪档 (★2026-11-15c)
 addTrauma(0.02);
 }
 takeDmg(amt,attacker,ap){
@@ -1670,7 +1673,7 @@ if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 屏
 if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
 explosionFX(this.pos.clone().add(V3(0,1.4,0)));
-AudioSys.explosion(this.pos.distanceTo(camera.position));
+AudioSys.explosion('tankdie',this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // 弹药殉爆档 (★2026-11-15c: 大爆+三记殉爆连响)
 if(typeof vehHeadlightKill==='function') vehHeadlightKill(this); // 夜战大灯先拆 (N2): 焦黑化 traverse 会把 additive 光锥 Mesh 一起换成不透明材质 (黑锥残留 bug)
 this.grp.traverse(o=>{ if(o.isMesh){ if(!o.userData.mat0) o.userData.mat0=o.material; o.material=wreckMat; } });
 this.grp.rotation.x=this.suspP+rand(-0.1,0.1);
@@ -1872,7 +1875,7 @@ if(hitPl){ hitPl.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380)
 //   被坦克炮/火箭筒蹭到即近殁, 是"总被秒杀"的又一主诉源; Bot 步兵维持 260 (互殴烈度不变)。
 if(hitSol){ hitSol.damage(hitSol.isPlayer?180:260,s.owner,false); if(_fbP&&hitSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
 explosionFXSmall(p);
-AudioSys.explosion(p.distanceTo(camera.position)*1.6);
+AudioSys.explosion('shell',p.distanceTo(camera.position)*1.6,AudioSys.panOf(p)); // 炮弹落地档 (★2026-11-15c: 脆响+中锤)
 // 爆炸半径分档 (2026-09-29 用户裁定"火箭筒爆炸范围仍太小, 再加大"): 火箭弹 9→12 —— 只认 s.rocket
 //   (巴祖卡 M9/坦克杀手 RPzB54, 玩家/Bot 同走 fireRocket 单源); 反坦克炮炮弹维持 9, 坦克/舰炮维持 7。
 //   结构破坏半径同步 7.5→10 (随爆圈成比例, 参照航弹 9.5m 圈/9 结构的既有口径; 掀树/油桶殉爆同吃此半径)
@@ -1911,7 +1914,7 @@ if(m.mesh&&m.mesh.parent) m.mesh.parent.remove(m.mesh);
 const p=V3(m.x,m.g0+0.4,m.z);
 spawnP(PT.flash,m.x,m.g0+0.5,m.z,0,2,0,2.4,15,0.14,1,0,true);
 for(let i=0;i<7;i++) spawnP(PT.dark,m.x,m.g0+0.5,m.z,rand(-2,2),rand(1,4),rand(-2,2),1.0,2.4,rand(0.8,1.4),0.85,0.6);
-AudioSys.explosion(p.distanceTo(camera.position));
+AudioSys.explosion('mine',p.distanceTo(camera.position),AudioSys.panOf(p)); // 反坦克雷档 (★2026-11-15c)
 splashDamage(p,null,-1,5,95,340,true);   // 与反坦克雷同口径: 反装甲全额
 damageStructures(p,5,130);                // 无主 (反坦克雷没有 owner 字段): 破坏结构不给任何人加分
 crater(m.x,m.z,1.1,true);

@@ -36,6 +36,9 @@ this.sunk=false; this.sinking=false;
 this.startU=i*((CAMPAIGN.convoy&&CAMPAIGN.convoy.gap)||15); // 列队间距: 沿行进方向提前 startU
 this.buildMesh();
 this.placeAtColumn();
+// 卡车引擎声 (★2026-11-15c 音效推倒重写批新增: 车队首次有声) —— truck 档=中速方波柴油"哒哒",
+// 频响与增益在 update 里按 vel 与距离现算 (与坦克/飞机同口径); die/突围即停, 不留静音常驻节点。
+this.engine=AudioSys.createEngine('truck');
 trucks.push(this);
 this.grp.position.copy(this.pos);
 this.grp.rotation.set(0,this.yaw,0);
@@ -109,6 +112,7 @@ const P=convoyPath();
 if(this.wpI>=P.length-1){
 // 抵达终点: 突围西口
 this.escaped=true; this.alive=false;
+if(this.engine){ this.engine.stop(); this.engine=null; } // 突围下线即停引擎 (★2026-11-15c)
 if(CONVOY_STATE){ CONVOY_STATE.esc++; CONVOY_STATE.left=Math.max(0,CONVOY_STATE.left-1); }
 addKillMsg(`运输车突围! 已突围 ${CONVOY_STATE?CONVOY_STATE.esc:0} 辆`,(CAMPAIGN.convoy&&CAMPAIGN.convoy.escortTeam!==undefined)?CAMPAIGN.convoy.escortTeam:1);
 world.remove(this.grp);
@@ -122,6 +126,7 @@ const spd=(CAMPAIGN.convoy&&CAMPAIGN.convoy.spd)||4.2;
 const steer=Math.atan2(dx,dz);
 this.yaw=angleLerpTo(this.yaw,steer,2.2*dt);
 this.vel=dampF(this.vel,spd,2.5,dt);
+if(this.engine) this.engine.update(42+Math.abs(this.vel)*9, clamp(0.24-this.pos.distanceTo(camera.position)/130,0,0.24)*(0.5+Math.abs(this.vel)*0.12)); // 卡车引擎频响 (★2026-11-15c)
 this.pos.x+=Math.sin(this.yaw)*this.vel*dt;
 this.pos.z+=Math.cos(this.yaw)*this.vel*dt;
 this.pos.y=dampF(this.pos.y,heightAt(this.pos.x,this.pos.z),8,dt);
@@ -178,9 +183,10 @@ if(this.hp<=0) this.die(attacker);
 }
 die(attacker){
 this.alive=false;
+if(this.engine){ this.engine.stop(); this.engine=null; } // 车毁停引擎 (★2026-11-15c: 与 15d 残骸期"不再 update 引擎"同一泄漏口径)
 if(CONVOY_STATE){ CONVOY_STATE.destroyed++; CONVOY_STATE.left=Math.max(0,CONVOY_STATE.left-1); }
 explosionFX(this.pos.clone().add(V3(0,0.8,0)));
-AudioSys.explosion(this.pos.distanceTo(camera.position)*0.9);
+AudioSys.explosion('truckdie',this.pos.distanceTo(camera.position)*0.9,AudioSys.panOf(this.pos)); // 卡车油料殉爆档 (★2026-11-15c)
 for(let i=0;i<8;i++) spawnP(PT.dark,this.pos.x+rand(-1,1),this.pos.y+rand(0.3,1.5),this.pos.z+rand(-1,1),rand(-1,1),rand(1,3),rand(-1,1),1.0,2.0,rand(0.8,1.4),0.85,0.6);
 for(let i=0;i<4;i++) spawnP(PT.flash,this.pos.x+rand(-0.5,0.5),this.pos.y+rand(0.4,1.2),this.pos.z+rand(-0.5,0.5),rand(-0.5,0.5),rand(0.5,1.5),rand(-0.5,0.5),0.4,0.6,0.15,1,0,true);
 crater(this.pos.x,this.pos.z,1.4,true);

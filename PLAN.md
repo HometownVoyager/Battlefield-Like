@@ -363,6 +363,30 @@
    单具身体；④宿主阵亡/登车自动脱离且不还尸体模型；⑤👁 徽标条在罗盘条下方不重叠；⑥夜图每台开灯载具左右各一道光锥、
    照明范围明显变远；⑦观战局终局横幅「胜方 X」中性；⑧调试模式 Q/E 附身脱离、幽灵坦克面向玩家。
 
+## 一.111 音效系统完全推倒重写: 每枪独立音色 × 坦克引擎三档 × 炮/爆/机枪全谱系细分 (2026-11-15c, 待实机验收)
+
+**用户令**: 「我希望将游戏内的音效完全推倒并重新设计和制造一套，现在用的基本是从初版Demo继承下来的，太过简陋。不同枪械的音效，轻（此处特指全部尺寸的日本坦克）、大、小三种坦克的三种引擎音效……总之就是要足够细分，不要吝惜。」技术路线用户裁定 = **程序合成推倒重写**（零音频资产，沙箱/闸门/冻结账全兼容）。
+
+**一、01-audio.js 内核推倒重造**（原 997 行 → ~1250 行，原地重写保加载位次与 AudioSys 全局）：声明式分层档案表单源——`GUN_PROFILES`（旧 snd 五家族缺省档保留 + **每把在役武器一条独立音色** 38 条 + 载具/固定机枪 9 条：vcoax/mg_mg42 撕布/mg_92 慢沉/mg_maxim 水冷闷/mg_air/planeMG/navalSec/navalMG/flak20）/ `CANNON_PROFILES` 13 条（tkJp 57mm 浅咣·tkMed 75mm·tkHeavy 88-90mm 深锤·atgun·battery·naval_lvt/kami/pt/gyorai·rocket_bazooka/schreck/loiter 带 hiss 尾焰层·generic）/ `EXPLOSION_PROFILES` 18 kind（新增 thunder 天穹闷响·drum 亮 pop·collapse 闷隆+大量散落·tankdie/planedie/truckdie 带**殉爆连响 pops 层**·torpedo 水下闷爆·barrage 重炮犁地）/ `ENGINE_KINDS` 9 档 + `ENGINE_ALIASES`（tank→tankSmall·plane→planeInline）。**每发变奏**：频点 ±7%（jf）/响度 ±9%（jv）逐发抖动 ⇒ 连发不重样。**真声像**：新 `AudioSys.panOf(pos)` 单源（相机右基向量 matrixWorld[0..2] · 方向 XZ）——旧 cannon 收 pan 参数但函数体从不使用（病修正）；cannon/explosion 全链出声像。兼容面：全部旧 API 名保留；explosion/cannon 第一参收到**数字**=旧调用口径回落 generic 档。
+
+**二、引擎三档（用户裁定口径）**：`tankJp`=**日系全系不分尺寸**（九七式/一式 + cpc 缴获两版，判据 `tk.shape==='chiha'` **在前**——一式 heavy:true 也归日系；saw 粗糙波 + pitch1.35 高转嘶吼 + 纹理噪声更粗）/ `tankBig`=潘兴·黑豹·KV-1（**读 `tk.wc==='heavy'` 不读 def.heavy**——heavy 是槽位标记非车重（2026-10-24 批口径），T-26/一式 heavy:true 实为轻/中坦；pitch0.8 低沉 lp240）/ `tankSmall`=其余轻中坦（谢尔曼/四号/T-34/维克斯/T-26）。飞机两档跟剪影单源 `pl.nose`（inline: P-51/BF-109/零式/隼=det18 lp900 平滑高转 / radial: P-47/FW-190/La-5/IL-2/霍克III/伊-16/九九式=det26 lp700 粗哑拍频）。**卡车首配引擎**（truck 档 square 柴油哒哒；15b 构造建档+update 频响+die/突围即停——车队首次有声）。海战 amph/boat 基档（navalAudEngine 塑形契约 osc/osc2/lp 原样接管；15d 构造与 01-audio 重生建档双点随 kind 口径）。幽灵坦克 tankSmall（开火静音红线不动）；巡飞弹 loiter 专用电嗡档（pitch1.6，13-combat 顶层建档 'plane'→'loiter'）。
+
+**三、identity 全链接线**：WPN_DEFS 43 条全加 `sid` 字段（node codemod 逐条机械插入；★radio 行 `radio:{` 无空格+尾行 `\n` 被正则 `\s*$` 吃掉两坑，手工补）；`MG_BULLET_DEF` sid='vcoax' + `mgBulletDef` 按 `FACTION_MG.style` 经新单源 `mgSid()` 分档 + 20a 枪座玩家声同步；fireBullet/玩家开火全走 `def.sid||def.snd`；坦克炮/爆炸 17 处调用点全带档位（explodeAt 增第 5 参 kind，frag 路径传入）。
+
+**契约红线全数原样**（多支在册探针钉死）：bypass 13 键 verbatim / 24-main 冻结喂账 / `navalAudioTick(wdt,dt)` / navalAudEngine 三写点 / splash 四参签名 / 幽灵坦克开火静音 / 远枪限流（dist>70·100ms窗4发）/ `'tank'/'plane'` 旧档别名可用（verify-batch-20261114 直调 createEngine('tank') 兼容）。
+
+**判据**：新 dev/verify-audio3-20261115c.js **47/0** = 契约面（bypass/naval/splash/引擎 pitch 写法 verbatim）+ 四档案表（在役武器 sid 全覆盖·炮 13·爆 18·引擎 9+别名）+ **逐阵营实 spawn 引擎档**（normandy: M4/四号=tankSmall·潘兴/黑豹=tankBig·P-51/BF-109=planeInline·P-47/FW-190=planeRadial; songhu: 维克斯/T-26=tankSmall·九七/一式=tankJp; baituan: 缴获双车=tankJp）+ identity 接线锚 14 组 + 行为面（每发变奏 bandpass 抖动层 3/3 全不同·未知 sid 回落·旧数字口径·tankJp saw 60→81·tankBig 60→48·truck square·radial det26/lp700 vs inline det18/lp900·panOf）+ 远枪限流；**NEG 3 补丁亲见转红**（N1 garand 档改名→T2b / N2 引擎映射硬编码 tankSmall→T3a/b/c+T4e / N3 bypass 摘键→T1a）。**verify-audio2-20261115 退役删档**（T2-T4 钉旧合成内部 osc3 表/58→18Hz/bp1b 层随推倒过期 = 过期锚清账先例；仍有效契约面 bypass/splash 四参/行为 init 全数并入 audio3）。**老探针判据跟码修钉**：verify-ffneutral-20261109 T9 锚1/锚2（explodeAt 增第 5 参 kind 两锚随码）+ 顺手清 11-10 海战下架遗留的 N4 NEG 过期锚（`!shooter.capitalGun` 已摘项）——修钉后正向 39/0×3 + --neg 22/17 有红=判据具分辨力；r1 唯一稳定红即此两锚（tankai 为在案偶发 3/3 复绿）。**run-all 两轮**：r1 102/107 → **r2 101/101 全部通过 ✔**（audio3 47/0 在册套件内亲见）。换弹音裁定：10-viewmodel 按机构分档（栓动/漏夹/弹匣/弹板/弹鼓）本已各自独立参数，**维持不动**（报告声才是主辨识面）。**升戳 20261115b→c**（index.html 49 + dev/_game_files.txt 45 + 23 支戳钉探针；★坑又账：Git Bash `grep -rl` 输出带 \r 尾 ⇒ sed 批量 22 文件 "can't read"，照 11-14 批先例 `tr -d '\r'` 收口）。
+
+### 待验收（用户实机清单）
+1. 每把枪听感区分（同族栓动如毛瑟/三八式/中正式/汉阳造各有音色）+ 同枪连发每发微变奏不机械重复。
+2. 坦克引擎三档：日系坦克（含八路军缴获）=高转嘶吼 vs 潘兴/黑豹/KV-1=低沉 vs 谢尔曼/四号/T-34/维克斯/T-26=中档；坦克炮声同样三档（日系浅咣/中型/重坦深锤）。
+3. 飞机直列（P-51/BF-109/零式/隼）vs 星型（P-47/FW-190/La-5/IL-2/霍克III/伊-16/九九式）两档引擎。
+4. 车队运输卡车首次有引擎声（路边能听到卡车开过）。
+5. 枪座重机枪四档：MG42 撕布 / 九二式慢沉 / 水冷马克沁闷 / M1919 气冷；坦克同轴/航炮/舰载机枪各自音色。
+6. 爆炸按类型分档：手雷/AT炸药/迫击炮/航弹/炮弹落地/地雷/坦克殉爆（带连响）/坠机/鱼雷（闷）/雷暴远雷/油桶/楼板坍塌。
+7. 火箭筒发射音（巴祖卡/坦克杀手/巡飞弹各档+尾焰嘶声）；巡飞弹飞行电嗡档。
+8. 远处炮声/爆炸有左右声像；水下闷响/时停静音/结算静默/暂停静音照旧。
+
 ## 一.110 锥体碰撞普查 × 教堂侧楼修形 × 入水特效/音效 × 音效全套重制 × 自适应弹坑 (2026-11-15, 实机已确认)
 承用户五令（1 锥体碰撞不遗漏 / 1.5 教堂侧楼屋顶+二三楼接缝 / 2 入水特效音效随速度尺寸 / 3 音效全套重制 / 4 弹坑自适应贴地），中途令**禁浏览器截图验证**（碰撞信息以 CYLS/BOXES 代码账本为准），四项实机均已确认修复后收尾。**①锥体**：全库 cone 过堂，真缺碰撞的悬空锥体仅三处——教堂尖顶（`ConeGeometry(4.2,3.4,4)`+`ry+HPI*1.5` 45° 平边对墙全覆盖，用户令"转45度再加大"，三档碰撞 3.5/2.2/0.8）、国会穹顶（七档漏斗带面半径 6.9/3.1/4.5/5.9+顶针 2.4/1.5/0.6）、水塔锥顶（1.7/0.6）——全部 `noNav:1` 分层近似圆柱，OCC 烘焙加 `c.noNav` 豁免门（高空饰件不占地面格，圆厅照常走人）；钟塔底层墙 h 7.05→7.2 消 15cm 沟缝。**②入水**：waterSplash 五参 `(p,scale,big,bubbles,spd)`（粒子 n 随 spd、水柱 ×spdF、白沫冠、气泡；音频四参透传），四新消费点=Bot（moveDir 干→湿边沿 `_wStatePrev` 账+`_wyPrev` 落差折算 scale0.6~2.2）、坦克（`_wasInWater` 账 3.4+气泡）、卡车（2.6 档）、飞机触水坠机（先溅后毁 2.2~4.2 随下沉率）；玩家/炮弹本就有未动。**③音效**：契约面零动（bypass Set/naval 段逐字/引擎节点名/静默冻结账）；枪声+第二裂响+中频体层+近距机械咔哒、爆炸五层（次声重锤 58→18Hz/1.4s 等）、引擎三层化（osc3 次八度+ns→nbp→ng2 纹理噪声）、splash f0 双调制+嘶声+回浪、炮声/脚步/弹啸/跳弹/受伤/迫击炮/高炮/远机枪全套加层。**④弹坑（二轮修黑弧）**：病根=渲染地形是 terrainRenderY 弦面而非 heightAt，曲率段弦高 0.3~1.2m ⇒ 坑体沉进渲染面之下只剩唇缘露弧+一轮修绕向朝下全剔除——修=03-terrain 新 **terrainSurfaceY 单源**（同格距同 PlaneGeometry 对角，python 提取打包 three.min.js 证实）+05b 顶点改采+绕向翻正 `(a,a+1,b)`；125 顶点 BufferGeometry/唇缘脊 0.8r 峰 0.13r+0.05 余量/外沿 1.18r 熔回；贴花契约与 36 账不动。**判据**：新探针四支全绿入册——conecollide 18/0+waterentry 26/0+audio2 21/0+crater 21/0，NEG 3+3+3+3 补丁全数亲见转红（红名↔补丁对认）；crater 探针桩补真 setIndex/computeVertexNormals（照 Group.clear 先例）；★坑：createEngine 节点懒建须先 setTimeFrozenMute(false) 否则 nodes=null 假红。**run-all 两轮**：r1 101/107 + r2 105/113——预存红 fixbatch-20260926 ✗1「splashDamage 掩体遮挡」=11-13 零分配批改掉旧字面量的过期锚，判据跟码修钉后 55/0（11-14 批在案预存账清零）；loiterview/tankai 偶发单跑 3/3·2/3 绿；botai 偶发率偏高（9 跑 4 红）但选择性 A/B（摘 noNav skip ×4）3/4 绿且签名相同 ⇒ 预存与本批无关（下批 triage）；surf 22/22+worldrestore 10/0 契约单验绿。**升戳 20261115a→b**（22 文件：index.html 49+game_files 45+戳钉探针 20 支）。详见 `finished-docs/批-锥体碰撞×入水特效×音效重制×自适应弹坑-2026-11-15.md`。
 

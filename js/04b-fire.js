@@ -1197,7 +1197,7 @@ const dCam=Math.hypot(x-camera.position.x,z-camera.position.z);
 if(TB_GROUND){
 // 草原炮火犁地: 贴地爆炸 (尘柱+火光) + 小弹坑; 落在麦田内 → 点燃植株 (烈焰麦田)
 if(dCam<200) explosionFXSmall({x,y:gy+0.6,z});
-if(dCam<180) AudioSys.explosion(dCam);
+if(dCam<180) AudioSys.explosion('barrage',dCam,AudioSys.panOf({x,z})); // 重炮犁地档 (★2026-11-15c)
 if(typeof crater==='function'&&dCam<150) crater(x,z,1.8,true);
 for(const cf of (typeof CROP_FIELDS!=='undefined'?CROP_FIELDS:[])){
 if(x>cf.x0&&x<cf.x1&&z>cf.z0&&z<cf.z1){ igniteArea(x,z,4.5,null); break; }
@@ -1216,7 +1216,7 @@ spawnP(PT.spark,x+rand(-1.5,1.5),by+rand(-1,1),z+rand(-1.5,1.5),rand(-6,6),rand(
 }
 spawnP(PT.dark,x,gy+0.6,z,0,rand(1.2,2),0,rand(1.8,2.6),1.9,rand(1,1.6),0.4,0.1);
 }
-if(dCam<180) AudioSys.explosion(dCam);
+if(dCam<180) AudioSys.explosion('barrage',dCam,AudioSys.panOf({x,z})); // 林冠空爆档 (★2026-11-15c)
 // 留疤: 小弹坑 (运行期 crater, 不涉种子)
 if(typeof crater==='function'&&dCam<150) crater(x,z,1.5,true);
 }

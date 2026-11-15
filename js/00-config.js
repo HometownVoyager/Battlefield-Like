@@ -1693,8 +1693,12 @@ function seaWaveOffset(x,z,t){
   return Math.sin(t*NAVAL_CFG.waveFreq + x*NAVAL_CFG.waveKx + z*NAVAL_CFG.waveKz)*NAVAL_CFG.waveAmp;
 }
 // ===== 固定火力点/载具机枪单源常量 (2026-09-06 B4: 玩家与 Bot 走同一份射击代码) =====
-const MG_BULLET_DEF={dmg:22,headMul:1.8,snd:'mg',tracer:2,vehDmg:9};      // 载具同轴机枪弹 (坦克 AI/玩家共用: 伤害降至22防速融)
-const mgBulletDef=mdef=>({dmg:mdef.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:2.5}); // 固定重机枪弹 (座子 def 参数化; headMul 统一 1.9)
+// 固定重机枪音色 id (★2026-11-15c 音效推倒重写批): 按 FACTION_MG.style 分档 —— MG42 撕布/九二式慢沉/
+//   水冷马克沁闷响/气冷 M1919。mgBulletDef 弹体与 20a-seats 玩家枪座出声共用本单源。
+const MG_SID={ air:'mg_air', mg42:'mg_mg42', water:'mg_maxim', 92:'mg_92' };
+function mgSid(mdef){ return (mdef&&mdef.style&&MG_SID[mdef.style])||'mg'; }
+const MG_BULLET_DEF={dmg:22,headMul:1.8,snd:'mg',sid:'vcoax',tracer:2,vehDmg:9};      // 载具同轴机枪弹 (坦克 AI/玩家共用: 伤害降至22防速融; sid=音效档 ★2026-11-15c)
+const mgBulletDef=mdef=>({dmg:mdef.dmg,headMul:1.9,snd:'mg',sid:mgSid(mdef),tracer:2,vehDmg:2.5}); // 固定重机枪弹 (座子 def 参数化; headMul 统一 1.9; sid 按 style 分档 ★2026-11-15c)
 // ===== 手雷投掷单源 (2026-09-30 批): 初速表 + 爆圈半径 =====
 // NADE_THROW: releaseNade (18-game) 与弹道预演 updateNadeArc (22-hud) 共用 —— 预演与实弹必须同一初速
 //   才"指哪落哪"。v=平飞分量 (camForward×v), up=抬手竖直补正, 叠加玩家自身速度 ×0.4; 重力 9.8 在

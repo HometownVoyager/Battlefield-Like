@@ -224,7 +224,7 @@ shooter._src=def.name||''; // 击杀来源: 火箭筒开火即记入 (2026-09-29
 shells.push({pos:origin.clone(),vel,team:(shooter.spectator?-1:shooter.team),owner:shooter,life:3.6,kind:'at',dmgV:def.atDmg||320,trail:0,rocket:true,src:def.name||''}); // src: 弹体自带标签, 命中时重盖章 (见 updateShells); team: 2026-11-09 观战中立批 —— 观战者本尊的火箭无差别 (幽灵坦克 team:-1 同约定); 非观战射手逐位不变
 spawnP(PT.flash,origin.x,origin.y,origin.z, dir.x*2,dir.y*2,dir.z*2, 0.6,6,0.1,1,0,true);
 spawnP(PT.dark,origin.x,origin.y,origin.z, dir.x*2+rand(-1,1),1.5,dir.z*2+rand(-1,1), 0.9,2.5,0.8,0.7,0.5);
-AudioSys.cannon(origin.distanceTo(camera.position));
+AudioSys.cannon('rocket_'+(def.sid||'bazooka'),origin.distanceTo(camera.position),AudioSys.panOf(origin)); // 火箭筒发射音分档 (★2026-11-15c: 巴祖卡/坦克杀手/巡飞弹各自档案, 未知回落 generic)
 shooter.lastFiredT=nowT;
 if(typeof player!=='undefined'&&player&&player.specViewHost&&player.specViewHost===shooter&&typeof svHostFireFx==='function') svHostFireFx(def);   // 真附身 (2026-11-04): 与 fireBullet 同款出膛反馈钩 —— 宿主打火箭视角同样有后坐/枪口焰 (旧版只挂枪械弹)
 }
@@ -381,7 +381,7 @@ if(visMuzzle) muzzleFXWorld(visMuzzle,dir);
 const dCam=origin.distanceTo(camera.position);
 const rv=camRight(_fbR);
 const pan=clamp(rv.dot(_fbPan.set(origin.x-camera.position.x,0,origin.z-camera.position.z).normalize()),-1,1);
-if(!shooter.isPlayer) AudioSys.gunshot(def.snd,dCam,pan*0.7);
+if(!shooter.isPlayer) AudioSys.gunshot(def.sid||def.snd,dCam,pan*0.7); // sid=每枪独立音色档 (★2026-11-15c 音效推倒重写批; 未登记回落旧 snd 家族)
 if(!shooter.isPlayer&&shooter.team!==player.team&&player.alive){
 const relX=player.pos.x-origin.x, relY=player.pos.y+1.5-origin.y, relZ=player.pos.z-origin.z;
 const tp=relX*dir.x+relY*dir.y+relZ*dir.z;
@@ -457,7 +457,7 @@ if(shooter&&shooter.protUntil) shooter.protUntil=0; // 出生保护清账 (★20
 g.cd=3.6+rand(0,0.8); // 炮上冷却, 换人不重置 (CD优化降至3.6+rand(0,0.8))
 const o=_emplA.set(g.x,g.y,g.z).addScaledVector(dir,2.7);
 shooter._src='反坦克炮';
-AudioSys.cannon(o.distanceTo(camera.position));
+AudioSys.cannon('atgun',o.distanceTo(camera.position),AudioSys.panOf(o)); // 固定反坦克炮档 (★2026-11-15c: 高速长管更脆更冲)
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*3,dir.y*3,dir.z*3,0.85,8.5,0.1,1,0,true);
 spawnP(PT.dark,o.x,o.y,o.z,dir.x*2,1,dir.z*2,0.85,2.55,0.85,0.7,0.5);
 shells.push({pos:o.clone(),vel:dir.clone().multiplyScalar(SHELL_SPD),team:shooter.team,owner:shooter,life:2.4,kind:'at',trail:0,src:'反坦克炮'});
@@ -671,7 +671,7 @@ if(n.src&&n.thrower) n.thrower._src=n.src; // 击杀来源重盖章 (2026-09-29)
 if(typeof markHitCls==='function') markHitCls('explo'); // 命中标识档: 投掷爆炸物一律 'explo' (2026-09-30 批)
 if(n.mortar){
 explosionFXSmall(n.pos);
-AudioSys.explosion(n.pos.distanceTo(camera.position)*0.85);
+AudioSys.explosion('mortar',n.pos.distanceTo(camera.position)*0.85,AudioSys.panOf(n.pos)); // 迫击炮弹档 (★2026-11-15c)
 // ★2026-10-30 迫击炮削弱 (用户裁定⑤"标准档+半径5.25+伤害≤100"): 半径 7.5→5.25m (原为手雷圈的1.36倍,
 //   现与手雷/反坦克炸药 5.5 同级偏小), 步兵 135→100 (中心命中满血不再一击致死, 边缘由衰减进一步收敛);
 //   载具 150 与 ap=false 不动 (对装甲本来刮痧); 结构半径随爆径同比例 7→5 (伤害 210 不动)。
@@ -683,7 +683,7 @@ return;
 if(n.at){
 spawnP(PT.flash,n.pos.x,n.pos.y+0.4,n.pos.z,0,2,0,2.4,15,0.14,1,0,true);
 for(let i=0;i<7;i++) spawnP(PT.dark,n.pos.x,n.pos.y+0.4,n.pos.z,rand(-2,2),rand(1,4),rand(-2,2),1.0,2.4,rand(0.8,1.4),0.85,0.6);
-AudioSys.explosion(n.pos.distanceTo(camera.position));
+AudioSys.explosion('atcharge',n.pos.distanceTo(camera.position),AudioSys.panOf(n.pos)); // 反坦克炸药档 (★2026-11-15c)
 // 爆圈 5→5.5 (2026-09-30 批, 用户裁定"微量增加手雷爆炸范围"; 反装甲全额/伤害表不动)
 splashDamage(n.pos,n.thrower,-1,5.5,95,340,true,'explo'); // 反坦克炸药: 反装甲全额; team=-1 = 2026-11-09 用户裁定"投掷手雷中立" (与地雷/油桶同约定; 仅爆炸伤害中立, 触发引信仍只认敌方)
 damageStructures(n.pos,5,130,n.thrower);
@@ -693,13 +693,13 @@ crater(n.pos.x,n.pos.z,1.1,true);
 // 步兵 170→210 / 载具 260→1350 且 **ap=true** —— 旧无 ap: 260×TANK_ARMOR0.3=78 纯挠痒; 现在
 // 直接命中 = 反装甲全额 ≈1300 (中型坦克击毁级, 轻坦必杀, 重坦残废), 与巡飞弹 (560, ap) 同族但更重。
 explosionFX(n.pos);
-AudioSys.explosion(n.pos.distanceTo(camera.position)*0.7);
+AudioSys.explosion('bomb',n.pos.distanceTo(camera.position)*0.7,AudioSys.panOf(n.pos)); // 航弹档 (★2026-11-15c: 最重爆炸)
 splashDamage(n.pos,n.thrower,n.team,13,210,1350,true);
 damageStructures(n.pos,12,460,n.thrower);
 crater(n.pos.x,n.pos.z,2.4,true);
 explodeAt(n.pos,n.thrower);
 } else {
-explodeAt(n.pos,n.thrower,undefined,true);   // noFF (2026-11-09 用户裁定"投掷手雷中立"): 普通手雷爆炸伤双方; 触发引信仍只认敌方, 自炸(s!==attacker)照旧
+explodeAt(n.pos,n.thrower,undefined,true,'frag');   // noFF (2026-11-09 用户裁定"投掷手雷中立"): 普通手雷爆炸伤双方; 触发引信仍只认敌方, 自炸(s!==attacker)照旧; kind=手雷档 (★2026-11-15c)
 }
 }
 // attacker 可为 null = **无主爆炸** (2026-09-25 修): 钢水包等场景破坏物 g.onDead 就是叠了 null 调进来的
@@ -707,12 +707,12 @@ explodeAt(n.pos,n.thrower,undefined,true);   // noFF (2026-11-09 用户裁定"�
 // 第一个存活单位就抛 TypeError, 异常被 05-world 的 try/catch 吞掉 ⇒ 现象是"爆了但周围零伤害、火区也不生成"。
 // 全链其余环节本来就支持无主 (18-game damage/die 用 `if(attacker)` 守卫、04b igniteCell 写 FATT=attacker||null),
 // 所以这里只需同规守卫: 无主时不做友军免伤、不做威胁广播 (与 splashDamage 的"无主=对双方生效"一致)。
-function explodeAt(p,attacker,R,noFF){   // noFF (2026-11-09 投掷手雷中立批): 跳过同队免伤 —— 仅手雷 frag 分支传 true; boomer殉爆/航弹叠爆/钢水包/丧尸链不传=旧口径
+function explodeAt(p,attacker,R,noFF,kind){   // noFF (2026-11-09 投掷手雷中立批): 跳过同队免伤 —— 仅手雷 frag 分支传 true; boomer殉爆/航弹叠爆/钢水包/丧尸链不传=旧口径; kind=爆炸音档 (★2026-11-15c, 缺省 generic)
 // 爆圈半径 (2026-09-30 批, 用户裁定"微量增加手雷爆炸范围"): 缺省 NADE_BLAST_R=10 (旧 9, 00-config 单源);
 // 航弹分支的叠爆/场景破坏物殉爆同吃此缺省 —— 航弹主伤圈是上面 splashDamage 的 13, 这里只微涨边缘。
 R=R||NADE_BLAST_R;
 explosionFX(p);
-AudioSys.explosion(p.distanceTo(camera.position));
+AudioSys.explosion(kind||'generic',p.distanceTo(camera.position),AudioSys.panOf(p));
 // 命中标识 (2026-09-30 批): 爆炸档 'explo' + 玩家射手伤到**活着的敌对目标**出聚合白档 (致命一击不补, die 链红档)。
 if(typeof markHitCls==='function') markHitCls('explo');
 let _fbAny=false;
@@ -746,7 +746,7 @@ if(Math.hypot(s.pos.x-p.x,s.pos.z-p.z)<40&&attacker.team!==s.team) s.noticeThrea
 }
 }
 // ===== 巡飞弹 (实验模式): 火箭筒发射小型无人机, 飞行中玩家进入TV制导视角 =====
-const loiterEng=AudioSys.createEngine('plane');
+const loiterEng=AudioSys.createEngine('loiter'); // 巡飞弹专用电嗡档 (★2026-11-15c: 高频细嗡, 不再借飞机档)
 function buildLoiterMesh(){
 const g=new THREE.Group();
 const bodyMat=new THREE.MeshLambertMaterial({color:0x6a705c});
@@ -986,7 +986,7 @@ if(ov) ov.style.display='none';
 loiterEng.stop();
 if(!matchOver){
 explosionFX(p);
-AudioSys.explosion(p.distanceTo(camera.position)*0.8);
+AudioSys.explosion('loiter',p.distanceTo(camera.position)*0.8,AudioSys.panOf(p)); // 巡飞弹战斗部档 (★2026-11-15c)
 if(d.owner) d.owner._src='巡飞弹'; // 击杀来源重盖章 (2026-09-29): 制导飞行期间发射者身上的 _src 已是旧枪名
 if(typeof markHitCls==='function') markHitCls('explo'); // 命中标识档: 爆炸类 (2026-09-30 批)
 // 攻顶战斗部: 不分敌我的大范围高伤害爆炸 (含发射者自己与友军)

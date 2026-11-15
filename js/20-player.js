@@ -1306,7 +1306,7 @@ p.pitch+=rec*0.55;
 p.yaw+=rand(-1,1)*w.def.recSide*0.003;
 vmFireKick();
 addTrauma(w.def.kick*0.9);
-AudioSys.gunshot(w.def.snd,0,0);
+AudioSys.gunshot(w.def.sid||w.def.snd,0,0); // 每枪独立音色档 (★2026-11-15c 音效推倒重写批; 未登记回落旧 snd 家族)
 const o=oS; // 弹道起点: 第三人称=角色眼位, 第一人称=camera.position (同 playerFireOrigin)
 p._src=w.def.name||''; // 击杀来源: 当前武器名
 // 瞄准吸附 (2026-09-27, 用户要求): 枪弹的最后一道工序 —— 散布/后坐都已结算完, 这里只把"差一点点打中"

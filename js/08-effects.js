@@ -196,7 +196,7 @@ scene.add(sp);
 cloud.sprites.push({sp,flame:true,fk:rand(6,14),ph:rand(0,TAU),vx:0,vy:0,vz:0,rs:0,g:-0.1});
 }
 crater(p.x,p.z,1.5,true);
-AudioSys.explosion(p.distanceTo(camera.position)*1.4);
+AudioSys.explosion('drum',p.distanceTo(camera.position)*1.4,AudioSys.panOf(p)); // 燃烧弹/油料爆档 (★2026-11-15c: 亮 pop)
 }
 if(SMOKES.length>=SMOKES_MAX){
 const old=SMOKES.shift();
@@ -471,7 +471,7 @@ setTimeout(()=>{ sun.intensity=_nBase; },160);
 const dd=rand(90,320);
 // ★2026-11-04b 时停音频批: 远雷是墙钟 setTimeout, 时停前排程的那一声会在冻结期间照响 ——
 //   触发当刻再看一次时停/静默账 (与 01-audio 的 distantMG/bird 同款闸), 冻住的战场不许打雷。
-setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; if(typeof AudioSys!=='undefined'&&AudioSys.isSilenced&&AudioSys.isSilenced()) return; AudioSys.explosion(dd*0.8); },dd*2.6);
+setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; if(typeof AudioSys!=='undefined'&&AudioSys.isSilenced&&AudioSys.isSilenced()) return; AudioSys.explosion('thunder',dd*0.8); },dd*2.6); // 远雷档 (★2026-11-15c: 天穹闷响)
 }
 }
 if(stormFlash>0){

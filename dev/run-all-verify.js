@@ -113,7 +113,7 @@ const SANDBOX=[
 ['dev/verify-mapfix-20261115.js',[],'多图修批 (2026-11-15 用户实报, 含 --neg): 柏林地铁桥式抬升(B1 带内=街面/B2 横穿连续/B3 顶板贴街/B4 洞内底板净高/B5 洞口胸墙+B6 厅坑压平底板/B7 护环pad/B8 OCC豁免)+莫斯科残墙迁位(M1 不压教堂/不骑墙·M1b 教堂旗净空·M2 工厂旗 132m)+百团 R10 南移 27.3m/前哨拉距 59m+胡康水态门/河道过界/水位 0.44+草原水塔腿 1.909 — NEG4: 摘抬升/摘压平/摘墙足迹/摘水态门 全部转红'],
 ['dev/verify-conecollide-20261115.js',[],'2026-11-15 锥体碰撞批: 国会穹顶 7 档/教堂尖顶 45° 转位加大三档/水塔锥顶两档 noNav 分层近似圆柱 + OCC 烘焙 noNav 豁免 (悬空饰件不占地面格, 行为测试+对照组) + 钟塔接缝 h7.05→7.2 (含 --neg)'],
 ['dev/verify-waterentry-20261115.js',[],'2026-11-15 入水特效批: waterSplash 五参 (spd=入水速度) 粒子档位 6/14/24 + AudioSys.splash 四参透传 + Bot dry→wet 边沿 (14-bots moveDir, 大落差 scale 2.2/big) + 坦克 3.4/卡车 2.6 车体级跃迁账 + 飞机触水先溅后毁 (含 --neg)'],
-['dev/verify-audio2-20261115.js',[],'2026-11-15 音效重制批: 契约面 (bypass Set/naval 段三写点/splash 四参签名/引擎节点名) + 引擎三层化 osc3+ns→nbp→ng2 + splash f0 双调制/嘶声/回浪 + 枪声第二裂响/中频体层 + 爆炸次声重锤 58→18Hz + 运行期 init/splash/createEngine/update/stop 全链 (含 --neg)'],
+['dev/verify-audio3-20261115c.js',[],'2026-11-15c 音效完全推倒重写批: 契约面 (bypass Set/naval 段三写点/splash 四参/引擎 pitch 写法) + 四档案表 (每枪 sid 全覆盖/炮 13 条/爆 18 kind/引擎 9 档+旧档别名) + 逐阵营坦克/飞机引擎档实spawn (normandy+songhu+baituan, 权重档读 tk.wc) + identity 接线锚 (sid/mgSid 四 style/坦克炮三档/planeMG/flak20/naval_*/battery/loiter/truck) + 行为 (每发变奏/未知回落/旧数字口径/tankJp saw pitch1.35/truck square/radial vs inline) + 远枪限流 (含 --neg)'],
 ['dev/verify-crater-20261115.js',[],'2026-11-15 自适应弹坑批 (二轮修黑弧): terrainSurfaceY 单源 (渲染弦面同格同对角) + 顶点贴地不变式 (≥弦面+0.04) + 绕向翻正法线朝上 + 125 顶点 BufferGeometry/贴花档材质/36 上限账/无 Torus rim (桩补真 setIndex/computeVertexNormals; 含 --neg)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];

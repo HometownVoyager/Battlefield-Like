@@ -52,7 +52,7 @@ this.heat=0; this.heatLock=false;
 this.suspP=0; this.suspR=0; this.suspPV=0; this.suspRV=0;
 this.muzzle=V3();
 this.buildMesh();
-this.engine=AudioSys.createEngine('tank');
+this.engine=AudioSys.createEngine('tankSmall'); // 幽灵坦克走轻中坦档 (★2026-11-15c; GHOST_DEF 无 tk 形档, 开火保持静音红线不动)
 }
 // 全白车体: 主体纯白 + 行走部分极浅灰 (仍是"白车", 只为读出体块), 轻微自发光保证阴天/逆光下仍是白的
 buildMesh(){

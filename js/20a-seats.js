@@ -413,7 +413,7 @@ p.recoilPitch+=0.0022;
 p.pitch=clamp(p.pitch+0.0012,-0.7,0.45);
 p.yaw+=rand(-1,1)*0.0018;
 addTrauma(0.06);
-AudioSys.gunshot('mg',0,0);
+AudioSys.gunshot(mgSid(mg.def),0,0); // 架设重机枪按阵营型号分档 (★2026-11-15c: MG42 撕布/九二式慢沉/水冷闷/气冷, 单源 mgSid 00-config)
 const h0=mg.heat;
 // 瞄准吸附 (2026-09-27): 固定重机枪 = 机枪档; 挂在散布 (随热量) 之后 ⇒ 掰的是这一发的最终方向
 if(typeof aimAssistDir==='function') dir=aimAssistDir(V3(mg.x,mg.y+0.1,mg.z),dir,'mg',{team:p.team,ff:false});

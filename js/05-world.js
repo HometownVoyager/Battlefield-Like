@@ -1064,7 +1064,7 @@ for(const m of seen) spawnWallDebris(m,cx,cz);
 for(const rm of kept){
 for(let k=0;k<3;k++) spawnP(PT.dirt,rm.position.x+rand(-1.5,1.5),rm.position.y,rm.position.z+rand(-1.5,1.5),rand(-2,2),rand(0,2),rand(-2,2),rand(0.5,0.8),1.5,rand(0.8,1.2),0.85,3);
 }
-AudioSys.explosion(Math.hypot(cx-camera.position.x,cz-camera.position.z)*0.85);
+AudioSys.explosion('collapse',Math.hypot(cx-camera.position.x,cz-camera.position.z)*0.85,AudioSys.panOf({x:cx,z:cz})); // 屋盖坍塌档 (★2026-11-15c: 闷隆+散落)
 for(const rm of seen) world.remove(rm);
 }
 // 碰撞带连同其阶梯网格一并击杀 (不再 keepMesh —— 残留空中 = 屋顶浮空 bug 根源)
@@ -1142,7 +1142,7 @@ for(let k=0;k<8;k++) spawnP(PT.smoke,hx+rand(-2,2),gy+rand(0.5,2.8),hz+rand(-2,2
 for(let k=0;k<8;k++) spawnP(PT.dirt,hx+rand(-1.5,1.5),gy+rand(1,2.8),hz+rand(-1.5,1.5),rand(-4,4),rand(2,6),rand(-4,4),rand(0.3,0.55),0.5,rand(0.6,1),0.9,7);
 // 高层墙塌 (at 来自楼上那一块): 在**缺口高度**补一层尘 —— 全按地面高撒尘时, 楼上塌墙看着像地面塌
 if(fx&&fx.y-gy>2.4) for(let k=0;k<6;k++) spawnP(PT.dirt,hx+rand(-1.2,1.2),fx.y+rand(-0.8,0.8),hz+rand(-1.2,1.2),rand(-1,1),rand(0.5,2),rand(-1,1),rand(0.6,1),2,rand(0.8,1.4),0.85,0.5);
-AudioSys.explosion(Math.hypot(hx-camera.position.x,hz-camera.position.z)*0.7);
+AudioSys.explosion('collapse',Math.hypot(hx-camera.position.x,hz-camera.position.z)*0.7,AudioSys.panOf({x:hx,z:hz})); // 高墙坍塌档 (★2026-11-15c)
 if(player.alive&&Math.hypot(hx-player.pos.x,hz-player.pos.z)<25) addTrauma(0.4);
 // ★ 2026-09-27N (A4): 坍塌碾压 —— 旧版坍塌是纯视觉事件 (站在楼里看天花板塌下来不会死)。
 //   口径: 落体覆盖矩形 = 本组成员盒并集, 顶面 = 最高一块的顶; 参数见 00-config.STRUCT_CRUSH。
@@ -1302,7 +1302,7 @@ killCyl(c);
 // 网格只摘不置空: 世界还原按 world.children 快照把网格放回来, 下一局同一只桶还能再被引爆一次
 if(c.mesh&&c.mesh.parent) world.remove(c.mesh);
 if(typeof explosionFXSmall==='function') explosionFXSmall(p); else if(typeof explosionFX==='function') explosionFX(p);
-if(typeof AudioSys!=='undefined'&&AudioSys.explosion&&camera) AudioSys.explosion(p.distanceTo(camera.position)*0.8);
+if(typeof AudioSys!=='undefined'&&AudioSys.explosion&&camera) AudioSys.explosion('drum',p.distanceTo(camera.position)*0.8,AudioSys.panOf(p)); // 燃料桶档 (★2026-11-15c: 亮 pop)
 for(let k=0;k<6;k++) spawnP(PT.spark,p.x,p.y,p.z,rand(-3,3),rand(1.5,4.5),rand(-3,3),0.13,-0.02,rand(0.2,0.45),1,6,true);
 for(let k=0;k<5;k++) spawnP(PT.dark,p.x+rand(-0.6,0.6),p.y+rand(0.2,1.2),p.z+rand(-0.6,0.6),rand(-1.4,1.4),rand(1,2.6),rand(-1.4,1.4),rand(0.7,1.2),2,rand(1,1.6),0.75,0.3);
 // 溅射不认人 (燃料爆炸, 对双方一视同仁) + 点燃周边植被; 已归零的桶自身不再参与

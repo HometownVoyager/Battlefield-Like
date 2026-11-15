@@ -52,7 +52,7 @@ w.pos.y=_plSwHit.y+0.45;
 w.state='rest'; w.vel.set(0,0,0); w.onTop=true;
 if(w.ageT>0.6){
 explosionFX(w.pos.clone().add(V3(0,0.8,0)));
-AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
+AudioSys.explosion('planedie',w.pos.distanceTo(camera.position)*0.8,AudioSys.panOf(w.pos)); // 坠机档 (★2026-11-15c)
 splashDamage(w.pos,w.attacker,-1,9,165,240);
 damageStructures(w.pos,8,280,w.attacker||null);
 }
@@ -90,7 +90,7 @@ w.pos.y=gh+0.45;
 // 燃烧一段时间 + 二次爆炸消失。
 if(!w.bld){
 explosionFX(w.pos.clone().add(V3(0,0.8,0)));
-AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
+AudioSys.explosion('planedie',w.pos.distanceTo(camera.position)*0.8,AudioSys.panOf(w.pos)); // 坠机档 (★2026-11-15c)
 splashDamage(w.pos,w.attacker,-1,9,165,240);
 damageStructures(w.pos,8,280,w.attacker||null); // 4参 = 破坏得分归属: 坠机撞塌的楼算击落者的战果
 crater(w.pos.x,w.pos.z,1.6,true);
@@ -117,7 +117,7 @@ if(w.restT<=0){
 // 地面档维持既有"沉入地下"谢幕, 不加炸。
 if(w.bld){
 explosionFX(w.pos.clone().add(V3(0,0.8,0)),true);
-AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
+AudioSys.explosion('planedie',w.pos.distanceTo(camera.position)*0.8,AudioSys.panOf(w.pos)); // 坠机档 (★2026-11-15c)
 splashDamage(w.pos,w.attacker,-1,9,165,240);
 damageStructures(w.pos,8,280,w.attacker||null); // 4参 = 破坏得分归属: 与坠撞/触地档同口径
 }
@@ -308,7 +308,9 @@ this.aiEvSrc=null; this.aiEvDur=1.2; // 2026-09-30j 破转反咬: 规避威胁�
 this.respawnT=0; this.smokeT=0;
 this.pilotWaitT=0;   // 飞行员生还待命计时 (2026-09-26 见 update() 重生分支)
 this.buildMesh();
-this.engine=AudioSys.createEngine('plane');
+// 引擎两档 (★2026-11-15c 音效推倒重写批): 直列液冷 (inline 机鼻: P-51/BF-109/零式/隼) 平滑高转 / 星型气冷
+//   (radial 机鼻: P-47/FW-190/La-5/IL-2/霍克III/伊-16/九九式) 粗哑拍频 —— 音效跟剪影单源 pl.nose 走。
+this.engine=AudioSys.createEngine(this.def.pl&&this.def.pl.nose==='radial'?'planeRadial':'planeInline');
 planes.push(this);
 }
 // ── 建模段 (2026-09-20 I2: 从构造函数原样抽出为方法, 与 class Tank 同构) ──
@@ -422,7 +424,7 @@ if(shooter) shooter._src=this.name; // 击杀来源: 战机扫射记入战机名
 // 不是 player); 挂在随机散布之后, 掰的就是这一发串射的最终方向。判据是 shooter 身份, 不是机种。
 let dirA=dir;
 if(shooter===player&&typeof aimAssistDir==='function') dirA=aimAssistDir(o,dir,'airmg',{team:player.team,ff:false,self:this});
-fireBullet(shooter,o,dirA,{dmg:this.def.mgDmg,headMul:1.5,snd:'smg',tracer:1,vehDmg:this.def.mgDmg*0.18,noAirHit:true},o); // noAirHit: 对空伤害由下面显式分层收口, fireBullet 不再对机刮血 (防双份)
+fireBullet(shooter,o,dirA,{dmg:this.def.mgDmg,headMul:1.5,snd:'smg',sid:'planeMG',tracer:1,vehDmg:this.def.mgDmg*0.18,noAirHit:true},o); // noAirHit: 对空伤害由下面显式分层收口, fireBullet 不再对机刮血 (防双份); sid=航炮音档 (★2026-11-15c)
 // 7c 对空判定 (显式分层, 2026-09-30): 对地/对舰/对人走上面 fireBullet 弹道, 对空由这一段收口 ——
 // 判定几何单源 planeHitTest (旧手写平径 3.2 球测绝迹), 并补 raycastWorld 遮挡: 机心之前有山/楼
 // ⇒ 弹被世界挡住, 不再隔山伤机 (F7)。伤害口径不变 (mgDmg×0.7, 空空机炮档)。
@@ -715,7 +717,7 @@ const dy=steerToward(this,aim,lerp(this.def.spd[0],this.def.spd[1],clamp((d-60)/
 if(this.fireT<=0&&Math.abs(dy)<0.12&&d<160*PLANE_DIFF[SETTINGS.diff].eng*(ep.playerDriven?0.85:1)){
 this.fireT=this.def.rof*PLANE_DIFF[SETTINGS.diff].rof*(ep.playerDriven?1.15:1);
 this.fireMGBurst(this.crewBot||this.crew,1);
-if(Math.random()<0.12) AudioSys.gunshot('smg',this.pos.distanceTo(camera.position),0);
+if(Math.random()<0.12) AudioSys.gunshot('planeMG',this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // AI 航炮档 (★2026-11-15c)
 }
 if(d>340){ this.state='patrol'; this.stateT=rand(5,10); this.dogTgt=null; } // 脱离线比进入线 (240×eng≤300) 宽出半拍, 防临界抖动
 return;
@@ -875,7 +877,7 @@ this.fctl.spdTgt=this.speed+((keys.KeyW?1:0)-(keys.KeyS?1:0))*PF.thrAccel;
 if(mouseDown&&this.fireT<=0&&!matchOver){
 this.fireT=this.def.rof*(player.streakBuff?player.streakBuff.reloadMul:1); // 连杀增益: 航炮加速 (2026-09-12)
 this.fireMGBurst(player,0.8);
-AudioSys.gunshot('smg',0,0);
+AudioSys.gunshot('planeMG',0,0); // 玩家航炮档 (★2026-11-15c)
 addTrauma(0.03);
 }
 if((mouse2Down||keys.KeyB)&&this.bombs>0&&this.bombCd<=0&&!matchOver){
@@ -1137,7 +1139,7 @@ if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击�
 }
 tickets[this.team]=Math.max(0,tickets[this.team]-(hadCrew?TICKET_COST.plane-1:TICKET_COST.plane));
 explosionFX(this.pos.clone(),!!bld);   // 撞楼档不盖弹坑 (2026-11-14: 旧版 crater 恒打 heightAt = 爆点在楼面/半空, 坑却盖在正下方地上)
-AudioSys.explosion(this.pos.distanceTo(camera.position));
+AudioSys.explosion('planedie',this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // 坠机档 (★2026-11-15c)
 }catch(e){
 // 单位已正确退场 (本体已隐 + 残骸已上): 只丢一次账/报, 不能把飞机挂在空中
 console.warn('[击落] 记分/布娃娃链异常 (单位已退场):',e);
@@ -1355,7 +1357,7 @@ b.die(aPilot,true);
 }
 function fireFlak(gun,shooter,dir){
 const o=V3(gun.x,gun.y,gun.z).addScaledVector(dir,1.6); // 弹壳出生炮轴心 (2026-09-06 P2-20: 旧 +0.4 与炮管视觉错位)
-AudioSys.gunshot('mg',o.distanceTo(camera.position),0);
+AudioSys.gunshot('flak20',o.distanceTo(camera.position),AudioSys.panOf(o)); // 20mm 高炮连射档 (★2026-11-15c)
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*2,dir.y*2,dir.z*2,0.35,3,0.07,1,0,true);
 flakShots.push({pos:o.clone(),vel:dir.clone().multiplyScalar(FLAK_SPD),team:shooter.team,owner:shooter,life:1.7,age:0}); // 弹速单源 FLAK_SPD (7d-乙 四联 20mm: 旧借 SHELL_SPD 380 ⇒ 460, life 2.05→1.7 同步收紧保 ~780m 射程包线不变; age: 出膛计时, B13 舰体实体判定的豁免窗用)
 }

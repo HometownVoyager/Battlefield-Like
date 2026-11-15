@@ -398,7 +398,7 @@ b.lastFiredT=nowT;
 // 再上炮打的这一炮仍记成"卡宾枪" (上炮不清 _src)。与全库其它开火处同口径: 本次开火**无条件**写自己的标签。
 if(shooter) shooter._src=b.name;
 b.flash=1;
-AudioSys.cannon(o.distanceTo(camera.position));
+AudioSys.cannon('battery',o.distanceTo(camera.position),AudioSys.panOf(o)); // 海防重炮档 (★2026-11-15c: 最重一档 52→16Hz 深锤长尾)
 spawnP(PT.flash,o.x,o.y,o.z,dir.x*3,dir.y*3,dir.z*3,0.9,9,0.1,1,0,true);
 spawnP(PT.dark,o.x,o.y,o.z,dir.x*2,1,dir.z*2,0.9,2.6,0.85,0.7,0.5);
 return true;
@@ -479,7 +479,7 @@ this._src=this.name;
 if(this.cyl) this.cyl.y1=Math.min(this.cyl.y1,this.baseY+0.85); // 只留混凝土座圈 (炮座已被打塌)
 if(this.net){ this.net.rotation.z=0.55; this.net.position.y-=0.75; }  // 伪装网塌落
 spawnP(PT.dark,this.x,this.baseY+1.4,this.z,0,1.4,0,1.4,3.2,1.4,0.8,0.4);
-AudioSys.explosion(Math.hypot(this.x-camera.position.x,this.z-camera.position.z));
+AudioSys.explosion('batterydie',Math.hypot(this.x-camera.position.x,this.z-camera.position.z)); // 炮台塌毁档 (★2026-11-15c: 混凝土闷隆)
 // 播报 (00b-i18n 已有中文键; 缺函数时静默)
 if(typeof addKillMsg==='function'&&typeof t==='function'){
 try{ addKillMsg(t('反舰炮台已摧毁'),BATTERY_TEAM); }catch(e){}
@@ -591,7 +591,7 @@ if(idx>=0) shells.splice(idx,1);                                      // 先摘�
 sh.done=true;
 hit.takeDmg((sh.s.dmgV||300)+rand(-30,30),sh.s.owner,true);
 explosionFXSmall(p);
-AudioSys.explosion(p.distanceTo(camera.position)*1.6);
+AudioSys.explosion('navalShell',p.distanceTo(camera.position)*1.6,AudioSys.panOf(p)); // 重炮弹命中档 (★2026-11-15c)
 }
 }
 sh.last.copy(to);

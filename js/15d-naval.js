@@ -240,7 +240,9 @@ class NavalCraft {
     this.crew={name:this.name,team:this.team,kills:0,deaths:0,score:0,isPlayer:false,isCrew:true,
       pos:this.pos,alive:true,lastFiredT:-99,damage(){},vel:V3()};
     this.buildMesh();
-    this.engine=(typeof AudioSys!=='undefined'&&AudioSys.createEngine)?AudioSys.createEngine('tank'):null;
+    // 引擎基档按艇型 (★2026-11-15c 音效推倒重写批): amph 履带两栖 / boat 汽艇 —— 每帧音色仍由 01-audio
+    //   海战追加段 navalAudEngine 塑形接管 (osc/osc2/lp 契约不变), 基档只定"建闸前的底色"。
+    this.engine=(typeof AudioSys!=='undefined'&&AudioSys.createEngine)?AudioSys.createEngine(this.kind==='boat'?'boat':'amph'):null;
     // 引擎音频开关注解 (2026-09-20N 收尾, naval-crew 报的音频节点泄漏): 沉没/残骸期**一律不再 update 引擎** ——
     // 01-audio 的 engine.update 会把已 stop 的振荡器/增益"静音重建", 残骸期每台白占 4 个音频节点且回收不掉。
     // 本开关在 crewOut/_finishWreck 置 false、在 respawn 置回 true —— 单点控制, 不依赖 state 字符串。
@@ -375,7 +377,7 @@ class NavalCraft {
     const o=navalMuzzleWorld(this,'main');
     const shooter=this._shooter();
     shooter._src=this.name;
-    if(typeof AudioSys!=='undefined') AudioSys.cannon(this.pos.distanceTo(camera.position));
+    if(typeof AudioSys!=='undefined') AudioSys.cannon('naval_'+this.key,this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // 舰炮按艇型分档 (★2026-11-15c: lvt 37mm/kami 120mm/pt/gyorai; 未知 key 回落 generic)
     spawnP(PT.flash,o.x,o.y,o.z, dir.x*3,dir.y*3,dir.z*3, 1.0,10,0.12,1,0,true);
     spawnP(PT.dark,o.x,o.y,o.z, dir.x*3+rand(-1,1),1.5,dir.z*3+rand(-1,1), 1.0,3,0.9,0.7,0.5);
     if(this.playerDriven){ addTrauma(0.5); }
@@ -407,9 +409,9 @@ class NavalCraft {
       let d=dir?dir.clone():this.aimDir();
       d.x+=rand(-0.012,0.012); d.y+=rand(-0.010,0.010); d.z+=rand(-0.012,0.012);
       d.normalize();
-      fireBullet(shooter,o,d,{dmg:S.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:S.mgDmg||6},o);
+      fireBullet(shooter,o,d,{dmg:S.dmg,headMul:1.9,snd:'mg',sid:'navalSec',tracer:2,vehDmg:S.mgDmg||6},o); // sid=舰载 .50 双联音档 (★2026-11-15c)
     }
-    if(this.playerDriven&&typeof AudioSys!=='undefined') AudioSys.gunshot('mg',0,0);
+    if(this.playerDriven&&typeof AudioSys!=='undefined') AudioSys.gunshot('navalSec',0,0);
     vehMgHeatAdd(this); // A#3 每发积热 (heatPS, 与坦克同轴机枪同档)
     shooter.lastFiredT=nowT;
     return true;
@@ -428,8 +430,8 @@ class NavalCraft {
     let d=dir?dir.clone():this.aimDir();
     d.x+=rand(-0.010,0.010); d.y+=rand(-0.008,0.008); d.z+=rand(-0.010,0.010);
     d.normalize();
-    fireBullet(shooter,o,d,{dmg:M.dmg,headMul:1.9,snd:'mg',tracer:2,vehDmg:MG_BULLET_DEF.vehDmg},o);
-    if(this.playerDriven&&typeof AudioSys!=='undefined') AudioSys.gunshot('mg',0,0);
+    fireBullet(shooter,o,d,{dmg:M.dmg,headMul:1.9,snd:'mg',sid:'navalMG',tracer:2,vehDmg:MG_BULLET_DEF.vehDmg},o); // sid=舰载机枪音档 (★2026-11-15c)
+    if(this.playerDriven&&typeof AudioSys!=='undefined') AudioSys.gunshot('navalMG',0,0);
     vehMgHeatAdd(this); // A#3 每发积热 (heatPS, 与坦克同轴机枪同档)
     shooter.lastFiredT=nowT;
     return true;
@@ -541,7 +543,7 @@ class NavalCraft {
     this.respawnT=rand(rt[0],rt[1]);
     // 摧毁特效: 爆炸 + 黑烟 (+ 水面溅落)
     explosionFX(V3(cx,cy,cz));
-    if(typeof AudioSys!=='undefined') AudioSys.explosion(this.pos.distanceTo(camera.position));
+    if(typeof AudioSys!=='undefined') AudioSys.explosion('naval',this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // 艇毁档 (★2026-11-15c)
     for(let i=0;i<6;i++) spawnP(PT.dark,cx+rand(-1.6,1.6),cy+rand(0.4,1.8),cz+rand(-1.6,1.6),
       rand(-1,1),rand(1.2,3),rand(-1,1),rand(1.0,2.0),1.6,rand(1.4,2.6),0.8,0.6);
     if(sea) waterSplash(V3(cx,wy+0.1,cz),1.8,true,true);
@@ -1283,7 +1285,7 @@ function shellHitNaval(s,dt){
   hit.takeDmg(dmg,s.owner,true);
   if(s.owner&&s.owner.isPlayer&&hit.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell');
   explosionFXSmall(p);
-  if(typeof AudioSys!=='undefined') AudioSys.explosion(p.distanceTo(camera.position)*1.6);
+  if(typeof AudioSys!=='undefined') AudioSys.explosion('navalShell',p.distanceTo(camera.position)*1.6,AudioSys.panOf(p)); // 舰体中弹档 (★2026-11-15c)
   splashDamage(p,s.owner,s.team,7,s.kind==='at'?70:150,110,true,'shell');
   damageStructures(p,7.5,s.kind==='at'?180:300,s.owner); // 4参 = 破坏得分归属 (2026-09-26 破坏得分批)
   return true;
@@ -1381,7 +1383,7 @@ function updateTorpedoes(dt){
     if(hit){   // (2026-11-10: 大舰吃雷 capitalTorpedoHit 钩随大舰子系统下架摘除)
       explosionFX(V3(t.pos.x,wy+0.4,t.pos.z));
       waterSplash(V3(t.pos.x,wy+0.2,t.pos.z),2.0,true,true);
-      if(typeof AudioSys!=='undefined') AudioSys.explosion(t.pos.distanceTo(camera.position));
+      if(typeof AudioSys!=='undefined') AudioSys.explosion('torpedo',t.pos.distanceTo(camera.position),AudioSys.panOf(t.pos)); // 鱼雷档 (★2026-11-15c: 水下闷爆)
       torpedoes.splice(i,1);
       continue;
     }
