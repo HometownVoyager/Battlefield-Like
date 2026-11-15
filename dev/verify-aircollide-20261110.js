@@ -64,12 +64,13 @@ section('① 源码防回退 (修好的写法在 / 旧写法不在)');
 {
 const s16=SRC('js/16-aircraft.js'), s05b=SRC('js/05b-props.js'), s24=SRC('js/24-main.js'),
       s22=SRC('js/22-hud.js'), ih=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('16-aircraft: die(attacker,crash) 签名 + crash 豁免门 (!crash&&AUTO_EXIT_VEH) + 注记',
- s16.includes('die(attacker,crash){')&&s16.includes('else if(!crash&&AUTO_EXIT_VEH&&player.alive')
+assert('16-aircraft: die(attacker,crash,bld) 签名 + crash 豁免门 (!crash&&AUTO_EXIT_VEH) + 注记 (2026-11-14 跟码: 撞楼档第三参)',
+ s16.includes('die(attacker,crash,bld){')&&s16.includes('else if(!crash&&AUTO_EXIT_VEH&&player.alive')
  &&s16.includes('crash 档豁免 (2026-11-10 三虫批②)'));
-assert('16-aircraft: 坠地调用点带 crash 档 + 撞楼调用点带 crash 档 (die(...,true) 恰两处)',
+assert('16-aircraft: 坠地调用点带 crash 档 + 撞楼调用点带 crash+bld 档 (2026-11-14 跟码: 撞楼 die(...,true,true), 坠地 die(...,true) 恰一处)',
  s16.includes('if(this.pos.y<gh+2) this.die(this.lastHitBy||null,true);')
- &&(s16.match(/this\.die\(this\.lastHitBy\|\|null,true\);/g)||[]).length===2);
+ &&(s16.match(/this\.die\(this\.lastHitBy\|\|null,true\);/g)||[]).length===1
+ &&s16.includes('this.die(this.lastHitBy||null,true,true);'));
 assert('16-aircraft: 撞楼扫掠三件套 (_plSwTake/盒回调/柱回调) + foliage 豁免门 + 机鼻余量',
  s16.includes('function _plSwTake(r){')&&s16.includes('function _plSwBoxCb(b){')&&s16.includes('function _plSwCylCb(c){')
  &&s16.includes('if(c.dead||c.foliage||_plSwHit.on) return;')&&s16.includes('_swmv+this.def.size*1.5'));
@@ -85,9 +86,9 @@ assert('16-aircraft: updatePlaneCollisions 单源 (BODY_K=1.7 / CLOSE=2 / fwdDir
 assert('05b-props: foliage 标记恰好四处 (树/枯树/垂柳/竹)',(s05b.match(/foliage:true/g)||[]).length===4);
 assert('24-main: 撞机接线在飞机循环之后 (世界帧长 dt 门)',s24.includes('updatePlaneCollisions(dt); // 空中撞机'));
 assert('22-hud: sf_autoexit 注记跟走 (crash 档不读开关)',s22.includes('坠地/撞楼/空中撞机时**不**读此开关'));
-assert('版本戳 20261111a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
- [...ih.matchAll(/20261111a/g)].length>=48&&ih.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
+assert('版本戳 20261115b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
+ [...ih.matchAll(/20261115b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
  &&!ih.includes('20261110a')&&!gf.includes('20261110a'));
 }
 

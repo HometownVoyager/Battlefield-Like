@@ -58,19 +58,29 @@ particles.push(p);
 }
 // 水花 (2026-09-18 塔拉瓦批): 子弹/炮弹/手雷入水与落水冲击 —— 白色水柱 + 飞溅水滴 (纯视觉)
 // big=true: 炮弹/载具级入水 (更高更散); bubbles=true 追加水下气泡 (哑火的手雷/沉物)
-function waterSplash(p,scale=1,big=false,bubbles=false){
-const n=big?10:5;
+// ★2026-11-15 入水批: 新增第 5 参 spd (入水速度 m/s, 缺省 0 = 旧调用全兼容) —— 特效规模随
+//   "入水速度 × 入水物尺寸(scale)" 双参数变化: 速度抬水柱初速/粒数, 尺寸放大水柱与水雾直径;
+//   高速或大物入水追加贴水面外扩的白沫冠层。音频侧把 (scale, spd) 透传给 AudioSys.splash。
+function waterSplash(p,scale=1,big=false,bubbles=false,spd=0){
+const spdC=clamp(spd,0,25);
+const spdF=1+spdC*0.055;                            // 25m/s 顶格 ≈ ×2.4 初速
+const n=(big?10:5)+Math.round(spdC*0.4)+(big?3:0);
 for(let k=0;k<n;k++){
 spawnP(PT.drop,p.x+rand(-0.5,0.5)*scale,p.y+rand(0,0.3),p.z+rand(-0.5,0.5)*scale,
-rand(-2.2,2.2)*scale,rand(3.2,7.5)*scale*(big?1.3:1),rand(-2.2,2.2)*scale,
+rand(-2.2,2.2)*scale,rand(3.2,7.5)*scale*(big?1.3:1)*spdF,rand(-2.2,2.2)*scale,
 rand(0.22,0.5)*scale,0.5,rand(0.5,0.95),0.9,9);
 }
-spawnP(PT.smoke,p.x,p.y+0.25*scale,p.z,0,1.2*scale,0,0.7*scale,2.4,rand(0.7,1.1),0.55,0.4);
+spawnP(PT.smoke,p.x,p.y+0.25*scale,p.z,0,1.2*scale*spdF,0,0.7*scale,2.4,rand(0.7,1.1),0.55,0.4);
+if(big||spdC>4) for(let k=0;k<3;k++){               // 白沫冠: 贴水面外扩的扁平水雾
+spawnP(PT.drop,p.x+rand(-0.6,0.6)*scale,p.y+0.06,p.z+rand(-0.6,0.6)*scale,
+rand(-3.4,3.4)*scale,rand(0.4,1.1),rand(-3.4,3.4)*scale,
+rand(0.5,0.9)*scale,1.6,rand(0.4,0.7),0.75,4);
+}
 if(bubbles) for(let k=0;k<7;k++){
 spawnP(PT.drop,p.x+rand(-0.5,0.5),p.y+rand(-1.2,-0.2),p.z+rand(-0.5,0.5),
 rand(-0.6,0.6),rand(0.8,2.0),rand(-0.6,0.6),rand(0.14,0.3),0.25,rand(0.6,1.2),0.7,-1.2);
 }
-if(typeof AudioSys!=='undefined'&&AudioSys.splash) AudioSys.splash(p.distanceTo(camera.position),big);
+if(typeof AudioSys!=='undefined'&&AudioSys.splash) AudioSys.splash(p.distanceTo(camera.position),big,clamp(scale,0.5,4),spdC);
 }
 function updateParticles(dt){
 for(let i=particles.length-1;i>=0;i--){
@@ -86,7 +96,10 @@ p.sp.material.opacity=p.opa*(1-p.age/p.life);
 }
 }
 const tracers=[], tracerPool=[];
-const tracerGeo=new THREE.BoxGeometry(0.035,0.035,1.6);
+// ★2026-11-14 批⑥: 曳光截面方→圆 (用户实报"打出的子弹的粒子总是方形"): BoxGeometry 侧影从正后方看
+//   永远是 0.035 方块; 改 8 段圆柱 (几何一次 rotateX(HPI) 把圆柱 Y 轴烘到 Z 轴, 配 lookAt 的 +Z 弹道朝向
+//   约定), 半径 0.0175 与旧盒半宽一致, 池化 Mesh 复用与 340m/s 步进逻辑不动。
+const tracerGeo=new THREE.CylinderGeometry(0.0175,0.0175,1.6,8,1); tracerGeo.rotateX(HPI);
 const tracerMat=new THREE.MeshBasicMaterial({color:0xffd890,transparent:true,opacity:0.9,blending:THREE.AdditiveBlending,depthWrite:false,fog:false});
 // owner (可选, 2026-09-27M 时停修复批): 这发曳光的射手 —— 决定它在时停里冻住还是照飞。
 // 回填它是**零分配**的 (只存引用), 判据单源在 22b 的 specTimeShotDt (owner.isPlayer)。
@@ -156,6 +169,11 @@ if(!c.bounced){ c.bounced=true; if(c.m.position.distanceTo(camera.position)<8) A
 // ===== 烟雾弹系统: 遮蔽视线(bot同样无法看穿) =====
 // 燃烧弹云: 红黑烈焰烟雾, 同样遮蔽视线, 并对云内步兵持续灼烧
 const SMOKES=[];
+// 并发云上限 (2026-11-11 性能批): 每朵云 12~21 个独立 THREE.Sprite (各自 SpriteMaterial), Sprite 不合批
+// ⇒ 每个可见粒子 1 个透明 draw call + 一次独立 uniform 上传, 且完全在 spawnP 的 PARTICLE_MAX 池外。
+// 混战期烟雾弹+燃烧弹并存会叠出几十~上百个全尺寸 (scale 3-5m) 透明 draw call + overdraw。
+// 超限挤掉最老的云 (与 DEBRIS 96 同"挤旧"口径; 清理与 updateSmokes 自然到期路径逐位同款)。
+const SMOKES_MAX=5;
 function spawnSmokeCloud(p,incin,thrower){
 // 燃烧弹云 9s (2026-09-02 由 12s 缩短): 云散更快, 地面余火由 igniteArea 的 6s 寿命上限收尾
 const cloud={x:p.x,y:p.y,z:p.z,t:0,dur:incin?9:16,r:5.5,sprites:[],incin:!!incin,team:thrower?thrower.team:-1,thrower:thrower||null,dmgT:0,seed:rand(0,9)};
@@ -179,6 +197,10 @@ cloud.sprites.push({sp,flame:true,fk:rand(6,14),ph:rand(0,TAU),vx:0,vy:0,vz:0,rs
 }
 crater(p.x,p.z,1.5,true);
 AudioSys.explosion(p.distanceTo(camera.position)*1.4);
+}
+if(SMOKES.length>=SMOKES_MAX){
+const old=SMOKES.shift();
+for(let si=0;si<old.sprites.length;si++){ const osp=old.sprites[si].sp; scene.remove(osp); osp.material.dispose(); }
 }
 SMOKES.push(cloud);
 if(!incin) AudioSys.metalSlide(0.22,0.5,300,140);
@@ -1293,6 +1315,22 @@ let flashTimer=0;
 //           onRest:开始下沉回调, onHalf:半沉回调(撤碰撞), onDone:全沉回调, noRemove:终态不移除网格(由回调处理)}
 // 停留期视觉原地不动; 下沉期匀速下移 depth; 半沉(40%)时撤碰撞; 全沉时移除网格/零缩放实例。
 const SINK_JOBS=[];
+// ═══ 2026-11-13 性能批 D: 沉入实例矩阵局部上传 (GPU 侧) ═══
+// queueSink 的 inst 任务 (灌木/草丛/庄稼烧尽沉入) 沉入动画每帧写 instanceMatrix 后整批 needsUpdate ⇒
+// 全量重传 (草批数千实例 × 64B)。改按"本帧脏段"标脏: BufferAttribute.updateRange {offset,count} (r152
+// 语义; vendor lib/three.min.js 实证: 部分上传后 count 自动复位 -1 ⇒ 23b 世界还原的全量写回不残留旧区间,
+// 正确性安全)。散置下标在登记时收外接区间, 同帧多任务按属性合并 (区间外数据本就正确, 多传无害)。
+// 与 04b-fire 的 fireImDirty 同款但各自持有帧戳/独立函数名 —— 两文件顶层共享全局函数名空间, 重名会互相覆盖。
+let _sinkFr=0;
+function sinkImDirty(a,i0,n){
+if(window.IM_FULL_UPLOAD){ a.needsUpdate=true; if(a.updateRange) a.updateRange.count=-1; return; }   // 回退旗 (D): 整批全量上传旧口径
+a.needsUpdate=true;
+if(a._upFr!==_sinkFr){ a._upFr=_sinkFr; a._upMin=i0; a._upMax=i0+n-1; }
+else{ if(i0<a._upMin)a._upMin=i0; if(i0+n-1>a._upMax)a._upMax=i0+n-1; }
+if(!a.updateRange) a.updateRange={offset:0,count:-1};
+a.updateRange.offset=a._upMin*16;
+a.updateRange.count=(a._upMax-a._upMin+1)*16;
+}
 let _sinkZeroM=null;
 const sinkZeroM=()=>{ if(!_sinkZeroM) _sinkZeroM=new THREE.Matrix4().makeScale(0,0,0); return _sinkZeroM; };
 function queueSink(job){
@@ -1302,6 +1340,9 @@ if(job.inst){
 const arr=job.inst.im.instanceMatrix.array;
 job.ys=job.inst.idxs.map(i=>arr[i*16+13]);
 if(job.dx) job.xs=job.inst.idxs.map(i=>arr[i*16+12]);
+let mn=job.inst.idxs[0], mx=mn;
+for(let qi=0;qi<job.inst.idxs.length;qi++){ const i=job.inst.idxs[qi]; if(i<mn)mn=i; if(i>mx)mx=i; }
+job._upMin=mn; job._upN=mx-mn+1;   // D: 本任务脏段外接区间 (同帧多任务在 sinkImDirty 里再并)
 }
 SINK_JOBS.push(job);
 return job;
@@ -1318,6 +1359,7 @@ if(job.inst){
 const im=job.inst.im;
 for(const i of job.inst.idxs) im.setMatrixAt(i,sinkZeroM());
 im.instanceMatrix.needsUpdate=true;
+if(im.instanceMatrix.updateRange) im.instanceMatrix.updateRange.count=-1;   // D: 收尾走全量, 不吃同帧局部区间
 }
 if(job.objs){
 for(const m of job.objs){ if(m.parent&&!job.noRemove) m.parent.remove(m); }
@@ -1325,6 +1367,7 @@ for(const m of job.objs){ if(m.parent&&!job.noRemove) m.parent.remove(m); }
 if(job.onDone) job.onDone();
 }
 function updateWreckSinks(dt){
+_sinkFr++;   // D: 局部上传帧戳 (24-main 每帧恰调一次)
 for(let i=SINK_JOBS.length-1;i>=0;i--){
 const job=SINK_JOBS[i];
 job.t+=dt;
@@ -1351,7 +1394,7 @@ for(let ii=0;ii<job.inst.idxs.length;ii++){
 arr[job.inst.idxs[ii]*16+13]=job.ys[ii]-job.depth*k;
 if(job.xs) arr[job.inst.idxs[ii]*16+12]=job.xs[ii]+job.dx*k;
 }
-job.inst.im.instanceMatrix.needsUpdate=true;
+sinkImDirty(job.inst.im.instanceMatrix,job._upMin,job._upN);   // D: 局部上传 (同帧多任务合并外接区间)
 }
 if(k>=1){
 SINK_JOBS.splice(i,1);
@@ -1359,7 +1402,7 @@ endSinkJob(job);
 }
 }
 }
-function explosionFX(p){
+function explosionFX(p,noCrater){   // noCrater (2026-11-14 用户令): 撞楼 die/残骸二次爆炸等"全程无坑"场合显式压掉
 spawnP(PT.flash,p.x,p.y+0.6,p.z,0,1.5,0, 2.6,14,0.16,1,0,true);
 spawnP(PT.flash,p.x,p.y+0.9,p.z,0,2,0, 1.6,10,0.22,1,0,true);
 for(let i=0;i<10;i++) spawnP(PT.dark,p.x+rand(-1,1),p.y+rand(0.2,1.6),p.z+rand(-1,1), rand(-2,2),rand(1.5,4.5),rand(-2,2), rand(0.8,1.6),2.2,rand(1.2,2.4),0.85,0.8,false,rand(-1,1));
@@ -1376,5 +1419,9 @@ for(let i=0;i<4;i++) spawnP(PT.smoke,p.x+rand(-1.5,1.5),p.y+rand(1,3),p.z+rand(-
 }
 flashLight.position.set(p.x,p.y+1.2,p.z);
 flashLight.intensity=60; flashTimer=0.14;
-crater(p.x,p.z,rand(1.2,1.7),true);
+// 弹坑高度门 (2026-11-14 用户令 "撞楼后黑色爆炸坑出现在正下方的地上, 十分诡异"): crater 恒打
+// heightAt(x,z) = 爆点正下方的地面 ⇒ 半空/楼面的爆炸隔空在地上盖坑 (高炮空炸/撞楼/楼面中弹全中招)。
+// 爆点高于支撑地面 2.2m 不再盖坑 (2.2 取值: 坠地机 die 门是 floor+2, 手雷/炮弹触地爆都在 1m 级 ——
+// 全部照旧盖坑; 水面上 heightAt 是水底, 深水自然不盖, 浅水盖在水底不可见=旧同款); noCrater 再显式压一档。
+if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true);
 }

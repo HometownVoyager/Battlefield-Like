@@ -441,9 +441,10 @@ zBoom(){
 // 爆圈单源 (2026-10-28): 引信到期 (zBoom) 与被杀殉爆 (die) 共用 —— 对人 explodeAt + 载具直伤 + 丧尸连锁。
 // src=归因主体 (zBoom 传自己 / die 传击杀者, 链式殉爆 die(null) 传 null 退化为自归因)。
 zBoomBlast(src){
+ const B=ZCFG.boomer;   // 2026-11-13 fix: hoisted to fn scope - chain loop below reads B.chainR but old decl sat inside if(!this._boomDone) block (ReferenceError on every boomer blast)
  if(!this._boomDone){
   this._boomDone=true;
-  const B=ZCFG.boomer, p=V3(this.pos.x,this.pos.y+0.9,this.pos.z);
+  const p=V3(this.pos.x,this.pos.y+0.9,this.pos.z);
   explodeAt(p,src||this,B.boomR);
   // 载具直伤 (explodeAt 不伤车 — 手雷契约单源不动): 9m 内线性衰减, 免装甲
   const hitVeh=list=>{ if(typeof list==='undefined'||!list) return;

@@ -92,8 +92,8 @@ assert('00b-i18n: 终身累计+清除数据词条齐',i18.includes("'总共击�
  &&i18.includes("'🗑 清除游戏数据'")&&i18.includes("'⚠ 再点一次确认清除'")&&i18.includes("'终身累计':'LIFETIME TOTALS'"));
 assert('00b-i18n: 四成就名+描述 EN 词条齐',i18.includes("'夷陵之火':'Fire of Yiling'")&&i18.includes("'比夷陵之火还要好':'Better than the Fire of Yiling'")
  &&i18.includes("'自刎归天':'Death by Own Grenade'")&&i18.includes("'狗熊岭之王':'King of Bear Ridge'"));
-assert('27-achievements: 定义表四条 (id/name/kind)',(s27.match(/\{id:'/g)||[]).length===4&&s27.includes("id:'yiling_fire'")&&s27.includes("id:'better_yiling'")
- &&s27.includes("id:'seppuku'")&&s27.includes("id:'bear_king'"));
+assert('27-achievements: 定义表五条 (id/name/kind; 2026-11-14 跟码 +likud_pilot)',(s27.match(/\{id:'/g)||[]).length===5&&s27.includes("id:'yiling_fire'")&&s27.includes("id:'better_yiling'")
+ &&s27.includes("id:'seppuku'")&&s27.includes("id:'bear_king'")&&s27.includes("id:'likud_pilot'"));
 assert('27-achievements: 普查口径单源 (FUEL>0.05 / FLORA_HASH 四树类 / DESTRUCTIBLES !dead / crush 盒排树篱 / explosive 桶 / wires alive)',
  s27.includes('if(FUEL[ci]>0.05) cells.push(ci)')&&s27.includes("k==='tree'||k==='willow'||k==='palm'||k==='dead'")
  &&s27.includes('if(g&&!g.dead) structs.push(g)')&&s27.includes('b.crush&&!b.flora&&!b.dead')
@@ -146,10 +146,10 @@ assert('00b-i18n: 弹窗位置词条',i18.includes("'成就弹窗位置':'Achiev
 assert('css: 成就列表 + Toast 样式在册 (#dataAchPane/.achRow/.achState/#achToast)',
  css.includes('#dataAchPane')&&css.includes('.achRow')&&css.includes('.achState')&&css.includes('#achToast'));
 assert('run-all 已登记本探针',ra.includes('verify-achieve-20261111.js'));
-assert('版本戳 20261111a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110c 清零 (本批 c→d, 新文件+1)',
- [...ih.matchAll(/20261111a/g)].length>=48&&ih.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
- &&gf.includes('27-achievements.js?v=20261111a')
+assert('版本戳 20261115b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110c 清零 (本批 c→d, 新文件+1)',
+ [...ih.matchAll(/20261115b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
+ &&gf.includes('27-achievements.js?v=20261115b')
  &&!ih.includes('20261110c')&&!gf.includes('20261110c'));
 }
 

@@ -286,10 +286,10 @@ assert('③ 国军青天白日徽蓝/白两层出盔面且埋入固定 (旧 0.14
 section('④ 版本戳');
 {
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261111a/g)].length;
-assert('版本戳 20261111a: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
- stamps>=48&&idx.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
+const stamps=[...idx.matchAll(/20261115b/g)].length;
+assert('版本戳 20261115b: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
+ stamps>=48&&idx.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
  &&!idx.includes('20261103b')&&!gf.includes('20261103b'));
 }
 

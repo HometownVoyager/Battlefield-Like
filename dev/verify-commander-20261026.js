@@ -29,7 +29,7 @@
 //     耗尽只回常速 / 观战免费不减 (R8) / 死亡不可用 / selfExempt 超人档 (pdt/座驾豁免) / 设置项落 localStorage
 //   ⑦ 指挥地图: 姿态门矩阵 (D18) / 开关+定身 (R11) / R12 dotVis 与小地图判据逐点对账 (全图开关/观战/死亡
 //     旁路 + 视野圆) / 布势开关-冻结-确认解冻-宿主切换 (body↔#ui) / 配比增减+落装 (setClass) / 废墟补丁不炸
-//   ⑧ 回归对账: index.html 脚本表 ↔ dev/_game_files.txt 双向一致 / 版本戳 20261111a 四处 / i18n 新键全配 /
+//   ⑧ 回归对账: index.html 脚本表 ↔ dev/_game_files.txt 双向一致 / 版本戳 20261115b 四处 / i18n 新键全配 /
 //     非指挥官零回归 (cmdIsCommander false·dt 原样·slowOn false) / 小地图源码未动 (26 不碰 mmEnemyVis·
 //     drawMinimap, 22-hud 不进 cmdMap)
 //
@@ -276,7 +276,7 @@ assert('14-bots decide CMD 块就位 (SQUAD 同款拦截式: 远 advance+寻路 
 // 本条防的是「令压过自卫」: 敌人贴脸时组令必须让位给接战 (设计 §5 不动决策核心)。
 assert('14-bots CMD 块敌近身暂缓门与 SQUAD 块同源 (engaged&&distT<20, 同一条判据不另立阈值)',
  /if\(this\.cmdGrp&&!\(engaged&&distT<20\)\)\{/.test(s14)
- &&s14.includes('if(this.inSquad&&!(engaged&&distT<20)){'));
+ &&s14.includes('if(this.inSquad&&!player.spectator&&!(engaged&&distT<20)){')); /* ★2026-11-13 观战中立批跟码: SQUAD 块加 spectator 门 */
 assert('14-bots D16 双门就位: 重生自动上车与 decide 认领两处都过 cmdBotFree 单源',
  s14.includes("if(!this.inSquad&&(typeof cmdBotFree==='function'?cmdBotFree(this):true)){")
  &&(s14.match(/cmdBotFree\(this\):true/g)||[]).length===2);
@@ -383,7 +383,7 @@ const sidx=SRC('index.html');
 {
 const i25=sidx.indexOf('js/25-zombies.js'),i26=sidx.indexOf('js/26-commander.js'),i24=sidx.indexOf('js/24-main.js');
 assert('index.html: 26-commander 脚本行 (25-zombies 之后 24-main 之前) + 设置两按钮',
- sidx.includes('<script src="js/26-commander.js?v=20261111a"></script>')
+ sidx.includes('<script src="js/26-commander.js?v=20261115b"></script>')
  &&i25>=0&&i25<i26&&i26<i24
  &&sidx.includes('id="cmdFocusBtn"')&&sidx.includes('id="cmdSelfBtn"'));
 }
@@ -914,12 +914,12 @@ assert('index.html 脚本表 ↔ dev/_game_files.txt 双向一致 (序即载入�
  `index ${idxScripts.length} vs files ${gfFiles.length}`);
 assert('26-commander 载入位: 25-zombies 之后 (27-achievements 插其后, 24-main 收尾; 编制先于主循环; 2026-11-11 成就批判据跟码)',
  gfFiles.indexOf('26-commander.js')===gfFiles.indexOf('25-zombies.js')+1&&gfFiles.indexOf('26-commander.js')+1===gfFiles.indexOf('27-achievements.js')&&gfFiles.indexOf('27-achievements.js')+1===gfFiles.indexOf('24-main.js'));
-const stamps=[...idx.matchAll(/\?v=20261111a/g)].length;
-assert('版本戳 20261111a: index.html 全量脚本+样式戳 + __sfStyleVer + _game_files 全行 + 三探针 (2026-11-10 海战移除批判据跟码)',
- stamps>=44&&idx.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
+const stamps=[...idx.matchAll(/\?v=20261115b/g)].length;
+assert('版本戳 20261115b: index.html 全量脚本+样式戳 + __sfStyleVer + _game_files 全行 + 三探针 (2026-11-10 海战移除批判据跟码)',
+ stamps>=44&&idx.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
  &&['dev/verify-animfix-20261012.js','dev/verify-hudfix-20261007.js','dev/verify-perf-20261024.js']
-  .every(f=>SRC(f).includes('20261111a')));
+  .every(f=>SRC(f).includes('20261115b')));
 
 const i18n=SRC('js/00b-i18n.js');
 const keys=['指挥官','通讯仪','指挥地图','布势阶段','指挥读条','减速消耗读条','减速对我无效',

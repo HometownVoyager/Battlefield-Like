@@ -60,7 +60,7 @@ const NEG=process.argv.includes('--neg');
 const SRC={},PATCH_MAP={};
 const NEG_PATCHES=[
 // N1 同队×0 回灌 (noFF 门拆): T1 frag 友军红
-['js/13-combat.js','if(!noFF&&attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;','if(attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;'],
+['js/13-combat.js','if((!noFF||!EXPLO_FF)&&attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;','if(attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;'],
 // N2 frag 分支 noFF 实参拆: T1 红 (双保险 —— 注入回旧调用形态)
 ['js/13-combat.js','explodeAt(n.pos,n.thrower,undefined,true);','explodeAt(n.pos,n.thrower);'],
 // N3 反坦克炸药 -1 回灌: T2 红

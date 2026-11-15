@@ -80,13 +80,15 @@ const tw=ctx.L(0,-10.6);
 const tf=foundation(tw[0],tw[1],ry,5,5,{maxDh:1.6});
 const tc=bctx(tw[0],tw[1],ry,tf.floor);
 const tH=9.7,tt=0.45;
-// 底层墙(0~7.05): 背面门, 侧窗; 钟室墙(7.2~9.7): 四面大窗
-wallSeg(tc,{along:'x',at:2.5,from:-2.5,to:2.5,h:7.05,t:tt,mat:MAT.stone,ops:[]});
-wallSeg(tc,{along:'x',at:-2.5,from:-2.5,to:2.5,h:7.05,t:tt,mat:MAT.stone,
+// 底层墙(0~7.2): 背面门, 侧窗; 钟室墙(7.2~9.7): 四面大窗
+// ★2026-11-15 侧楼批: 底层墙顶 7.05→7.2 —— 旧版 7.05~7.2 有一圈 15cm 内凹沟缝横贯塔身
+//   (用户实报"二楼三楼连接不紧密", 接缝图即此处); 抬到与钟室墙底齐平, 外墙面全高无缝。
+wallSeg(tc,{along:'x',at:2.5,from:-2.5,to:2.5,h:7.2,t:tt,mat:MAT.stone,ops:[]});
+wallSeg(tc,{along:'x',at:-2.5,from:-2.5,to:2.5,h:7.2,t:tt,mat:MAT.stone,
 ops:[{c:0,w:1.4,ht:2.1,h:0,type:'door'},{c:1.6,w:0.9,b:4.6,h:1.0,type:'win'}]});
-wallSeg(tc,{along:'z',at:2.5,from:-2.5+tt,to:2.5-tt,h:7.05,t:tt,mat:MAT.stone,
+wallSeg(tc,{along:'z',at:2.5,from:-2.5+tt,to:2.5-tt,h:7.2,t:tt,mat:MAT.stone,
 ops:[{c:0,w:1.0,b:4.8,h:1.0,type:'win'}]});
-wallSeg(tc,{along:'z',at:-2.5,from:-2.5+tt,to:2.5-tt,h:7.05,t:tt,mat:MAT.stone,
+wallSeg(tc,{along:'z',at:-2.5,from:-2.5+tt,to:2.5-tt,h:7.2,t:tt,mat:MAT.stone,
 ops:[{c:0,w:1.0,b:4.8,h:1.0,type:'win'}]});
 for(const at of [2.5,-2.5]){
 wallSeg(tc,{along:'x',at,from:-2.5,to:2.5,y0:7.2,h:2.5,t:tt,mat:MAT.stone,ops:[{c:0,w:1.6,b:0.4,h:1.9,type:'win'}]});
@@ -103,9 +105,17 @@ solidBox(MAT.woodDark,2.55,0.22,4.4,bl[0],tf.floor+7.09,bl[1],ry);
 const rl=tc.L(-0.24,-0.425);
 solidBox(MAT.woodDark,0.12,0.95,3.25,rl[0],tf.floor+7.2+0.475,rl[1],ry);
 // 塔顶盖 + 尖顶
+// ★2026-11-15 侧楼批 (二轮, 实机截图裁定): 尖顶加大 + 转 45° —— 四棱锥四角须指向塔身对角、
+//   坡面正对四面墙; 旧朝向 (角对墙面) 的坡面斜切塔角, 压顶石四角仍露在锥底外 (用户实报
+//   "覆盖仍不完全, 转 45° 再加大")。新锥 4.2r/3.4h: 坡面半宽 2.97m > 塔身外墙半宽 2.72m
+//   (0.25m 出檐), 对角半距 4.2m > 压顶石半对角 3.82m ⇒ 平面覆盖率 100%。
+// 尖顶碰撞 (锥体碰撞批): 三档圆柱按锥面带中点半径贴形 (r(y)=4.2·(1−(y−0.4)/3.4)), 子弹/飞机扫掠
+//   从此有命中面; noNav:1 —— 高空饰件不入 OCC 导航烘焙 (塔底那格该走照走)。
 const cp=tc.L(0,0);
 addSnowCap(solidBox(MAT.stone,5.4,0.4,5.4,cp[0],tf.floor+tH+0.2,cp[1],ry));
-mesh(new THREE.ConeGeometry(2.2,2.8,4),MAT.woodDark,cp[0],tf.floor+tH+1.8,cp[1],ry+HPI);
+mesh(new THREE.ConeGeometry(4.2,3.4,4),MAT.woodDark,cp[0],tf.floor+tH+2.1,cp[1],ry+HPI*1.5);
+for(const [cr,c0,c1] of [[3.5,0.4,1.5],[2.2,1.5,2.5],[0.8,2.5,3.8]])
+CYLS.push({x:cp[0],z:cp[1],r:cr,y0:tf.floor+tH+c0,y1:tf.floor+tH+c1,noNav:1});
 addCoverAround(x,z,10,16,ry);
 coverPoints.push({x:ctx.L(0,-4)[0],z:ctx.L(0,-4)[1]},{x:ctx.L(0,3)[0],z:ctx.L(0,3)[1]});
 BUILD_REG.push({type:'church',x,z,ry,w:10,d:16,floor:f.floor,doors:ctx.doors.concat(tc.doors),roofY:f.floor+H+1.91,towerFloor:tf.floor,towerRoofY:tf.floor+tH+0.4});
@@ -182,9 +192,13 @@ slab(-3.8,2.15,-4.3,4.3);
 slab(2.15,3.8,-4.3,-1.34); // 井北缘伸到梯末步下 0.06: 消除登顶口 0.1 断缝 (与 ruinBlock 同口径)
 slab(2.15,3.8,3.9,4.3);
 // 楼梯井护栏(西侧长边+南侧短边; 北侧是楼梯登顶口保持敞开, 东侧贴墙)
+// ★2026-11-13b 批③: 护栏高 0.95→0.84 —— 旧 0.95 顶面 (F1+0.95) 站人后头顶 F1+2.65 已探进屋顶底面
+//   (F1+2.6) 的 HEAD_GRAZE 擦碰带 0.05m (= 用户实报"站上护栏就已局部穿模": 头盔插进天花板), 且起跳
+//   上升一帧冲出擦碰带后楼板横推把人整只弹射穿墙 (04-collision 批③注释)。0.84 顶面站人头顶净空
+//   0.12m, 擦碰带不再被占用; 栏体仍是腰高掩体档 (Bot 掩体判定不受 11cm 影响)。
 const rail=(lx,lz,len,alongX)=>{
 const p=ctx.L(lx,lz);
-solidBox(MAT.woodDark,alongX?len:0.12,0.95,alongX?0.12:len,p[0],F1+0.475,p[1],ry);
+solidBox(MAT.woodDark,alongX?len:0.12,0.84,alongX?0.12:len,p[0],F1+0.42,p[1],ry);
 };
 rail(2.09,1.2,5.4,false);
 rail(2.98,3.96,1.72,true);
@@ -321,11 +335,14 @@ rail(-1.17,1.74,1.14,0.12); rail(1.17,1.74,1.14,0.12); // +z 侧护栏留 1.2m �
 // 顶棚柱 + 实心顶板(挡弹/挡视线)
 for(const [lx,lz] of [[-1.6,-1.6],[1.6,-1.6],[-1.6,1.6],[1.6,1.6]]){
 const p=ctx.L(lx,lz);
-mesh(boxGeo(0.16,2.3,0.16),MAT.woodDark,p[0],deckTop+1.15,p[1]);
-CYLS.push({x:p[0],z:p[1],r:0.1,y0:deckTop,y1:deckTop+2.3});
+// ★2026-11-14 批③通用化: 顶棚整体抬 0.6 (柱 2.3→2.9 / 顶板 2.21→2.81) —— 护栏顶 0.95 站人头部
+//   2.65 原本探进屋面板底 (2.12) 达 0.53m (用户实报"大部分有护栏的都有这个问题"的塔台档), 抬后板底
+//   2.72, 站护栏余量 0.07 与红砖房同档; 起跳由 headCeilClamp 穿越窗接管。
+mesh(boxGeo(0.16,2.9,0.16),MAT.woodDark,p[0],deckTop+1.45,p[1]);
+CYLS.push({x:p[0],z:p[1],r:0.1,y0:deckTop,y1:deckTop+2.9});
 }
 const rp=ctx.L(0,0);
-addSnowCap(solidBox(MAT.woodDark,4.2,0.18,4.2,rp[0],deckTop+2.21,rp[1],ry));
+addSnowCap(solidBox(MAT.woodDark,4.2,0.18,4.2,rp[0],deckTop+2.81,rp[1],ry));
 // 直爬梯: 踏面板 + 踢面立板 (两级都走 solidBox=视觉与碰撞同源) ——
 // 逐级采样使最下一级的踢面下探到本级自己脚下的地形 (接地), 其余各级踢面落在下一级踏面顶上 (连续支承)
 const st=towerStairGeom(ctx,deckTop);
@@ -1038,6 +1055,20 @@ mesh(new THREE.CylinderGeometry(6.9,6.9,0.4,16),MAT.stone,dp[0],f.floor+RT+5.2,d
 mesh(new THREE.CylinderGeometry(6.6,2.4,2.8,16),MAT.stone,dp[0],f.floor+RT+6.8,dp[1]);
 mesh(new THREE.CylinderGeometry(2.4,2.4,0.9,12),MAT.stone,dp[0],f.floor+RT+8.6,dp[1]);
 mesh(new THREE.ConeGeometry(2.4,1.5,12),MAT.roof,dp[0],f.floor+RT+9.8,dp[1]);
+// 穹顶壳碰撞 (★2026-11-15 锥体碰撞批): 鼓座之上的环板/漏斗壳/小鼓座/顶锥原本全部纯视觉 ——
+//   子弹穿壳、飞机扫掠直穿穹顶 (全图最高点 19.1m 是航线撞点大户)。分层圆柱贴形:
+//   环板 r6.9 (5.0~5.4) / 漏斗壳三档 (rBottom2.4@5.4 → rTop6.6@8.2 带中点取半径) /
+//   小鼓座 r2.4 (8.2~9.05) / 顶锥两档 (9.05~10.55)。noNav:1 —— 穹顶正下方是圆厅可走区,
+//   本循环无竖直闸, 不豁免会把圆厅地面整片误标不可通行。
+{ const dy0=f.floor+RT;
+CYLS.push({x:dp[0],z:dp[1],r:6.9,y0:dy0+5.0,y1:dy0+5.4,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:3.1,y0:dy0+5.4,y1:dy0+6.3,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:4.5,y0:dy0+6.3,y1:dy0+7.3,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:5.9,y0:dy0+7.3,y1:dy0+8.2,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:2.4,y0:dy0+8.2,y1:dy0+9.05,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:1.5,y0:dy0+9.05,y1:dy0+9.75,noNav:1});
+CYLS.push({x:dp[0],z:dp[1],r:0.6,y0:dy0+9.75,y1:dy0+10.55,noNav:1});
+}
 // ── 内部: 4 根承重石柱 (视觉+圆柱碰撞) + 一层瓦砾 ──
 for(const [lx,lz] of [[-8,-6],[8,-6],[-8,6],[8,6]]){
 const p=ctx.L(lx,lz);
@@ -1211,6 +1242,35 @@ segs('x',A.z1,A.x0,A.x1,gaps.N);
 segs('x',A.z0,A.x0,A.x1,gaps.S);
 segs('z',A.x0,A.z0,A.z1,gaps.W);
 segs('z',A.x1,A.z0,A.z1,gaps.E);
+// ── 站厅底板 (2026-11-15): 坑底原是裸地形压土色, 实机读作"没有地板的下水道" —— 补整片石板
+//   (metroDep+metroFlatY 已把矩形内压平, 板顶=坑底+0.06 平贴; 厚 0.5 埋底; maxY<gh+0.5 ⇒ OCC 自动豁免不挡寻路)
+solidBox(MAT.stone,A.x1-A.x0-0.6,0.5,A.z1-A.z0-0.6,cx,fY-0.19,cz,0);
+// ── 2026-11-15 隧道口胸墙 (只补隧道洞口; 梯道口保持全高开敞 —— 旧版把梯口也封了半人高横梁, 登梯者
+//   在墙线处撞腿): 厅墙洞口全高开到墙顶, 而隧道顶板顶=带内街面−0.02 (低于墙顶 gY) ⇒ 洞口上部留一道
+//   竖缝望穿坑底; 且桥面直通洞口 —— 沿带行驶的坦克会从 6m 洞口一头栽进站坑 (2.6m 深出不来, 洞内净高
+//   2.07 < 车高)。胸墙从顶板顶起 ≥0.8m: 竖缝填死 (底面=顶板顶平接, 不伸进洞内通道) + 街面高拦住载具
+//   (maxY>gh+0.5 ⇒ OCC 记账, Bot 寻路自动绕行); 洞内步兵通道在胸墙下方照常 (桥式抬升后带内街面可用
+//   heightAt 实测, metroTunnel 先行已把节点缓存建好)。
+if(T){
+const tG=[];
+if(T.x0>=A.x0-0.01&&T.x1<=A.x1+0.01){
+if(Math.abs(T.z1-A.z0)<0.01) tG.push([T.x0,T.x1,A.z0,0]);
+if(Math.abs(T.z0-A.z1)<0.01) tG.push([T.x0,T.x1,A.z1,0]);
+}
+if(T.z0>=A.z0-0.01&&T.z1<=A.z1+0.01){
+if(Math.abs(T.x1-A.x0)<0.01) tG.push([T.z0,T.z1,A.x0,1]);
+if(Math.abs(T.x0-A.x1)<0.01) tG.push([T.z0,T.z1,A.x1,1]);
+}
+for(const g of tG){
+const mid=(g[0]+g[1])/2;
+const rt=(g[3]?heightAt(g[2],mid):heightAt(mid,g[2]))-0.02; // 洞口处带内街面 = 顶板顶
+const W=g[1]-g[0]+0.6, ph=Math.max(gY-rt,0.8); // 竖缝填死 + 0.8m 胸墙
+if(ph>0.03){
+if(g[3]) solidBox(MAT.stone,0.6,ph,W,g[2],rt+ph/2,mid,0);
+else solidBox(MAT.stone,W,ph,0.6,mid,rt+ph/2,g[2],0);
+}
+}
+}
 // ── 实心踏步梯: 顶面 = 梯口落点实地高度 (墙外 0.35m), 步数由高度差定 (2 次迭代收敛) ──
 const ex=side==='N'?[at,A.z1+0.35]:side==='S'?[at,A.z0-0.35]:side==='E'?[A.x1+0.35,at]:[A.x0-0.35,at];
 const topY=heightAt(ex[0],ex[1]);
@@ -1237,6 +1297,14 @@ else if(RS==='W'){ rx0=A.x0+0.3; rx1=rx0+RW; rz0=cz-RL/2; rz1=cz+RL/2; }
 else if(RS==='N'){ rz1=A.z1-0.3; rz0=rz1-RL; rx0=cx-RW/2; rx1=cx+RW/2; }
 else { rz0=A.z0+0.3; rz1=rz0+RL; rx0=cx-RW/2; rx1=cx+RW/2; }
 solidBox(MAT.stone,rx1-rx0,0.45,rz1-rz0,(rx0+rx1)/2,gY-0.225,(rz0+rz1)/2,0);
+// 2026-11-15 封"掉人缝": 顶板 RL=16.4 比厅深 18 短 1.6m ⇒ 两端各留 0.5m×10m 街面高度竖缝直通坑底
+// (顶板顶面与墙顶齐=街面, 实机踩进缝里就摔进站厅)。梯道口居中, 顶板只占 E/W 侧 10m ⇒ 缝段不压梯道,
+// 两端缝整条封死, 顶面与墙顶同高衔接 (verify-buildings 3b 梯道净高不受影响: 梯道不在顶板 x 跨内)。
+if(RS==='E'||RS==='W'){
+const zN1=A.z1-0.3, zS0=A.z0+0.3;
+if(zN1-(cz+RL/2)>0.05) solidBox(MAT.stone,rx1-rx0,0.45,zN1-(cz+RL/2),(rx0+rx1)/2,gY-0.225,(cz+RL/2+zN1)/2,0);
+if((cz-RL/2)-zS0>0.05) solidBox(MAT.stone,rx1-rx0,0.45,(cz-RL/2)-zS0,(rx0+rx1)/2,gY-0.225,(zS0+cz-RL/2)/2,0);
+}
 for(const [px,pz] of [[rx0+1.6,rz0+1.6],[rx0+1.6,rz1-1.6],[rx1-1.6,rz0+1.6],[rx1-1.6,rz1-1.6]]){
 const g0=heightAt(px,pz), h=gY-0.45-g0;
 mesh(new THREE.CylinderGeometry(0.35,0.4,h,8),MAT.stone,px,g0+h/2,pz);
@@ -1260,20 +1328,68 @@ coverPoints.push({x:cx,z:cz});
 BUILD_REG.push({type:'metroStation',x:cx,z:cz,ry:0,w:A.x1-A.x0,d:A.z1-A.z0,floor:fY,doors:[],roofY:gY,hall:idx});
 }
 function metroTunnel(T){
-// 分段 (6m): 两侧挡土墙 + 顶板 同段同高 (顶面 = 该段两侧地面最高点 + 0.15, 跟随地形)
-for(let z=T.z0;z<T.z1-0.01;z+=6){
-const seg=Math.min(6,T.z1-z), zc=z+seg/2;
-const gy=Math.max(heightAt(T.x0-1.6,zc),heightAt(T.x1+1.6,zc))+0.15;
-const fy=Math.min(heightAt(T.x0+1,zc),heightAt(T.x1-1,zc));
+// 分段 (≤6m): 两侧埋墙 + 贴地顶板 + 洞内底板。2026-11-15 四改 (用户实机"顶与墙连接松垮 / 没有地板 / 齐平却不能过坦克"):
+//   ① 隧道带地形已由 terrain metroLiftY 桥式抬到街面 (config street:1) —— 载具如过桥面碾过, 旧版 −2.6
+//      明坑高度场才是"齐平也过不去"的根因 (vehicles 贴地走 heightAt); 洞体降级为纯建造件;
+//   ② 街面基准=metroLiftNodes 节点 (terrain 侧同一套采样: 旗标期轴心采样+两轮滑动平均) —— 建造件与
+//      heightAt 桥面同源, 段间无锯齿;
+//   ③ 段内 gy=min(两端节点) —— 顶板顶=gy−0.02、墙顶=gy−0.05 恒在地形下方 (平滑节点与线性插值地形之间
+//      可能差 0.2~0.3m, 顶板冒头会剐蹭坦克 hull);
+//   ④ 底板顶=fy+0.06 (fy=gy−d, 洞内净深 d=2.6 —— 旧版 fy 采 heightAt, 抬升后返回街面已失效) + 墙厚
+//      2.0 全埋 (不冒出街面), 顶板 8m 宽恰好盖到墙外皮; 步兵厅间通道语义保留 (洞内净高 ≈2.0m)。
+const L=metroLiftNodes(T);
+const WT=2.0;
+// 建造件分段=稠密段 (segL≈1.2, 与桥面同源同粒度); 顶板基准=段内两列节点最小值 → 两轮滑动平滑
+// (灭段间锯齿, 残差 ≤0.07) → 钳回该段原始最小值 (平滑会向高处拉; 线性插值在段内 ≥两端节点最小值
+// ⇒ rawMin 是段内地形下界, 钳制后顶板/墙顶恒在地形之下, 不冒头按构造成立, 不剐蹭 hull)
+const rawMin=[],refs=[];
+for(let i=0;i<L.n;i++){
+rawMin.push(Math.min(L.ns[i][0],L.ns[i][1],L.ns[i+1][0],L.ns[i+1][1]));
+refs.push(rawMin[i]);
+}
+for(let pass=0;pass<2;pass++){
+for(let i=0;i<L.n;i++){
+const a=refs[Math.max(0,i-1)],c=refs[Math.min(L.n-1,i+1)];
+refs[i]=(a+refs[i]+c)/3;
+}
+}
+for(let i=0;i<L.n;i++) if(refs[i]>rawMin[i]) refs[i]=rawMin[i];
+for(let i=0;i<L.n;i++){
+const z0=T.z0+i*L.segL;
+const seg=Math.min(L.segL,T.z1-z0), zc=z0+seg/2;
+const gy=refs[i];                     // 段内顶板基准 (≤段内地形下界, 贴街面剖面)
+const fy=gy-(T.d||2.6);               // 洞内底面
 const wb=fy-0.8;
-for(const wx of [T.x0,T.x1]) solidBox(MAT.stone,0.6,gy-wb,seg+0.02,wx,(gy+wb)/2,zc,0);
-solidBox(MAT.stone,T.x1-T.x0+2.0,0.45,seg+0.02,(T.x0+T.x1)/2,gy-0.225,zc,0);
+for(const wx of [T.x0,T.x1]) solidBox(MAT.stone,WT,gy-0.05-wb,seg+0.02,wx,(gy-0.05+wb)/2,zc,0); // 墙顶=gy−0.05 全埋
+solidBox(MAT.stone,T.x1-T.x0+WT,0.45,seg+0.02,(T.x0+T.x1)/2,gy-0.245,zc,0); // 顶面=gy−0.02 (贴地可碾)
+solidBox(MAT.stone,T.x1-T.x0-1.0,0.5,seg+0.02,(T.x0+T.x1)/2,fy-0.19,zc,0);  // 底板 (顶=fy+0.06, maxY<gh+0.5 ⇒ OCC 豁免)
 }
 }
 function metroStation(){
 const M=CITY&&CITY.metro; if(!M) return;
 const HALLS=M.halls||[], T=M.tunnel||null;
 if(!HALLS.length&&!T) return;
+// 2026-11-15: 每局清采样缓存 —— _fy/_ln 锚定"本局世界"的地形 (护环 pad/广场碟/urban 噪声都进节点);
+//   CAMPAIGN 克隆若跨局复用, 旧局缓存会污染新局街面/坑底 (浅碟剖面错位 ~0.2m 级)。
+for(const h of HALLS){ if(h._fy!==undefined) delete h._fy; }
+if(T&&T._ln) delete T._ln;
+// ── 护环垫层 (2026-11-15 用户实机"地铁站侧墙旁边总是有沟"): 矩形下沉的 0.4m 陡坎被 ~2.77m 间距的
+//   渲染顶点抹成贴墙 2~2.5m 宽的凹沟 (物理竖坎/视觉斜坡剖面不一致)。在厅矩形**外** 3m 环带上登记
+//   权威 pad 压回街面 (PADS 在 metroDep 之后生效 ⇒ 不会填坑), 渲染网格在环带内=平街面 ⇒ 沟消失;
+//   坑缘竖坎由挡土墙遮住。pad 高取环带外缘 8 点采样均值 (urban 噪声平滑); 隧道穿广场浅碟不设环
+//   (环会填掉广场碟形), 隧道两侧以 2.0m 厚墙遮坎 (见 metroTunnel)。
+const D=3;
+for(const A of HALLS){
+let acc=0,n=0;
+for(const [sx,sz] of [[A.x0-D-1.2,A.z0-D-1.2],[A.x1+D+1.2,A.z0-D-1.2],[A.x0-D-1.2,A.z1+D+1.2],[A.x1+D+1.2,A.z1+D+1.2],[A.x0-D-1.2,(A.z0+A.z1)/2],[A.x1+D+1.2,(A.z0+A.z1)/2],[(A.x0+A.x1)/2,A.z0-D-1.2],[(A.x0+A.x1)/2,A.z1+D+1.2]]){
+acc+=heightAt(sx,sz); n++;
+}
+const hs=acc/n;
+addPad((A.x0+A.x1)/2,A.z0-D/2,0,(A.x1-A.x0)/2+D,D/2,2.2,hs);   // 南环
+addPad((A.x0+A.x1)/2,A.z1+D/2,0,(A.x1-A.x0)/2+D,D/2,2.2,hs);   // 北环
+addPad(A.x0-D/2,(A.z0+A.z1)/2,0,D/2,(A.z1-A.z0)/2+D,2.2,hs);   // 西环
+addPad(A.x1+D/2,(A.z0+A.z1)/2,0,D/2,(A.z1-A.z0)/2+D,2.2,hs);   // 东环
+}
 if(T) metroTunnel(T);
 HALLS.forEach((A,i)=>metroHall(A,T,i));
 // 隧道中段通行带 (Bot 穿行两端进站)
@@ -2172,14 +2288,17 @@ BUILD_REG.push({type:'windmill',x,z,ry,w:6.6,d:6.6,floor:g0,doors:ctx.doors.slic
 //   钢腿/矮一档), 两文件都是顶层 function ⇒ 后加载的 05c 覆盖本版, 草原车站拿到的是另一张图的地标 (矮 ~2m)。
 //   重名消除后本函数才真正被 layoutSteppe 用上 (调用点同步改)。
 // 空间账: 腿柱高 6.8 (CYL r0.28), 水柜 r2.2 y 6.8..9.8 (CYL), 锥顶 9.8..11.2 (视觉);
-// 柱距 3.4 (对角 4.8) —— 底部可穿行 (净高 6.8/净宽 2.8), 步兵掩体位; 顶柜不可登 (无梯, 纯地标)
+// 柱距 2.7 (对角 3.82) —— 底部可穿行 (净高 6.8/净宽 2.0), 步兵掩体位; 顶柜不可登 (无梯, 纯地标)
+// ★ 2026-11-15 用户实机"罐子浮空没落在支撑上": 旧柱位对角半径 2.40 > 水柜 r2.2 —— 腿顶落点在水柜
+//   底盘边缘外 0.2m, 仰视时四条腿与罐底之间一圈空隙 = "悬空"。柱位内收到对角 1.91 (±1.35),
+//   腿身外缘 2.25 ≥ 2.2 塞进罐底边缘之下 ⇒ 视觉落地。
 function stationWaterTower(x,z){
 const g0=heightAt(x,z);
-for(const [lx,lz] of [[-1.7,-1.7],[1.7,-1.7],[-1.7,1.7],[1.7,1.7]]){
+for(const [lx,lz] of [[-1.35,-1.35],[1.35,-1.35],[-1.35,1.35],[1.35,1.35]]){
 mesh(new THREE.CylinderGeometry(0.28,0.34,6.8,8),MAT.brick,x+lx,g0+3.4,z+lz);
 CYLS.push({x:x+lx,z:z+lz,r:0.3,y0:g0,y1:g0+6.8});
 }
-for(const [ax,az,bx2,bz2] of [[-1.7,-1.7,1.7,1.7],[1.7,-1.7,-1.7,1.7],[-1.7,-1.7,-1.7,1.7],[1.7,-1.7,1.7,1.7]]){
+for(const [ax,az,bx2,bz2] of [[-1.35,-1.35,1.35,1.35],[1.35,-1.35,-1.35,1.35],[-1.35,-1.35,-1.35,1.35],[1.35,-1.35,1.35,1.35]]){
 mesh(boxGeo(Math.hypot(bx2-ax,bz2-az),0.14,0.14),MAT.woodDark,x+(ax+bx2)/2,g0+5.6,z+(az+bz2)/2,Math.atan2(bz2-az,bx2-ax),false,true);
 }
 const tank=new THREE.Mesh(uvGeo(new THREE.CylinderGeometry(2.2,2.2,3.0,12),MAT.metalDark),MAT.metalDark);

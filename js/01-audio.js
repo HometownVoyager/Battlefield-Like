@@ -1,6 +1,12 @@
 // ─────────────────────────────────────────────
 // 01-audio.js —— 音频系统 AudioSys
 // 源: Index.original.html 第 501-833 行
+// ★2026-11-15 音效重制批 (用户实报"初版 Demo 继承下来的音效太简陋"): 一次性瞬态全部分层重造 ——
+//   gunshot 补中频机身层+双峰裂响+自发抛壳咔哒 / explosion 双层→五层(次声锤+中频砰+气浪+近场碎裂+
+//   弹片散落尾) / cannon 加中频骨架+炮口回响 / splash 升级 (尺寸·速度双参数, 三层+回浪) / footstep
+//   逐步随机化+擦地层 / whizz·ricochet·hurt·mortarThunk·flakPop 各补衬底层 / 引擎三层化 (次八度+
+//   纹理噪声)。★全部函数签名向后兼容; 静默闸门/时停冻结账/海战追加段一字未动; osc/osc2/lp/g
+//   引擎节点名是海战音色塑形段的契约, 原样保留。
 // 2026-09-17 音效停止批: 新增静默闸门 (kill 增益节点 + silenced 标记) 与 stopAll()/restoreAll() ——
 //   结算 (endMatch) 与回主界面 (returnToMenu) 一律 stopAll: 立即静音 + 停引擎 + 挂起一切发声入口
 //   (含 setTimeout/setInterval 里排队的来源, 如雷暴远雷与环境枪声/鸟鸣), 回战局/开新局 restoreAll 解除。
@@ -127,6 +133,7 @@ if(panN){ panN.pan.value=clamp(pan,-1,1); lpO.connect(panN); panN.connect(comp);
 const relNodes=[out,lpO];
 if(panN) relNodes.push(panN);
 // 1) 枪口激波: 极短宽频噪声脆响
+// ★2026-11-15 音效重制批: 叠一只 +60% 频率的窄带"第二峰" —— 单带通的裂响单薄, 双峰有"两层脆"质感
 const n=noiseSrc();
 const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=P.crack*rand(0.92,1.1); bp.Q.value=0.45;
 const ng=ctx.createGain();
@@ -135,6 +142,14 @@ ng.gain.linearRampToValueAtTime(P.v*sp.gain*selfB,t0+0.0015);
 ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.022);
 n.connect(bp); bp.connect(ng); ng.connect(out); n.start(t0); n.stop(t0+0.05);
 relNodes.push(n,bp,ng);
+const n1b=noiseSrc();
+const bp1b=ctx.createBiquadFilter(); bp1b.type='bandpass'; bp1b.frequency.value=P.crack*1.6*rand(0.92,1.1); bp1b.Q.value=0.9;
+const ng1b=ctx.createGain();
+ng1b.gain.setValueAtTime(0.0001,t0);
+ng1b.gain.linearRampToValueAtTime(P.v*0.45*sp.gain*selfB,t0+0.001);
+ng1b.gain.exponentialRampToValueAtTime(0.0001,t0+0.014);
+n1b.connect(bp1b); bp1b.connect(ng1b); ng1b.connect(out); n1b.start(t0); n1b.stop(t0+0.03);
+relNodes.push(n1b,bp1b,ng1b);
 // 1b) 高频瞬态"啪"层: 让近处枪声清脆不发闷
 const hfProx=clamp(1-dist/90,0,1);
 if(hfProx>0.05){
@@ -146,6 +161,16 @@ gh2.gain.linearRampToValueAtTime(P.v*0.62*hfProx*selfB,t0+0.001);
 gh2.gain.exponentialRampToValueAtTime(0.0001,t0+0.012);
 nh.connect(hp2); hp2.connect(gh2); gh2.connect(out); nh.start(t0); nh.stop(t0+0.03);
 relNodes.push(nh,hp2,gh2);
+}
+// 1c) 中频"机身"层 (★2026-11-15 音效重制批新增): 旧版只有极高频裂响与极低频冲击, 中段空 ⇒ 近处
+//    枪声"响而不实"。bandpass 频点随兵种 body 参数走 (rifle≈1.25k / pistol≈1.8k), 给声音装上"肉"。
+const midW=clamp(1-dist/110,0,1);
+if(midW>0.04){
+const nm=noiseSrc();
+const bm=ctx.createBiquadFilter(); bm.type='bandpass'; bm.frequency.value=P.body*7+520; bm.Q.value=0.75;
+const gm=ctx.createGain(); env(gm,t0,P.v*0.5*midW*sp.gain*selfB,P.bd*1.7);
+nm.connect(bm); bm.connect(gm); gm.connect(out); nm.start(t0); nm.stop(t0+P.bd*1.7+0.06);
+relNodes.push(nm,bm,gm);
 }
 // 2) 低频炮口冲击波: 近距离才有体感
 const prox=clamp(1-dist/50,0,1);
@@ -159,6 +184,20 @@ const n3=noiseSrc(); const lp3=ctx.createBiquadFilter(); lp3.type='lowpass'; lp3
 const g3=ctx.createGain(); env(g3,t0,P.v*0.35*prox*selfB,P.bd*1.5);
 n3.connect(lp3); lp3.connect(g3); g3.connect(out); n3.start(t0); n3.stop(t0+P.bd*1.5+0.05);
 relNodes.push(o,og,n3,lp3,g3);
+}
+// 2b) 自发枪械操作感 (★2026-11-15 音效重制批新增, dist<2 专用): 闭锁回位+抛壳两记金属轻咔
+//    (+28ms/+46ms) —— 旧版自发枪声"一响就完", 没有武器存在的机械质感。音量刻意压低, 只是质感层。
+if(dist<2){
+for(const [tt2,f2,v2] of [[t0+0.028,2450,0.05],[t0+0.046,3150,0.034]]){
+const nc=noiseSrc();
+const bc=ctx.createBiquadFilter(); bc.type='bandpass'; bc.frequency.value=f2*rand(0.94,1.06); bc.Q.value=4.5;
+const gc=ctx.createGain();
+gc.gain.setValueAtTime(0.0001,tt2);
+gc.gain.linearRampToValueAtTime(v2*selfB,tt2+0.003);
+gc.gain.exponentialRampToValueAtTime(0.0001,tt2+0.03);
+nc.connect(bc); bc.connect(gc); gc.connect(out); nc.start(tt2); nc.stop(tt2+0.05);
+relNodes.push(nc,bc,gc);
+}
 }
 // 3) 旷野回声: 双拍延时模拟山壁/林地混响, 距离越远延迟越长
 let maxEchoDur=0.1;
@@ -183,18 +222,47 @@ if(endD>maxEchoDur) maxEchoDur=endD;
 }
 scheduleNodeRelease(relNodes, Math.max(0.3, maxEchoDur));
 }
+// 爆炸 (★2026-11-15 音效重制批: 双层→五层) —— ①次声重锤(更低更长) ②爆心中频"砰"(新增骨架层)
+// ③气浪下扫 ④近场高频碎裂(新增) ⑤弹片散落尾音(新增)。距离衰减与调用口径不变。
 function explosion(dist=0){
 if(!inited) return;
 const t0=ctx.currentTime; const sp=spatial(dist,400); if(sp.gain<0.02) return;
+const rel=[];
+// ① 次声重锤: 58→18Hz 拖 1.4s (旧 70→24/1.1s —— 更低更长, "地面在震"的体感)
 const o=ctx.createOscillator(); o.type='sine';
-o.frequency.setValueAtTime(70,t0); o.frequency.exponentialRampToValueAtTime(24,t0+1.1);
-const og=ctx.createGain(); env(og,t0,1.5*sp.gain,1.1);
-o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+1.2);
+o.frequency.setValueAtTime(58,t0); o.frequency.exponentialRampToValueAtTime(18,t0+1.4);
+const og=ctx.createGain(); env(og,t0,1.7*sp.gain,1.4);
+o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+1.5); rel.push(o,og);
+// ② 爆心中频"砰": 带通 260Hz 短促一记 —— 旧版低频锤与宽带噪声之间中段是空的, 爆炸"闷而不脆"
+const nb=noiseSrc(); const bp2=ctx.createBiquadFilter(); bp2.type='bandpass'; bp2.frequency.value=260; bp2.Q.value=0.7;
+const g2=ctx.createGain(); env(g2,t0,1.05*sp.gain,0.22);
+nb.connect(bp2); bp2.connect(g2); g2.connect(comp); nb.start(t0); nb.stop(t0+0.3); rel.push(nb,bp2,g2);
+// ③ 主体气浪: 低通 5k→100 下扫 1.4s
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass';
-lp.frequency.setValueAtTime(Math.min(sp.lp,5000),t0); lp.frequency.exponentialRampToValueAtTime(120,t0+1.3);
-const ng=ctx.createGain(); env(ng,t0,1.3*sp.gain,1.3);
-n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1.4);
-scheduleNodeRelease([o,og,n,lp,ng], 1.5);
+lp.frequency.setValueAtTime(Math.min(sp.lp,5000),t0); lp.frequency.exponentialRampToValueAtTime(100,t0+1.4);
+const ng=ctx.createGain(); env(ng,t0,1.3*sp.gain,1.4);
+n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1.5); rel.push(n,lp,ng);
+// ④ 近场高频碎裂: 60m 内才有 (破片初始动能的"哗", 远处被空气吃掉)
+const hf=clamp(1-dist/60,0,1);
+if(hf>0.05){
+const nh=noiseSrc(); const hp2=ctx.createBiquadFilter(); hp2.type='highpass'; hp2.frequency.value=3400;
+const gh2=ctx.createGain(); env(gh2,t0,0.55*hf*sp.gain,0.05);
+nh.connect(hp2); hp2.connect(gh2); gh2.connect(comp); nh.start(t0); nh.stop(t0+0.1); rel.push(nh,hp2,gh2);
+}
+// ⑤ 弹片散落尾音: 0.12~0.95s 间散布 2~5 记小带通噼啪 (近处多且清, 远处只剩两记闷响)
+const nDeb=dist<90?randi(3,5):2;
+const debW=clamp(1-dist/140,0,1);
+for(let k=0;k<nDeb;k++){
+const tt=t0+rand(0.12,0.95);
+const nd=noiseSrc();
+const bd=ctx.createBiquadFilter(); bd.type='bandpass'; bd.frequency.value=rand(480,1650); bd.Q.value=2.2;
+const gd=ctx.createGain();
+gd.gain.setValueAtTime(0.0001,tt);
+gd.gain.linearRampToValueAtTime(0.17*sp.gain*debW*rand(0.5,1),tt+0.006);
+gd.gain.exponentialRampToValueAtTime(0.0001,tt+0.05);
+nd.connect(bd); bd.connect(gd); gd.connect(comp); nd.start(tt); nd.stop(tt+0.09); rel.push(nd,bd,gd);
+}
+scheduleNodeRelease(rel, 1.5);
 }
 function click(freq=2200, vol=0.25, dur=0.03){
 if(!inited) return;
@@ -222,24 +290,42 @@ const g=ctx.createGain(); env(g,t0,0.16/(i+1),0.5);
 o.connect(g); g.connect(comp); o.start(t0); o.stop(t0+0.55);
 });
 }
+// 脚步 (★2026-11-15 音效重制批): 闷响层 + 鞋底擦地"沙"层 + 逐步随机化 —— 旧版单层固定低通,
+//   连续脚步是同一音色等间隔重复 ("机关枪脚步"); 现在低通与擦地频点每步随机 ±15%, 擦地层补质感。
 function footstep(run=false, dist=0){
 if(!inited) return;
 const sp=spatial(dist,40); if(sp.gain<0.03) return;
 const t0=ctx.currentTime;
-const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=run?500:380;
+const rel=[];
+const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=(run?500:380)*rand(0.85,1.15);
 const g=ctx.createGain(); env(g,t0,(run?0.2:0.11)*sp.gain, 0.07);
-n.connect(lp); lp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.12);
+n.connect(lp); lp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.12); rel.push(n,lp,g);
+const n2=noiseSrc(); const bp2=ctx.createBiquadFilter(); bp2.type='bandpass'; bp2.frequency.value=rand(900,1500); bp2.Q.value=1.2;
+const g2=ctx.createGain(); env(g2,t0+0.012,(run?0.085:0.045)*sp.gain, 0.05);
+n2.connect(bp2); bp2.connect(g2); g2.connect(comp); n2.start(t0+0.012); n2.stop(t0+0.1); rel.push(n2,bp2,g2);
+scheduleNodeRelease(rel, 0.18);
 }
+// 弹道呼啸 (★2026-11-15 音效重制批): 高频窄带下扫 + 低频气浪衬底 —— 旧版单层高频, 近失弹
+//   只有"嘶"没有"风压"; 补一层低通 620Hz 短衬底, "风刮过来"的体感。
 function whizz(){
 if(!inited) return;
 const t0=ctx.currentTime;
+const rel=[];
 const n=noiseSrc(); const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=4;
 bp.frequency.setValueAtTime(4200,t0); bp.frequency.exponentialRampToValueAtTime(900,t0+0.16);
 const g=ctx.createGain();
 g.gain.setValueAtTime(0.0001,t0); g.gain.linearRampToValueAtTime(0.22,t0+0.03);
 g.gain.exponentialRampToValueAtTime(0.0001,t0+0.17);
-n.connect(bp); bp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.2);
+n.connect(bp); bp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.2); rel.push(n,bp,g);
+const n2=noiseSrc(); const lp2=ctx.createBiquadFilter(); lp2.type='lowpass'; lp2.frequency.value=620;
+const g2=ctx.createGain();
+g2.gain.setValueAtTime(0.0001,t0); g2.gain.linearRampToValueAtTime(0.14,t0+0.035);
+g2.gain.exponentialRampToValueAtTime(0.0001,t0+0.19);
+n2.connect(lp2); lp2.connect(g2); g2.connect(comp); n2.start(t0); n2.stop(t0+0.22); rel.push(n2,lp2,g2);
+scheduleNodeRelease(rel, 0.28);
 }
+// 跳弹 (★2026-11-15 音效重制批): 金属下滑哨 + 撞击瞬间的带通噪声一记 —— 旧版纯正弦哨
+//   "不像打在石头/钢板上"; 补 0.05s 撞击噪声给"弹头蹭出去"的实体感。
 function ricochet(dist){
 if(!inited) return;
 const sp=spatial(dist,80); if(sp.gain<0.03) return;
@@ -249,14 +335,26 @@ o.frequency.setValueAtTime(rand(2400,3600),t0);
 o.frequency.exponentialRampToValueAtTime(rand(700,1100),t0+0.22);
 const g=ctx.createGain(); env(g,t0,0.1*sp.gain,0.22);
 o.connect(g); g.connect(comp); o.start(t0); o.stop(t0+0.25);
+const n=noiseSrc(); const bp2=ctx.createBiquadFilter(); bp2.type='bandpass'; bp2.frequency.value=rand(1800,2600); bp2.Q.value=1.6;
+const g2=ctx.createGain(); env(g2,t0,0.14*sp.gain,0.05);
+n.connect(bp2); bp2.connect(g2); g2.connect(comp); n.start(t0); n.stop(t0+0.09);
+scheduleNodeRelease([o,g,n,bp2,g2], 0.32);
 }
+// 受伤闷哼 (★2026-11-15 音效重制批): 锯齿滑音 + 同滑正弦衬底, 过低通滤出"闷哼"的嗓音感
+// —— 旧版裸锯齿太"电子"。
 function hurt(){
 if(!inited) return;
 const t0=ctx.currentTime;
 const o=ctx.createOscillator(); o.type='sawtooth';
 o.frequency.setValueAtTime(220,t0); o.frequency.exponentialRampToValueAtTime(90,t0+0.15);
-const g=ctx.createGain(); env(g,t0,0.2,0.15);
-o.connect(g); g.connect(comp); o.start(t0); o.stop(t0+0.18);
+const o2=ctx.createOscillator(); o2.type='sine';
+o2.frequency.setValueAtTime(150,t0); o2.frequency.exponentialRampToValueAtTime(65,t0+0.13);
+const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=620;
+const g=ctx.createGain(); env(g,t0,0.22,0.15);
+const g2=ctx.createGain(); env(g2,t0,0.13,0.13);
+o.connect(f); o2.connect(f); f.connect(g); g.connect(comp); g2.connect(comp);
+o.start(t0); o.stop(t0+0.18); o2.start(t0); o2.stop(t0+0.16);
+scheduleNodeRelease([o,o2,f,g,g2], 0.25);
 }
 function hitmarkSnd(kill){
 if(!inited) return;
@@ -284,6 +382,8 @@ const g=ctx.createGain(); env(g,t0,0.12,0.05);
 o.connect(g); g.connect(comp); o.start(t0); o.stop(t0+0.09);
 }
 }
+// 迫击炮闷响 (★2026-11-15 音效重制批): 管压"咚" + 出膛气浪拖尾 —— 旧版两层都极短 (0.2s 收),
+//   迫击炮标志性的"嘭————"腔体余韵缺失; 补 0.3s 低通 700→200 拖尾。
 function mortarThunk(dist=0){
 if(!inited) return;
 const sp=spatial(dist,300); if(sp.gain<0.02) return;
@@ -295,26 +395,47 @@ o.connect(g); g.connect(comp); o.start(t0); o.stop(t0+0.25);
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
 const g2=ctx.createGain(); env(g2,t0,0.5*sp.gain,0.09);
 n.connect(lp); lp.connect(g2); g2.connect(comp); n.start(t0); n.stop(t0+0.14);
+const n3=noiseSrc(); const lp3=ctx.createBiquadFilter(); lp3.type='lowpass';
+lp3.frequency.setValueAtTime(700,t0); lp3.frequency.exponentialRampToValueAtTime(200,t0+0.3);
+const g3=ctx.createGain(); env(g3,t0+0.02,0.32*sp.gain,0.32);
+n3.connect(lp3); lp3.connect(g3); g3.connect(comp); n3.start(t0+0.02); n3.stop(t0+0.4);
+scheduleNodeRelease([o,g,n,lp,g2,n3,lp3,g3], 0.5);
 }
 function nadeBounce(dist){
 if(!inited) return;
 const sp=spatial(dist,60); if(sp.gain<0.05) return;
 click(600,0.3*sp.gain,0.04);
 }
+// 坦克/舰炮 (★2026-11-15 音效重制批: 双层→四层) —— ①炮口锤 ②膛压中频"砰"(新增骨架)
+// ③气浪下扫 ④+0.11s 炮口回响拍(新增)。与 explosion 的区分: 更短更冲, 有金属感的膛压冲击。
 function cannon(dist=0,pan=0){
 if(!inited) return; resume();
 const t0=ctx.currentTime;
 const sp=spatial(dist,500); if(sp.gain<0.02) return;
+const rel=[];
 const o=ctx.createOscillator(); o.type='sine';
 o.frequency.setValueAtTime(85,t0); o.frequency.exponentialRampToValueAtTime(26,t0+0.7);
 const og=ctx.createGain(); env(og,t0,1.6*sp.gain,0.7);
-o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+0.8);
+o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+0.8); rel.push(o,og);
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass';
 lp.frequency.setValueAtTime(Math.min(sp.lp,3800),t0); lp.frequency.exponentialRampToValueAtTime(160,t0+0.9);
 const ng=ctx.createGain(); env(ng,t0,1.2*sp.gain,0.9);
-n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1);
-scheduleNodeRelease([o,og,n,lp,ng], 1.1);
+n.connect(lp); lp.connect(ng); ng.connect(comp); n.start(t0); n.stop(t0+1); rel.push(n,lp,ng);
+// ② 膛压中频"砰": 带通 200Hz 0.18s —— 炮弹出膛的骨架声, 旧版低频锤+宽带气浪之间中段空
+const nb=noiseSrc(); const bp2=ctx.createBiquadFilter(); bp2.type='bandpass'; bp2.frequency.value=200; bp2.Q.value=0.8;
+const g2=ctx.createGain(); env(g2,t0,0.9*sp.gain,0.18);
+nb.connect(bp2); bp2.connect(g2); g2.connect(comp); nb.start(t0); nb.stop(t0+0.24); rel.push(nb,bp2,g2);
+// ④ 炮口回响拍: +0.11s 一记低通噪声 (开阔地炮声的"回一下", 旧版没有)
+const nr=noiseSrc(); const lr=ctx.createBiquadFilter(); lr.type='lowpass'; lr.frequency.value=800;
+const gr=ctx.createGain();
+gr.gain.setValueAtTime(0.0001,t0+0.11);
+gr.gain.linearRampToValueAtTime(0.3*sp.gain,t0+0.15);
+gr.gain.exponentialRampToValueAtTime(0.0001,t0+0.4);
+nr.connect(lr); lr.connect(gr); gr.connect(comp); nr.start(t0+0.11); nr.stop(t0+0.45); rel.push(nr,lr,gr);
+scheduleNodeRelease(rel, 1.1);
 }
+// 高炮"咚" (★2026-11-15 音效重制批): 低通爆响 + 中频"砰"一记 —— 旧版纯低通"噗"没有弹射的
+//   机械冲劲; 带通 380Hz 0.12s 补管压骨架。
 function flakPop(dist=0){
 if(!inited) return;
 const t0=ctx.currentTime;
@@ -322,7 +443,10 @@ const sp=spatial(dist,300); if(sp.gain<0.02) return;
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=Math.min(sp.lp,1500);
 const g=ctx.createGain(); env(g,t0,0.55*sp.gain,0.35);
 n.connect(lp); lp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+0.4);
-scheduleNodeRelease([n,lp,g], 0.5);
+const n2=noiseSrc(); const bp2=ctx.createBiquadFilter(); bp2.type='bandpass'; bp2.frequency.value=380; bp2.Q.value=0.9;
+const g2=ctx.createGain(); env(g2,t0,0.4*sp.gain,0.12);
+n2.connect(bp2); bp2.connect(g2); g2.connect(comp); n2.start(t0); n2.stop(t0+0.18);
+scheduleNodeRelease([n,lp,g,n2,bp2,g2], 0.55);
 }
 const engines=new Set(); // 持续声源(坦克/飞机引擎): 暂停/结算时统一静音
 function createEngine(kind){
@@ -334,6 +458,7 @@ if(!inited){ return; }
 if(silenced||audioTimeFrozen()){
 e.lastVol=clamp(vol,0,0.4);
 if(e.nodes){ try{ e.nodes.g.gain.setTargetAtTime(0,ctx.currentTime,0.05); }catch(err){} }
+e._lastVolW=undefined;   // gain was forced to 0 here: clear the gate or post-freeze update with ~same vol would skip the restore write (2026-11-13 perf batch)
 return;
 }
 if(!e.nodes){
@@ -341,18 +466,40 @@ const osc=ctx.createOscillator();
 osc.type=kind==='plane'?'sawtooth':'triangle';
 const osc2=ctx.createOscillator();
 osc2.type='sawtooth'; osc2.detune.value=kind==='plane'?18:8;
+// ★2026-11-15 音效重制批: 引擎三层化 —— 新增次八度正弦 (osc3, 转速下探时的"底鼓") 与纹理噪声
+//   (ns→nbp→ng2, 机械摩擦/气流噪)。★契约: osc/osc2/lp/g 四节点名与语义原样保留 (海战音色塑形段
+//   navalAudEngine 只写这三个), 新节点并联进同一低通与增益, 静音/冻结账不变 (噪声支路先进 ng2 电平
+//   再进 g, g=0 时全静)。
+const osc3=ctx.createOscillator(); osc3.type='sine';
+const ns=noiseSrc();
+const nbp=ctx.createBiquadFilter(); nbp.type='bandpass'; nbp.frequency.value=kind==='plane'?1400:420; nbp.Q.value=0.6;
+const ng2=ctx.createGain(); ng2.gain.value=0;
 const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=kind==='plane'?900:340;
 const g=ctx.createGain(); g.gain.value=0;
-osc.connect(lp); osc2.connect(lp); lp.connect(g); g.connect(comp);
-osc.start(); osc2.start();
-e.nodes={osc,osc2,g,lp};
+osc.connect(lp); osc2.connect(lp); osc3.connect(lp); lp.connect(g);
+ns.connect(nbp); nbp.connect(ng2); ng2.connect(g);
+g.connect(comp);
+osc.start(); osc2.start(); osc3.start(); ns.start();
+e.nodes={osc,osc2,g,lp,osc3,ns,nbp,ng2};
 engines.add(e);
 }
 e.lastVol=clamp(vol,0,0.4);
+// 2026-11-13 perf batch: change gate - skip setTargetAtTime when freq/vol moved < threshold since last
+// actual write (0.8Hz / 0.004 steps are inaudible under the 0.12s smoothing; saves 3 param calls per
+// vehicle per frame during steady RPM). Forced-zero branch above clears _lastVolW; stop() clears both.
 const t0=ctx.currentTime;
+if(e._lastFreq===undefined||Math.abs(freq-e._lastFreq)>=0.8){
 e.nodes.osc.frequency.setTargetAtTime(freq,t0,0.12);
 e.nodes.osc2.frequency.setTargetAtTime(freq*0.5,t0,0.12);
+if(e.nodes.osc3) e.nodes.osc3.frequency.setTargetAtTime(freq*0.25,t0,0.12); // 次八度随转速 (★2026-11-15 重制)
+e._lastFreq=freq;
+}
+if(e._lastVolW===undefined||Math.abs(e.lastVol-e._lastVolW)>=0.004){
 e.nodes.g.gain.setTargetAtTime(e.lastVol,t0,0.12);
+// 纹理噪声电平随音量走 (飞机气流占比高些) (★2026-11-15 重制)
+if(e.nodes.ng2) e.nodes.ng2.gain.setTargetAtTime(e.lastVol*(e.kind==='plane'?0.5:0.35),t0,0.12);
+e._lastVolW=e.lastVol;
+}
 };
 // 停: 增益归零 + 振荡器真停 + 节点置空 (2026-09-17: 旧版只把增益压到 0 且保留 nodes,
 // 于是"停过的引擎"再 update 只会去改已停振荡器的频率 = 之后永远发不出声; 置空让下次 update 重建)
@@ -362,8 +509,12 @@ try{
 const t1=ctx.currentTime;
 e.nodes.g.gain.setTargetAtTime(0,t1,0.1);
 e.nodes.osc.stop(t1+0.2); e.nodes.osc2.stop(t1+0.2);
+// ★2026-11-15 音效重制批: 新增纹理节点随停 (泄漏口径与 osc/osc2 同账)
+if(e.nodes.osc3) e.nodes.osc3.stop(t1+0.2);
+if(e.nodes.ns) e.nodes.ns.stop(t1+0.2);
 }catch(err){}
 e.nodes=null;
+e._lastFreq=undefined; e._lastVolW=undefined;   // rebuilt nodes start silent: next update must write (2026-11-13 perf batch)
 }
 engines.delete(e);
 };
@@ -436,7 +587,7 @@ const f=rand(400,700);
 const panV=rand(-0.8,0.8);
 const panN=ctx.createStereoPanner?ctx.createStereoPanner():null;
 const bus=ctx.createGain(); bus.gain.value=1;
-const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
+const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=rand(650,1150); // ★2026-11-15 重制: 每轮随机低通, 远处对射不再同音色循环
 bus.connect(lp);
 if(panN){ panN.pan.value=panV; lp.connect(panN); panN.connect(comp); } else lp.connect(comp);
 for(let i=0;i<nCnt;i++){
@@ -449,24 +600,53 @@ g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
 o.connect(g); g.connect(bus); o.start(t); o.stop(t+0.08);
 }
 }
-// 入水/水花 (2026-09-18 塔拉瓦批): 物体入水/涉水冲击 —— 带通噪声爆发 + 低频"咕咚"
-function splash(dist=0, big=false){
+// 入水/水花 (2026-09-18 塔拉瓦批; ★2026-11-15 音效重制批升级): 物体入水/涉水冲击 ——
+//   三层: 入水裂响 (带通下扫) + 水体"咕咚" (低频滑音) + 高速水膜嘶声 / 大物回浪 (条件层)。
+//   ★新增第 3/4 参 (size=入水物尺寸档 0.5~4, spd=入水速度 m/s): 尺寸越大裂响越沉、拖得越长、
+//   咕咚越低; 速度越快裂响越亮越冲、并出嘶声层 —— 与 08-effects waterSplash 的强度双参同源。
+//   旧调用 splash(dist,big) 全兼容 (size=1/spd=0)。
+function splash(dist=0, big=false, size=1, spd=0){
 if(!inited) return;
 const sp=spatial(dist,120); if(sp.gain<0.03) return;
 const t0=ctx.currentTime;
+const sz=clamp(size,0.5,4), spC=clamp(spd,0,25);
+const rel=[];
+// ① 入水裂响: 带通下扫 —— 频点按尺寸降 (大物排水声沉), 按速度抬 (高速入水更"炸")
+const f0=(big?2300:2900)/Math.sqrt(sz)*(1+spC*0.012);
+const dur1=(big?0.3:0.16)+sz*0.06;
 const n=noiseSrc(); const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=1.1;
-bp.frequency.setValueAtTime(big?2600:2000,t0);
-bp.frequency.exponentialRampToValueAtTime(big?700:520,t0+(big?0.3:0.16));
+bp.frequency.setValueAtTime(f0,t0);
+bp.frequency.exponentialRampToValueAtTime(f0*0.27,t0+dur1);
 const g=ctx.createGain();
 g.gain.setValueAtTime(0.0001,t0);
-g.gain.linearRampToValueAtTime((big?0.5:0.26)*sp.gain,t0+0.012);
-g.gain.exponentialRampToValueAtTime(0.0001,t0+(big?0.42:0.22));
-n.connect(bp); bp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+(big?0.5:0.3));
+g.gain.linearRampToValueAtTime((big?0.5:0.26)*sp.gain*clamp(0.75+sz*0.18,0.75,1.5)*(1+spC*0.02),t0+0.012);
+g.gain.exponentialRampToValueAtTime(0.0001,t0+dur1+(big?0.12:0.06));
+n.connect(bp); bp.connect(g); g.connect(comp); n.start(t0); n.stop(t0+dur1+0.2); rel.push(n,bp,g);
+// ② 水体"咕咚": 低频滑音 —— 频点/时长随尺寸 (坦克入水是"咚————", 士兵是"咚")
 const o=ctx.createOscillator(); o.type='sine';
-o.frequency.setValueAtTime(big?260:340,t0);
-o.frequency.exponentialRampToValueAtTime(big?90:130,t0+0.18);
-const og=ctx.createGain(); env(og,t0,(big?0.3:0.16)*sp.gain,0.22);
-o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+0.3);
+o.frequency.setValueAtTime((big?260:340)/Math.sqrt(sz),t0);
+o.frequency.exponentialRampToValueAtTime(big?90:130,t0+0.16+sz*0.05);
+const og=ctx.createGain(); env(og,t0,(big?0.3:0.16)*sp.gain*clamp(0.8+sz*0.15,0.8,1.4),0.2+sz*0.05);
+o.connect(og); og.connect(comp); o.start(t0); o.stop(t0+0.3+sz*0.1); rel.push(o,og);
+// ③ 高速水膜嘶声: spd>6 才出 (俯冲入水"咻——啪"里的那道"咻")
+if(spC>6){
+const nh=noiseSrc(); const hp2=ctx.createBiquadFilter(); hp2.type='highpass'; hp2.frequency.value=4500;
+const gh2=ctx.createGain();
+gh2.gain.setValueAtTime(0.0001,t0);
+gh2.gain.linearRampToValueAtTime(clamp(spC*0.016,0.08,0.4)*sp.gain,t0+0.02);
+gh2.gain.exponentialRampToValueAtTime(0.0001,t0+0.14);
+nh.connect(hp2); hp2.connect(gh2); gh2.connect(comp); nh.start(t0); nh.stop(t0+0.2); rel.push(nh,hp2,gh2);
+}
+// ④ 大物回浪: big 时 +0.18s 一记低通拍岸 (载具/炮弹级入水的"回涌"尾)
+if(big){
+const nr=noiseSrc(); const lr=ctx.createBiquadFilter(); lr.type='lowpass'; lr.frequency.value=520;
+const gr=ctx.createGain();
+gr.gain.setValueAtTime(0.0001,t0+0.18);
+gr.gain.linearRampToValueAtTime(0.28*sp.gain*clamp(sz*0.35,0.4,1.2),t0+0.24);
+gr.gain.exponentialRampToValueAtTime(0.0001,t0+0.55);
+nr.connect(lr); lr.connect(gr); gr.connect(comp); nr.start(t0+0.18); nr.stop(t0+0.6); rel.push(nr,lr,gr);
+}
+scheduleNodeRelease(rel, 0.7);
 }
 // 水下闷响闸: 主链 (压缩器→静默闸) 之间串一只低通 —— 相机没入水面时把所有声音压成闷响
 function setUnderwater(on){

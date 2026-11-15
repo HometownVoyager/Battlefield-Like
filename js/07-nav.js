@@ -144,6 +144,7 @@ const compFreeList=[];
 const allocCompId=()=>(compFreeList.length>0?compFreeList.pop():compNext++);
 const _seedList=[], _idList=[];
 const REBAKE_FULL_FRAC=0.04; // 脏格数 > NN×此值 ⇒ 全量
+const _navRects=[]; // 簇级增量 (2026-11-11): 脏矩形簇换算成 NAV 格坐标的复用槽 (refresh 内装载, 簇数≤登记端 CAP)
 function fullBakeGrid(){ bakeGrid(); bakeComponents(); baked=true; }
 // 被波及的连通分量重标 (清空 → 同一套 BFS 重跑); 范围同"边表重算范围" [i0..i1]×[j0..j1] (闭区间)
 function relabelRegion(i0,j0,i1,j1){
@@ -504,7 +505,9 @@ return c>=0&&csize[c]>=(minCells||SPAWN_MIN_COMP);
 // 出生点兜底搬迁: 封锁格或死袋 → 就近找"走得出去"的落点 (环扫到 R 米, 默认 24m); 找不到就原样返回。
 // 逐环向外扫, 首个合格点即最近点 (同环上各点到原点等距, 取先扫到的那个 → 结果确定, 便于探针复现)。
 function spawnSpot(x,z,R){
-if(spawnSpotOk(x,z)) return [x,z];
+// 出生离边门 (2026-11-13): 快路也要过边带 —— 原点贴边时照旧环扫往里搬 (typeof 守卫: 07-nav 先于
+// 17-emplacements 载入, 函数声明不跨脚本提升)。
+if(spawnSpotOk(x,z)&&(typeof spawnEdgeOk!=='function'||spawnEdgeOk(x,z))) return [x,z];
 const rMax=R||24, step=1.5;
 for(let r=step;r<=rMax;r+=step){
 const n=Math.max(8,Math.round((2*Math.PI*r)/2.0));   // 弧长 ~2m 一个采样点
@@ -512,11 +515,12 @@ for(let k2=0;k2<n;k2++){
 const a=k2/n*Math.PI*2;
 const px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
 if(!spawnSpotOk(px,pz)) continue;
+if(typeof spawnEdgeOk==='function'&&!spawnEdgeOk(px,pz)) continue;   // 搬迁也不出边带 (2026-11-13)
 if(occBlocked(px,pz)) continue;      // 与出生筛选同口径: 该点自身也要站得住
 return [px,pz];
 }
 }
-return [x,z];
+return (typeof spawnEdgeClamp==='function')?spawnEdgeClamp(x,z):[x,z];   // 兜底同样钳回边带 (2026-11-13)
 }
 // edgeOK 一并导出: 它是"两格之间能不能走过去"的**唯一判据** (A* 扩展/分量 BFS/平滑前探全读它)。
 // 路径输出段的可通保证按它定义 (中线全通 或 ±NAV_EDGE_PAD 平行线全通), 不是按更严的 lineClear ——
@@ -527,22 +531,38 @@ navStats.refreshMs=0; navStats.fullBakes=0; navStats.partBakes=0; navStats.skipB
 // refresh(forceFull): 占用/索引重建 + 导航重烘焙。
 // 旧签名无参 = 全量; 现无参 = **自适应** (按 OCC.dirty 走增量, 不具局部性时自动全量) —— 调用点无需改动。
 // forceFull=true 强制全量 (世界还原/换图这类"整张图都可能是新的"场景, 见 23b-worldrestore)。
+// ★2026-11-11 性能批两刀:
+//   ① buildSpatialIndex 按集合变更戳跳过 (04-collision _colIdxDirty): 火情期每 5s 的 refresh 里
+//     "数千 BOX/CYL 重灌倒排表 + 两枚 Int32Array 重分配"对局部事件是纯冗余 (addBoxCollider 已增量注册)。
+//   ② 脏区按**矩形簇**逐个走增量 bakeRegion (03-terrain occTouch/occDiffRects 簇合并): 旧版把所有触点
+//     并成一个外接矩形, 两处火线相距几百米时覆盖面积轻松超 REBAKE_FULL_FRAC ⇒ 退回全量烘焙
+//     (640 图 128~143ms = "每隔几秒定帧一次"的病根)。簇级增量下各自小区域照旧走 bakeRegion,
+//     兜底: 任一簇面积超阈值 / 簇数超登记端 CAP (已退化单矩形) / forceFull ⇒ 一次全量。
 refresh(forceFull){
-buildOccupancy(); buildSpatialIndex();
+buildOccupancy();
+if(_colIdxDirty||forceFull){ buildSpatialIndex(); _colIdxDirty=false; }
 const t0=Date.now();
-const dirty=OCC.dirty;
+const dirty=OCC.dirty, dlist=OCC.dirtyList;
 if(forceFull||!baked){ fullBakeGrid(); navStats.fullBakes++; navStats.lastDirty=-1; }
 else if(!dirty){ navStats.skipBakes++; navStats.lastDirty=0; } // 占用逐格未变 ⇒ 导航输入未变, 整段跳过
 else{
 // OCC 格坐标 (1m) → 世界坐标 → NAV 格坐标: 两端各留 1 格外扩 (保守; bakeRegion 内部还会再外扩)
 const {res,off}=OCC;
-const x0=dirty.i0*res-off, x1=dirty.i1*res-off, z0=dirty.j0*res-off, z1=dirty.j1*res-off;
-const gi0=clamp(Math.floor((x0+OFF)/SP)-1,0,N-1), gi1=clamp(Math.floor((x1+OFF)/SP)+1,0,N-1);
-const gj0=clamp(Math.floor((z0+OFF)/SP)-1,0,N-1), gj1=clamp(Math.floor((z1+OFF)/SP)+1,0,N-1);
-const cells=(gi1-gi0+1)*(gj1-gj0+1);
-navStats.lastDirty=cells;
-if(cells>NN*REBAKE_FULL_FRAC){ fullBakeGrid(); navStats.fullBakes++; }
-else { bakeRegion(gi0,gj0,gi1,gj1); navStats.partBakes++; }
+const rects=(dlist&&dlist.length)?dlist:[dirty];
+let cellsSum=0, over=false;
+for(let q=0;q<rects.length;q++){
+const r=rects[q];
+const x0=r.i0*res-off, x1=r.i1*res-off, z0=r.j0*res-off, z1=r.j1*res-off;
+const nr=_navRects[q]||(_navRects[q]={gi0:0,gj0:0,gi1:0,gj1:0,cells:0});
+nr.gi0=clamp(Math.floor((x0+OFF)/SP)-1,0,N-1); nr.gi1=clamp(Math.floor((x1+OFF)/SP)+1,0,N-1);
+nr.gj0=clamp(Math.floor((z0+OFF)/SP)-1,0,N-1); nr.gj1=clamp(Math.floor((z1+OFF)/SP)+1,0,N-1);
+nr.cells=(nr.gi1-nr.gi0+1)*(nr.gj1-nr.gj0+1);
+cellsSum+=nr.cells;
+if(nr.cells>NN*REBAKE_FULL_FRAC) over=true;
+}
+navStats.lastDirty=cellsSum;
+if(over){ fullBakeGrid(); navStats.fullBakes++; }
+else for(let q=0;q<rects.length;q++){ const nr=_navRects[q]; bakeRegion(nr.gi0,nr.gj0,nr.gi1,nr.gj1); navStats.partBakes++; }
 }
 // 清账: 脏矩形只由本函数消费 (03-terrain occDirtyClear) —— 清早了会漏改动, 清晚了只是多算几格
 if(typeof occDirtyClear==='function') occDirtyClear();

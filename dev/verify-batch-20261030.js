@@ -113,10 +113,10 @@ assert('22 deployBtn onclick: 票尽未开调试 ⇒ enterSpecView, 其余走部
  s22.includes('if(tickets[player.team]<=0&&!player.specWillBe()){')
  &&s22.includes("if(typeof enterSpecView==='function') enterSpecView();"));
 const s24=srcOf('js/24-main.js');
-assert('24 死亡页每帧保活: 票尽 ⇒ 可用+「观 战」标签, 其余 disabled=respawnCd',
+assert('24 死亡页每帧保活: 票尽 ⇒ 可用+「观 战」标签, 其余 disabled=respawnCd (2026-11-14 跟码: 调试模式冷却放行尾)',
  s24.includes('if(tickets[player.team]<=0&&!player.specWillBe()){')
  &&s24.includes("_sp.setAttribute('data-i18n','观 战')")
- &&s24.includes('btn.disabled=respawnCd>0;'));
+ &&s24.includes('btn.disabled=respawnCd>0&&!(player.spectator||player.specWillBe());'));
 assert('i18n 新词条 (观战部署文案 + 结算中性组)',
  srcOf('js/00b-i18n.js').includes("'⚠ 己方兵力已耗尽 · 部署将以调试观战身份入场'")
  &&srcOf('js/00b-i18n.js').includes("'对 局 结 束':'MATCH OVER'"));
@@ -156,7 +156,7 @@ assert('19 换枪双击门用 SW+槽位 (Digit1↔槽0 一一对应, 连按同�
  s19.includes("if(!player.barStealArmed('SW'+i)) return;"));
 assert('19 X 取消 / 左键取消(举雷除外) / 系统自动换弹不抢 三条旧口径原样',
  s19.includes("if(player.readBarActive()){ player.cancelReadBar('已取消'); return; }")
- &&s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)){")
+ &&s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){") /* ★2026-11-13 批跟码: 换弹中左键豁免 */
  &&s19.includes('if(!viaKey) return;'));
 const s20=srcOf('js/20-player.js');
 assert('20 F 交互栈双击门 7 处 (2026-11-10 跟码: 原钉 14 处 —— 大舰甲板层跳海/上炮塔/补弹/登机×2/并靠登舰/甲板炮等 7 处随大舰子系统下架摘除)',

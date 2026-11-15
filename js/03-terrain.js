@@ -3,6 +3,68 @@
 // 源: Index.original.html 第 1096-1329 行
 // ─────────────────────────────────────────────
 'use strict';
+// ═══ 折线/矩形特征空间桶 (2026-11-13 性能批 A): 距离场全扫 → 16m 网格候选集 ═══
+// 每张特征表一个桶: 逐 shape 把 bbox 外扩 reach 后覆盖的所有 16m 格登记 shape 下标; 查询只取
+// 查询点所在格的候选集求 min/逐项施加。reach = 该表全部消费方的最大比较阈值 + 12.4 (格半对角
+// 11.32 + 1m 余量 ⇒ 点距 shape ≤ 阈值时 shape 必在候选集内, 逐位等价), 有 hgridClear 消费的表
+// 再 +2.2 (带 PAD) —— 各调用点分别注明。候选集外的 shape 只能产生 >阈值 的距离, 而消费方对
+// 距离的使用全部是 `d<T` 守卫比较 / sstep-clamp 饱和带 / 逐 shape 独立施加 ⇒ 与旧全扫在所有
+// 消费方视角下等价 (逐点论证见 dev/verify-frameperf-terrain-20261113.js 与修复报告 §2)。
+// 懒建: 首次查询时建; src 引用或长度变化自动重建 (procgen 00c 重绑 RIVER=CAMPAIGN.river 的防御)。
+// window.SEG_OFF=true ⇒ 全部回退旧全扫; 细粒度另有 ROAD_OFF/GULLY_OFF/RAMP_OFF (回退路径=原全扫)。
+const SEG_CELL=16;
+const _SEGB=new Map();
+function _segReg(bk,x0,z0,x1,z1,idx){
+const c0=Math.floor(x0/SEG_CELL), c1=Math.floor(x1/SEG_CELL), r0=Math.floor(z0/SEG_CELL), r1=Math.floor(z1/SEG_CELL);
+for(let cx=c0;cx<=c1;cx++)for(let cz=r0;cz<=r1;cz++){
+const k=cx*100000+cz;
+let a=bk.get(k); if(!a){ a=[]; bk.set(k,a); }
+a.push(idx);
+}
+}
+// 返回: 候选下标数组 (按表序, 保序 ⇒ 逐项施加/lerp 链的浮点顺序与旧全扫一致) | null=该格无候选
+// (等价于"旧全扫里全部 shape 距查询点 > reach-格半对角 ≥ 消费阈值") | false=SEG_OFF ⇒ 调用方走旧全扫。
+// src 只在 (re)build 时求值; reach 可传函数 (如 ramps 的 max w 懒求值); kind 见 segBucket 内分支。
+function segQuery(name,x,z,src,reach,kind){
+if(window.SEG_OFF) return false;
+const cur=src(); const n=cur?cur.length:0;
+let b=_SEGB.get(name);
+if(!b||b.srcRef!==cur||b.n0!==n){
+b={srcRef:cur,n0:n,bk:new Map()};
+_SEGB.set(name,b);
+if(cur&&n){
+const rc=(typeof reach==='function')?reach():reach;
+if(kind==='polys'||kind==='poly1'){
+// 逐段注册 (2026-11-13 修): 整条 bbox 注册会让跨图长折线把候选集退化成全表, 且 poly1 的 shape
+// 下标曾被消费方当**段下标**直读 (P[i]/P[i+1]) ⇒ 越界。逐段注册后候选下标即段下标:
+// 'poly1' 下标=段号 j; 'polys' 编码 i*1024+j —— 登记按 (i,j) 字典序 ⇒ 逐段累加语义与全扫同序。
+const list=(kind==='polys')?cur:[cur];
+for(let i=0;i<list.length;i++){
+const g=list[i]; if(!g||g.length<2) continue;
+for(let j=0;j<g.length-1;j++){
+const p0=g[j], p1=g[j+1];
+const x0=Math.min(p0[0],p1[0]), x1=Math.max(p0[0],p1[0]);
+const z0=Math.min(p0[1],p1[1]), z1=Math.max(p0[1],p1[1]);
+_segReg(b.bk,x0-rc,z0-rc,x1+rc,z1+rc,i*1024+j);
+}
+}
+}else{
+for(let i=0;i<n;i++){
+let x0,z0,x1,z1;
+if(kind==='segs'){ const s=cur[i]; x0=s[0]; z0=s[1]; x1=s[2]; z1=s[3]; }
+else if(kind==='osegs'){ const s=cur[i]; x0=s.x0; z0=s.z0; x1=s.x1; z1=s.z1; }
+else if(kind==='tsegs'){ const s=cur[i]; x0=s.x1; z0=s.z1; x1=s.x2; z1=s.z2; }
+else if(kind==='rects'){ const s=cur[i]; x0=s.x0; z0=s.z0; x1=s.x1; z1=s.z1; }
+else{ const s=cur[i]; const rr=(s.r||0)+rc; _segReg(b.bk,s.x-rr,s.z-rr,s.x+rr,s.z+rr,i); continue; } // 'circs': 外扩 r_i+reach
+if(x1<x0){ const t=x0; x0=x1; x1=t; } if(z1<z0){ const t=z0; z0=z1; z1=t; }
+_segReg(b.bk,x0-rc,z0-rc,x1+rc,z1+rc,i);
+}
+}
+}
+}
+if(!n) return null;
+return b.bk.get(Math.floor(x/SEG_CELL)*100000+Math.floor(z/SEG_CELL))||null;
+}
 // 地貌语义表 (2026-09-10 三图改造): 淞沪水网 / 百团沟壑 / 莫斯科雪岭 ——
 // 与 CITY/RURAL_FIELDS 同约定: 表本体在 config 战役条目, 全链路共读, 严禁布局另写坐标
 // DELTA/DELTA_CHANS 已在 00-config 定义 (RIVER 表旁); 此处只补 LOESS/ALPINE
@@ -15,9 +77,17 @@ const ALPINE=CAMPAIGN.alpine||null;
 // 雾林守线语义 (2026-09-13 许特根改版): 北谷(卡尔小径)判定 —— rawHeight/色带/OCC 共用 (表本体在 config.wood)
 function woodRavineDist(x,z){
 if(!WOOD||!WOOD.ravine) return 1e9;
-let gd=1e9;
 const P=WOOD.ravine.pts;
+// 桶化 (2026-11-13 性能批 A): 消费阈值最大 = W2.w+2 (05c 布局让位带) ⇒ reach=W2.w+2+12.4
+const arr=segQuery('wravine',x,z,()=>P,(WOOD.ravine.w||15)+2+12.4,'poly1');
+let gd=1e9;
+if(arr===false){
 for(let i=0;i<P.length-1;i++){
+const d=segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]);
+if(d<gd) gd=d;
+}
+}else if(arr) for(let q=0;q<arr.length;q++){
+const i=arr[q];
 const d=segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]);
 if(d<gd) gd=d;
 }
@@ -26,8 +96,19 @@ return gd;
 // 谷堑口遮罩: 走廊内=1 (谷壑压平剩 12% 残深=缓坡), 走廊外 5m 渐灭 —— 车辆/步兵/Bot 的合法过谷通道
 function woodRampMask(x,z){
 if(!WOOD||!WOOD.ravine) return 0;
+const RS=WOOD.ravine.ramps||[];
+// 桶化 (2026-11-13 性能批 A): k>0 区 = d<w+5 ⇒ reach=maxW+5+12.4 (k>0 的坡道必在候选集)
+const arr=segQuery('wramps',x,z,()=>RS,()=>{ let mw=0; for(const r of RS){ const w=r.w||5; if(w>mw) mw=w; } return mw+5+12.4; },'osegs');
 let m=0;
-for(const r of (WOOD.ravine.ramps||[])){
+if(arr===false){
+for(const r of RS){
+const w=r.w||5;
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+const k=d<=w?1:clamp(1-(d-w)/5,0,1);
+if(k>m) m=k;
+}
+}else if(arr) for(let q=0;q<arr.length;q++){
+const r=RS[arr[q]];
 const w=r.w||5;
 const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
 const k=d<=w?1:clamp(1-(d-w)/5,0,1);
@@ -116,16 +197,79 @@ function rectDist(x,z,x0,z0,x1,z1){
 const dx=Math.max(x0-x,0,x-x1), dz=Math.max(z0-z,0,z-z1);
 return Math.hypot(dx,dz);
 }
+let _mNoDep=false; // metroFlatY/metroLiftNodes 反查"无地铁明坑基准高"期间置真 —— 矩形明坑/压平短路防递归;
+// 广场圆碟不短路 (碟形是街面剖面的一部分, 隧道带桥式抬升的节点采样必须含碟, 否则桥在碟心悬空 +1.1m)
 function metroDep(x,z){
 if(!METRO) return 0;
 let dep=0;
 const d0=Math.hypot(x-METRO.x,z-METRO.z);
 if(d0<METRO.r) dep=Math.max(dep,METRO.d*sstep(1-d0/METRO.r));
+if(_mNoDep) return dep; // 旗标期: 只保留广场碟形
 for(const s of METRO_RECTS){
+if(s.street) continue; // 街面桥矩形不下沉 (地形由 metroLiftY 抬到街面, 明坑只在洞内由建造件表达)
 const dd=rectDist(x,z,s.x0,s.z0,s.x1,s.z1);
 if(dd<METRO_FALL) dep=Math.max(dep,(s.d||METRO.d)*sstep(1-dd/METRO_FALL));
 }
 return dep;
+}
+// 坑底压平 (2026-11-15 用户实机"没有底下的地板/如下水道"): 矩形下沉内部原本随 urban 噪声起伏
+// ±0.4~0.7m ⇒ 站厅底板没法平贴、"地板"观感破碎。矩形内整体压到"当地地面−深度" (权威覆盖,
+// 在 metroDep 之后执行); 基准高用旗标反查一次并按矩形缓存。
+// 2026-11-15: street 矩形优先 —— 厅/带边界线上的点判给街面桥 (否则洞口一线 heightAt 跌进厅坑,
+// 载具跨线瞬间坠采样; 桥语义优先)。
+function metroFlatRect(x,z){
+if(!METRO||_mNoDep) return null;
+for(const s of METRO_RECTS){ if(s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+for(const s of METRO_RECTS){ if(!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+return null;
+}
+function metroFlatY(s){
+if(s._fy!==undefined) return s._fy;
+_mNoDep=true;
+const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
+_mNoDep=false;
+s._fy=base-(s.d||METRO.d);
+return s._fy;
+}
+// ── 隧道带桥式抬升 (2026-11-15 用户实机"地铁顶端和地面齐平, 却不能过坦克"): 旧隧道带是 −2.6 明坑,
+//   顶板再齐平也没用 —— vehicles 贴地走 heightAt (15-vehicles), 带内高度场仍是坑。正解=桥面注册同一
+//   套路 (BRIDGES 抬升分支): 街矩形内 heightAt 抬到"街面节点插值", 洞体 (底板/埋墙/贴地顶板) 全部
+//   改为 metroTunnel 纯建造件。节点=旗标期沿带逐段采样 (raw+广场碟+护环 pad = 真实街面剖面),
+//   缓存 s._ln。★ 节点保持**原始采样不做平滑** —— 带缘连续性要求"带内值=该 z 处带外真实地面",
+//   任何平滑都会在广场碟峰这类剖面急变处把节点抬离邻侧地面 (实测两轮平滑在碟峰留 0.42m 缘台阶);
+//   段间锯齿是顶板 (建造件) 的问题, 在 metroTunnel 内对顶板基准单独平滑+钳回原始最小值。
+//   ★ 每节点采矩形两条长边**两列**再横向线性混合 —— 单列 (轴心) 采样在广场碟上会留 0.35~0.46m 的
+//   带缘台阶 (碟心在带轴正上, 带缘碟浅, 单列把碟心剖面铺满全带宽 ⇒ 带缘比邻侧地面低 0.4m); 两列
+//   采样与带外邻点同源同位, 带缘连续性按构造成立, 带内横坡 ≤碟的 x 梯度 (~0.4m/6m=3.8°, 无感)。
+function metroLiftNodes(s){
+if(s._ln) return s._ln;
+const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
+const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
+// 节距 1.2m: 节点线性插值要重构护环 pad 的 2.2m sstep 裙坡与广场碟膝点 —— 旧 6m 节距在 pad 裙坡段
+// 实测带缘台阶 0.55m (裙坡夹在两节点之间被线性抄近路); 1.2m 节距插值误差 ≤0.08m。
+const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
+const segL=span/nS;
+_mNoDep=true;
+const ns=[]; // 每节点 [边1, 边2] 两列 (原始采样)
+for(let i=0;i<=nS;i++){
+const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
+if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]);
+else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]);
+}
+_mNoDep=false;
+s._ln={n:nS,segL,ns,alongZ};
+return s._ln;
+}
+function metroLiftY(s,x,z){
+const L=metroLiftNodes(s);
+const t=L.alongZ?(z-s.z0):(x-s.x0);
+const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
+const i=Math.floor(fi), f=fi-i;
+const i2=Math.min(L.n,i+1);
+const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
+const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f;
+const hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
+return lo+(hi-lo)*u;
 }
 function metroClear(x,z){ // 到最近地铁特征的带外距离 (hgridClear 用)
 if(!METRO) return 1e9;
@@ -170,8 +314,10 @@ return null;
 // 百团沟壑判定 (2026-09-12 立体化): 到最近沟壑折线的距离 + 坡道堑口遮罩 —— rawHeight/色带/OCC 共用
 function gullyDist(x,z){
 if(!LOESS||!LOESS.gullies) return 1e9;
+const G=LOESS.gullies;
+if(window.GULLY_OFF){ // 回退旗: 原全扫 (2026-11-13 性能批 A)
 let gd=1e9;
-for(const g of LOESS.gullies){
+for(const g of G){
 for(let i=0;i<g.length-1;i++){
 const d=segDist(x,z,g[i][0],g[i][1],g[i+1][0],g[i+1][1]);
 if(d<gd) gd=d;
@@ -179,11 +325,49 @@ if(d<gd) gd=d;
 }
 return gd;
 }
+// 桶化 (2026-11-13 性能批 A): 消费阈值最大 = W+2.2 (hgridClear 的 segDist-W 带内记账) ⇒ reach=W+14.6
+const arr=segQuery('gullies',x,z,()=>G,(LOESS.w||14)+14.6,'polys');
+let gd=1e9;
+if(arr===false){
+for(const g of G){
+for(let i=0;i<g.length-1;i++){
+const d=segDist(x,z,g[i][0],g[i][1],g[i+1][0],g[i+1][1]);
+if(d<gd) gd=d;
+}
+}
+}else if(arr) for(let q=0;q<arr.length;q++){
+const enc=arr[q], g=G[enc>>10], si=enc&1023;
+const d=segDist(x,z,g[si][0],g[si][1],g[si+1][0],g[si+1][1]);
+if(d<gd) gd=d;
+}
+return gd;
+}
 // 坡道堑口遮罩: 走廊内=1 (沟壁压平为缓坡), 走廊外 5m smoothstep 渐灭 —— 坦克/步兵/Bot 的合法过沟通道
 function rampMask(x,z){
 if(!LOESS||!LOESS.ramps) return 0;
+const RS=LOESS.ramps;
+if(window.RAMP_OFF){ // 回退旗: 原全扫 (2026-11-13 性能批 A)
 let m=0;
-for(const r of LOESS.ramps){
+for(const r of RS){
+const w=r.w||9;
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+const k=d<=w?1:clamp(1-(d-w)/5,0,1);
+if(k>m) m=k;
+}
+return m;
+}
+// 桶化 (2026-11-13 性能批 A): k>0 区 = d<w+5 ⇒ reach=maxW+5+12.4 (k>0 的坡道必在候选集)
+const arr=segQuery('lramps',x,z,()=>RS,()=>{ let mw=0; for(const r of RS){ const w=r.w||9; if(w>mw) mw=w; } return mw+5+12.4; },'osegs');
+let m=0;
+if(arr===false){
+for(const r of RS){
+const w=r.w||9;
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+const k=d<=w?1:clamp(1-(d-w)/5,0,1);
+if(k>m) m=k;
+}
+}else if(arr) for(let q=0;q<arr.length;q++){
+const r=RS[arr[q]];
 const w=r.w||9;
 const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
 const k=d<=w?1:clamp(1-(d-w)/5,0,1);
@@ -536,15 +720,24 @@ case 'delta':{
 let h=0.55*Math.sin(x*0.018)*Math.cos(z*0.02)
 + 0.35*Math.sin(x*0.06+2)*Math.sin(z*0.05+1) - 0.15;
 if(DELTA){
-// 田埂/堤路: +1.35m, 半宽 2.2m 可走走廊
+// 田埂/堤路: +1.35m, 半宽 2.2m 可走走廊 —— 桶化 (2026-11-13 性能批 A): 阈值最大 = 2.2+2.2 (hgridClear 记账) ⇒ reach=16.8
 if(DELTA.ridges){
+const rarr=segQuery('dridges',x,z,()=>DELTA.ridges,4.4+12.4,'osegs');
+if(rarr===false){
 for(const r of DELTA.ridges){
 const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
 if(d<2.2) h+=1.35*sstep(1-d/2.2);
 }
+}else if(rarr) for(let q=0;q<rarr.length;q++){
+const r=DELTA.ridges[rarr[q]];
+const d=segDist(x,z,r.x0,r.z0,r.x1,r.z1);
+if(d<2.2) h+=1.35*sstep(1-d/2.2);
 }
-// 圩田田面下沉 -0.65 (矩形内; 边缘 sstep 过渡, 不切田埂)
+}
+// 圩田田面下沉 -0.65 (矩形内; 边缘 sstep 过渡, 不切田埂) —— 桶化: 矩形含点时 bbox 距离 0 必在候选集, 边缘带 1.5 ⇒ reach=1.5+12.4
 if(DELTA.paddy){
+const parr=segQuery('dpaddy',x,z,()=>DELTA.paddy,1.5+12.4,'rects');
+if(parr===false){
 for(const p of DELTA.paddy){
 const mx=(x-p.x0)*(x-p.x1), mz=(z-p.z0)*(z-p.z1);
 if(mx<=0&&mz<=0){
@@ -552,9 +745,19 @@ const dEdge=Math.min(x-p.x0,p.x1-x,z-p.z0,p.z1-z);
 if(dEdge>1.5) h-=0.65; else h-=0.65*sstep(dEdge/1.5);
 }
 }
+}else if(parr) for(let q=0;q<parr.length;q++){
+const p=DELTA.paddy[parr[q]];
+const mx=(x-p.x0)*(x-p.x1), mz=(z-p.z0)*(z-p.z1);
+if(mx<=0&&mz<=0){
+const dEdge=Math.min(x-p.x0,p.x1-x,z-p.z0,p.z1-z);
+if(dEdge>1.5) h-=0.65; else h-=0.65*sstep(dEdge/1.5);
 }
-// 鱼塘/藕塘: 圆形浅塘下切 (不进激流)
+}
+}
+// 鱼塘/藕塘: 圆形浅塘下切 (不进激流) —— 桶化: 阈值 = r+1.2 (+hgridClear 2.2) ⇒ 外扩 r+3.4+12.4
 if(DELTA.ponds){
+const pdarr=segQuery('dponds',x,z,()=>DELTA.ponds,3.4+12.4,'circs');
+if(pdarr===false){
 for(const pd of DELTA.ponds){
 const d=Math.hypot(x-pd.x,z-pd.z);
 if(d<pd.r+1.2){
@@ -562,11 +765,28 @@ const k=clamp(1-d/(pd.r+1.2),0,1);
 h-=(pd.t==='lotus'?0.55:0.75)*sstep(k);
 }
 }
+}else if(pdarr) for(let q=0;q<pdarr.length;q++){
+const pd=DELTA.ponds[pdarr[q]];
+const d=Math.hypot(x-pd.x,z-pd.z);
+if(d<pd.r+1.2){
+const k=clamp(1-d/(pd.r+1.2),0,1);
+h-=(pd.t==='lotus'?0.55:0.75)*sstep(k);
 }
-// 支流汊港下切
+}
+}
+// 支流汊港下切 —— 桶化: 阈值最大 = w+2.2 (hgridClear 记账) ⇒ reach=w+14.6 (与 heightAt procgen/hgridClear 共用 'chans' 桶)
+{
+const carr=segQuery('chans',x,z,()=>DELTA_CHANS,(DELTA.w||3.4)+14.6,'polys');
+if(carr===false){
 for(const ch of DELTA_CHANS){
 for(let i=0;i<ch.length-1;i++){
 const d=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
+if(d<DELTA.w) h-=(DELTA.d||1.35)*sstep(1-d/DELTA.w);
+}
+}
+}else if(carr) for(let q=0;q<carr.length;q++){
+const enc=carr[q], ch=DELTA_CHANS[enc>>10], si=enc&1023;
+const d=segDist(x,z,ch[si][0],ch[si][1],ch[si+1][0],ch[si+1][1]);
 if(d<DELTA.w) h-=(DELTA.d||1.35)*sstep(1-d/DELTA.w);
 }
 }
@@ -589,16 +809,36 @@ const base=1.5*Math.sin(x*0.016+0.5)*Math.cos(z*0.019)
 let h=base;
 if(LOESS){
 // 塬面高台: 矩形内=台面高, 边距 14m smoothstep 过渡 (塬坡≈33°, sstep 局部≈44°: 慢爬区)
+// —— 桶化 (2026-11-13 性能批 A): m>0 区 = d<14, 阈值最大 = 14+2.2 (hgridClear 记账) ⇒ reach=28.6
 if(LOESS.terraces){
+const tarr=segQuery('lterr',x,z,()=>LOESS.terraces,14+2.2+12.4,'rects');
+if(tarr===false){
 for(const t2 of LOESS.terraces){
 const d=rectDist(x,z,t2.x0,t2.z0,t2.x1,t2.z1);
 const m=sstep(clamp(1-d/14,0,1));
 h=lerp(h,t2.h,m);
 }
+}else if(tarr) for(let q=0;q<tarr.length;q++){
+const t2=LOESS.terraces[tarr[q]];
+const d=rectDist(x,z,t2.x0,t2.z0,t2.x1,t2.z1);
+const m=sstep(clamp(1-d/14,0,1));
+h=lerp(h,t2.h,m);
 }
-// 黄土峁: 抛物面穹顶 (边缘坡度 2h/R≈20~29°, 坦克可爬; 顶部平缓宜布旗)
+}
+// 黄土峁: 抛物面穹顶 (边缘坡度 2h/R≈20~29°, 坦克可爬; 顶部平缓宜布旗) —— 桶化: 阈值 = r (+hgridClear 2.2) ⇒ 外扩 r+14.6
 if(LOESS.maos){
+const marr=segQuery('lmaos',x,z,()=>LOESS.maos,2.2+12.4,'circs');
+if(marr===false){
 for(const m2 of LOESS.maos){
+const d=Math.hypot(x-m2.x,z-m2.z);
+if(d<m2.r){
+const k=1-d/m2.r;
+const mh=base+m2.h*k*(2-k);
+if(mh>h) h=mh;
+}
+}
+}else if(marr) for(let q=0;q<marr.length;q++){
+const m2=LOESS.maos[marr[q]];
 const d=Math.hypot(x-m2.x,z-m2.z);
 if(d<m2.r){
 const k=1-d/m2.r;
@@ -618,9 +858,17 @@ else dep=(D-8)*(1-sstep((gd-TE)/(W-TE)));
 dep*=1-0.88*rampMask(x,z);
 h-=dep;
 }
-// 沟底渡台: 沟壑内的低台 (回填至绝对高, 台缘 12m 缓坡≈49°=天然渡口, 沟底库旗点立足台)
+// 沟底渡台: 沟壑内的低台 (回填至绝对高, 台缘 12m 缓坡≈49°=天然渡口, 沟底库旗点立足台) —— 桶化: reach=12+2.2+12.4
 if(LOESS.benches){
+const barr=segQuery('lbench',x,z,()=>LOESS.benches,12+2.2+12.4,'rects');
+if(barr===false){
 for(const b2 of LOESS.benches){
+const d=rectDist(x,z,b2.x0,b2.z0,b2.x1,b2.z1);
+const m=sstep(clamp(1-d/12,0,1));
+h=lerp(h,b2.h,m);
+}
+}else if(barr) for(let q=0;q<barr.length;q++){
+const b2=LOESS.benches[barr[q]];
 const d=rectDist(x,z,b2.x0,b2.z0,b2.x1,b2.z1);
 const m=sstep(clamp(1-d/12,0,1));
 h=lerp(h,b2.h,m);
@@ -645,7 +893,19 @@ const base=1.2*Math.sin(x*0.021)*Math.cos(z*0.024)
 if(ALPINE){
 let bd=1e9, bh=0;
 const R=ALPINE.ridges[0], RH=ALPINE.ridgeH;
+// 桶化 (2026-11-13 性能批 A): s>0 区 = bd<70, 阈值最大 = 70+2.2 (hgridClear 记账) ⇒ reach=84.6;
+// argmin 段必在候选集内 (bd<70 ⇒ 距离 ≤70 < 84.6-12.4), bd≥70 时新旧都给 s=0 ⇒ 等价
+const aarr=segQuery('aridge',x,z,()=>R,70+2.2+12.4,'poly1');
+if(aarr===false){
 for(let i=0;i<R.length-1;i++){
+const abx=R[i+1][0]-R[i][0], abz=R[i+1][1]-R[i][1];
+const t=clamp(((x-R[i][0])*abx+(z-R[i][1])*abz)/(abx*abx+abz*abz),0,1);
+const px=R[i][0]+abx*t, pz=R[i][1]+abz*t;
+const d=Math.hypot(x-px,z-pz);
+if(d<bd){ bd=d; bh=RH[i]+(RH[i+1]-RH[i])*t; }
+}
+}else if(aarr) for(let q=0;q<aarr.length;q++){
+const i=aarr[q];
 const abx=R[i+1][0]-R[i][0], abz=R[i+1][1]-R[i][1];
 const t=clamp(((x-R[i][0])*abx+(z-R[i][1])*abz)/(abx*abx+abz*abz),0,1);
 const px=R[i][0]+abx*t, pz=R[i][1]+abz*t;
@@ -743,7 +1003,12 @@ h=lerp(h,f.h,s);
 }
 }
 // 柏林地铁站厅/广场: 圆形+矩形下沉 (在 FLATS 之后叠加以保证旗点平台不被抬走)
-if(METRO) h-=metroDep(x,z);
+// 2026-11-15: 矩形内的压平/抬升权威覆盖拆到 padHeight 之后 (见下方第二段) —— 护环 pad 的 2.2m ramp
+//   会越过墙线渗进厅坑把坑底边缘抬回街面 (实测厅内高差 2.26m, 底板被埋), 矩形内必须以 metro 为权威;
+//   而 metroDep 明坑本体留在这 —— 0.4m 陡坎裙带要被护环 pad 盖回街面 (杀"侧墙旁的沟"), pad 必须后行。
+if(METRO){
+h-=metroDep(x,z);
+}
 // 诺曼底: 博卡日下沉土路 —— 土路低于两侧田野约 0.45m (战壕下切模板减半)
 // 城市组不适用 (斯大林格勒田地旗复用农田表, 但城区道路不参与下沉 → !CITY 门控, 2026-09-06)
 if(RURAL_FIELDS.length&&!CITY){
@@ -753,7 +1018,10 @@ const k=1-rd/4;
 h-=0.45*sstep(k);
 }
 }
-// 战壕: 沿线下凹
+// 战壕: 沿线下凹 —— 桶化 (2026-11-13 性能批 A): 阈值最大 = 2.4+2.2 (hgridClear 记账) ⇒ reach=17
+{
+const tarr=segQuery('trench',x,z,()=>TRENCHES,2.4+2.2+12.4,'tsegs');
+if(tarr===false){
 for(let i=0;i<TRENCHES.length;i++){
 const t=TRENCHES[i];
 const d=segDist(x,z,t.x1,t.z1,t.x2,t.z2);
@@ -762,11 +1030,28 @@ const k=1-d/2.4;
 h-=1.3*sstep(k);
 }
 }
+}else if(tarr) for(let q=0;q<tarr.length;q++){
+const t=TRENCHES[tarr[q]];
+const d=segDist(x,z,t.x1,t.z1,t.x2,t.z2);
+if(d<2.4){
+const k=1-d/2.4;
+h-=1.3*sstep(k);
+}
+}
+}
 	// 河道: 沿折线下切 (d>2 为深谷激流); ford 徒涉滩: 滩心下切按 8% 计 (2026-09-12 胡康巨桥改版)
+	// —— 桶化 (2026-11-13 性能批 A): 阈值最大 = w+2.2 (hgridClear 记账) ⇒ reach=w+14.6 (与 hgridClear 共用 'river' 桶)
 	if(RIVER){
 	let rd=1e9;
 	const P=RIVER.pts;
+	const rarr=segQuery('river',x,z,()=>P,(RIVER.w||1.9)+2.2+12.4,'poly1');
+	if(rarr===false){
 	for(let i=0;i<P.length-1;i++){
+	const d=segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]);
+	if(d<rd) rd=d;
+	}
+	}else if(rarr) for(let q=0;q<rarr.length;q++){
+	const i=rarr[q];
 	const d=segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1]);
 	if(d<rd) rd=d;
 	}
@@ -787,16 +1072,32 @@ h-=1.3*sstep(k);
 	if(DELTA_CHANS.length){
 	const cw=DELTA.w||3.4;
 	let cd=1e9;
+	// 桶化 (2026-11-13 性能批 A): 与 rawHeight delta/hgridClear 共用 'chans' 桶 (reach=w+14.6)
+	const carr=segQuery('chans',x,z,()=>DELTA_CHANS,(DELTA.w||3.4)+2.2+12.4,'polys');
+	if(carr===false){
 	for(const ch of DELTA_CHANS){
 	for(let i=0;i<ch.length-1;i++){
 	const dd=segDist(x,z,ch[i][0],ch[i][1],ch[i+1][0],ch[i+1][1]);
 	if(dd<cd) cd=dd;
 	}
 	}
+	}else if(carr) for(let q2=0;q2<carr.length;q2++){
+	const enc=carr[q2], ch=DELTA_CHANS[enc>>10], si=enc&1023;
+	const dd=segDist(x,z,ch[si][0],ch[si][1],ch[si+1][0],ch[si+1][1]);
+	if(dd<cd) cd=dd;
+	}
 	if(cd<cw) h-=1.2*sstep(1-cd/cw);
 	}
 	if(DELTA.ponds&&DELTA.ponds.length){
+	// 桶化 (2026-11-13 性能批 A): 与 rawHeight delta 共用 'dponds' 桶 (外扩 r+15.8)
+	const pdarr=segQuery('dponds',x,z,()=>DELTA.ponds,3.4+12.4,'circs');
+	if(pdarr===false){
 	for(const pd of DELTA.ponds){
+	const pdD=Math.hypot(x-pd.x,z-pd.z);
+	if(pdD<pd.r+1.2) h-=(pd.t==='lotus'?0.65:0.85)*sstep(1-pdD/(pd.r+1.2));
+	}
+	}else if(pdarr) for(let q2=0;q2<pdarr.length;q2++){
+	const pd=DELTA.ponds[pdarr[q2]];
 	const pdD=Math.hypot(x-pd.x,z-pd.z);
 	if(pdD<pd.r+1.2) h-=(pd.t==='lotus'?0.65:0.85)*sstep(1-pdD/(pd.r+1.2));
 	}
@@ -808,6 +1109,13 @@ h-=1.3*sstep(k);
 	//    壕沟不参与建筑选址, 战壕横穿地基会把楼面重新切成壕沟(实测: 塔拉瓦两处椰木掩体室内 1.3m 沟);
 	//    地基是"施工完成面", 压在天然下切之上。桥面抬升仍在其后(桥面优先)。
 	h=padHeight(x,z,h);
+	// 柏林地铁矩形权威覆盖 (2026-11-15 自 padHeight 后行): 厅矩形压到坑底平面 (metroFlatY —— 底板平贴,
+	//   坑缘 pad ramp 的渗入在此被否决), street 矩形 (隧道带) 抬到街面节点 (metroLiftY 桥式 —— 坦克/步兵
+	//   如过桥面碾过, 明坑只存在于洞内建造件)。桥面抬升仍在其后 (桥优先)。
+	if(METRO){
+	const mr=metroFlatRect(x,z);
+	if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr);
+	}
 	// 大桥桥面: 桥矩形区域内地面抬升至桥面高度 (两岸衔接, 步兵/车辆直接通行)
 	// noBridge: 采样真实河床/地面 (水面高度计算用, 避免把桥面当河床)
 	if(!noBridge&&BRIDGES.length){
@@ -820,11 +1128,25 @@ h-=1.3*sstep(k);
 // 特征集: FLATS 平台/地铁站厅下沉/博卡日土路/壕沟/河道/桥面抬升。格心带距>0 ⇒ 全格点各修正项恒为 0
 // (smoothstep 在特征半径外精确为 0), 快路直接返回 rawHeight。惰性首触填充, 无启动停顿。零插值保证逐位等价。
 const HGRID={res:3, N:Math.ceil((MAP_SIZE+120)/3), off:(MAP_SIZE+120)/2, data:null};
+// 2026-11-13 性能批 B: 缓存壳保持原样 (惰性首触填 Float32 场), 全扫计算体拆成 hgridClearFast (桶化候选集)
+// 与 hgridClearSlow (旧实现留档, 纯函数)。window.HGRID_OFF ⇒ 走 Slow (heightAt 侧已有同旗总门)。
+// 等价性: 各小表 (FLATS/PADS/METRO/TRENCHES/ridges/paddy/ponds/terraces/maos/benches/BRIDGES) 逐字保留;
+// 大折线表 (RIVER/CHANS/gullies/ALPINE) 与 roads (经 roadDist) 走桶化候选集 —— 候选集外条目的
+// dd = 距离-半径 > 带 PAD(2.2)+1 (reach=阈值+2.2+12.4 ⇒ 保found半径=阈值+1), 而 argmin 条目 dd≤PAD 时
+// 必在候选集内 ⇒ 新 m ≥ 旧 m 且旧 m≤PAD 时逐位相等 ⇒ 快路判定 (>0) 逐位一致 (唯一消费方 heightAt:734)。
 function hgridClear(iI,jJ){
 let d=HGRID.data;
-if(d===null){ d=HGRID.data=new Float32Array(HGRID.N*HGRID.N); d.fill(-1); }
+// 2026-11-13 性能批 B: 空格哨兵 -1→NaN (fill(-1)+cached>=0 的旧哨兵使**负值 clear 永不命中缓存** ——
+// 带内格每次 heightAt 都重走全扫, 正是剖析里 hgridClear 自耗时的主因)。唯一消费方 heightAt:734 只判
+// >0, fround 存储保号 ⇒ 缓存命中判定/快路决策逐位一致。
+if(d===null){ d=HGRID.data=new Float32Array(HGRID.N*HGRID.N); d.fill(NaN); }
 const idx=jJ*HGRID.N+iI, cached=d[idx];
-if(cached>=0) return cached;
+if(cached===cached) return cached;
+const clear=window.HGRID_OFF?hgridClearSlow(iI,jJ):hgridClearFast(iI,jJ);
+d[idx]=clear;
+return clear;
+}
+function hgridClearSlow(iI,jJ){
 const cx=iI*HGRID.res-HGRID.off+HGRID.res/2, cz=jJ*HGRID.res-HGRID.off+HGRID.res/2;
 const PAD=2.2; // 格半对角≈2.12 + 余量
 let m=1e9;
@@ -924,9 +1246,126 @@ const pv=Math.abs(dx*Math.cos(B.yaw)-dz*Math.sin(B.yaw))-B.w/2;
 const dd=(ax<=0&&pv<=0)?-1:Math.hypot(ax>0?ax:0,pv>0?pv:0);
 if(dd<m) m=dd;
 }
-const clear=m-PAD;
-d[idx]=clear;
-return clear;
+return m-PAD;
+}
+// 桶化实现 (2026-11-13 性能批 B): 与 Slow 同一 min 归约顺序; 仅 RIVER/CHANS/gullies/ALPINE 四段大折线
+// 扫描换成桶化候选集 (roads 经 roadDist 内部桶化), 其余小表逐字同 Slow。
+function hgridClearFast(iI,jJ){
+const cx=iI*HGRID.res-HGRID.off+HGRID.res/2, cz=jJ*HGRID.res-HGRID.off+HGRID.res/2;
+const PAD=2.2; // 格半对角≈2.12 + 余量
+let m=1e9;
+for(let k=0;k<FLATS.length;k++){ const f=FLATS[k]; const dd=Math.hypot(cx-f.x,cz-f.z)-f.r; if(dd<m) m=dd; }
+// 建筑地基平台 (同 FLATS 支): 平台矩形外廓 + ramp 之外才可走快路
+for(let k=0;k<PADS.length;k++){
+const p=PADS[k];
+const dx=cx-p.x, dz=cz-p.z;
+const lx=dx*p.cs-dz*p.sn, lz=dx*p.sn+dz*p.cs;
+const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
+const dd=(ax<=0&&az<=0)?-1:Math.hypot(ax>0?ax:0,az>0?az:0)-p.ramp;
+if(dd<m) m=dd;
+}
+if(METRO){ const dd=metroClear(cx,cz); if(dd<m) m=dd; }
+if(RURAL_FIELDS.length&&!CITY){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; } // !CITY 门控同 heightAt 下沉项
+for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
+if(RIVER){
+const P=RIVER.pts; let rd=1e9;
+const rarr=segQuery('river',cx,cz,()=>P,(RIVER.w||1.9)+2.2+12.4,'poly1');
+if(rarr===false){
+for(let k=0;k<P.length-1;k++){ const dd=segDist(cx,cz,P[k][0],P[k][1],P[k+1][0],P[k+1][1]); if(dd<rd) rd=dd; }
+}else if(rarr) for(let q=0;q<rarr.length;q++){
+const k=rarr[q];
+const dd=segDist(cx,cz,P[k][0],P[k][1],P[k+1][0],P[k+1][1]); if(dd<rd) rd=dd;
+}
+const dd=rd-RIVER.w; if(dd<m) m=dd;
+}
+// 支流汊港 (淞沪): rawHeight 内下切 —— 带外快路必须感知, 否则修正项漏算
+if(DELTA_CHANS.length){
+const cw=DELTA.w||3.4;
+const carr=segQuery('chans',cx,cz,()=>DELTA_CHANS,(DELTA.w||3.4)+2.2+12.4,'polys');
+if(carr===false){
+for(const ch of DELTA_CHANS){
+for(let k=0;k<ch.length-1;k++){
+const dd=segDist(cx,cz,ch[k][0],ch[k][1],ch[k+1][0],ch[k+1][1])-cw;
+if(dd<m) m=dd;
+}
+}
+}else if(carr) for(let q=0;q<carr.length;q++){
+const enc=carr[q], ch=DELTA_CHANS[enc>>10], si=enc&1023;
+const dd=segDist(cx,cz,ch[si][0],ch[si][1],ch[si+1][0],ch[si+1][1])-cw;
+if(dd<m) m=dd;
+}
+}
+// 田埂微抬 (淞沪 ridges): rawHeight 内, 带宽 2.2
+if(DELTA&&DELTA.ridges){
+for(const r of DELTA.ridges){
+const dd=segDist(cx,cz,r.x0,r.z0,r.x1,r.z1)-2.2;
+if(dd<m) m=dd;
+}
+}
+// 圩田下沉 (淞沪 paddy): rawHeight 内, 边缘过渡 1.5
+if(DELTA&&DELTA.paddy){
+for(const p of DELTA.paddy){
+const mx0=Math.abs(cx-p.x0), mx1=Math.abs(cx-p.x1), mz0=Math.abs(cz-p.z0), mz1=Math.abs(cz-p.z1);
+// 矩形外最近边距离近似
+let dd=1e9;
+if(cx<p.x0) dd=Math.min(dd,p.x0-cx); if(cx>p.x1) dd=Math.min(dd,cx-p.x1);
+if(cz<p.z0) dd=Math.min(dd,p.z0-cz); if(cz>p.z1) dd=Math.min(dd,cz-p.z1);
+if(cx>=p.x0&&cx<=p.x1&&cz>=p.z0&&cz<=p.z1) dd=-1; // 内部
+const e=dd-1.5; if(e<m) m=e;
+}
+}
+// 鱼塘/藕塘 (淞沪 ponds): rawHeight 内
+if(DELTA&&DELTA.ponds){
+for(const pd of DELTA.ponds){
+const dd=Math.hypot(cx-pd.x,cz-pd.z)-(pd.r+1.2);
+if(dd<m) m=dd;
+}
+}
+// 黄土深沟 (百团): rawHeight 内下切 —— 沟壑带 + 塬面/峁/渡台高程带 (2026-09-12 立体化)
+if(LOESS&&LOESS.gullies){
+const gw=(LOESS.w||14);
+const garr=segQuery('gullies',cx,cz,()=>LOESS.gullies,gw+14.6,'polys');
+if(garr===false){
+for(const g of LOESS.gullies){
+for(let k=0;k<g.length-1;k++){
+const dd=segDist(cx,cz,g[k][0],g[k][1],g[k+1][0],g[k+1][1])-gw;
+if(dd<m) m=dd;
+}
+}
+}else if(garr) for(let q=0;q<garr.length;q++){
+const enc=garr[q], g=LOESS.gullies[enc>>10], si=enc&1023;
+const dd=segDist(cx,cz,g[si][0],g[si][1],g[si+1][0],g[si+1][1])-gw;
+if(dd<m) m=dd;
+}
+if(LOESS.terraces) for(const t2 of LOESS.terraces){ const dd=rectDist(cx,cz,t2.x0,t2.z0,t2.x1,t2.z1)-14; if(dd<m) m=dd; }
+if(LOESS.maos) for(const m2 of LOESS.maos){ const dd=Math.hypot(cx-m2.x,cz-m2.z)-m2.r; if(dd<m) m=dd; }
+if(LOESS.benches) for(const b2 of LOESS.benches){ const dd=rectDist(cx,cz,b2.x0,b2.z0,b2.x1,b2.z1)-12; if(dd<m) m=dd; }
+}
+// 莫斯科主脊 (alpine): rawHeight 内 ridge 场 —— 带外距离 70m
+if(ALPINE){
+const R=ALPINE.ridges[0];
+const aarr=segQuery('aridge',cx,cz,()=>R,70+2.2+12.4,'poly1');
+if(aarr===false){
+for(let k=0;k<R.length-1;k++){
+const dd=segDist(cx,cz,R[k][0],R[k][1],R[k+1][0],R[k+1][1])-70;
+if(dd<m) m=dd;
+}
+}else if(aarr) for(let q=0;q<aarr.length;q++){
+const k=aarr[q];
+const dd=segDist(cx,cz,R[k][0],R[k][1],R[k+1][0],R[k+1][1])-70;
+if(dd<m) m=dd;
+}
+}
+// 桥面抬升带: 按桥矩形到格心的距离记账 (与 PADS 同口径)
+for(let k=0;k<BRIDGES.length;k++){
+const B=BRIDGES[k];
+const dx=cx-B.x, dz=cz-B.z;
+const ax=Math.abs(dx*Math.sin(B.yaw)+dz*Math.cos(B.yaw))-B.len/2;
+const pv=Math.abs(dx*Math.cos(B.yaw)-dz*Math.sin(B.yaw))-B.w/2;
+const dd=(ax<=0&&pv<=0)?-1:Math.hypot(ax>0?ax:0,pv>0?pv:0);
+if(dd<m) m=dd;
+}
+return m-PAD;
 }
 // 桥面高度: 取桥两端外侧的岸边地面高度 (惰性求值, 采样点在桥矩形外避免递归)
 // 多桥: 每座桥独立缓存 deckY (淞沪石拱桥×2 共用 BRIDGES 表)
@@ -1010,6 +1449,35 @@ const h=heightAt(x,z);
 if(!BRIDGES.length) return h;
 return h-bridgeDeckSinkAt(x,z,h);
 }
+// ── 渲染弦面采样单源 (★2026-11-15 弹坑批二轮修, 用户实报"弹坑只露几条黑弧") ──
+// 病根: 渲染地形 = TERRAIN_CHUNKS (4×4 chunk PlaneGeometry) 把 terrainRenderY 采在 ~2.8m 节点格上
+//   做**线性三角化**; 而解析 heightAt 在裙摆 ramp/壕沟/道路下切这些曲率大的特征上与"节点弦面"可差
+//   0.3~1.2m (弦线切过凹弧上方)。任何"贴地形"的覆盖件 (弹坑贴花) 若按解析 heightAt 取高, 在这些
+//   区段整片沉进渲染面之下 —— 只剩抬升的唇缘脊露出地面 = 实机截图的黑弧。
+// 修法: 这里按**同格同三角化**精确重算 GPU 实际画出来的表面高度:
+//   · 格距/原点: chunk 网格全局等距 (chunk 宽 = chunkSeg×dx, 整倍数 ⇒ 跨 chunk 无缝), 复算 chunkSeg
+//     与 dx 与构建段 (下方网格构建块) 逐式一致;
+//   · 三角化: three PlaneGeometry 固定对角 b(i,j+1)→d(i+1,j), 即局部 (u,v) 的 u+v=1 线 ——
+//     u+v≤1 用 (00,01,10) 三角平面, 否则用 (01,11,10) 平面, 与 GPU 逐点一致。
+// 消费: 05b-props crater() 顶点采样 (贴花类覆盖件的唯一正确取面); 语义仍是"渲染面" —— 物理判定
+//   (站立/碰撞/水态) 一律继续走 heightAt, 本函数不参与任何游戏逻辑。
+const TRS=(()=>{
+const totalW=MAP_SIZE+40;
+const seg=Math.max(64,Math.round(totalW/2.76));
+const cseg=Math.max(16,Math.round(seg/4));
+return {x0:-totalW/2,z0:-totalW/2,dx:totalW/(4*cseg),n:4*cseg};
+})();
+function terrainSurfaceY(x,z){
+let i=Math.floor((x-TRS.x0)/TRS.dx), j=Math.floor((z-TRS.z0)/TRS.dx);
+i=clamp(i,0,TRS.n-2); j=clamp(j,0,TRS.n-2);
+const u=clamp((x-TRS.x0)/TRS.dx-i,0,1), v=clamp((z-TRS.z0)/TRS.dx-j,0,1);
+const y00=terrainRenderY(TRS.x0+i*TRS.dx,TRS.z0+j*TRS.dx);
+const y10=terrainRenderY(TRS.x0+(i+1)*TRS.dx,TRS.z0+j*TRS.dx);
+const y01=terrainRenderY(TRS.x0+i*TRS.dx,TRS.z0+(j+1)*TRS.dx);
+const y11=terrainRenderY(TRS.x0+(i+1)*TRS.dx,TRS.z0+(j+1)*TRS.dx);
+if(u+v<=1) return y00+(y10-y00)*u+(y01-y00)*v;
+return (y01+y10-y11)+(y11-y01)*u+(y11-y10)*v;
+}
 // 徒涉滩强度场 (0..1, 1=滩心): RIVER.ford={x,z,r} 滩心全效, r..r+9 平滑过渡到 0
 // 消费: heightAt 下切缩放 / inRiverChannel 激流豁免 / inShallowChannel 涉水减速 (2026-09-12 胡康巨桥改版)
 function fordAt(x,z){
@@ -1031,6 +1499,14 @@ for(let i=0;i<P.length-1;i++){
 if(segDist(x,z,P[i][0],P[i][1],P[i+1][0],P[i+1][1])<RIVER.w*0.8) return true;
 }
 return false;
+}
+// 激流伤害/冲移/警告的水态门 (2026-11-15 用户实机"没下水也在激流中"): inRiverChannel 是**纯平面**判据
+// (水平带宽 w*0.8=20.8m), 胡康沟壁 73~79° —— 岸坡高出水面 4~6m 的干地也在带内 ⇒ 站岸上吃伤+冲移+警告。
+// 消费点 (20-player 伤害/减速+警告, 14-bots, 15-vehicles) 一律改用本门: 平面在河道带内 **且** 该点真被水
+// 淹没 (waterDepthAt>0.2 = 河床高程低于水面)。OCC 阻挡/免摔伤/布景排除仍用平面版 (那些语义关心的是
+// "河谷走廊"而不是"水", 且 OCC 是静态账没有高程语境 —— 契约: 水态单源 waterStateAt 同款口径)。
+function inRiverWater(x,z){
+return inRiverChannel(x,z)&&waterDepthAt(x,z)>0.2;
 }
 // 是否在浅水河道/支流/鱼塘/徒涉滩内 (涉水减速, 无激流伤害): 主河 d<=2 或支流汊港 或 鱼塘藕塘 或 ford 滩心
 // 2026-09-12: 主河已加深 d=2.8 → 激流; 浅水=支流+鱼塘+胡康徒涉滩
@@ -1083,8 +1559,24 @@ if(L2) TRENCHES.push({x1:L2[0],z1:L2[1],x2:L2[2],z2:L2[3]});
 function sineRoadZ(x){ return SINE_ROAD.amp*Math.sin(x*SINE_ROAD.freq); }
 function roadDist(x,z){
 let d=CAMPAIGN.sineRoad?Math.abs(z - sineRoadZ(x)):1e9;
+if(window.ROAD_OFF){ // 回退旗: 原全扫 (2026-11-13 性能批 A)
 for(const r of CAMPAIGN.roads){
 d=Math.min(d,segDist(x,z,r[0],r[1],r[2],r[3]));
+}
+return d;
+}
+// 桶化 (2026-11-13 性能批 A): 消费阈值最大 = 32 (mountain rawHeight 的 rim=sstep(clamp((rd-21)/11))
+// 在 rd≥32 饱和; 其余消费方 (色带<5/heightAt<4/布局≤10/OCC>20 布尔) 全部 ≤20 或布尔) ⇒ reach=32+2.2+12.4。
+// 正弦路 z=sineRoadZ(x) 是解析式, 不入桶。
+const arr=segQuery('roads',x,z,()=>CAMPAIGN.roads,32+2.2+12.4,'segs');
+if(arr===false){
+for(const r of CAMPAIGN.roads){
+d=Math.min(d,segDist(x,z,r[0],r[1],r[2],r[3]));
+}
+}else if(arr) for(let q=0;q<arr.length;q++){
+const r=CAMPAIGN.roads[arr[q]];
+const dd=segDist(x,z,r[0],r[1],r[2],r[3]);
+if(dd<d) d=dd;
 }
 return d;
 }
@@ -1498,40 +1990,78 @@ const nx=(px-c.x)/c.r, nz=(pz-c.z)/c.r;
 _rcR.t=t; _rcR.nx=nx; _rcR.ny=0; _rcR.nz=nz;
 return _rcR;
 }
-const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null, dirty:null, pend:null, _bA:null, _bB:null };
+// dirty=单一外接矩形 (兼容口径) / dirtyList=矩形簇表 (2026-11-11, NAV.refresh 簇级增量消费);
+// pend 旧字段已由 pendList 取代 (簇表), OCC.pend 不再写入
+const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null, dirty:null, dirtyList:null, pendList:null, _bA:null, _bB:null };
 // buildOccupancy 之外的**直接写** OCC.data 的登记入口 (registerDynCollider / killDynCollider /
 // 05-world killOne / 04b-fire occMarkFire 四处)。必要性: 差分的基线是"上一次重建出来的网格",
 // 而这些路径会直接改活体网格 —— 下一次重建按同一批表算出来的结果与改动后的活体逐格一致,
 // 差分自然为空, 但**导航烘的还是更早那一份** ⇒ 必须把"被直接写过的范围"另行补进脏矩形。
 // 超集无害 (多算几格), 漏登记才会留下陈旧寻路格。
+// ── 触点矩形簇 (2026-11-11 性能批) ──
+// 旧账: occTouch 把所有触点并进**一个**外接矩形 (OCC.pend)。火情多点开花 (两处火线相距几百米 /
+// 车辆火线+坠机火圈同时存在) 时, 外接矩形覆盖大半张图 ⇒ NAV.refresh 按"外接矩形面积>NN×4%"判全量
+// 重烘焙 (640 图 128~143ms, "每隔几秒定帧一次"的病根)。改为**小矩形簇表**: 新触点与已有簇相交或
+// 间距≤OCC_CLUSTER_MERGE (3 格, 簇间烘焙各自 ±10m 外扩足以覆盖交互) 就并簇, 远离的前线各留各的;
+// 簇数超 OCC_CLUSTER_CAP (12) 才退化成单一外接矩形 (旧行为兜底)。
+// 旧 OCC.pend (单一外接矩形) 字段由 OCC.pendList 簇表取代; 消费点 (buildOccupancy 末段并账) 直接读簇表。
+const OCC_CLUSTER_MERGE=3, OCC_CLUSTER_CAP=12;
+function occRectMerge(list,i0,j0,i1,j1){
+let m=0;
+while(m<list.length){
+const q=list[m];
+if(i0<=q.i1+OCC_CLUSTER_MERGE&&q.i0<=i1+OCC_CLUSTER_MERGE&&j0<=q.j1+OCC_CLUSTER_MERGE&&q.j0<=j1+OCC_CLUSTER_MERGE){
+// 并簇: 取外接矩形; 合并后的新矩形可能又与更早/更晚的簇相邻 ⇒ 从头重扫 (有合并才扫, 簇数≤CAP 代价可忽略)
+i0=Math.min(i0,q.i0); j0=Math.min(j0,q.j0); i1=Math.max(i1,q.i1); j1=Math.max(j1,q.j1);
+list.splice(m,1); m=0; continue;
+}
+m++;
+}
+list.push({i0,j0,i1,j1});
+if(list.length>OCC_CLUSTER_CAP){
+const q0=list[0];
+for(let k=1;k<list.length;k++){ const q=list[k];
+q0.i0=Math.min(q0.i0,q.i0); q0.j0=Math.min(q0.j0,q.j0); q0.i1=Math.max(q0.i1,q.i1); q0.j1=Math.max(q0.j1,q.j1); }
+list.length=1;
+}
+}
 function occTouch(x0,z0,x1,z1){
 const {res,N,off}=OCC;
 if(!N||!OCC.data) return;
 const i0=clamp(Math.floor((x0+off)/res),0,N-1), i1=clamp(Math.ceil((x1+off)/res),0,N-1);
 const j0=clamp(Math.floor((z0+off)/res),0,N-1), j1=clamp(Math.ceil((z1+off)/res),0,N-1);
-const p=OCC.pend||(OCC.pend={i0:1e9,j0:1e9,i1:-1,j1:-1});
-if(i0<p.i0)p.i0=i0; if(j0<p.j0)p.j0=j0; if(i1>p.i1)p.i1=i1; if(j1>p.j1)p.j1=j1;
+const p=OCC.pendList||(OCC.pendList=[]);
+occRectMerge(p,i0,j0,i1,j1);
 }
-// ── 占用网格差分 → 脏矩形 (2026-09-26 性能批) ──
+// ── 占用网格差分 → 脏矩形 (2026-09-26 性能批; 2026-11-11 簇化) ──
 // 事实: OCC.data **就是** NAV 网格的全部输入 (open/边烘焙的唯一判据是 occBlocked)。
 // 于是"本次重建相对上次改了哪些格"可以用一次逐格比对拿到, 而且这个判据是**充分的**:
 // 差分为空 ⇒ 导航输入逐格未变 ⇒ 重烘焙可以整段跳过 (证明式跳过, 不是估计)。
 // 旧版每次都全图重烘焙 (640 图 52 万次 occBlocked + 全图分量, 实测 128~143ms),
 // 而真实改动集清一色是局部的 (烧一格火/塌一堵墙/碾一段铁丝网/造一件工事)。
 // 比对成本 463k 次字节比较 ≈ 1ms, 换掉的是两个数量级的重建。
-function occDiffRect(prev,cur,N){
-if(!prev||prev.length!==cur.length) return {i0:0,j0:0,i1:N-1,j1:N-1};
-let r0=-1,r1=-1,c0=N,c1=-1;
+// ★簇化: 逐行收"改动列区间", 与 occTouch 同一合并器并簇 —— 多前线火情的差分不再并成一个大矩形
+//   (差分矩形是全量烘焙判定的另一路输入, 不簇化则簇化 occTouch 白搭)。
+function occDiffRects(prev,cur,N){
+if(!prev||prev.length!==cur.length) return [{i0:0,j0:0,i1:N-1,j1:N-1}];
+const list=[];
 for(let j=0;j<N;j++){
 const base=j*N;
-let hit=false;
+let c0=-1,c1=-1;
 for(let i=0;i<N;i++){
-if(prev[base+i]!==cur[base+i]){ if(i<c0)c0=i; if(i>c1)c1=i; hit=true; }
+if(prev[base+i]!==cur[base+i]){ if(c0<0)c0=i; c1=i; }
 }
-if(hit){ if(r0<0)r0=j; r1=j; }
+if(c0>=0) occRectMerge(list,c0,j,c1,j);
 }
-if(r0<0) return null; // 逐格一致: 导航输入未变
-return {i0:c0,j0:r0,i1:c1,j1:r1};
+return list.length?list:null; // 逐格一致: 导航输入未变
+}
+function occDiffRect(prev,cur,N){ // 兼容包装: 单一外接矩形 (原版语义; NAV 主链已走 occDiffRects)
+const l=occDiffRects(prev,cur,N);
+if(!l) return null;
+let r=l[0];
+for(let k=1;k<l.length;k++){ const q=l[k];
+r={i0:Math.min(r.i0,q.i0),j0:Math.min(r.j0,q.j0),i1:Math.max(r.i1,q.i1),j1:Math.max(r.j1,q.j1)}; }
+return r;
 }
 // ── 静态地貌层缓存 (2026-09-26 性能批) ──
 // 河道深谷带/深水海面/断崖岩脊/雪岭陡坡这四支"逐格全场扫描"的判据只读地图**静态几何**
@@ -1662,8 +2192,11 @@ if((x-cl.x)*(x-cl.x)+(z-cl.z)*(z-cl.z)<=cl.r*cl.r) d[j*N+i]=0;
 }
 }
 // 圆柱障碍(草垛/拒马等)最后标记, 保证寻路不会穿过实体
+// ★2026-11-15 锥体碰撞批: CYLS 现在也收录"高高在上"的建筑顶饰(教堂尖顶/国会穹顶壳/水塔锥顶)的
+//   分层近似圆柱 —— 这批带 noNav:1 标记, 烘焙跳过: 它们悬在高空, 地面上那格其实走得通 (国会穹顶
+//   正下方的圆厅/鼓座内部都是可走区)。本循环没有 BOXES 那道 maxY/minY 竖直闸, 必须靠标记豁免。
 for(const c of CYLS){
-if(c.r<0.28) continue;
+if(c.r<0.28||c.noNav) continue;
 const rr=c.r+pad;
 mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr);
 }
@@ -1783,18 +2316,25 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	//   取并集后: 只有 NAV.refresh 会清账, 中间无论重建几次, 改动集都不会漏。
 	OCC.data=d;
 {
-const dv=occDiffRect(prev,d,N), pd=OCC.pend, ac=OCC.dirty;
-OCC.pend=null;
+const dvs=occDiffRects(prev,d,N), pl=OCC.pendList, ac=OCC.dirty;
+OCC.pendList=null;
+// 簇账合并 (2026-11-11): 三路来源 (本次差分簇 / 直接写登记簇 / 上次遗留账) 并进一张簇表,
+// 近距簇由 occRectMerge 并簇; ★累积而非覆盖 (理由见上, 两次重建间无 refresh 时改动集不得漏)。
+// OCC.dirty 仍写单一外接矩形 (兼容既有读取口径), OCC.dirtyList 供 NAV.refresh 簇级增量烘焙。
+const list=[];
+if(dvs) for(let k=0;k<dvs.length;k++) occRectMerge(list,dvs[k].i0,dvs[k].j0,dvs[k].i1,dvs[k].j1);
+if(pl) for(let k=0;k<pl.length;k++) occRectMerge(list,pl[k].i0,pl[k].j0,pl[k].i1,pl[k].j1);
+if(ac&&ac.i0<=ac.i1&&ac.j0<=ac.j1) occRectMerge(list,ac.i0,ac.j0,ac.i1,ac.j1);
+OCC.dirtyList=list.length?list:null;
 let r=null;
-for(const q of [ac,dv,pd]){
-if(!q) continue;
+for(let k=0;k<list.length;k++){ const q=list[k];
 r=r?{i0:Math.min(r.i0,q.i0),j0:Math.min(r.j0,q.j0),i1:Math.max(r.i1,q.i1),j1:Math.max(r.j1,q.j1)}:{i0:q.i0,j0:q.j0,i1:q.i1,j1:q.j1};
 }
 OCC.dirty=r;
 }
 }
 // NAV 消费脏矩形后清账 (07-nav.refresh 末尾调用; 唯一的清账点)
-function occDirtyClear(){ OCC.dirty=null; }
+function occDirtyClear(){ OCC.dirty=null; OCC.dirtyList=null; }
 function registerDynCollider(cx,cy,cz,w,h,d){
 const b=addBoxCollider(cx,cy,cz,w,h,d); // RGRID 增量注册已由 addBoxCollider 统一处理
 if(OCC.data){

@@ -92,7 +92,7 @@ assert('舰艇五件套: 点火 + 燃烧账 + Bot 起火弃船 crewOut + beginDe
  &&s15d.includes('if(!this._burnCrewOut&&this.crewBot&&!this.playerDriven){ this._burnCrewOut=true; this.crewOut(); }')
  &&s15d.includes('if(this.burnSrc) removeFireSource(this.burnSrc);')
  &&s15d.includes('this.burning=false; this.burnBy=null; this._burnCrewOut=false;'));
-assert('14-bots: 坦克乘员起火即弃车 (dismountVehicle(true))',s14.includes('if(v.burning&&v.kind===\'tank\'){')&&s14.includes('this.dismountVehicle(true);'));
+assert('14-bots: 坦克乘员起火即弃车 (dismountVehicle(true); 2026-11-14 跟码: 加 dt>0 门 —— 冻结世界不弃车)',s14.includes('if(v.burning&&v.kind===\'tank\'&&dt>0){')&&s14.includes('this.dismountVehicle(true);'));
 assert('20-player: autoExitWreck 单源 (坦克落位 + 飞机跳伞两分支)',
  s20.includes('function autoExitWreck(v,bail){')&&s20.includes('p.chute=true; p.onGround=false;')
  &&s20.includes('showScorePop(\'座驾被毁 · 已自动脱离\')')&&s20.includes('showScorePop(\'跳伞! 自动脱离\')'));
@@ -130,9 +130,9 @@ const iCtrl=ih.indexOf('>操作方式<'), iLang=ih.indexOf('>语言 / Language<'
 assert('页签顺序: 操作方式→语言→性能与画面→游戏内容 (用户裁定)',iCtrl>=0&&iLang>iCtrl&&iPerf>iLang&&iGame>iPerf,
  `idx 控=${iCtrl} 语=${iLang} 性=${iPerf} 游=${iGame}`);
 const idx0=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('版本戳 20261111a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261109b 清零 (2026-11-10 海战移除批判据跟码)',
- [...idx0.matchAll(/20261111a/g)].length>=48&&idx0.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
+assert('版本戳 20261115b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261109b 清零 (2026-11-10 海战移除批判据跟码)',
+ [...idx0.matchAll(/20261115b/g)].length>=48&&idx0.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
  &&!idx0.includes('20261109b')&&!gf.includes('20261109b'));
 }
 

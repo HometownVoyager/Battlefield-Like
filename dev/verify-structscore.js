@@ -461,7 +461,7 @@ if(args.split(',').length<4) noArg.push(f+': damageStructures('+args+')');
 }
 }
 }
-ok(total===11,'T10 全库非定义处 damageStructures 调用点 = 11 (实测 '+total+') (2026-11-10 跟码: 三蟲抓① 飞机撞楼新调用点)');
+ok(total===14,'T10 全库非定义处 damageStructures 调用点 = 14 (实测 '+total+') (2026-11-10 跟码: 三蟲抓① 飞机撞楼新调用点; 2026-11-13 批跟码: 残骸坠落扫掠 ageT>0.6 结构伤害新调用点; 2026-11-14 批跟码: 撞楼残骸滑落结构伤害 + 收尾二次爆炸两新调用点)');
 ok(noArg.length===1&&/^js\/15-vehicles\.js: damageStructures\(p,5,130\)$/.test(noArg[0]),
  'T10 唯一无归属的调用点 = 反坦克雷 (雷没有 owner 字段), 其余 10 处都传了 owner/thrower (实测 '+JSON.stringify(noArg)+')');
 // 2026-09-27N 破坏机制批新增的第 10 处: 油桶连锁引爆 (05-world.barrelBlast) —— 它把触发者的归属透传下去,

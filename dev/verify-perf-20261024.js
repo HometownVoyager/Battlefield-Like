@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // dev/verify-perf-20261024.js —— 2026-10-24 性能排查批沙箱
 // 覆盖: ①阴影半频刷新 (q0/q1 30Hz, q2 逐帧) ②大灯真灯池 60/75m 滞回 + 夜间链零分配
-//       ③火源灯 85/110m 滞回 + 0.2s 扫描节流 ④Bot 手电 raycast 0.12s 节流 ⑤版本戳 20261111a
+//       ③火源灯 85/110m 滞回 + 0.2s 扫描节流 ④Bot 手电 raycast 0.12s 节流 ⑤版本戳 20261115b
 // 用法: node dev/verify-perf-20261024.js
 // 纪律: 载入清单从 index.html 动态解析 (逐条同序对账, 不写死数量)。
 // ─────────────────────────────────────────────
@@ -40,15 +40,16 @@ console.log('── T1 阴影半频刷新 (shadowRefreshTick) ──');
 {
 const s2=read('js/02-scene.js'), m24=read('js/24-main.js');
 ok(s2.includes('function shadowRefreshTick()'),'T1 02-scene 定义 shadowRefreshTick');
-ok(/f===0\|\|\(f===-1&&SETTINGS\.quality>=2\)\)\{ renderer\.shadowMap\.autoUpdate=true/.test(s2),'T1 跟随画质档(q2 或档0) 恢复逐帧 (autoUpdate=true) [2026-11-08 性能与画面批判据跟码]');
+ok(/if\(f===0\)\{ renderer\.shadowMap\.autoUpdate=true; return; \}/.test(s2),'T1 显式档0才恢复逐帧 (autoUpdate=true) [2026-11-11 性能批判据跟码: q2 默认不再逐帧]');
+ok(!/f===-1&&SETTINGS\.quality>=2/.test(s2),'T1 跟随画质档不再含 q2 逐帧旁支 [2026-11-11 判据跟码]');
 ok(/renderer\.shadowMap\.autoUpdate=false;\nrenderer\.shadowMap\.needsUpdate=\(_shadowParity===0\)&&sun\.castShadow/.test(s2.replace(/\r/g,'')),'T1 q0/q1 mod-N 帧置 needsUpdate 且夜间 (sun.castShadow=false) 跳过 [2026-11-08 判据跟码]');
 ok(s2.includes('renderer.shadowMap.needsUpdate=true; // 换档重灌'),'T1 applyQuality 换档后立即补一帧');
 ok((m24.match(/shadowRefreshTick\(\);/g)||[]).length===2,'T1 24-main 恰两处调用 (冻结分支+战斗分支, 均在 render 前)');
-// 行为: 诺曼底 (晴) 引导 → q1 奇偶翻转 / q2 恢复逐帧
+// 行为: 诺曼底 (晴) 引导 → q1 奇偶翻转 / q2 默认也半频 (2026-11-11 性能批: 阴影 pass=第二遍全量绘制)
 const ctx=boot(0);
 ok(startGame(ctx)===true,'T1 #0 startGame');
 vm.runInContext(`
-var __t1a,__t1b,__t1c,__t1d;
+var __t1a,__t1b,__t1c,__t1d,__t1e;
 SETTINGS.quality=1;
 shadowRefreshTick();
 __t1a={au:renderer.shadowMap.autoUpdate,nu:renderer.shadowMap.needsUpdate,cs:sun.castShadow};
@@ -61,13 +62,21 @@ __t1d={nu:renderer.shadowMap.needsUpdate};
 sun.castShadow=true;
 SETTINGS.quality=2;
 shadowRefreshTick();
-__t1c={au:renderer.shadowMap.autoUpdate};
+__t1c={au:renderer.shadowMap.autoUpdate,nu:renderer.shadowMap.needsUpdate};
+shadowRefreshTick();
+__t1c2={nu:renderer.shadowMap.needsUpdate};
+SETTINGS.shadowFreq=0;
+shadowRefreshTick();
+__t1e={au:renderer.shadowMap.autoUpdate};
+SETTINGS.shadowFreq=-1;
 `,ctx);
-const t1a=vm.runInContext('__t1a',ctx),t1b=vm.runInContext('__t1b',ctx),t1c=vm.runInContext('__t1c',ctx),t1d=vm.runInContext('__t1d',ctx);
+const t1a=vm.runInContext('__t1a',ctx),t1b=vm.runInContext('__t1b',ctx),t1c=vm.runInContext('__t1c',ctx),t1c2=vm.runInContext('__t1c2',ctx),t1d=vm.runInContext('__t1d',ctx),t1e=vm.runInContext('__t1e',ctx);
 ok(t1a.au===false&&t1a.nu===false,'T1 行为: q1 首帧 autoUpdate=false, needsUpdate=false (mod2 计数器首帧不落) [2026-11-08 判据跟码]');
 ok(t1b.nu===t1a.cs,'T1 行为: q1 次帧 needsUpdate 跟随 sun.castShadow('+t1a.cs+') (半频=每2帧1次) [2026-11-08 判据跟码]');
 ok(t1d.nu===false,'T1 行为: 漫射/夜间 (sun.castShadow=false) 本应落帧的 mod2 位也不置 needsUpdate ⇒ 阴影 pass 跳过 [2026-11-08 判据跟码]');
-ok(t1c.au===true,'T1 行为: q2 恢复 autoUpdate=true (逐帧)');
+ok(t1c.au===false,'T1 行为: q2 (shadowFreq=-1 默认) 也走半频: autoUpdate=false [2026-11-11 判据跟码]');
+ok(((t1c.nu===true)?1:0)+((t1c2.nu===true)?1:0)===1,'T1 行为: q2 连续两 tick 恰落帧一次 (mod2 半频, 奇偶无关判据) [2026-11-11 判据跟码]');
+ok(t1e.au===true,'T1 行为: 显式 shadowFreq=0 仍可逐帧 (档位旋钮保留) [2026-11-11 判据跟码]');
 }
 
 console.log('── T2 大灯真灯池滞回 + 夜间链零分配 ──');
@@ -166,12 +175,12 @@ ok(r.vis===true&&r.occ===true,'T4 行为: 光锥可见 + occD 缓存在位');
 }
 }
 
-console.log('── T5 版本戳 20261111a ──');
+console.log('── T5 版本戳 20261115b ──');
 {
 const stamps=[...new Set([...html.matchAll(/<script src="js\/[^"?]+\?v=([^"]+)"/g)].map(m=>m[1]))];
-ok(stamps.length===1&&stamps[0]==='20261111a','T5 全部 js 引用同一版本戳 '+stamps.join(','));
+ok(stamps.length===1&&stamps[0]==='20261115b','T5 全部 js 引用同一版本戳 '+stamps.join(','));
 const gf=read('dev/_game_files.txt');
-ok(!gf.includes('v=20260928h')&&gf.includes('v=20261111a'),'T5 dev/_game_files.txt 同步升戳');
+ok(!gf.includes('v=20260928h')&&gf.includes('v=20261115b'),'T5 dev/_game_files.txt 同步升戳');
 }
 
 console.log(FAILS?('\n✗ verify-perf-20261024: '+FAILS+' 项失败'):'\n✓ verify-perf-20261024: 全部通过 ('+PASS+' 项)');

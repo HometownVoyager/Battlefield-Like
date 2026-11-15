@@ -46,12 +46,22 @@ const I18N_EN={
 '鼠标灵敏度':'Mouse Sensitivity','音量':'Volume','触控按键大小':'Touch Button Size',
 '语言 / Language':'LANGUAGE / 语言','中文':'中文','English':'English',
 '游戏内容':'GAMEPLAY','游戏内容设置':'GAMEPLAY SETTINGS','游 戏 内 容 设 置':'GAMEPLAY SETTINGS','🎮 游戏内容设置...':'🎮 Gameplay Settings...','地图全图信息':'ALL MAP INTEL','手雷预瞄地图标记':'NADE PREVIEW MARKERS',
+// 2026-11-14 批: 手雷对友方造成伤害 (爆炸友伤总开关)
+'手雷对友方造成伤害':'FRIENDLY EXPLOSION DAMAGE',
+'开启（默认）＝手雷爆炸伤双方、友方手雷近距离告警；关闭后手雷、坦克炮弹、火箭弹、航弹、迫击炮弹、AT 炸药、巡飞弹等有归属的爆炸一律不伤友军步兵与载具（玩家与 Bot 同规），友方手雷告警一并停用。无主爆炸（地雷、油桶）不受此开关影响。':'ON (default) = grenades wound both teams and nearby friendly grenades trigger a warning; when off, owned explosives (grenades, tank shells, rockets, bombs, mortar rounds, AT charges, loiter munitions) never wound friendly infantry or vehicles — player and bots alike — and the friendly-grenade warning is disabled too. Unowned blasts (mines, fuel barrels) are unaffected.',
 '实验模式':'EXPERIMENTAL',
 // 2026-11-09 四项批: 游戏内容设置两新开关 + 载具起火警告 + 自动脱离弹字
 '游戏中显示详细操作':'SHOW IN-GAME CONTROL TIPS','自动脱离载具':'AUTO-EXIT DESTROYED VEHICLE',
 '关闭后不再显示多键操作明细（如“左键 开火 · C 换炮位”）、顶部模式说明与部署页键位提示；保留“F 进入坦克”这类单键交互入口提示与血量/战报等状态信息。改档即时生效。':'When off, hides multi-key control breakdowns (e.g. "LMB Fire · C Switch Gun · F Exit"), the top mode-explainer line and deploy-screen key tips; single-key interaction prompts like "F Enter Tank" and status info (HP/killfeed) are kept. Applies immediately.',
 '开启后己方载具被击毁的瞬间自动下车脱离（飞机=跳伞），代替与载具一同阵亡；舰艇弃船机制不受影响。默认关。':'When on, you automatically bail out of your vehicle the instant it is destroyed (planes = parachute) instead of dying with it; naval abandon-ship is unaffected. Off by default.',
+// 2026-11-12 批: 动态换弹速度 + 死亡时视角 (killcam) 两设置
+'动态换弹速度':'DYNAMIC RELOAD','死亡时视角':'DEATH CAMERA','自己':'SELF','击杀者':'KILLER','☠ 击杀者视角':'☠ KILLER CAM',
+'开启后实际换弹耗时=预设耗时×(已消耗弹量÷弹匣容量)：越接近满弹匣换得越快，打空=原时长；玩家与 Bot 同规。默认关。':'When on, actual reload time = preset × (rounds spent ÷ magazine size): the fuller the magazine, the faster the reload; empty = preset time. Applies to player and bots alike. Off by default.',
+'击杀者 = 被击杀后先保持原死亡镜头约半秒，随后切入击杀者的第三人称观战镜头（带滤镜与角标，纯观察不附身；自杀与环境死亡不切换），之后照常进入重部署页面。默认自己。':'Killer: after death, hold the current death view for ~0.5s, then cut to a filtered third-person camera following your killer (observer only, not possession; suicides and environmental deaths keep the old view), then the redeploy screen opens as usual. Default: Self.',
 '⚠ 载具起火! 即将损毁 —— 快脱离!':'⚠ VEHICLE ON FIRE! Breaking up — bail out!',
+// 2026-11-13 批: 巡飞弹离膛武装 (哑弹撞毁提示条) + TV OSD 加速标
+'⚠ 巡飞弹未武装即撞毁 (离膛 {0}m 内不引爆)':'⚠ Loiter munition crushed unarmed (no detonation within {0}m of launch)',
+'加速':'BOOST',
 '座驾被毁 · 已自动脱离':'Vehicle destroyed · auto-exited',
 '跳伞! 自动脱离':'Bail out! Auto-exit',
 // 2026-09-20N 补漏 (wreck-art 的跨图审计在 EN 模式下抓到): 22-hud:1014 用
@@ -121,6 +131,7 @@ const I18N_EN={
 '比夷陵之火还要好':'Better than the Fire of Yiling','在一局游戏中破坏掉全部可以破坏掉的东西（包括可燃物）':'Destroy everything destructible (burnables included) in a single match.',
 '自刎归天':'Death by Own Grenade','自己被自己的手雷炸死一次':'Get killed by your own grenade.',
 '狗熊岭之王':'King of Bear Ridge','在一局游戏中令全部的树倒下':'Bring down every tree in a single match.',
+'利库德集团最好的飞行员':'The Likud\'s Finest Pilot','驾驶飞机撞上建筑而死亡一次':'Die once by crashing the plane you are piloting into a building.',
 '票':'tickets','在场':'in field','得分':'SCORE',
 '机体 {0}%':'Airframe {0}%','装甲 {0}%':'Armor {0}%','高度 {0}m':'Alt {0}m','就绪':'READY','全自动':'Full-auto',
 '穿甲弹':'AP shell','高爆弹':'HE shell','导弹视角':'Missile cam',
@@ -392,6 +403,53 @@ const I18N_EN={
 '触屏操作':'TOUCH CONTROLS',
 '左侧虚拟摇杆移动, 右侧滑动转视角; 屏幕按钮对应开火/瞄准/跳跃/蹲/趴/换弹/手雷/绷带/互动/切枪等, 长按疾跑键锁定疾跑。':'Left stick moves, right side swipes to aim; on-screen buttons cover fire/aim/jump/crouch/prone/reload/grenade/bandage/use/swap; hold sprint to lock it.',
 '触控按键大小可在 游戏设置 中调整。':'Touch button size is adjustable in Settings.',
+// ── 2026-11-12 排版批: 游戏说明键位表化 —— 旧整行长串拆成「按键帽→作用」行与要点列表, 词条随之拆分 ──
+// 键位帽 (data-i18n 裸键): 拉丁键名恒等翻 / 中文键名意译
+'WASD':'WASD','Shift':'Shift','空格':'Space','左键':'LMB','右键':'RMB','1 / 2':'1 / 2','R':'R','N':'N','C':'C','Z':'Z','X':'X','Q / E':'Q / E','U':'U',
+'G':'G','3':'3','4':'4','6':'6','H':'H','B':'B','5':'5','F':'F','T':'T','Y':'Y','M':'M','Tab':'Tab','F1':'F1','Esc':'Esc',
+'W / S':'W / S','A / D':'A / D','鼠标':'Mouse','右键 / B':'RMB / B','滚轮':'Wheel','E':'E','左键点地图':'LMB on map','中键拖动':'MMB drag',
+'RT':'RT','LT':'LT','A':'A','LB':'LB','RB':'RB','LS 按下':'LS click','RS 按下':'RS click','Back':'Back','Start':'Start',
+'十字键 上':'D-pad ↑','十字键 下':'D-pad ↓','十字键 左':'D-pad ←','十字键 右':'D-pad →','坦克':'Tank','飞机':'Plane',
+// 基础操作
+'移动':'Move','疾跑(机瞄时为屏息稳枪)':'Sprint (hold breath while aiming)','跳跃':'Jump','机瞄/瞄准镜':'Iron sights / scope','射击':'Fire',
+'装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断)':'Reload (<b>X</b> cancels the bar; interrupted by a single hit over 25 dmg or by starting another action)',
+'切换武器':'Weapon slots','卧倒':'Prone','在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消)':'Brace on cover (big accuracy boost; during a cast/raised grenade/reload it cancels instead)',
+'左右侧身探头':'Lean left / right','第三人称: 开/关 (步行可用; 开镜或上车时自动回到第一人称)':'Third person: ON/OFF (on foot; ADS or vehicles return to first person)',
+// 投掷物与医疗
+'手雷(可按住烹饪引信, 举雷中按<b>X</b>收回; 单次受创>25或改做其他动作会打断)':'Grenade (hold to cook; <b>X</b> stows it back; interrupted by a single hit over 25 dmg or by another action)',
+'反坦克雷':'AT mine','烟雾弹':'Smoke','燃烧弹':'Incendiary','绷带包扎(+45生命, 单次受创>25会打断)':'Bandage (+45 HP; interrupted by a single hit over 25 dmg)',
+// 载具与固定武器
+'驾驶':'Drive','主炮(圆环为落点)':'Main gun (ring = impact point)','下车':'Exit','坦克车速够快可撞塌砖墙。':'A tank at speed can smash brick walls.',
+'油门':'Throttle','压坡转向':'Bank turn','拉杆':'Stick','机枪':'MG','投弹':'Bombs','跳伞':'Bail out',
+// 兵种与技能
+'建造; 靠近自己工事=读条拆除(退点)':'Build; near your own piece = timed demolish (refunds pts)','切换工事(沙袋墙/铁丝网/拒马/MG42/医疗箱)':'Pick build piece (sandbags/wire/hedgehog/MG42/medkit)',
+'架设/回收迫击炮':'Deploy/recover mortar','操作架好的迫击炮(全员可用)':'Use a deployed mortar (anyone)',
+'<b>实验模式</b>(游戏设置中开关): 反坦克兵替换为非史实的 <b>巡飞弹兵</b> — 火箭筒式发射器射出小型巡飞弹, 弹上TV制导, 触碰目标/地面即爆, 额外携带燃烧弹。':'<b>EXPERIMENTAL</b> (toggle in Settings): Anti-Tank becomes the unhistorical <b>Loiter Munition Troop</b> — a rocket-tube launcher firing a small loitering munition with onboard TV guidance; detonates on contact with target or ground, plus incendiaries.',
+'切换第一/第三视角':'Toggle 1st/3rd person','自爆':'Detonate','加速冲刺(松开回落巡航)':'Dash (release to cruise)','开镜放大(按住强制第一人称)':'Zoom (hold: forced 1st-person)',
+'<b>调试模式</b>(原「观战模式」; 实验模式下, 在兵种卡「巡飞弹兵」上再点一次开关): 免伤 · 不被索敌 · 弹药无限, 本局不计入历史记录(只在兵种卡上点开开关又取消的不算)。战斗中开启会先确认, 且<b>下一次部署才生效</b>(关闭立即生效)。':'<b>DEBUG MODE</b> (formerly "Spectator Mode"; Experimental on: click the "Loiter Munition Troop" class card a second time): invulnerable · undetected · infinite ammo, and the match is not recorded (merely flicking the switch on and off does not count). Enabling it mid-battle asks for confirmation and <b>takes effect on your next deploy</b> (disabling is immediate).',
+'<b>双击空格</b>悬停飞行 / <b>H</b> 气动飞行(空格加速), 两种飞行中<b>左键都能开火 · 右键都能瞄准</b>':'<b>Double-tap Space</b> to hover / <b>H</b> to glide (Space to dash) — <b>LMB fires · RMB aims in both flight modes</b>',
+'副武器位换成 <b>观战连狙</b>(全自动·4x, 可开镜)':'the secondary slot becomes the <b>Spectator Auto Sniper</b> (full-auto · 4x, scoped)',
+'投掷物<b>四种全配</b>(<b>G</b> 手雷 · <b>3</b> AT雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹, 持雷有弹道预演, 自动回满)':'<b>all four throwables are stocked</b> (<b>G</b> grenade · <b>3</b> AT mine · <b>4</b> smoke · <b>6</b> incendiary — hold to see the throw arc preview, auto-refilled)',
+'操控巡飞弹时按 <b>T</b>: 弹体立刻消失并把自身传送到弹体位置':'while guiding a loiter round, <b>T</b> discards it and teleports you to its position',
+'观战者<b>不指挥小队</b>(T/Y 关闭); 出生列表里的坦克/战机/舰艇/两栖车<b>一律标注「观战不可征用」</b>(想开艇请走近按 <b>F</b> 上艇)':'Spectators give <b>no squad orders</b> (T/Y disabled), and every real vehicle in the spawn list (tank/aircraft/boat/amphibious) is marked <b>"unavailable to spectators"</b> (to take a boat, walk up to it and press <b>F</b>)',
+'<b>F</b> = 按需召唤<b>幽灵坦克</b>(全白 · 免伤 · 弹丸穿透 · 可对双方开火, 开场不预置)':'<b>F</b> summons the all-white <b>Ghost Tank</b> on demand (invulnerable · shells pass through · hits both sides · nothing is pre-placed at match start)',
+'观战工具: <b>Q</b> 附身准星Bot(只读借眼, <b>E</b> 脱离还原观察位) · <b>J</b> 信息层(名字/队属/血量/交火指向线) · <b>K</b> 时停(冻结整个战场与游戏时钟; 你本人·正在开的座驾·自己打出的弹丸都不受影响 —— 可以走到任何位置慢慢看, 也可以定点打一发再按 K 把它停在空中; 顶部栏常驻「⏸ 时停中」读数, 回主菜单或战局结束自动解除) · <b>L</b> 战术手电(步行)/载具大灯(含幽灵坦克, 夜晚照明)':'Spectator tools: <b>Q</b> possess the bot in your crosshair (read-only borrowed eyes, <b>E</b> detach &amp; restore your vantage point) · <b>J</b> info layer (name/faction/health/targeting lines) · <b>K</b> time-stop (freezes the whole battle and the game clock; you, the vehicle you are driving and your own rounds keep moving — walk anywhere and study it, or fire a round and press K to hang it in mid-air; a permanent "⏸ Time stopped" readout sits in the top bar, and leaving to the main menu or ending the match clears it) · <b>L</b> tactical flashlight (on foot) / vehicle headlights (Ghost Tank included, for night lighting)',
+'<b>观战模式</b>(票数归零后, 重部署页的「部署」按钮会变成「观战」; 点它进入): 类 MC 旁观者 —— 无碰撞 · 无法攻击 · 无有效交互 · 创造式飞行(<b>滚轮</b>调速度, <b>Space</b> 升 / <b>Shift</b> 降)。':'<b>SPECTATOR MODE</b> (when your tickets hit zero, the "Deploy" button on the redeploy page turns into "Spectate"; press it): an MC-like spectator — no collision · cannot attack · no interactions · creative flight (<b>wheel</b> adjusts speed, <b>Space</b> up / <b>Shift</b> down).',
+'<b>左键</b>附身准星下的 Bot 借他的视角看战局(只读) · <b>Q/E</b> 轮换附身目标 · <b>右键</b>脱离回自由飞行 · <b>Esc</b> 呼出部署页':'<b>LMB</b> possess the bot under your crosshair to watch through their eyes (read-only) · <b>Q/E</b> cycle possess targets · <b>RMB</b> detach back to free flight · <b>Esc</b> opens the deploy page',
+'战局在观战中结束时按<b>开局阵营</b>结算胜利/战败并<b>计入历史记录</b>(与调试模式的区别: 本模式不能干涉战局)':'When the match ends while spectating, victory/defeat is settled by your <b>starting faction</b> and <b>counted into history</b> (difference from debug mode: this mode cannot interfere with the battle)',
+// 小队与指挥
+'标记进攻位置':'Attack marker','令小队跟随':'Squad follow','战场大地图':'Tactical map','战场记分板':'Scoreboard','显示/隐藏战斗HUD':'Toggle combat HUD',
+// 指挥官兵种
+'指挥地图 (步行时右键开/关, 手持通讯仪)':'Command map (RMB on foot to toggle, holding the radio)',
+'切换当前高亮的可指挥单位(其余单位在右侧列表里压缩成细条)':'Cycle the highlighted commandable unit (the rest collapse into thin bars in the right-side list)',
+'令它到光标处防守':'Order it to defend at the cursor','令它进攻光标处(飞机=向该点投弹)':'Order it to attack the cursor (planes bomb that point)',
+'恢复自由推进':'Resume free advance','集火该点(半径内己方火力 14 秒内优先打这里)':'Focus fire there (friendly fire within the radius prioritizes this point for 14s)',
+'平移视图':'Pan the view','退出指挥态':'Exit command mode','开图期间人物定身, 关图才恢复行动。':'Your body stands frozen while the map is open and resumes when you close it.',
+// 暂停与结算 / 手柄操作
+'暂停(战斗/移动/天气全部冻结, 再按 Esc 或点按钮继续)':'Pause (combat/movement/weather all freeze; Esc again or the button resumes)','一局结束后战场活动同样全部停止。':'After the match ends, all battlefield activity stops.',
+'插上/连接手柄即自动生效 (Xbox 标准布局); 手柄只在战斗中接管, 菜单与部署界面仍用鼠标/触屏, 拔线或回到菜单会自动松开全部按住的键。':'Plug in / connect a gamepad and it works automatically (Xbox standard layout); the gamepad only takes over in battle — menus and deploy screens stay on mouse/touch — and unplugging or returning to the menu releases every held key.',
+'移动(推满外圈=疾跑)':'Move (push to the outer ring = sprint)','视角/巡飞弹制导':'Camera / loiter guidance','左摇杆':'Left stick','右摇杆':'Right stick','疾跑(按住)':'Sprint (hold)','手雷(按住烹饪)':'Grenade (hold to cook)',
+'战况(按住)':'Situation (hold)','暂停':'Pause','绷带(H)':'Bandage (H)','趴(Z)':'Prone (Z)','烟雾(4) / 工程兵选工事(5)':'Smoke (4) / Engineer pick build piece (5)','AT雷(3)':'AT mine (3)',
 // ── 2026-09-21 批次 A (sea-hud) ──
 // ① 三人车组 (契约B): 载具血条上的乘员存活计数 + 记分板空名乘员的兜底称呼
 '乘员 ×{0}':'Crew ×{0}','乘员':'Crew',

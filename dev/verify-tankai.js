@@ -85,24 +85,35 @@ shells.length=0; gunEvents=[];
 try{ SMOKES.length=0; }catch(e){}
 try{ matchOver=false; }catch(e){}
 }
-// 车道搜索: 长 L 直线, 两端 OCC 空 + 双向通视 (与 tankPerceive 同一套口径: 眼高 1.9 → 目标 +1.3) + 沿线可行驶
-function lane(L){
-let best=null;
-for(let x=-280;x<=280;x+=10)for(let z=-280;z<=280;z+=10)for(let k=0;k<8;k++){
-const a=k/8*TAU, dx=Math.sin(a), dz=Math.cos(a);
-const ax=x-dx*L/2, az=z-dz*L/2, bx=x+dx*L/2, bz=z+dz*L/2;
-const lim=MAP_SIZE/2-6;
-if(Math.max(Math.abs(ax),Math.abs(az),Math.abs(bx),Math.abs(bz))>lim) continue;
-if(occBlocked(ax,az)||occBlocked(bx,bz)) continue;
-const ha=heightAt(ax,az), hb=heightAt(bx,bz);
-if(Math.abs(ha-hb)>9) continue;
-let ok=true, prev=ha;
-for(let s=10;s<L;s+=10){
-const px=ax+dx*s, pz=az+dz*s, h=heightAt(px,pz);
-if(occBlocked(px,pz)||Math.abs(h-prev)>5.5){ ok=false; break; }
-prev=h;
-}
-if(!ok) continue;
+	// 车道搜索: 长 L 直线, 两端 OCC 空 + 双向通视 (与 tankPerceive 同一套口径: 眼高 1.9 → 目标 +1.3) + 沿线可行驶
+	// 2026-11-14 缩图批 640→360: 图幅缩小后布景密度相对升高, 旧 10m 中线单线采样会漏掉车道中段的占用格/树
+	//   (实测: ③ 推挤车被推入住用格 / ④ 敌车落树后不可见) —— 改中线+±1.3m 平行线逐 5m 采样 (车体宽 2.6m 口径);
+	//   车道长度判据经实测在 360 图仍可放下 200m (车道 (-170,40)→(30,40)), 长度语义不变。
+	function lane(L){
+		let best=null;
+		for(let x=-280;x<=280;x+=10)for(let z=-280;z<=280;z+=10)for(let k=0;k<8;k++){
+			const a=k/8*TAU, dx=Math.sin(a), dz=Math.cos(a);
+			const ax=x-dx*L/2, az=z-dz*L/2, bx=x+dx*L/2, bz=z+dz*L/2;
+			const lim=MAP_SIZE/2-6;
+			if(Math.max(Math.abs(ax),Math.abs(az),Math.abs(bx),Math.abs(bz))>lim) continue;
+			if(occBlocked(ax,az)||occBlocked(bx,bz)) continue;
+			const ha=heightAt(ax,az), hb=heightAt(bx,bz);
+			if(Math.abs(ha-hb)>9) continue;
+			// 沿线可行驶: 中线 + ±2.2m 平行线逐 5m 采样 (2026-11-14 缩图批, 旧: 中线逐 10m —— 360 图布景密度相对升高,
+			//   旧采样漏掉车道中段占用格/大半径道具贴边 (实测 ③ 推挤车蹭进调车场平板车占用盘 / ④ 敌车落树后不可见))
+			let ok=true, prev=ha;
+			for(const off of [0,-2.2,2.2]){
+				const ox=-dz*off, oz=dx*off;
+				let pv=heightAt(ax+ox,az+oz);
+				if(occBlocked(ax+ox,az+oz)){ ok=false; break; }
+				for(let s=5;s<=L;s+=5){
+					const px=ax+dx*s+ox, pz=az+dz*s+oz, h=heightAt(px,pz);
+					if(occBlocked(px,pz)||Math.abs(h-pv)>5.5){ ok=false; break; }
+					pv=h;
+				}
+				if(!ok) break;
+			}
+			if(!ok) continue;
 let clr=true;
 for(const e of [[ax,az,ha+1.9,bx,bz,hb+1.3],[bx,bz,hb+1.9,ax,az,ha+1.3]]){
 let vx=e[3]-e[0], vy=e[4]-e[1], vz=e[5]-e[2];

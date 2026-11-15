@@ -553,7 +553,7 @@ class NavalCraft {
     const wm=navalWreckMaterial();
     this.grp.traverse(o=>{ if(o.isMesh){ if(!o.userData.mat0) o.userData.mat0=o.material; o.material=wm; } });
     // 计分/播报 (与 Tank.die 同口径: 分档取 SCORE_TABLE.tank, 票代价取 spec.ticket)
-    if(attacker&&(attacker.ffAll||attacker.team!==this.team)){
+    if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 观战本尊照常记分 (★2026-11-13 批, 与 Tank/Plane.die 三处同批补齐)
       attacker.kills=(attacker.kills||0)+1;
       if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁舰艇',SCORE_TABLE.tank);
       else attacker.score=(attacker.score||0)+SCORE_TABLE.tank;

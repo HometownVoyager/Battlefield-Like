@@ -395,6 +395,7 @@ const ang=Math.random()*Math.PI*2, rr=6+Math.random()*3;
 const wx=ax+Math.cos(ang)*rr, wz=az+Math.sin(ang)*rr;
 if(typeof occBlocked==='function'&&occBlocked(wx,wz)) continue;
 if(typeof freeSpot==='function'&&!freeSpot(wx,wz,0.6)) continue;
+if(typeof spawnEdgeOk==='function'&&!spawnEdgeOk(wx,wz)) continue;   // 出生离边门 (2026-11-13): 编制集中生成同样不出边带
 let sx=wx,sz=wz;
 if(typeof NAV!=='undefined'&&NAV&&NAV.spawnSpot){ const sp2=NAV.spawnSpot(wx,wz,12); sx=sp2[0]; sz=sp2[1]; }
 return {x:sx,z:sz};

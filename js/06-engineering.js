@@ -131,6 +131,9 @@ if(b.type==='sandbag'){ for(const bb of b.boxes) killBox(bb); }
 else if(b.type==='hedge'){
 for(const m of b.meshes) if(m.parent) world.remove(m);
 for(let i=CYLS.length-1;i>=0;i--){ const c=CYLS[i]; if(Math.hypot(c.x-b.tx,c.z-b.tz)<1.3) CYLS.splice(i,1); }
+// ★splice 使 RGRID.cylCells 里被删圆柱之后的下标集体前移 ⇒ 倒排表失效, 必须全量重建一次
+// (2026-11-11 性能批: NAV.refresh 的 buildSpatialIndex 改按此戳跳过, 见 04-collision _colIdxDirty)
+_colIdxDirty=true;
 }
 else if(b.type==='wire'){ if(b.wire){ b.wire.alive=false; if(b.wire.grp.parent) world.remove(b.wire.grp); } }
 else if(b.type==='mg'){

@@ -238,10 +238,13 @@ function findFreeSpawn(x,z){
 for(let r=0;r<7;r++){
 for(let i=0;i<8;i++){
 const px=x+rand(-2,2)+Math.cos(i*0.785)*r*1.6, pz=z+rand(-2,2)+Math.sin(i*0.785)*r*1.6;
+if(!spawnEdgeOk(px,pz)) continue;   // 出生离边门 (2026-11-13): 兜底环扫同样不出边带
 if(!occBlocked(px,pz)&&freeSpot(px,pz,0.6)) return [px,pz];
 }
 }
-return [x,z];
+// 全败兜底往中心钳回 (2026-11-13): 宁可进边带也不把人留在贴边原点; 挪后站不站得住由调用方
+// (pickSpawnPoint 兜底走 NAV.spawnSpot / deployPlayer 走 standHeight) 各自兜账。
+return spawnEdgeClamp(x,z);
 }
 const MED_CRATES=[];
 const medkitTex=(()=>{
@@ -514,7 +517,7 @@ return best;
 // 旧版落点语义: pickSpawnFor 返回**一个坐标**, 落点再用 findFreeSpawn(±2m 随机) 摊开 ——
 // 既没有"别人在哪"的概念, 也不做建筑足迹判定, 于是同一批人叠在同一个点上。
 const SPAWN_CLAIMS=[]; // 本帧已被占用的落点 (跨士兵互斥; 每帧由 updateSpawnClaims 清理)
-const _spawnDiag={picks:0,strict:0,relaxed:0,fallback:0,try:0,rejClear:0,rejFire:0,clSum:0,clMin:undefined}; // 分支计数 (探针/控制台自检)
+const _spawnDiag={picks:0,strict:0,relaxed:0,fallback:0,try:0,rejClear:0,rejFire:0,rejEdge:0,clSum:0,clMin:undefined}; // 分支计数 (探针/控制台自检)
 let _spawnClaimT=-1;
 function updateSpawnClaims(){
 if(_spawnClaimT!==nowT){ _spawnClaimT=nowT; SPAWN_CLAIMS.length=0; }
@@ -530,6 +533,24 @@ if(!freeSpot(x,z,margin===undefined?0.9:margin)) return false; // 建筑足迹/�
 // findPath 恒为 null ⇒ 整局站桩 ("无路可走就不动")。环里的合格落点通常就在环外 3~10m, 下面几轮环扫自然找到。
 if(typeof NAV!=='undefined'&&NAV.spawnSpotOk&&!NAV.spawnSpotOk(x,z)) return false;
 return true;
+}
+// ── 出生离边门 (2026-11-13 批, 单源) ──
+// 世界边缘是软夹取 (collideMove → WORLD_ACTOR_LIMIT) 无致死屏障, 但 procgen 建筑锚点可到
+// MAP_SIZE/2−12 (房身外伸后墙可贴到边内 ~4m)、手摆预设图 placeAt 连锚点门都没有 ⇒
+// "特定朝向房子 × 世界边缘"的楔形缝会卡死出生兵 (用户实报)。落点必须离活动夹取极限
+// (WORLD_ACTOR_LIMIT=MAP_SIZE/2−4) 至少 SPAWN_EDGE_MARGIN (00-config 单源, 默认 20m)。
+// 消费点: pickSpawnPoint 候选闸 + 最终保险 / findFreeSpawn / NAV.spawnSpot / cmdSquadSpawnNear /
+// 开局小队铺开。typeof 守卫兜住只加载本文件的沙箱 (00-config 未载时退回 160−24 同式)。
+function spawnEdgeLim(){
+return (((typeof MAP_SIZE==='number')?MAP_SIZE:320)/2)-4-((typeof SPAWN_EDGE_MARGIN==='number')?SPAWN_EDGE_MARGIN:20);
+}
+function spawnEdgeOk(x,z){
+const l=spawnEdgeLim();
+return Math.abs(x)<=l&&Math.abs(z)<=l;
+}
+function spawnEdgeClamp(x,z){
+const l=spawnEdgeLim();
+return [clamp(x,-l,l),clamp(z,-l,l)];
 }
 function spawnClearance(x,z,team){
 let best=1e9;
@@ -567,6 +588,7 @@ px=spot.x+Math.cos(a)*rr+(ring===0?rand(-1,1):rand(-jitter,jitter));
 pz=spot.z+Math.sin(a)*rr+(ring===0?rand(-1,1):rand(-jitter,jitter));
 }
 _spawnDiag.try++;
+if(!spawnEdgeOk(px,pz)){ _spawnDiag.rejEdge++; continue; }   // 出生离边门 (2026-11-13): "房子×世界边"楔缝免疫, 候选直接拒
 if(!spawnLandingClear(px,pz,margin)){ _spawnDiag.rejClear++; continue; }
 if(fireThreat&&fireThreat(px,pz,1.6)){ _spawnDiag.rejFire++; continue; } // 别往火线里丢人
 if(tbThreat&&tbThreat(px,pz,1.6)){ _spawnDiag.rejFire++; continue; }    // 树爆弹着圈
@@ -628,6 +650,9 @@ best={x:sp2[0],z:sp2[1]};
 }else best={x:fb[0],z:fb[1]};
 bestCl=0;
 }
+// 出生离边门最终保险 (2026-11-13): 两轮环扫+兜底全没挡住 (极端: 整圈被拒且 NAV.spawnSpot 搬不动)
+// 时把落点钳回边带, 绝不在贴边原点落人。
+if(!spawnEdgeOk(best.x,best.z)){ const _ec=spawnEdgeClamp(best.x,best.z); best.x=_ec[0]; best.z=_ec[1]; }
 SPAWN_CLAIMS.push({x:best.x,z:best.z});
 // lane 使用热度登记 (软天平跨人分散主项) + 本路方位 (供 Bot.pickObjective 多路推进)
 if(isLane){

@@ -4,8 +4,14 @@
 // ─────────────────────────────────────────────
 'use strict';
 var lastT=performance.now(); let fpsAcc=0, fpsN=0, fpsShow=0, deployRefreshT=0;
+var _loopErrN=0; // ★2026-11-14 批④: 帧内异常护栏的节流计数器 (见 loop 尾部 catch)
 function loop(){
-requestAnimationFrame(loop);
+requestAnimationFrame(loop); // rAF 最前重排: 链条永续 (旧有纪律, 2026-09 起码见两批注释)
+// ★2026-11-14 批④帧级护栏 (用户实报④症状形状之一: 画面僵死但 DOM/按钮还活着 = 每帧异常击穿主循环
+//   体, 世界更新+渲染全被跳过): rAF 重排救不了"函数体中途炸", 这里把 rAF 之后的整段帧体兜进 try。
+//   节流告警 (前 3 次带完整栈, 之后每 600 帧一次心跳), 兜底尽力渲染一帧防画面黑死;
+//   lastT 在 try 内早段推进, 异常帧不会让下一帧 dt 失控 (rdt 上限 0.05 双保险)。
+try{
 const now=performance.now();
 if(document.hidden){
 if(gamePaused||matchOver||menuHold) nowOff+=now-lastT;
@@ -24,10 +30,7 @@ return;
 // ★2026-11-04b 时停音频批 (用户实报: 时停期间发动机引擎仍有声音, "应该还有其他类似的问题"):
 //   时停的 dt=0 只冻住了战场物理, WebAudio 的连续振荡器 (坦克/飞机/舰艇/幽灵坦克引擎)、风噪雨声环境层、
 //   以及 setInterval/setTimeout 周期声 (远处机枪/鸟鸣/雷暴远雷/弹夹落地) 全走墙钟 ⇒ 画面停了声音没停。
-//   这里每帧把 specTimeFrozen() 的单一事实喂给 01-audio 的 setTimeFrozenMute 单源 (内部有状态, 稳态零
-//   WebAudio 写入); 放在冻结分支 return 之前, 保证暂停/结算/菜单期也能把残留的时停账复位。
-if(typeof AudioSys!=='undefined'&&AudioSys.setTimeFrozenMute)
-AudioSys.setTimeFrozenMute(typeof specTimeFrozen==='function'&&specTimeFrozen());
+//   喂入账见下方 dt 计算之后 (2026-11-14 批升级: 从"只认 specTimeFrozen()"改为**权威世界冻结账**)。
 if(typeof syncDeployHud==='function') syncDeployHud();
 const rdt=Math.min((now-lastT)/1000,0.05);          // 真实帧时间 (本帧世界推进的**上限**)
 // 观战时停 (2026-09-26H 观战批 B7; 2026-09-27I 收敛为"只留时停"): 单源在 22b-speclayer specTimeConsume ——
@@ -38,6 +41,16 @@ const dt0=(typeof specTimeConsume==='function')?specTimeConsume(rdt):rdt;
 // 指挥减速=×0.2 / 常速原样。K 时停优先 (D14): dt0<=0 (时停/暂停) 时原样放行, 减速不把冻结"复活"。
 // 慢掉/冻掉的差量由下方既有 nowOff 账吸收 ⇒ 游戏时钟 nowT 与世界同速慢放/冻结 (时停管道同款语义)。
 const dt=(typeof cmdDtGate==='function')?cmdDtGate(rdt,dt0):dt0;
+// ★2026-11-14 音频冻结账升级 (用户实报"时停时暂停, 引擎声照常轰鸣, 是一系列系统性BUG"): 喂入从
+//   specTimeFrozen() 改为**权威世界冻结账**, 修掉旧口径的两个洞:
+//   ①暂停洞: specTimeActive() 要求 !gamePaused ⇒ 暂停期间喂入恒 false, 而 setTimeFrozenMute(false) 的
+//     还原分支会把引擎增益恢复到 lastVol —— 先开时停再按 Esc 暂停, togglePause 的 setAmbientMute(true)
+//     静音立刻被下一帧喂入撤销 = "时停+暂停引擎照常轰鸣" (复现实录);
+//   ②布势洞: 布势期 (cmdDtGate 回 0) 从没进过音频账 ⇒ 布势里全场引擎/环境声照常。
+//   现在喂入 = (rdt>0 且 dt<=0: 观战时停/布势冻结) ∨ 暂停 ∨ 结算 ∨ 主菜单。rdt>0 门挡掉同毫秒双 rAF
+//   的 rdt=0 退化帧 (不算冻结, 免得静音/还原抖动)。setTimeFrozenMute 内部有状态账, 稳态零 WebAudio 写入。
+if(typeof AudioSys!=='undefined'&&AudioSys.setTimeFrozenMute)
+AudioSys.setTimeFrozenMute((rdt>0&&dt<=0)||gamePaused||matchOver||menuHold);
 // 观察者例外 (用户 2026-09-27: "时停的时候玩家也不能动"是缺陷): 时停冻的是**战场**, 不是观战者 ——
 // 本体链 (updatePlayer/相机/信息层/视角武器) 用 pdt = 真实帧时间; 座驾由 specTimeRideDt 逐台判定
 // (specRide 单源: 只有观战者正在开的那一台跟本体同速, 含幽灵坦克)。非时停时 pdt≡dt ⇒ 普通战斗零漂移。
@@ -102,7 +115,12 @@ renderer.render(vmScene,vmCamera);
 }
 return;
 }
-gunEvents=gunEvents.filter(e=>nowT-e.t<0.6);
+{ // 出膛事件账原地压实 (2026-11-11 性能批): 旧版 filter 每帧无条件分配新数组 (空表也分配)。
+  // 消费点 14-bots:874 在本帧内后读, 原地前移压实逐位等价。
+let _w=0;
+for(let _i=0;_i<gunEvents.length;_i++){ if(nowT-gunEvents[_i].t<0.6) gunEvents[_w++]=gunEvents[_i]; }
+gunEvents.length=_w;
+}
 // 模型内共面消解 (2026-09-27K): 载具/飞机/士兵等模型是开局/重生时才建的, 建图末那次世界级消解覆盖不到
 // —— 这里每帧只处理"没见过的"模型根 (每帧至多 2 个, 按离相机由近到远), 把检测成本摊到多帧。
 if(typeof resolveRuntimeSurfaces==='function') resolveRuntimeSurfaces();
@@ -222,7 +240,8 @@ renderer.render(vmScene,vmCamera);
 }
 if(!player.alive&&player.deployed&&!matchOver){
 respawnCd=Math.max(0,respawnCd-dt);
-el('respawnTxt').textContent=respawnCd>0?`(${Math.ceil(respawnCd)})`:'';
+const _rt=el('respawnTxt'), _rv=respawnCd>0?`(${Math.ceil(respawnCd)})`:'';
+if(_rt._lastRv!==_rv){ _rt._lastRv=_rv; _rt.textContent=_rv; }   // 2026-11-13 perf batch: identical content skips the DOM write (logic above still runs every frame)
 const btn=el('deployBtn');
 // ★2026-11-01 逐帧保活: 票尽未开调试观战 ⇒ 按钮恒可用且标签是「观 战」(与 23-deploy showDeploy 同一套
 // 换字代码 —— 部署页每 0.5s 才重刷, 而票数在页开着时也可能归零, 这条保证按钮态即时跟随)。
@@ -231,7 +250,7 @@ btn.disabled=false;
 const _sp=btn.querySelector('[data-i18n]');
 if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='观 战'){ _sp.setAttribute('data-i18n','观 战'); _sp.textContent=t('观 战'); }
 }else{
-btn.disabled=respawnCd>0; // 己方兵力归零后按钮保持禁用 (2026-09-04); 观战开关开着放行 (2026-10-30, specWillBe 单源见 18-game)
+btn.disabled=respawnCd>0&&!(player.spectator||player.specWillBe()); // 己方兵力归零后按钮保持禁用 (2026-09-04); 观战开关开着放行 (2026-10-30, specWillBe 单源见 18-game); 调试模式冷却读数中按钮保持可点 (2026-11-14 用户令, 点击侧 22-hud 同判据 bypass 部署)
 const _sp=btn.querySelector('[data-i18n]');
 if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='部 署'){ _sp.setAttribute('data-i18n','部 署'); _sp.textContent=t('部 署'); }   // 调试观战中途打开 ⇒ 标签从「观 战」还原「部 署」
 }
@@ -245,6 +264,17 @@ deployRefreshT=0.5;
 refreshDeployList();
 if(!player.alive) drawDeployMap();
 }
+}
+}catch(e){
+_loopErrN++;
+if(_loopErrN<=3||_loopErrN%600===0) console.warn('[主循环] 帧内异常 (已护栏, 第'+_loopErrN+'帧次):', e&&e.stack||e);
+// ★2026-11-14 重开局批: 首错上屏 —— 帧级护栏把异常从"报错可见"变成"世界冻结/没载具/UI停更"的静默病
+// (2026-11-12~14 四症状同根掩盖数日)。首错只提示一次不重复刷新, 技术文案不做 i18n; body 直挂件不进 #ui,
+// HUD 停更/隐藏时依然可见。
+if(_loopErrN===1){
+try{ const lb=document.getElementById('loopErrBar'); if(lb){ lb.textContent='⚠ 帧异常(已护栏): '+(e&&e.message||e); lb.style.display='block'; } }catch(_e){}
+}
+try{ if(!document.hidden&&typeof renderer!=='undefined'&&renderer) renderer.render(scene,camera); }catch(_e){} // 兜底渲染: 场景主相机一帧, 不画 VM 层 (其状态可能是抛错根源)
 }
 }
 // ===== 移动端触控输入 =====

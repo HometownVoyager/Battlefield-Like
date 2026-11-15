@@ -38,7 +38,8 @@ showScorePop(t2(p.navalGun?'炮手镜 · 稳像倍镜':(p.thirdPerson?'第三人
 }
 let lastEscT=0;
 addEventListener('keydown',e=>{
-if(e.code==='Tab'){ e.preventDefault(); document.getElementById('scoreboard').style.display='block'; updateScoreboard(); }
+if(e.code==='Tab'){ e.preventDefault(); if(e.repeat) return;   // 2026-11-13 perf batch: OS key-repeat must not re-run the scoreboard chain
+ document.getElementById('scoreboard').style.display='block'; updateScoreboard(); }
 if(e.code==='Escape'){
   const now=performance.now();
   if(now-lastEscT<350) return; // 350ms 防抖，杜绝连按两下，以及防止丢锁回调呼出部署后同一次按键补发 keydown
@@ -158,6 +159,9 @@ if(e.code==='KeyE'&&typeof specViewCycle==='function'){ specViewCycle(1); return
 }
 // ★2026-11-01 调试模式附身 (用户裁定): Q=附身准星 Bot / E=脱离还原 —— 原本这两键对观战者无意义
 // (侧身/开镜), 接管零损失。与视模式同一条 specViewHost 管线 (20-player dbgSpecPossess/Detach)。
+// ★2026-11-13 批: 座位/巡飞弹态的附身拒绝收拢在 20-player dbgSpecPossess 头部单点门
+// (onVehicle/onNaval/loiter → showScorePop 拒绝)。本块**不放**三态门 —— 2026-11-06 flyaim 批裁定
+// 巡飞中 J/K 观战工具键照常, timestopfix T8 契约: 本小段内部不许出现 loiter 让位门。
 if(player.spectator&&player.alive&&!player.specView&&pointerLocked){
 if(e.code==='KeyQ'&&typeof dbgSpecPossess==='function'){
 const b=(typeof specViewPickHost==='function')?specViewPickHost():null;
@@ -473,12 +477,15 @@ return;
 // 左键 mouseDown=true 虽因 updatePlayer 冻结 (20-player :799) 打不出去, 也照样置账。视模式 (alive=false)
 // 走上方分支已 return, 这里拦的是调试附身: 左/中/右键一律吞掉, 不进 ADS、不 cancel 读条。
 if(player.specViewHost) return;
-if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)){
+if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){
 // ★2026-10-12 用户提议②: 读条中左键 = 取消读条。**这次点击必须被吞掉** —— 取消之后 VM.state 立刻回到
 //   'idle', 若照旧置 mouseDown=true, 下一帧的 playerFireTick 就会顺势把这一枪打出去 (取消读条不该走火)。
 // ★2026-10-25 举雷并入读条后的**唯一例外**: 举雷待发是"按住瞄准"的持续态, 左键在枪上本来无语义
 //   (VM 'nade' 不可开火), 瞎点到左键不该把雷收回 —— 收雷只有 X / ✕ 两条有意路径。举雷期间其余读条
 //   结构上不可能同时活跃 (VM 单值状态机互斥), 这一个负条件即充分。
+// ★2026-11-13 批: 换弹同样豁免 (用户实报"换弹时按左键取消换弹很难受") —— 换弹中左键与按 R 同义:
+//   不取消不重启。VM.state!=='idle' 本就打不出枪, 这里不再吞键 (mouseDown=true 无害, 装填完成时仍按住
+//   = 正常开火节奏), 包扎/拆除/其它读条照旧可左键取消。
 player.cancelReadBar('已取消');
 return;
 }
@@ -639,7 +646,7 @@ if(VM.state!=='idle') return;
 }
 if(w.mag>=w.def.mag||w.reserve<=0) return;
 VM.state='reload'; VM.stateT=0;
-VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1); // 连杀增益: 换弹加速 (2026-09-11)
+VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1)*dynReloadFac(w.mag,w.def.mag); // 连杀增益: 换弹加速 (2026-09-11); 动态换弹速度 ×已耗/弹匣 (2026-11-12, 单源 dynReloadFac — VM 动画/读条/3P 镜像按 nt 比例自动跟随)
 vmSndFlags={};
 }
 function switchSlot(i,viaKey){

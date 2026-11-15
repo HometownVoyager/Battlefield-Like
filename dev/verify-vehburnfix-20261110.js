@@ -177,7 +177,9 @@ const SEA=boot(vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="songhu")',ctx));
 const GS=s=>vm.runInContext(s,SEA,{timeout:300000});
 GS("document.getElementById('startBtn').onclick();");
 GS("player.team=0; player.cls=0; player.spectator=false; player.alive=true; player.deployed=true;");
-GS("globalThis._rv=null; for(let z=-360;z<=360&&!_rv;z+=4){ for(let x=-360;x<=360;x+=4){ if(inRiverChannel(x,z)&&heightAt(x,z)<waterYAt(x,z)){ _rv={x,z}; break; } } }");
+// 2026-11-15 判据跟码修钉: 激流伤害走水态门 inRiverWater=inRiverChannel&&waterDepthAt>0.2
+//   (mapfix 批) —— 旧扫描只验 heightAt<waterYAt, 首中点常是 0~0.2m 浅缘 ⇒ 判干不受伤 ⇒ ④-1 假红。
+GS("globalThis._rv=null; for(let z=-360;z<=360&&!_rv;z+=4){ for(let x=-360;x<=360;x+=4){ if(inRiverChannel(x,z)&&waterDepthAt(x,z)>0.5){ _rv={x,z}; break; } } }");
 if(!GS('_rv')){
 console.log('  ⊘ songhu 未扫到深水河道点, 激流判据跳过 (源码钉已覆盖)');
 }else{

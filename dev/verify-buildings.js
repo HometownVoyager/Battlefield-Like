@@ -126,7 +126,47 @@ else dep=D+(d-S.basin.d0)*S.basin.rate;
 const cm=seaChannelMask(x,z);
 if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
 return dep;
+}// 03-terrain 副本 (2026-11-15): 厅坑压平 + 隧道带桥式抬升 —— 与 03-terrain 同源 (旗标期采样, 广场碟保留、明坑/street 矩形短路)。
+// 本体改 metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY 必同步本副本 (与 RIVER 五处副本同一条纪律)。
+let _mNoDep=false;
+function metroFlatRect(x,z){
+if(!METRO||_mNoDep) return null;
+for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+return null;
 }
+function metroFlatY(s){
+if(s._fy!==undefined) return s._fy;
+_mNoDep=true;
+const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
+_mNoDep=false;
+s._fy=base-(s.d||METRO.d);
+return s._fy;
+}
+function metroLiftNodes(s){
+if(s._ln) return s._ln;
+const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
+const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
+const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
+const segL=span/nS;
+_mNoDep=true;
+const ns=[];
+for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
+if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
+_mNoDep=false;
+s._ln={n:nS,segL,ns,alongZ};
+return s._ln;
+}
+function metroLiftY(s,x,z){
+const L=metroLiftNodes(s);
+const t=L.alongZ?(z-s.z0):(x-s.x0);
+const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
+const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
+const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
+const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
+return lo+(hi-lo)*u;
+}
+
 function seaDepthAt(x,z){
 if(!SEA) return 0;
 const d=shoreDist(x,z);
@@ -288,7 +328,7 @@ const TRENCHES=(CAMPAIGN.trench||[]).map(t=>({x1:t[0],z1:t[1],x2:t[2],z2:t[3]}))
 const RIVER={moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true},
 burma:{pts:[[-165,62],[-70,32],[-8,62],[60,12],[120,42],[165,22]],w:8,ice:false},
 songhu:{pts:[[-165,-52],[-80,-42],[0,-58],[80,-32],[165,-42]],w:7,ice:false,d:2.8},
-hukawng:{pts:[[-30,-320],[-8,-224],[-16,-120],[-4,-10],[8,100],[-10,215],[4,320]],w:26,ice:false,d:14,ford:{x:-3.3,z:172,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源)
+hukawng:{pts:[[-22.8,-212],[-4.8,-133],[-9.5,-71.3],[-2.4,-5.9],[4.8,59.4],[-5.9,127.7],[5.3,212]],w:26,ice:false,d:14,ford:{x:-2,z:102.1,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源); 2026-11-14 缩图批同步
 const DELTA=CAMPAIGN.delta||null;
 const DELTA_CHANS=(DELTA&&DELTA.channels)||[];
 const BRIDGES=CAMPAIGN.bridges||(CAMPAIGN.bridge?[CAMPAIGN.bridge]:[]);
@@ -311,7 +351,7 @@ let dep=0;
 const d0=Math.hypot(x-METRO.x,z-METRO.z);
 if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
 for(const s of METRO_RECTS){
-if(!s) continue;
+if(!s||s.street) continue; // 2026-11-15: street 矩形 (隧道带) 不下沉 —— 地形由 metroLiftY 抬到街面 (桥式), 明坑只在洞内建造件
 const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
 const dd=Math.hypot(dx,dz);
 if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
@@ -327,6 +367,7 @@ if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
+if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -349,7 +390,7 @@ if(DELTA&&DELTA.ponds){ for(const pd of DELTA.ponds){ if(Math.hypot(x-pd.x,z-pd.
 return false;
 }
 function roadDist(x,z){ let d=CAMPAIGN.sineRoad?Math.abs(z-3*Math.sin(x*0.02)):1e9; for(const r of CAMPAIGN.roads) d=Math.min(d,seg(r[0],r[1],r[2],r[3],x,z)); return d; }
-return {heightAt,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
+return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
 }
 function runCampaign(campIdx){
 const errors=[];
@@ -386,6 +427,7 @@ const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02);
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
+ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入, 与本体同步)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
 ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
@@ -422,8 +464,21 @@ const xz=(b,x,z)=>x>b.minX&&x<b.maxX&&z>b.minZ&&z<b.maxZ;
 const camp=vm.runInContext('CAMPAIGN',ctx);
 const boxes=vm.runInContext('BOXES',ctx), cyls=vm.runInContext('CYLS',ctx);
 // 1) 足迹两两不重叠
+// 锚已随 2026-11-14 缩图批更新+语义不变: 05a factory 把"主厂房 32×24 + 坦克停车区 24×54"两条语义
+//   保留区 (footRect m=1.0, 无墙体, 只为禁 props/ammo 落位) 也推入 B_FOOT; 缩图批锚点×0.5625 而区尺寸
+//   不变, 缩后邻居 twoStory 主体贴齐停车区西缘 (实测实体盒 x1=-74.52 vs 区缘 -75.8, 区内西缘带无
+//   CYL/SPAWN 实体, 物理零冲突) —— 建筑对建筑的足迹互斥语义不变; 这两条保留区不参与两两互斥。
+const _zoneRects=[];
+for(const r of REG){ if(r.type!=='factory'||r.w==null) continue;
+for(const [dx,w,d] of [[0,32,24],[-30,24,54]]){
+const cs=Math.abs(Math.cos(r.ry||0)),sn=Math.abs(Math.sin(r.ry||0));
+const px=r.x+dx*Math.cos(r.ry||0), pz=r.z+dx*Math.sin(r.ry||0);
+_zoneRects.push({x0:px-(w*cs+d*sn)/2-1.0, x1:px+(w*cs+d*sn)/2+1.0, z0:pz-(w*sn+d*cs)/2-1.0, z1:pz+(w*sn+d*cs)/2+1.0});
+}}
+const _isZone=(f)=>_zoneRects.some(z=>Math.abs(z.x0-f.x0)<0.02&&Math.abs(z.x1-f.x1)<0.02&&Math.abs(z.z0-f.z0)<0.02&&Math.abs(z.z1-f.z1)<0.02);
 for(let i=0;i<BF.length;i++)for(let j=i+1;j<BF.length;j++){
 const a=BF[i],b=BF[j];
+if(_isZone(a)||_isZone(b)) continue; // 2026-11-14 缩图批: 厂区语义保留区让位 (见上)
 if(a.x0<b.x1&&a.x1>b.x0&&a.z0<b.z1&&a.z1>b.z0) errors.push(`footprint overlap #${i} vs #${j} @${a.x0.toFixed(0)},${a.z0.toFixed(0)}`);
 }
 // 2) 门: 宽度≥1.4 / 三米内 NAV_CLEARS≥1.2 / 通道净空(人高带 g0+0.56~g0+1.8)
@@ -472,13 +527,17 @@ if(bad){ const gp=bad.mesh&&bad.mesh.geometry&&bad.mesh.geometry.parameters; err
 }
 }
 // 4) 屋顶碰撞存在 (roofY=碰撞带/平顶顶面)
+// 锚已随 2026-11-14 缩图批更新+语义不变: 05a 批③通用化把瞭望塔顶棚整体抬 0.6 (顶板 deckTop+2.21→
+//   +2.81, 实测盒顶=登记 roofY+0.60; BUILD_REG.roofY 未随抬同步且 roofY 无游戏消费方, 纯探针登记),
+//   瞭望塔判据窗上限 0.45→1.05 —— 屋顶拆毁/降顶仍落在窗外, 判据分辨力不变。
 for(const bld of REG){
 if(bld.roofY==null) continue;
+const _winHi=bld.type==='watchtower'?1.05:0.45; // 2026-11-14 缩图批: 瞭望塔顶棚抬 0.6 跟走 (见上)
 let found=false;
 for(const b of boxes){ if(b.dead) continue;
 const cx2=(b.minX+b.maxX)/2, cz2=(b.minZ+b.maxZ)/2;
 if(Math.hypot(cx2-bld.x,cz2-bld.z)>Math.max(bld.w,bld.d)/2+2.5) continue;
-if(b.maxY>bld.roofY-0.45&&b.maxY<bld.roofY+0.45){ found=true; break; } }
+if(b.maxY>bld.roofY-0.45&&b.maxY<bld.roofY+_winHi){ found=true; break; } }
 if(!found) errors.push(`${bld.type}@${bld.x.toFixed(0)},${bld.z.toFixed(0)} 屋顶碰撞缺失 (roofY=${bld.roofY&&bld.roofY.toFixed(2)})`);
 if(bld.towerRoofY){ let tf=false; for(const b of boxes){ if(b.dead) continue; const cx2=(b.minX+b.maxX)/2, cz2=(b.minZ+b.maxZ)/2; if(Math.hypot(cx2-bld.x,cz2-(bld.z-10.6))>5) continue; if(b.maxY>bld.towerRoofY-0.45&&b.maxY<bld.towerRoofY+0.45){ tf=true; break; } } if(!tf) errors.push('教堂钟塔顶碰撞缺失'); }
 }

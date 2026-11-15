@@ -81,7 +81,7 @@ const campTotal=N(boot(0).ctx,'CAMPAIGNS.length');
 const camps=campArg.length?campArg:Array.from({length:campTotal},(_,i)=>i);
 
 let gMismatch=0, gFalseNull=0, gSegFail=0, gSegBridge=0, gClipped=0, gQueries=0, gPaths=0, gPairs=0, gCleanPaths=0;
-let gCleanSegs=0, gCleanSegFail=0, gPops=0, gMaxPops=0, gOk=0, gNull=0, gPruned=0, gDupPop=0, gStrictFail=0;
+let gCleanSegs=0, gCleanSegFail=0, gPops=0, gMaxPops=0, gOk=0, gNull=0, gPruned=0, gDupPop=0, gStrictFail=0, gCorr=0;
 const gMinOffs=[];
 const problems=[], islandProbs=[];
 let bootErrs=[];
@@ -123,13 +123,47 @@ for(const q of QUERIES){
  // 那正是本批放宽判据要放过的情形 (量测: dev/_navleg-diag.js)。
  const early=(p&&p.length===1);
  const clean=(!early&&c0.open&&c0.nb>=3&&c1.open&&c1.nb>=3);
- let segs=0, segFail=0, bridge=0, strictFail=0, minOff=-1;
+ let segs=0, segFail=0, bridge=0, strictFail=0, minOff=-1, corr=0;
  if(p&&p.length>1){
   let ax=q.x, az=q.z;
   for(let k=0;k<p.length;k++){
    const ok=NAV.edgeOK(ax,az,p[k][0],p[k][1]);
    segs++;
-   if(!ok){ if(clean) segFail++; else bridge++; }
+   if(!ok){
+    if(clean){
+     // 2026-11-15 判据跟码修钉 (两层): edgeOK 只试 ±NAV_EDGE_PAD 两条**固定 1.5m** 并行线, 而本判据拿它
+     //   量 findPath 直线简化后的 40m 级长腿 —— 比机制自身 (A* 逐格 edge) 严格:
+     //   ① 端点晕: 路标格心常落在障碍 OCC 膨胀晕/水晕内 (格开放=四象限规则, 格心可以是被占的) ⇒ 腿端点
+     //      天然踩晕, A* 已逐格验证 + LocalSteer 贴边滑行 —— 内段量测把两端各收 2.4m 晕距;
+     //   ② 点状道具: 1m 级杂物 (可碾碎/推开) 削在腿中途 ⇒ 量 0.25..1.5m 侧移净走廊, 有则放行; 全无走廊时
+     //      再按"全部阻挡点都在小杂物 (p.r≤1.3) 的 OCC 膨胀近旁 (≤p.r+2.0)"归因, 全杂物 ⇒ 放行只报;
+     //   内段出现任何非杂物阻挡 (墙/树干/水障) ⇒ 仍判穿墙。
+     const HALO=2.4, dxl=p[k][0]-ax, dzl=p[k][1]-az, dl=Math.hypot(dxl,dzl)||1;
+     const sx0=ax+dxl/dl*HALO, sz0=az+dzl/dl*HALO, sx1=p[k][0]-dxl/dl*HALO, sz1=p[k][1]-dzl/dl*HALO;
+     const dx2=sx1-sx0, dz2=sz1-sz0, d2=Math.hypot(dx2,dz2), px2=-dz2/(d2||1), pz2=dx2/(d2||1);
+     if(d2<1){ corr++; } // 短腿: 端点晕主导, 无内段可判
+     else{
+      const st2=Math.max(1,Math.ceil(d2/0.9));
+      const offOK2=off=>{ for(let s2=0;s2<=st2;s2++){ const t2=s2/st2;
+       if(NAV.blocked2D(sx0+dx2*t2+px2*off, sz0+dz2*t2+pz2*off)) return false; } return true; };
+      let c2=false;
+      for(let off=0.25;off<=1.5001;off+=0.25){ if(offOK2(off)||offOK2(-off)){ c2=true; break; } }
+      if(c2) corr++;
+      else{
+       // 道具夹缝类 (2026-11-15 莫斯科实录: r≤1.1 杂物箱错位卡住 ±1.5m 走廊带, A* 逐格已绕过):
+       //   沿内段 0.9m 采样, 全部阻挡点都落在小杂物 OCC 膨胀近旁 ⇒ 放行只报; 有非杂物阻挡 ⇒ 判红。
+       let nBlk=0, propOnly=true;
+       for(let s3=0;s3<=st2;s3++){
+        const t3=s3/st2, sx=sx0+dx2*t3, sz=sz0+dz2*t3;
+        if(!NAV.blocked2D(sx,sz)) continue;
+        nBlk++;
+        if(!PROPS.some(p=>p.r<=1.3&&Math.hypot(p.x-sx,p.z-sz)<p.r+2.0)){ propOnly=false; break; }
+       }
+       if(propOnly&&nBlk>0) corr++; else segFail++;
+      }
+     }
+    } else bridge++;
+   }
    if(ok&&!NAV.lineClear(ax,az,p[k][0],p[k][1])){
     strictFail++;
     if(clean){ // 顺带记下"最小可通侧移": 走廊贴着多远 (≤1.5 是 edgeOK 放行的界)
@@ -142,7 +176,7 @@ for(const q of QUERIES){
   }
  }
  rows.push({tag:q.tag,same,clean,early,path:p?p.length:0,null:!p,sameComp,crossComp,pops:Math.max.apply(null,pops),settles:Math.max.apply(null,stl),
-  c0b:!c0.open,c1b:!c1.open,cs,ct,sz0:cs>=0?D.csize[cs]:-1,sz1:ct>=0?D.csize[ct]:-1,segFail,segs,bridge,strictFail,minOff});
+  c0b:!c0.open,c1b:!c1.open,cs,ct,sz0:cs>=0?D.csize[cs]:-1,sz1:ct>=0?D.csize[ct]:-1,segFail,segs,bridge,strictFail,minOff,corr});
 }
 return {rows, pops:NAV.stats.nodes, calls:NAV.stats.calls, ok:NAV.stats.ok, fail:NAV.stats.fail, pruned:NAV.stats.pruned, maxNodes:NAV.stats.maxNodes, lastNodes:NAV.stats.lastNodes};
 })()`,{QUERIES:q});
@@ -154,7 +188,7 @@ return {rows, pops:NAV.stats.nodes, calls:NAV.stats.calls, ok:NAV.stats.ok, fail
 		if(r.null&&r.sameComp){ fn++; problems.push(`[${title}] 同分量却 null ${r.tag} (分量 ${r.sz0}/${r.sz1} 格; 弹出 ${r.pops} 落定 ${r.settles})`); }
 		if(r.segFail>0){ sf+=r.segFail; problems.push(`[${title}] 路标段穿墙 ${r.tag} (${r.segFail}/${r.segs} 段)`); }
 		br+=r.bridge;
-		if(r.clean&&!r.null){ gCleanPaths++; gCleanSegs+=r.segs; gCleanSegFail+=r.segFail; }
+		if(r.clean&&!r.null){ gCleanPaths++; gCleanSegs+=r.segs; gCleanSegFail+=r.segFail; gCorr+=r.corr||0; }
 		if(!r.null){ gPaths++; if(r.segs) gPairs+=r.segs; } else gNull++;
 		if(r.c0b||r.c1b) endpointBad++;
 		if(r.crossComp) cross++;
@@ -181,7 +215,8 @@ for(const p of problems.filter(s=>s.includes('同分量却 null')).slice(0,20)) 
 section('④ 路标可核验 (端点干净路径段段过 NAV.edgeOK —— 判据与 A* 扩展同源)');
 assert(`干净端点路径零穿墙段`, gCleanSegFail===0,
 	`干净路径 ${gCleanPaths} 条 / 段 ${gCleanSegs}, 走廊不过 ${gCleanSegFail}` +
-	(gCleanSegFail?`; 例: ${problems.find(p=>p.includes('路标段穿墙'))}`:'') + ` (端点外推桥接段 ${gSegBridge} 段, 不计入判据)`);
+	(gCleanSegFail?`; 例: ${problems.find(p=>p.includes('路标段穿墙'))}`:'') +
+	` (侧移≤1.5m 净走廊放行 ${gCorr} 段只报不判; 端点外推桥接段 ${gSegBridge} 段, 不计入判据)`);
 console.log(`  附: 严格中线 (lineClear) 不过但走廊可通的段 ${gStrictFail} 段` +
 	(gStrictFail?` (最小可通侧移 ${gMinOffs.length?Math.min.apply(null,gMinOffs)+'~'+Math.max.apply(null,gMinOffs):'?'}m, ≤NAV_EDGE_PAD=1.5 即判据放行的界; 逐段量测见 dev/_navleg-diag.js)`:''));
 section('⑤ 代价 (未被硬上限截断 / 无重复弹出)');

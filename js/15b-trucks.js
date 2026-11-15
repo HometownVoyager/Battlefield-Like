@@ -125,6 +125,19 @@ this.vel=dampF(this.vel,spd,2.5,dt);
 this.pos.x+=Math.sin(this.yaw)*this.vel*dt;
 this.pos.z+=Math.cos(this.yaw)*this.vel*dt;
 this.pos.y=dampF(this.pos.y,heightAt(this.pos.x,this.pos.z),8,dt);
+// 入水特效/音效 (★2026-11-15 入水批): 护送车队涉水 (渡口/浅滩) 入水沿一记车级水花+扑通
+// (scale 2.6 档, 介于士兵与坦克之间); 跃迁账 _wasInWater 记车体, 出水再入水会重发。
+// 卡车没有水深熄火账 (维持现状), 这里只管特效 —— 0.4m 与炮弹入水门同参。
+{
+const wd=waterDepthAt(this.pos.x,this.pos.z);
+const inW=wd>0.4;
+const wasW=!!this._wasInWater;
+this._wasInWater=inW;
+if(inW&&!wasW&&this.alive){
+const wy=waterYAt(this.pos.x,this.pos.z);
+if(wy>-1e8&&typeof waterSplash==='function') waterSplash(V3(this.pos.x,wy+0.1,this.pos.z),2.6,true,true);
+}
+}
 // 实体碰撞: 步兵不可穿入车体; 行进正面的敌军碾压, 其余侧向挤出 (同坦克模式)
 {const _o=_vpsOpts; _o.dt=dt; _o.crusher=this; _o.moving=this.vel>0.8; _o.yMax=2.0; _o.frontalBand=1.4; _o.symmetricFrontal=true; _o.crushDmg=300; _o.pushVel=this.vel; _o.checkSpectator=false;
 vehiclePushSoldiers(this,1.05,3.7,_o);}

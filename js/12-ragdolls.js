@@ -7,6 +7,37 @@
 // (2026-09-26 A4 顺手清: RAG.geo 那 7 个 BoxGeometry 是死代码 —— 自古无人读, mkPart 当场 new 自己的几何;
 //  几何是逐具 dispose 的 (见 removeRagdoll), 共享的只有材质。历史交付文档不改。)
 const RAG={world:null,list:[]};
+// ═══ 2026-11-13 性能批 B: 布娃娃静止结算门 ═══
+// 现状账: updateRagdolls 每部件每帧 5×heightAt (地面 1 + 坡度差分 4) + world.step + ragCollide + 矩阵同步,
+// 尸体落定后 ( usually <2s) 这些全是纯浪费 —— 8 具尸体 ≈ 300 次 heightAt/帧。门设计:
+//   ① 冻结 = 记录全部件位姿快照; 冻结期跳过 heightAt/pen 修正/ragCollide/矩阵同步, 每帧把刚体位姿
+//      **回贴快照** (world.step 是整世界一次调用躲不掉, 让它积分完再钉回 ⇒ 零漂移; 不依赖 cannon 的
+//      sleep 语义, 对真 cannon/沙箱桩/任何假物理都成立);
+//   ② 静止判据 = 全部件逐帧位移 < 2.5mm 持续 2.5s (Baumgarte 微颤 ~0.1mm/帧, 落定即过门; 尸体不再
+//      微颤 = 与旧持续抖动的唯一可感差异, 观感等同"定格");
+//   ③ 活跃帽 = RAG_ACTIVE_MAX 具 —— 超帽把"已接近静止 (stillT>0.5s) 的最旧一具"立即冻结 (没有半静止的
+//      才冻最旧的), 尸体视觉保留在场, t 到期照常移除; 与 spawnRagdoll 开头既有的 8 具总量帽并行;
+//   ④ 解冻 = 冻结期每帧探一次部件速度, 任一部件 > 0.9m/s 判"外部冲量" (爆炸推/车辆碰/脚本 poke) ⇒
+//      解冻一具回到完整结算。既有代码已无爆炸推尸体的直接入口 (window._lastExplosion 死分支 2026-09-06
+//      D3 删除), 本钩按"任何现在/将来写 body.velocity 的路径都被它接住"的口径守住既有交互面;
+//      thawRagdoll 为顶层函数 (跨文件可调), 玩家死亡镜头 (20-player 读 parts[0].body.position) 读的是
+//      每帧回贴的快照位姿, 冻结不影响它。
+const RAG_STILL_T=2.5;
+const RAG_STILL_D2=6.25e-6;   // (0.0025m)²/帧
+const RAG_ACTIVE_MAX=6;
+const RAG_THAW_V2=0.81;       // (0.9m/s)²
+function freezeRagdoll(r){
+if(!r||r.frozen) return;
+r.frozen=true; r.stillT=0;
+r.snap=r.parts.map(p=>({x:p.body.position.x,y:p.body.position.y,z:p.body.position.z,
+qx:p.body.quaternion.x,qy:p.body.quaternion.y,qz:p.body.quaternion.z,qw:p.body.quaternion.w}));
+}
+function thawRagdoll(r){
+if(!r||!r.frozen) return;
+r.frozen=false; r.stillT=0; r.snap=null;
+for(let k=0;k<r.parts.length;k++){ const b=r.parts[k].body,l=r.last[k];
+l[0]=b.position.x; l[1]=b.position.y; l[2]=b.position.z; }
+}
 function ragInit(){
 if(!window.CANNON||RAG.world) return;
 RAG.world=new CANNON.World();
@@ -122,8 +153,21 @@ pt2.angularVelocity.set(rand(-5,5),rand(-4,4),rand(-5,5));
 }
 if(isHead){ head.velocity.y+=2.2; head.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9)); }
 }
-const entry={parts,cons,t:9,bodies:parts.map(p=>p.body)};
+const entry={parts,cons,t:9,bodies:parts.map(p=>p.body),frozen:false,stillT:0,
+last:parts.map(p=>[p.body.position.x,p.body.position.y,p.body.position.z])};
 RAG.list.push(entry);
+// ★2026-11-13 性能批 B③: 活跃布娃娃数量帽 —— 超帽立即冻结最旧的 (优先挑已接近静止的)。
+//   冻结只是停结算, 尸体网格/碰撞体摘除链 (removeRagdoll) 与 t 到期路径照旧。
+let _act=0;
+for(let i2=0;i2<RAG.list.length;i2++) if(!RAG.list[i2].frozen) _act++;
+while(_act>RAG_ACTIVE_MAX&&!window.RAG_NO_FREEZE){   // 回退旗 (B): RAG_NO_FREEZE=关活跃帽
+let pick=-1;
+for(let i2=0;i2<RAG.list.length;i2++){ const r2=RAG.list[i2]; if(!r2.frozen&&(r2.stillT||0)>0.5){ pick=i2; break; } }
+if(pick<0) for(let i2=0;i2<RAG.list.length;i2++){ if(!RAG.list[i2].frozen){ pick=i2; break; } }
+if(pick<0) break;
+freezeRagdoll(RAG.list[pick]);
+_act--;
+}
 return entry;
 }
 function removeRagdoll(r){
@@ -149,7 +193,9 @@ ragInit();
 if(!RAG.world) return;
 if(DEBRIS.list.length>=96){ removeDebrisEntry(DEBRIS.list.shift()); } // 2026-09-01: 26→96 (墙/屋顶即刻碎块化后单栋建筑碎块量增大)
 const mesh2=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
-mesh2.castShadow=true;
+// ★2026-11-11 性能批: 碎块不再投影。一栋大墙坍塌一次塞满 96 块 (上限即满), 主+阴影两遍 = +192 draw
+// call 恰好压在"炸楼瞬间"; 小件碎块的地面影子肉眼收益≈0, 换掉的是坍塌当帧的半条阴影 pass。
+mesh2.castShadow=false;
 scene.add(mesh2);
 const body=new CANNON.Body({mass:Math.max(2,w*h*d*2.5),collisionFilterGroup:0,collisionFilterMask:0});
 body.addShape(new CANNON.Box(new CANNON.Vec3(w/2,h/2,d/2)));
@@ -256,10 +302,34 @@ if(e.t<=0){ removeDebrisEntry(e); DEBRIS.list.splice(i,1); }
 function updateRagdolls(dt){
 if(!RAG.world||dt<=0) return;
 if(!RAG.list.length&&!DEBRIS.list.length) return;
+// ★2026-11-13 性能批 B④: 冻结具预扫 —— 外部冲量检测 (解冻) 或保持冻结。
+//   world.step 在下方整世界跑一次, 冻结具只能在 step 前后做文章: 探速 (外部 poke 的 velocity 留在
+//   体上直到这里) + step 后位姿回贴 (下方冻结分支)。
+for(let i=0;i<RAG.list.length;i++){
+const r=RAG.list[i];
+if(!r.frozen) continue;
+for(let k=0;k<r.parts.length;k++){
+const v=r.parts[k].body.velocity;
+if(v.x*v.x+v.y*v.y+v.z*v.z>RAG_THAW_V2){ thawRagdoll(r); break; }
+}
+}
 RAG.world.step(1/60,Math.min(dt,0.05),4);
 for(let i=RAG.list.length-1;i>=0;i--){
 const r=RAG.list[i];
 r.t-=dt;
+if(r.frozen){
+// 冻结: 位姿钉回快照 (step 的重力/约束积分被整帧抹平 ⇒ 零漂移), 不做 heightAt/坡度/ragCollide/矩阵同步
+const snap=r.snap;
+for(let k=0;k<r.parts.length;k++){
+const b=r.parts[k].body, s2=snap[k];
+b.position.x=s2.x; b.position.y=s2.y; b.position.z=s2.z;
+b.quaternion.x=s2.qx; b.quaternion.y=s2.qy; b.quaternion.z=s2.qz; b.quaternion.w=s2.qw;
+const v=b.velocity; v.x=0; v.y=0; v.z=0;
+const av=b.angularVelocity; av.x=0; av.y=0; av.z=0;
+}
+if(r.t<=0) removeRagdoll(r);
+continue;
+}
 for(const p of r.parts){
 const b=p.body;
 const gh=ragDeckGround(b.position.x,b.position.y,b.position.z);
@@ -287,6 +357,18 @@ ragCollide(b,0.16);
 p.mesh.position.copy(b.position);
 p.mesh.quaternion.copy(b.quaternion);
 }
+// ★2026-11-13 性能批 B②: 静止检测 —— 全部件逐帧位移都够小就累计 stillT, 达 RAG_STILL_T 冻结
+//   (跳过此后的 heightAt×5/部件/帧 + ragCollide + 矩阵同步; 冻结后网格停在最终姿态, 尸体不再微颤)
+let maxD2=0;
+for(let k=0;k<r.parts.length;k++){
+const b=r.parts[k].body, l=r.last[k];
+const dx=b.position.x-l[0], dy=b.position.y-l[1], dz=b.position.z-l[2];
+const d2=dx*dx+dy*dy+dz*dz;
+if(d2>maxD2) maxD2=d2;
+l[0]=b.position.x; l[1]=b.position.y; l[2]=b.position.z;
+}
+if(maxD2<RAG_STILL_D2) r.stillT+=dt; else r.stillT=0;
+if(r.stillT>=RAG_STILL_T&&!window.RAG_NO_FREEZE) freezeRagdoll(r);   // 回退旗 (B): RAG_NO_FREEZE=关静止冻结 (旧全活跃结算口径)
 if(r.t<=0) removeRagdoll(r);
 }
 updateDebris(dt);

@@ -154,7 +154,7 @@ MeshStandardMaterial:_mat(class{constructor(){}}),
 MeshPhongMaterial:_mat(class{constructor(){}}),
 PointsMaterial:_mat(class{constructor(){}}),
 ShaderMaterial:class{constructor(o){Object.assign(this,o||{});}},
-SpriteMaterial:_mat(class{constructor(){}}),
+SpriteMaterial:_mat(class{constructor(){this.rotation=0;}dispose(){}}),
 LineBasicMaterial:class{constructor(o){Object.assign(this,o||{});}},
 CanvasTexture:class{constructor(c){this.image=c;this.repeat=new V3(1,1,1);this.offset=new V3(0,0,0);this.needsUpdate=false;}clone(){return new THREE.CanvasTexture(this.image);}dispose(){}},
 Texture:class{constructor(){this.repeat=new V3(1,1,1);this.offset=new V3(0,0,0);this.wrapS=0;this.wrapT=0;this.needsUpdate=false;}clone(){return new THREE.Texture();}},
@@ -175,11 +175,11 @@ PCFSoftShadowMap:2,PCFShadowMap:1,BasicShadowMap:0,NearestFilter:0,LinearFilter:
 }
 // ── 媒体/窗口桩 ──
 const AC=class{
-createOscillator(){return {frequency:{setValueAtTime(){},value:0},type:'',start(){},stop(){},connect(){},onended:null};}
-createGain(){return {gain:{setValueAtTime(){},setTargetAtTime(){},value:0},connect(){},disconnect(){}};}
+createOscillator(){return {frequency:{setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},value:0},type:'',start(){},stop(){},connect(){},onended:null};}
+createGain(){return {gain:{setValueAtTime(){},setTargetAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},value:0},connect(){},disconnect(){}};}
 createBuffer(){return {getChannelData:()=>new Float32Array(16),duration:1,numberOfChannels:1};}
-createBufferSource(){return {buffer:null,loop:false,playbackRate:{value:0,setValueAtTime(){}},start(){},stop(){},connect(){},onended:null};}
-createBiquadFilter(){return {type:'',frequency:{value:0,setValueAtTime(){}},Q:{value:0},connect(){}};}
+createBufferSource(){return {buffer:null,loop:false,playbackRate:{value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}},start(){},stop(){},connect(){},onended:null};}
+createBiquadFilter(){return {type:'',frequency:{value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}},Q:{value:0},connect(){}};}
 createDynamicsCompressor(){return {threshold:{value:0},ratio:{value:0},attack:{value:0},release:{value:0},connect(){}};}
 createStereoPanner(){return {pan:{value:0},connect(){}};}
 resume(){return Promise.resolve();}
@@ -199,11 +199,11 @@ navigator:{},document,window,
 requestAnimationFrame:()=>0,cancelAnimationFrame:()=>{},
 setTimeout:(f,t)=>{return 0;},clearTimeout:()=>{},setInterval:()=>0,clearInterval:()=>{},
 devicePixelRatio:1,innerWidth:1280,innerHeight:720,addEventListener(){},removeEventListener(){},
-AudioContext:class{createOscillator(){return {frequency:{setValueAtTime(){},value:0},type:'',start(){},stop(){},connect(){},onended:null};}
-createGain(){return {gain:{setValueAtTime(){},setTargetAtTime(){},value:0},connect(){},disconnect(){}};}
+AudioContext:class{createOscillator(){return {frequency:{setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},value:0},type:'',start(){},stop(){},connect(){},onended:null};}
+createGain(){return {gain:{setValueAtTime(){},setTargetAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},value:0},connect(){},disconnect(){}};}
 createBuffer(){return {getChannelData:()=>new Float32Array(16),duration:1,numberOfChannels:1};}
-createBufferSource(){return {buffer:null,loop:false,playbackRate:{value:0,setValueAtTime(){}},start(){},stop(){},connect(){},onended:null};}
-createBiquadFilter(){return {type:'',frequency:{value:0,setValueAtTime(){}},Q:{value:0},connect(){}};}
+createBufferSource(){return {buffer:null,loop:false,playbackRate:{value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}},start(){},stop(){},connect(){},onended:null};}
+createBiquadFilter(){return {type:'',frequency:{value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}},Q:{value:0},connect(){}};}
 createDynamicsCompressor(){return {threshold:{value:0},ratio:{value:0},attack:{value:0},release:{value:0},connect(){}};}
 createStereoPanner(){return {pan:{value:0},connect(){}};}
 resume(){return Promise.resolve();}

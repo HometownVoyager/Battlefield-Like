@@ -32,9 +32,11 @@ sun.shadow.camera.updateProjectionMatrix();
 sun.shadow.mapSize.setScalar(q===0?1024:(q===1?1536:2048));
 if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
 renderer.shadowMap.needsUpdate=true; // 换档重灌 shadow map 后立即补一帧 (配合下方 shadowRefreshTick 的半频节流)
-// 高画质: 软阴影 + 电影感滤镜; 低画质硬阴影无滤镜
+// 高画质: 软阴影; 低画质硬阴影 (2026-11-11 性能批: 摘除画布 CSS 电影感滤镜 —— 旧版 q1/q2 在整张
+// WebGL 画布上常挂 saturate/contrast/brightness, 浏览器每帧对全屏画布多一次滤镜合成 pass (隐式拷贝,
+// 部分驱动上还阻断画布零拷贝直合成), 分辨率/dpr 越大越贵, 色彩收益 ≤6% ⇒ 恒定白缴的 GPU 税)。
 renderer.shadowMap.type=q===2?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
-renderer.domElement.style.filter=q===2?'saturate(1.1) contrast(1.06) brightness(1.02)':(q===1?'saturate(1.04) contrast(1.02)':'none');
+renderer.domElement.style.filter='none';
 // 2026-09-12 巨桥改版: 主题系数与图幅系数相乘 (旧版互斥三元 —— deepjungle 640 大图永远吃不到放宽)
 // 2026-09-13 许特根改版: deepjungle 硬编码 0.72 抽成主题字段 THEME.fogMul (woods=0.42 能见度极低)
 scene.fog.far = dryFogFar();
@@ -134,13 +136,15 @@ sun.position.set(cx-72,96,cz+32);
 // 一半的阴影 draw call。机制: autoUpdate=false + 按 mod-N 帧置 needsUpdate (r152 渲染一次后自动回落 false)。
 // 夜间 sun.castShadow=false 时恒置 false ⇒ 阴影 pass 整体跳过; applyQuality 换档重灌 shadow map 后
 // 就地补一次 needsUpdate, 保证换档当帧就有影子。
-// 档位 SETTINGS.shadowFreq: -1 跟随画质档 (高画质逐帧 / 低中半频 = 旧行为逐位) / 0 逐帧 / 1 半频 /
+// 档位 SETTINGS.shadowFreq: -1 跟随画质档 (2026-11-11 性能批: **全档半频** —— 旧版高画质逐帧, 但阴影
+// pass 是每帧的第二遍全量绘制且投射者名单近年只增不减 (士兵全身件/尸体 7-8 件/碎块 96 块 castShadow),
+// 高画质用户恒吃半条主 pass; 阴影位置差 1 帧在战术视距不可感知) / 0 逐帧 (显式开) / 1 半频 /
 // 2 四分之一频 / 3 关闭 (sunShadowAllowed 门已把 sun.castShadow 压 false, 此处再兜底停 autoUpdate)。
 let _shadowParity=0;
 function shadowRefreshTick(){
 const f=SETTINGS.shadowFreq;
 if(f===3){ renderer.shadowMap.autoUpdate=false; renderer.shadowMap.needsUpdate=false; return; }
-if(f===0||(f===-1&&SETTINGS.quality>=2)){ renderer.shadowMap.autoUpdate=true; return; }
+if(f===0){ renderer.shadowMap.autoUpdate=true; return; }
 _shadowParity=(_shadowParity+1)%((f===2)?4:2);
 renderer.shadowMap.autoUpdate=false;
 renderer.shadowMap.needsUpdate=(_shadowParity===0)&&sun.castShadow;

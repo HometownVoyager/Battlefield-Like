@@ -589,7 +589,10 @@ return { L:mk(), R:mk() };
 //   于是选烟雾弹/燃烧弹/反坦克雷出手前手里都是普通手雷的样子 (用户 2026-09-30 报)。
 // 尺寸 = 真实口径 (m), 原点 = 握点 (木柄雷在柄根/其余在弹体中心); 出手件另乘 NADE_WORLD_SCALE
 //   放大一档 (远距离辨识; 旧世界件本就是手上件的近 2 倍, 现在只留 1.5 倍且两处同模)。
-const NADE_WORLD_SCALE=1.5;
+//   ★2026-11-13 批: 1.5 → 2.5 (用户实报"投掷物模型太小不明显") —— 消费点只有出手件 (13-combat
+//   throwNade) 与三人称手持 (20-player avNadeSync) 两处同乘, 一人称手上件保持原尺寸不跟放;
+//   预瞄圈/地图标记半径走 nadeArcRingR 杀伤口径, 与模型尺寸不耦合。
+const NADE_WORLD_SCALE=2.5;
 const nadeMats={
 smoke:new THREE.MeshLambertMaterial({color:0x8f948c,map:TEX.metalBrush}),   // 发烟罐罐身 (马口铁灰)
 smokeCap:new THREE.MeshLambertMaterial({color:0x5c6058,map:TEX.metalBrush}),

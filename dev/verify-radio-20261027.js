@@ -231,8 +231,12 @@ const MEASURE=`(()=>{
  // 步枪档零回归: worldGunModel('rifle') 的网格数与包围盒 (改前 3 件)
  out.rifle=bboxOf(worldGunModel('rifle',0,'garand'));
  // ④ 挂点表
- out.mount=gunMountOf('radio'); out.mountDefault=gunMountOf('rifle');
- out.mountProne=gunMountOf('radio',1.5); out.mountProneDefault=gunMountOf('rifle',1.5);
+ // 2026-11-11 槽位契约跟钉: gunMountOf 返回模块级复用槽 _gm, 连续调用互相覆盖 —— 四档必须就地数值快照,
+ // 否则四份引用同槽、serialization 时只剩最后一次调用的值 (④-a/④-c 的 !== 判据会全假)。
+ {let _m=gunMountOf('radio'); out.mount={x:_m.x,y:_m.y,z:_m.z};
+  _m=gunMountOf('rifle'); out.mountDefault={x:_m.x,y:_m.y,z:_m.z};
+  _m=gunMountOf('radio',1.5); out.mountProne={x:_m.x,y:_m.y,z:_m.z};
+  _m=gunMountOf('rifle',1.5); out.mountProneDefault={x:_m.x,y:_m.y,z:_m.z};}
  out.fwd={radio:CARRIED_FWD.radio, rifle:CARRIED_FWD.rifle};
  out.hold=gunHoldOf('radio'); out.holdRifle=gunHoldOf('rifle');
  // 天线尖高度 = 模型最高点 (剪影里必须明显高过机身: 上段占 26%)
@@ -396,7 +400,10 @@ const AV=`(()=>{
  out.gunRotY=av._gun?+av._gun.rotation.y.toFixed(4):null;
  out.gunPos=av._gun?{x:+av._gun.position.x.toFixed(3),y:+av._gun.position.y.toFixed(3),z:+av._gun.position.z.toFixed(3)}:null;
  out.gunGPos={x:+av.gunG.position.x.toFixed(3),y:+av.gunG.position.y.toFixed(3),z:+av.gunG.position.z.toFixed(3)};
- out.mountWant=gunMountOf('radio',av.pelvis.rotation.x);
+ // 2026-11-11 槽位契约跟钉: 此处到 serialization (line ~474) 之间还有 ~600 帧姿态机 (趴姿 120 帧),
+ // _gm 会被覆盖 —— mountWant 必须就地快照数值, 不得持有槽引用跨帧。
+ {const _mw=gunMountOf('radio',av.pelvis.rotation.x);
+  out.mountWant={x:_mw.x,y:_mw.y,z:_mw.z};}
  const hRt=handTorso(av.armR.sh,av.armR.elm,av.armR.sh.position);
  const hLt=handTorso(av.armL.sh,av.armL.elm,av.armL.sh.position);
  const gp=gunGripPoint('radio',av.gunG.rotation.x,av.gunG.rotation.y,av.gunG.rotation.z,av.pelvis.rotation.x);

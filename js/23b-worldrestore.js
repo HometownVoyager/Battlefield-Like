@@ -88,6 +88,10 @@ if(!m||!m.position) return null;
 const q=m.quaternion;
 return [m.position.x,m.position.y,m.position.z,q?q.x:0,q?q.y:0,q?q.z:0,q?q.w:1];
 });
+// ★2026-11-14 重开局批: per-mesh 材质档引用 (04b vanishFlora 焦黑 = m.material 换 _charredFloraMat,
+// 树篱/枯树/竹丛/蕨丛走这条路) —— 不拍的话还原只回字段/变换, 材质仍是焦黑档 (用户实报"回主页航拍树篱焦黑")。
+// 开局快照时材质恒为原始档; 椰树 grp 无 material → null, 写回时自然跳过。
+if(rec.meshes) st.mm=rec.meshes.map(m=>(m&&m.material)?m.material:null);
 WSN.flora.push(st);
 };
 if(typeof FLORA_HASH!=='undefined'&&FLORA_HASH&&FLORA_HASH.forEach) FLORA_HASH.forEach(arr=>{ if(arr) for(const rec of arr) pushFlora(rec); });
@@ -256,6 +260,12 @@ if(m.position&&m.position.set) m.position.set(t[0],t[1],t[2]);
 if(m.quaternion){ m.quaternion.x=t[3]; m.quaternion.y=t[4]; m.quaternion.z=t[5]; m.quaternion.w=t[6];
 if(m.rotation&&m.rotation.setFromQuaternion) m.rotation.setFromQuaternion(m.quaternion); }
 }
+// ★2026-11-14 重开局批: 材质档写回 (快照新增 mm = 原材质引用) —— 树篱/枯树/竹丛/蕨丛的焦黑是
+// vanishFlora 换 m.material (04b-fire), 上面字段/变换还原碰不到材质引用; 不写回 = 焦黑树篱在还原后
+// 依旧黑着。null (椰树 grp 无材质) 自然跳过。★本块必须在 flora for-of 循环体内 (st 作用域)!
+if(st.mm&&r.meshes) for(let i=0;i<r.meshes.length;i++){
+const m=r.meshes[i]; if(m&&st.mm[i]) m.material=st.mm[i];
+}
 }
 // ⑥ 实例批: 矩阵/实例色/数量整体写回 (倒伏姿态、焦黑树干、烧尽的零缩放隐藏全在这里)
 for(const e of WSN.inst){
@@ -315,8 +325,14 @@ try{ flashLight.intensity=0; }catch(e){}
 try{ flashTimer=0; }catch(e){}
 try{ stormFlash=0; const ov=document.getElementById('stormOv'); if(ov) ov.style.opacity=0; }catch(e){}
 // ⑪ 占用网格 + 空间索引 + 寻路网格按还原后的碰撞体重建 (顺带抹掉火焰/工事留下的占用格)
+// ★2026-11-14 重开局批: refresh(true) 强制重建 RGRID 空间索引 —— ②/③ 的 _wsnTrim 把 BOXES/CYLS 截回
+// 开局长度, 但局内残骸动态碰撞盒 (registerDynCollider→addBoxCollider) 已把越界下标写进 RGRID.boxCells;
+// 2026-11-11 性能批把 refresh 改成"集合变更才重建索引"后, 无参调用在 _colIdxDirty=false 时**不再重建**,
+// 脏下标带进新一局 ⇒ standHeight/raycastWorld/eachBoxNear 喂 BOXES[bi]=undefined 抛 TypeError, 被
+// 24-main 帧级护栏吞掉 = "地图静态/没载具/UI消失/卡死"四症状同根 (04-collision.js:11 注释承诺的
+// forceFull 口径直到本批才真正接线)。
 try{ _navDirtyT=0; }catch(e){}
-try{ NAV.refresh(); }catch(e){ console.warn('[世界还原] 导航重建失败:',e&&e.message); }
+try{ NAV.refresh(true); }catch(e){ console.warn('[世界还原] 导航重建失败:',e&&e.message); }
 // ⑫ 环境与天气状态同步 (防止就地换局/复位后雾距/雾色/曝光与当前 WX_CFG 脱节)
 try{ if(typeof applySceneEnvironment==='function') applySceneEnvironment(); }catch(e){}
 // 耗时诊断 (一次换局/回主菜单一次): 实机若感到卡顿, 这条日志是唯一读数

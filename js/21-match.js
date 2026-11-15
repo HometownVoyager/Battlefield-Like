@@ -529,6 +529,7 @@ return kill.length;
 }
 function endMatch(forceWinner){
 matchOver=true;
+if(typeof killcamEnd==='function') killcamEnd(); // killcam 随结算一次收账 (2026-11-12 死亡视角批: 结算屏覆盖前先还原画布滤镜)
 // 观战时停随战局结束收尾 (2026-09-27M 时停修复批, 审计 P1-4): specTimeFrozen 本身就要求 !matchOver ⇒
 // 结算起时停已自动失效; 这里显式复位的是**状态残留** (SPEC_TIME.paused), 免得"结算 → 返回主界面 →
 // 下一局"这条链上把上一局的暂停态带进新局 (换局路径另有 resetPlayerForNewMatch 的复位, 两处同源)。

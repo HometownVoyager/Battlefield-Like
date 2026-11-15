@@ -39,7 +39,7 @@ ok(air.indexOf('planeNearTest(f.pos.x,f.pos.y,f.pos.z,f.owner&&f.owner.isPlayer?
 &&air.indexOf('p.pos.distanceTo(f.pos)<')<0,'S3 高炮近炸: 引信半径 8/11 保留, 判定几何收口 planeNearTest (旧手写点距循环绝迹; GROUNDGUN_VS_AIR 弹伤口径原样)');
 ok(cbt.indexOf("if(typeof planeHitTest==='function'&&shooter&&!def.noAirHit){")>=0
 &&air.indexOf('noAirHit:true},o);')>=0
-&&cbt.indexOf('const ph=planeHitTest(origin,dir,wallD,shooter.team);')>=0
+&&cbt.indexOf('const ph=planeHitTest(origin,dir,wallD,coFfFire(shooter)?-1:shooter.team);')>=0 /* 2026-11-13 观战中立批跟码: 对空链 coFfFire=-1 全队可命中 */
 &&cbt.indexOf('} else if(hitPlane&&planeD<=Math.min(tankD,truckD)){')>=0
 &&cbt.indexOf('AIRMG_SCRATCH_MG:AIRMG_SCRATCH_SOL')>=0
 &&cbt.indexOf('shooter.isPlayer?1:GROUNDGUN_VS_AIR')>=0

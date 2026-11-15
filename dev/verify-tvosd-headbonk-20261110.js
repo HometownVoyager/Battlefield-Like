@@ -33,8 +33,8 @@ document.querySelector=(s)=>patchStyle(q(s));
 const PATCHES=[
  // N1 病灶还原: 步行分支头顶钳制接线摘除 (头探进楼板纵带, 横推接管 ⇒ 穿模穿墙复现)
  ['js/20-player.js','if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: 上升段头探进底面就地停住','// NEG N1'],
- // N2 病灶还原: HEAD_GRAZE 摘除 (盒门还原) —— 擦碰天花板那帧横推仍接管
- ['js/04-collision.js','if(pos.y+1.7-HEAD_GRAZE<b.minY||pos.y+0.25>b.maxY) return;','if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) return; // NEG N2'],
+ // N2 病灶还原: 横推盒门眼线 (1.5) 还原为头顶线 (1.7) —— 擦碰天花板那帧横推仍接管 (★2026-11-14 跟码)
+ ['js/04-collision.js','if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;','if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) return; // NEG N2'],
  // N3 病灶还原: OSD 驱动块摘除 (遮罩退回光秃扫描线)。单行锚 (22-hud CRLF, 多行锚必失配)
  ['js/22-hud.js',"if(player.loiter&&!player.loiter.dead){","if(false&&player.loiter&&!player.loiter.dead){ // NEG N3"],
  // N4 病灶还原: tvOv 子元素整块摘除
@@ -59,10 +59,11 @@ assert('04-collision: headCeilClamp 单源 + 穿越窗判据 + 双回调 + 零�
  &&s04.includes('if(c.y0<s.prevHead||c.y0>s.head) return;')
  &&s04.includes('const _hcS={pos:null,r:0.42,prevHead:0,head:0,hit:0};')
  &&s04.includes('pos.y=_hcS.hit-1.7;'));
-assert('04-collision: HEAD_GRAZE 擦碰容差进横推双门 (盒+柱)',
+assert('04-collision: 横推双门眼线以上不作为 (盒+柱, 2026-11-14 批③改窗)',
  s04.includes('const HEAD_GRAZE=0.06;')
- &&s04.includes('if(pos.y+1.7-HEAD_GRAZE<b.minY||pos.y+0.25>b.maxY) return;')
- &&s04.includes('if(pos.y+1.7-HEAD_GRAZE<c.y0||pos.y+0.2>c.y1) return;'));
+ &&s04.includes('if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;')
+ &&s04.includes('if(pos.y+1.5<c.y0||pos.y+0.2>c.y1) return;')
+ &&s04.includes('_hcS.prevHead=pos.y+1.5;'));
 assert('20-player: 两条步兵积分路径都接线 (步行 + TV制导本体)',
  (s20.match(/if\(p\.vel\.y>0&&headCeilClamp\(p\.pos,p\.vel\.y\*dt\)\) p\.vel\.y=0;/g)||[]).length===2);
 assert('index.html: tvOv OSD 子元素齐 (四角标/顶栏REC+时钟+LINK/分划/开镜标/底栏双读数/存续条)',
@@ -82,12 +83,19 @@ assert('css: OSD 四角标/低量红脉冲/REC闪烁/分划/存续条规则齐',
  &&css.includes('#tvLifeWrap { position:absolute; left:50%; bottom:30px;')
  &&css.includes('#tvOv .tvOsd { position:absolute;')
  &&css.includes('#tvTopL { left:calc(7% + 46px); top:9%; }'));
-assert('22-hud: OSD 逐帧驱动 (底栏读数/时间码/开镜标/存续条/low 类) + 退场清账',
- s22.includes("hudText('tvBotL',t2('离地')+' '+agl+'m · '+t2('速度')+' '+Math.round(d.spd)+'m/s');")
+assert('22-hud: OSD 逐帧驱动 (底栏读数/时间码/开镜标/存续条/low+boost+zoom 类/FPV沉浸门) + 退场清账',
+ s22.includes("function _ltImmHud(hide){")
+ &&s22.includes("const boost=(keys.Space&&!player._ltSpace);")
+ &&s22.includes("const zoom=!!(mouse2Down&&!player._ltRClick);")
+ &&s22.includes("hudText('tvBotL',t2('离地')+' '+agl+'m · '+t2('速度')+' '+Math.round(d.spd)+'m/s'+(boost?' ▸▸ '+t2('加速'):''));")
  &&s22.includes("hudText('tvBotR',t2('离机')+' '+Math.round(d.pos.distanceTo(player.pos))+'m');")
- &&s22.includes("hudShow('tvZoom',!!(mouse2Down&&!player._ltRClick));")
- &&s22.includes("hudStyle('tvLifeFill','width',Math.max(0,Math.min(100,d.life/(d.lifeMax||24)*100))+'%');")
- &&s22.includes("hudClass('tvOv',d.life<4?'low':'');")
+ &&s22.includes("hudShow('tvZoom',zoom);")
+ &&s22.includes("hudText('tvZoom','ZOOM ×'+((typeof camera!=='undefined'&&camera&&camera.fov>1)?Math.round(85/camera.fov*10)/10:1));")
+ &&s22.includes("hudClass('tvOv',(d.life<4?'low':'')+(boost?' boost':'')+(zoom?' zoom':''));")
+ &&s22.includes("_ltImmHud(true);")
+ &&s22.includes("_ltImmHud(false);")
+ &&s22.includes("hudStyle('tvLifeFill','width',Math.max(0,Math.min(100,Math.round(d.life/(d.lifeMax||24)*100)))+'%');")
+ &&s22.includes("hudClass('tvOv','');")
  &&s22.includes("hudClass('tvOv','');"));
 assert('13-combat: lifeMax 出膛记账 (存续条上限单源, HUD 缺省兜底 24)',
  s13.includes('life:24, lifeMax:24, t:0, spd:13')&&s22.includes('d.lifeMax||24'));

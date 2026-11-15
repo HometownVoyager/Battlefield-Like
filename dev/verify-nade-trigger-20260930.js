@@ -188,7 +188,7 @@ has(hud,"box.className.indexOf('naWater')",'F1v 入水哑火档降档着色');
 console.log('  ─ F2 四弹种建模单源');
 has(weap,'function buildNadeMesh(kind,team)','F2a buildNadeMesh 单源建模入口');
 has(weap,"const NADE_KINDS=['frag','smoke','incin','at']","F2b NADE_KINDS 四档");
-has(weap,'const NADE_WORLD_SCALE=1.5','F2c 出手件放大单源');
+has(weap,'const NADE_WORLD_SCALE=2.5','F2c 出手件放大单源 (2026-11-13 批 1.5→2.5 跟码修钉)');
 has(weap,'function nadeFuzetop','F2d 引信组共用件 (引信头/握片/拉环)');
 has(weap,"fam==='stickS'",'F2e 木柄雷苏式档 (旧版只分 egg/stick, stickS 被当 stick)');
 lacks(weap,'function buildNadeModel(','F2f 旧单模型 buildNadeModel 绝迹');

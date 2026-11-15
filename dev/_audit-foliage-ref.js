@@ -445,15 +445,35 @@ else bad('灌木实例批容量与记录数不一致: '+CAP.count+' vs '+CAP.liv
 grassAlloc=BURN_INST[0]?BURN_INST[0].im.count:0;
 placed=0; if(BURN_INST[0]) for(const a of BURN_INST[0].byCell.values()) placed+=a.length;
 console.log('  草丛: 分配='+grassAlloc+' 落位='+placed+' 落位率='+(placed/grassAlloc*100).toFixed(1)+'%  (grassN='+JSON.stringify(FLORA_CFG.grassN)+' grassMul=1.35 grassTries='+FLORA_CFG.grassTries+')');
-// 烧毁 → 遮蔽消失 (先找一株确实在视线带里的)
+// 烧毁 → 遮蔽消失 (2026-11-15 判据修钉: 灌木成簇生长, 同一条 6m 视线可被多株同时遮挡 —— 旧版只
+//   烧一株就断言"线应变净", 遇簇内第二株即假红 (本图 @(-115.8,147.8) 实录, 三连稳现)。改为逐株
+//   烧掉同线遮挡者 (≤4 株), 断言语义=机制真值 "dead 早退生效": 全部烧完线必须变净, 仍挡 ⇒ 真红。
 let done=false;
 for(const rec of BUSH_LIVE){
 if(rec.dead||!rec.alive) continue;
-const g=rec.g0, ax=rec.x-6, ay=heightAt(ax,rec.z)+1.62;
-if(!los(ax,ay,rec.z, rec.x,g+1.40,rec.z)) continue;
-vanishFlora(rec,false);
-const after=los(ax,ay,rec.z, rec.x,g+1.40,rec.z);
-console.log('  烧毁复核: 挡视线灌木 @('+rec.x.toFixed(1)+','+rec.z.toFixed(1)+') → vanishFlora 后 dead='+rec.dead+' between='+after);
+const g=rec.g0, ax=rec.x-6, ay=heightAt(ax,rec.z)+1.62, az0=rec.z, bx=rec.x, bz0=rec.z, by=g+1.40;
+if(!los(ax,ay,az0, bx,by,bz0)) continue;
+const sd=(px,pz)=>{ // 点到线段 XZ 距离
+const dx=bx-ax, dz=bz0-az0, L2=dx*dx+dz*dz||1e-6;
+const t=Math.max(0,Math.min(1,((px-ax)*dx+(pz-az0)*dz)/L2));
+return Math.hypot(px-(ax+dx*t), pz-(az0+dz*t));
+};
+const burned=[rec]; vanishFlora(rec,false);
+const LOSP=G('FOLIAGE_LOS');
+for(let v=0;v<4;v++){
+if(!los(ax,ay,az0, bx,by,bz0)) break; // 线已净
+let nb=null;
+for(const r2 of BUSH_LIVE){ // 同线上另一株活灌木 (XZ 相交 + 高度带相交)
+if(r2.dead||!r2.alive||burned.includes(r2)) continue;
+const s2=r2.s||1, lo=r2.g0+LOSP.bushLow*s2, hi=r2.g0+LOSP.bushTop*s2, rr=LOSP.bushR*s2;
+const ylo=Math.min(ay,by), yhi=Math.max(ay,by);
+if(sd(r2.x,r2.z)<rr&&ylo<=hi&&yhi>=lo){ nb=r2; break; }
+}
+if(!nb) break; // 找不到活灌木遮挡者 (可能树冠/蕨丛) —— 交由最终断言裁决
+burned.push(nb); vanishFlora(nb,false);
+}
+const after=los(ax,ay,az0, bx,by,bz0);
+console.log('  烧毁复核: 挡视线灌木 @('+rec.x.toFixed(1)+','+rec.z.toFixed(1)+') → 逐株烧掉同线遮挡者 '+burned.length+' 株, 残余遮蔽='+after);
 if(!after) ok('烧毁后遮蔽消失 (dead 早退生效)'); else bad('烧毁后仍遮蔽');
 done=true; break;
 }

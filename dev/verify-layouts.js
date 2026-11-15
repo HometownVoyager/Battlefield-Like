@@ -132,7 +132,47 @@ else dep=D+(d-S.basin.d0)*S.basin.rate;
 const cm=seaChannelMask(x,z);
 if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
 return dep;
+}// 03-terrain 副本 (2026-11-15): 厅坑压平 + 隧道带桥式抬升 —— 与 03-terrain 同源 (旗标期采样, 广场碟保留、明坑/street 矩形短路)。
+// 本体改 metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY 必同步本副本 (与 RIVER 五处副本同一条纪律)。
+let _mNoDep=false;
+function metroFlatRect(x,z){
+if(!METRO||_mNoDep) return null;
+for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+return null;
 }
+function metroFlatY(s){
+if(s._fy!==undefined) return s._fy;
+_mNoDep=true;
+const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
+_mNoDep=false;
+s._fy=base-(s.d||METRO.d);
+return s._fy;
+}
+function metroLiftNodes(s){
+if(s._ln) return s._ln;
+const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
+const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
+const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
+const segL=span/nS;
+_mNoDep=true;
+const ns=[];
+for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
+if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
+_mNoDep=false;
+s._ln={n:nS,segL,ns,alongZ};
+return s._ln;
+}
+function metroLiftY(s,x,z){
+const L=metroLiftNodes(s);
+const t=L.alongZ?(z-s.z0):(x-s.x0);
+const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
+const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
+const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
+const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
+return lo+(hi-lo)*u;
+}
+
 function seaDepthAt(x,z){
 if(!SEA) return 0;
 const d=shoreDist(x,z);
@@ -303,7 +343,7 @@ const TRENCHES=(CAMPAIGN.trench||[]).map(t=>({x1:t[0],z1:t[1],x2:t[2],z2:t[3]}))
 const RIVER={moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true},
 burma:{pts:[[-165,62],[-70,32],[-8,62],[60,12],[120,42],[165,22]],w:8,ice:false},
 songhu:{pts:[[-165,-52],[-80,-42],[0,-58],[80,-32],[165,-42]],w:7,ice:false,d:2.8},
-hukawng:{pts:[[-30,-320],[-8,-224],[-16,-120],[-4,-10],[8,100],[-10,215],[4,320]],w:26,ice:false,d:14,ford:{x:-3.3,z:172,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源)
+hukawng:{pts:[[-22.8,-212],[-4.8,-133],[-9.5,-71.3],[-2.4,-5.9],[4.8,59.4],[-5.9,127.7],[5.3,212]],w:26,ice:false,d:14,ford:{x:-2,z:102.1,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源); 2026-11-14 缩图批同步
 const DELTA=CAMPAIGN.delta||null;
 const DELTA_CHANS=(DELTA&&DELTA.channels)||[];
 const BRIDGES=CAMPAIGN.bridges||(CAMPAIGN.bridge?[CAMPAIGN.bridge]:[]);
@@ -326,7 +366,7 @@ let dep=0;
 const d0=Math.hypot(x-METRO.x,z-METRO.z);
 if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
 for(const s of METRO_RECTS){
-if(!s) continue;
+if(!s||s.street) continue; // 2026-11-15: street 矩形 (隧道带) 不下沉 —— 地形由 metroLiftY 抬到街面 (桥式), 明坑只在洞内建造件
 const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
 const dd=Math.hypot(dx,dz);
 if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
@@ -342,6 +382,7 @@ if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
+if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -413,7 +454,7 @@ function inWaterBody(x,z){
 const wy=waterYAt(x,z);
 return wy>-1e8&&heightAt(x,z,true)<wy-0.05;
 }
-return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
+return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
 }
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
@@ -452,6 +493,7 @@ const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
 ctx.fordAt=terr.fordAt; // 胡康徒涉滩强度场 (2026-09-12, 断言环带检验用)
+ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入, 与本体同步)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
 ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
@@ -593,6 +635,7 @@ if(CT){
 const SD=1.0; // 街缘容差 (B_FOOT 已含 1.0 余量, 合计≥2m 净距)
 for(const s of CT.streets){
 for(const f of foots){
+if(f.sw) continue; // 2026-11-15: stoneWall 段落足迹可有意横街 (柏林街6十字墙=11-14 批既定口径"旧版同款"), 布局探针豁免
 if(f.x0<s.x1-SD&&f.x1>s.x0+SD&&f.z0<s.z1-SD&&f.z1>s.z0+SD){
 errs.push(`城市: 建筑足迹#${f._i} (${f.x0.toFixed(0)}..${f.x1.toFixed(0)},${f.z0.toFixed(0)}..${f.z1.toFixed(0)}) 侵入街道 (${s.x0},${s.z0})..(${s.x1},${s.z1})`);
 }
@@ -609,7 +652,7 @@ if(CAMPAIGN.id==='berlin'){
 if(!types.includes('metro')) errs.push('柏林: 缺少地铁入口亭 (BUILD_REG type=metro)');
 const M=CT.metro;
 if(M){
-const hc=ctx.heightAt(M.x,M.z), he=ctx.heightAt(M.x,M.z+M.r+3);
+const hc=ctx.heightAt(M.x,M.z), he=ctx.heightAt(M.x+M.r+3,M.z); // 2026-11-14 缩图批: 外缘采样改东侧 (+12,0) —— 北缘 +12 落进北站厅、南缘 -12 落进隧道带 (隧道固定宽 6 随厅西对齐, 纵贯广场两侧); 语义=广场浅坑 vs 厅外自然地面, 不变
 if(hc>he-0.5) errs.push(`柏林: 地铁下沉不足 (中心 ${hc.toFixed(2)} vs 外缘 ${he.toFixed(2)})`);
 }
 if(types.filter(t=>t==='block').length<4) errs.push(`柏林: 沿街多层公寓不足 (${types.filter(t=>t==='block').length} < 4)`);
@@ -619,42 +662,62 @@ if(!types.includes('reichstag')) errs.push('柏林: 缺少国会大厦地标 (BU
 if(!types.includes('flaktower')) errs.push('柏林: 缺少防空塔地标 (BUILD_REG type=flaktower)');
 const zs=flags.map(f=>f.z), xs=flags.map(f=>f.x);
 const zSpan=Math.max(...zs)-Math.min(...zs), xSpan=Math.max(...xs)-Math.min(...xs);
-if(zSpan<300) errs.push(`柏林: 旗点南北跨度 ${zSpan.toFixed(0)}<300 —— 又回到"一条线"`);
-if(xSpan<280) errs.push(`柏林: 旗点东西跨度 ${xSpan.toFixed(0)}<280`);
+// 2026-11-14 缩图批: 阈值按 360 图实测重写 (×0.85 余量), 语义不变 —— 锚已随 2026-11-14 缩图批更新+语义不变
+// (实测: zSpan 222.8 / xSpan 191.3 / minFD 81.0 / 站间距 56.3 / 城区建筑 59)
+if(zSpan<189) errs.push(`柏林: 旗点南北跨度 ${zSpan.toFixed(0)}<189 —— 又回到"一条线"`);
+if(xSpan<162) errs.push(`柏林: 旗点东西跨度 ${xSpan.toFixed(0)}<162`);
 let minFD=1e9;
 for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFD=Math.min(minFD,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
-if(minFD<100) errs.push(`柏林: 最近两旗间距 ${minFD.toFixed(0)}<100 (点位过密)`);
+if(minFD<68) errs.push(`柏林: 最近两旗间距 ${minFD.toFixed(0)}<68 (点位过密)`);
 if(M&&M.halls){
-// 两站一区间 (2026-09-09 用户定案): 每站下沉≥2.0 + 相邻站间距≥60 (中间有空间) +
+// 两站一区间 (2026-09-09 用户定案): 每站下沉≥2.0 + 相邻站间距 (中间有空间) +
 // 隧道全程下沉 + 顶板存在 (主街段/中段 —— 坦克/步兵照常过街, 全程不塌陷)
+// 2026-11-14 缩图批: 站间距阈值按实测 56.3×0.85=47 重写; 广场下沉外缘采样由 M.z+M.r+3 (北侧)
+//   改 M.z-M.r-3 (南侧) —— 北站厅缩图后北移 (z0=5.5), +12 采样点落进厅内会假红; 南侧 (-12) 是厅外净地。语义不变。
 const HS=M.halls, T=M.tunnel;
 if(HS.length<2) errs.push(`柏林: 地铁站 ${HS.length}<2 —— 用户要求"起码两个地铁站"`);
 for(let i=0;i<HS.length;i++){
 const A=HS[i], hcx=(A.x0+A.x1)/2, hcz=(A.z0+A.z1)/2;
 const cIn=ctx.heightAt(hcx,hcz), cOut=ctx.heightAt(A.x0-4,hcz);
 if(cOut-cIn<2.0) errs.push(`柏林: 站厅${i+1}下沉不足 (庭内 ${cIn.toFixed(2)} vs 庭外 ${cOut.toFixed(2)})`);
-if(i){ const B=HS[i-1], gap=Math.hypot(hcx-(B.x0+B.x1)/2,hcz-(B.z0+B.z1)/2); if(gap<60) errs.push(`柏林: 相邻地铁站间距 ${gap.toFixed(0)}<60 (两站挤在一起)`); }
+if(i){ const B=HS[i-1], gap=Math.hypot(hcx-(B.x0+B.x1)/2,hcz-(B.z0+B.z1)/2); if(gap<47) errs.push(`柏林: 相邻地铁站间距 ${gap.toFixed(0)}<47 (两站挤在一起)`); }
 }
 if(T){
 const tunX=(T.x0+T.x1)/2;
 const boxes=vm.runInContext('BOXES',ctx);
+// 街面自然地面基准 —— 2026-11-14 缩图批: 由单点 x0-8 改为隧道两壁外 1.2m 的 4 点取最大
+//   (取最大=选最不沉的邻点; 4 点均在厅矩形 x 跨外, 近广场端浅碟/厅坑影响被 max 掩掉)
+const gNat=z=>Math.max(ctx.heightAt(T.x0-1.2,z),ctx.heightAt(T.x1+1.2,z),ctx.heightAt(T.x0-1.2,z-3),ctx.heightAt(T.x1+1.2,z+3));
 // 洞口必须真的通 (2026-09-09 自检发现: 旧洞口判定按"与站厅等宽"写, 6m 隧道对 26m 站厅判不出洞 → 两站被墙封死)
+// 2026-11-15 桥式抬升批重锚: 隧道带 heightAt 已抬到街面 (载具碾顶通行) ⇒ 旧判据 gy=带内 heightAt 的
+//   [gy+0.2,gy+1.6] 变成街面上方空气带, 顶板/过梁必假红。通道带改锚洞内底板实测顶面 [floor+0.2,+1.6]。
 for(const A of HS){
 const wallZ=Math.abs(T.z0-A.z1)<0.01?A.z1:(Math.abs(T.z1-A.z0)<0.01?A.z0:null);
 if(wallZ===null) continue;
 const gy=ctx.heightAt(tunX,wallZ);
-const jam=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.minY<gy+1.6&&b.maxY>gy+0.2);
+const fl=boxes.find(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.maxY<gy-1.5&&b.maxY>gy-4);
+const fTop=fl?fl.maxY:gy-2.6;
+const jam=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.minY<fTop+1.6&&b.maxY>fTop+0.2);
 if(jam) errs.push(`柏林: 站厅(z ${A.z0}..${A.z1}) 隧道洞口被封死 @(${tunX.toFixed(0)},${wallZ.toFixed(0)})`);
 }
-const gNat=z=>ctx.heightAt(T.x0-8,z); // 街面自然地面基准 (x0-8 在所有地铁矩形外)
-for(const z of [T.z0+3,(T.z0+T.z1)/2,T.z1-3]){ // 隧道全程下沉
+for(const z of [T.z0+3,(T.z0+T.z1)/2,T.z1-3]){
+// 隧道带=街面桥 (2026-11-15, 旧"隧道全程下沉≥2"作废): 带内 heightAt 抬到街面节点 —— 坦克如过桥面
+//   碾过 (旧 −2.6 明坑高度场才是"齐平也过不去"的根因)。允差下限 1.4=广场浅碟 (带在 z≈0 穿碟心, 带
+//   内可比邻侧低 ~1.1m 且平滑连续), 上限 0.6=不得隆起成脊 (顶板冒头剐蹭 hull 同族病)。
 const tIn=ctx.heightAt(tunX,z), tOut=gNat(z);
-if(tOut-tIn<2.0) errs.push(`柏林: 隧道下沉不足 @z=${z.toFixed(0)} (${tIn.toFixed(2)} vs ${tOut.toFixed(2)})`);
+if(tIn<tOut-1.4) errs.push(`柏林: 隧道带街面未抬升 @z=${z.toFixed(0)} (带内 ${tIn.toFixed(2)} vs 邻侧 ${tOut.toFixed(2)} — 坦克过不去)`);
+if(tIn>tOut+0.6) errs.push(`柏林: 隧道带街面隆起 @z=${z.toFixed(0)} (${tIn.toFixed(2)} vs ${tOut.toFixed(2)})`);
+// 地下通道语义保留: 洞内底板必须存在且比街面低 ≥1.5 (厅间步行通道, 顶板承载街面)
+const fl=boxes.find(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY<tOut-1.5&&b.maxY>tOut-4);
+if(!fl) errs.push(`柏林: 隧道底板缺失/未下沉 @z=${z.toFixed(0)} (应比街面低 ≥2m)`);
 }
-for(const z of [0,(T.z0+T.z1)/2]){ // 顶板 (主街段 + 中段): 顶面≈自然地面+0.15
-const gref=gNat(z)+0.15;
-const roofOK=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY>gref-0.9&&b.maxY<gref+0.9);
-if(!roofOK) errs.push(`柏林: 隧道顶板缺失 @z=${z.toFixed(0)} (街面塌陷/无法通行)`);
+for(const z of [0,(T.z0+T.z1)/2]){ // 顶板 (主街段 + 中段)
+// 2026-11-15 桥式抬升批: 顶面基准由"邻侧自然地面+0.15"改为**带内本地街面** —— 隧道带在 z≈0 穿广场
+//   碟心, 带内街面可比邻侧低 ~1.1m, 邻侧基准的 ±0.9 窗必然假红。语义: 顶面 ≤ 本地街面 (不冒头剐蹭)
+//   且不深于街面下 1.0 (顶板贴街剖面, 不做"厚土层")。
+const tIn=ctx.heightAt(tunX,z);
+const roofOK=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY>tIn-1.0&&b.maxY<tIn+0.05);
+if(!roofOK) errs.push(`柏林: 隧道顶板缺失/冒头 @z=${z.toFixed(0)} (带内街面 ${tIn.toFixed(2)}, 无贴街顶板)`);
 }
 }
 }
@@ -666,15 +729,21 @@ else if(fd[0].y-ctx.heightAt(fd[0].x,fd[0].z)<8) errs.push(`柏林: 防空塔顶
 const nFac=types.filter(t=>t==='facade').length, nTer=types.filter(t=>t==='terrace').length;
 if(nFac+nTer<15) errs.push(`柏林: 沿街街墙不足 (facade ${nFac} + terrace ${nTer} < 15) —— 城内又空了`);
 const nCity=types.filter(t=>['facade','terrace','block','ruinedHouse','twoStory'].includes(t)).length;
-if(nCity<70) errs.push(`柏林: 城区建筑总数 ${nCity} < 70 (加密批次基线; 640 大地图不该只有 50 栋)`);
+if(nCity<50) errs.push(`柏林: 城区建筑总数 ${nCity} < 50 (2026-11-14 缩图批实测 59×0.85 余量; 旧 640 图基线 83) —— 加密批次语义不变`);
 // 国会大厦不可破坏 (2026-09-09 用户定案: 残穹壳全塌后浮空 → 整楼改永久件)
 {
 const R=reg.find(b=>b.type==='reichstag');
 if(R){
 if(!R.indestr) errs.push('柏林: 国会大厦未标记 indestr (应为不可破坏地标)');
+// 2026-11-14 缩图批: 判定域由"锚点 26m 圆"改为 BUILD_REG 足迹矩形 (语义不变: 楼体内不得有可毁组 ——
+//   旧 640 图前庭残墙距锚 33m 在圆外; 缩图+定向后残墙贴楼南脸 2.5m, 圆判据会误伤楼外可毁件)
 const DES=vm.runInContext('DESTRUCTIBLES',ctx);
-const near=DES.filter(g=>!g.dead&&Math.hypot(g.cx-R.x,g.cz-R.z)<26);
+{
+const cs=Math.abs(Math.cos(R.ry)),sn=Math.abs(Math.sin(R.ry));
+const ex=(R.w*cs+R.d*sn)/2+0.5, ez=(R.w*sn+R.d*cs)/2+0.5;
+const near=DES.filter(g=>!g.dead&&g.cx>R.x-ex&&g.cx<R.x+ex&&g.cz>R.z-ez&&g.cz<R.z+ez);
 if(near.length) errs.push(`柏林: 国会大厦不可破坏断言失败 —— 足迹内有 ${near.length} 个可毁组 (全塌后残穹壳会浮空)`);
+}
 }
 }
 // 新建建筑不得落在地铁站厅/隧道上方 (placeAt 走 metroBlocked; 站厅本体除外)
@@ -694,13 +763,15 @@ if(!types.includes('factory')) errs.push('莫斯科: 缺少厂区地标 (BUILD_R
 if(types.filter(t=>t==='tramWreck').length<1) errs.push('莫斯科: 主街电车残骸缺失');
 const zs2=flags.map(f=>f.z), xs2=flags.map(f=>f.x);
 const zSpan2=Math.max(...zs2)-Math.min(...zs2), xSpan2=Math.max(...xs2)-Math.min(...xs2);
-if(zSpan2<300) errs.push(`莫斯科: 旗点南北跨度 ${zSpan2.toFixed(0)}<300 —— 又回到"一条线"`);
-if(xSpan2<380) errs.push(`莫斯科: 旗点东西跨度 ${xSpan2.toFixed(0)}<380 (城市边缘纵深不足)`);
+// 2026-11-14 缩图批: 阈值按 360 图实测重写 (×0.85 余量), 语义不变 —— 锚已随 2026-11-14 缩图批更新+语义不变
+// (实测: zSpan 184.6 / xSpan 227.8 / minFD 89.9 / 城区建筑 76)
+if(zSpan2<156) errs.push(`莫斯科: 旗点南北跨度 ${zSpan2.toFixed(0)}<156 —— 又回到"一条线"`);
+if(xSpan2<193) errs.push(`莫斯科: 旗点东西跨度 ${xSpan2.toFixed(0)}<193 (城市边缘纵深不足)`);
 let minFD2=1e9;
 for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFD2=Math.min(minFD2,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
-if(minFD2<100) errs.push(`莫斯科: 最近两旗间距 ${minFD2.toFixed(0)}<100 (点位过密)`);
+if(minFD2<76) errs.push(`莫斯科: 最近两旗间距 ${minFD2.toFixed(0)}<76 (点位过密)`);
 const nCity2=types.filter(t=>['facade','terrace','block','ruinedHouse','twoStory'].includes(t)).length;
-if(nCity2<50) errs.push(`莫斯科: 城区建筑总数 ${nCity2} < 50 (城市边缘不该是空场撒楼)`);
+if(nCity2<64) errs.push(`莫斯科: 城区建筑总数 ${nCity2} < 64 (2026-11-14 缩图批实测 76×0.85 余量; 旧 640 图基线 114) —— 城市边缘不该是空场撒楼`);
 }
 }
 // ── 2026-09-12 胡康巨桥改版断言 (用户指令: "总体仍是单线夺点…大桥远不够大, 这个地图的主题就应当是巨大的大桥")
@@ -755,29 +826,34 @@ const upF={x:F.x,z:F.z-64};
 if(!ctx.inRiverChannel(upF.x,upF.z)) errs.push('胡康: 滩外上游河心不判激流 (渡滩范围失控)');
 }
 // ⑤ 三路扇面: 旗点跨度 (告别一条线) + 桥心旗在主桥上
+// 2026-11-14 缩图批: 阈值按 380 图实测重写 (×0.85 余量), 语义不变 —— 锚已随 2026-11-14 缩图批更新+语义不变
+// (实测: zSpan 225.6 / xSpan 201.9; 巨桥三旗为桥集群保持原坐标, 外圈四旗 ×0.59375)
 const zs3=flags.map(f=>f.z), xs3=flags.map(f=>f.x);
 const zSpan3=Math.max(...zs3)-Math.min(...zs3), xSpan3=Math.max(...xs3)-Math.min(...xs3);
-if(zSpan3<300) errs.push(`胡康: 旗点南北跨度 ${zSpan3.toFixed(0)}<300 —— 又回到"一条线"`);
-if(xSpan3<260) errs.push(`胡康: 旗点东西跨度 ${xSpan3.toFixed(0)}<260 (扇面不足)`);
+if(zSpan3<191) errs.push(`胡康: 旗点南北跨度 ${zSpan3.toFixed(0)}<191 —— 又回到"一条线"`);
+if(xSpan3<171) errs.push(`胡康: 旗点东西跨度 ${xSpan3.toFixed(0)}<171 (扇面不足)`);
 if(GB&&!flags.some(f=>Math.abs(f.x-GB.x)<2&&Math.abs(f.z-GB.z)<2)) errs.push('胡康: 桥心旗「大桥」不在主桥桥心');
 }
 // ── 2026-09-13 雾林守线许特根改版断言 (用户指令: "总体仍是单线夺点, 太小同时没有任何特色, 能见度极低不错但不够")
 //    (与胡康块同级 —— woodline 无 city 语义, 放城市组包裹内永远不会执行)
 if(CAMPAIGN.id==='woodline'){
 const hW=ctx.heightAt;
-// ① 三路扇面: 旗点跨度 (旧版 5 旗一线 x 跨仅 146 —— 640 大图扇面必须读出纵深与两翼)
+// ① 三路扇面: 旗点跨度 (旧版 5 旗一线 x 跨仅 146 —— 大图扇面必须读出纵深与两翼)
+// 2026-11-14 缩图批: 阈值按 360 图实测重写 (×0.85 余量), 语义不变 —— 锚已随 2026-11-14 缩图批更新+语义不变
+// (实测: zSpan 178.9 / xSpan 216.5; 最近旗距 58.8 = 西墙缺口↔坝路枢纽)
 const zsW=flags.map(f=>f.z), xsW=flags.map(f=>f.x);
 const zSpanW=Math.max(...zsW)-Math.min(...zsW), xSpanW=Math.max(...xsW)-Math.min(...xsW);
-if(zSpanW<280) errs.push(`雾林: 旗点南北跨度 ${zSpanW.toFixed(0)}<280 —— 又回到"一条线"`);
-if(xSpanW<320) errs.push(`雾林: 旗点东西跨度 ${xSpanW.toFixed(0)}<320 (640 图纵深不足)`);
+if(zSpanW<152) errs.push(`雾林: 旗点南北跨度 ${zSpanW.toFixed(0)}<152 —— 又回到"一条线"`);
+if(xSpanW<184) errs.push(`雾林: 旗点东西跨度 ${xSpanW.toFixed(0)}<184 (360 图纵深不足)`);
 let minFW=1e9;
 for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFW=Math.min(minFW,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
-if(minFW<100) errs.push(`雾林: 最近两旗间距 ${minFW.toFixed(0)}<100 (点位过密)`);
+if(minFW<50) errs.push(`雾林: 最近两旗间距 ${minFW.toFixed(0)}<50 (点位过密)`);
 // ② 北谷(卡尔小径): 谷深真实存在 (谷底低于两岸≥6m) + 车辆堑口纵坡可过 (相邻 8m 采样高差≤1.6m)
+// 2026-11-14 缩图批: 谷线采样点 (-60,164)→(-33.8,92.3) (×0.5625); 岸点偏移 ±(w+6) 为剖面相对量不动
 const WDv=vm.runInContext('WOOD',ctx);
 if(!WDv||!WDv.ravine){ errs.push('雾林: WOOD.ravine 语义表缺失 (北谷不存在)'); }
 else{
-const btm=hW(-60,164), bankL=hW(-60,164-WDv.ravine.w-6), bankR=hW(-60,164+WDv.ravine.w+6);
+const btm=hW(-33.8,92.3), bankL=hW(-33.8,92.3-WDv.ravine.w-6), bankR=hW(-33.8,92.3+WDv.ravine.w+6);
 if(Math.min(bankL,bankR)-btm<6) errs.push(`雾林: 北谷谷深不足 (底 ${btm.toFixed(1)} vs 岸 ${Math.min(bankL,bankR).toFixed(1)})`);
 const VR=WDv.ravine.ramps[0];
 if(!VR||VR.w<7) errs.push('雾林: 车辆堑口缺失或过窄 (坦克无法过谷)');
@@ -790,43 +866,48 @@ if(dh>maxStep) maxStep=dh;
 if(maxStep>1.6) errs.push(`雾林: 车辆堑口纵坡过陡 (相邻8m高差 ${maxStep.toFixed(2)}>1.6, 坦克爬不过)`);
 }
 }
-// ③ 西墙带: 龙牙双排存在 (带内混凝土块≥100) + 永备火力点≥3 + 缺口走廊净空 (唯一装甲通道不得被堵)
+// ③ 西墙带: 龙牙双排存在 (带内混凝土块≥86) + 永备火力点≥3 + 缺口走廊净空 (唯一装甲通道不得被堵)
+// 2026-11-14 缩图批: 带长 268→150.8 齿数近半 (实测 101), 阈值 100→86 (实测×0.85); 走廊扫描盒 x146..164→82.1..92.3 (围绕缩后带 82.3..91.3), z±6 中段宽度不动;
+//   加 !crush 过滤 (倒木 crush=true 坦克可碾, 与草原缺口判据同源 —— 随机倒木偶入走廊缘不再假红)
 const boxesW=vm.runInContext('BOXES',ctx);
 const BW=CAMPAIGN.wood.belt;
 const teeth=boxesW.filter(b=>!b.dead&&b.minX>BW.x0-4&&b.maxX<BW.x1+4&&Math.abs((b.minZ+b.maxZ)/2)>BW.gapZ-2&&b.maxY-b.minY>0.7&&b.maxY-b.minY<1.6).length;
-if(teeth<100) errs.push(`雾林: 西墙龙牙不足 (${teeth}<100, 双排带缺失)`);
+if(teeth<86) errs.push(`雾林: 西墙龙牙不足 (${teeth}<86, 双排带缺失)`);
 const regW=vm.runInContext('BUILD_REG',ctx);
 const beltBunk=regW.filter(b2=>b2.type==='bunker'&&b2.x>BW.x0&&b2.x<BW.x0+30).length;
 if(beltBunk<3) errs.push(`雾林: 西墙带永备火力点不足 (${beltBunk}<3, 节节设防缺火力点)`);
-const jam=boxesW.filter(b2=>!b2.dead&&b2.maxX>146&&b2.minX<164&&b2.maxZ>-6&&b2.minZ<6&&b2.maxY-b2.minY>0.4); // 走廊内任何高度>0.4 的实体盒都算堵 (阴性验证: 单颗龙牙也必须抓到)
-if(jam.length) errs.push(`雾林: 西墙缺口装甲走廊被堵 (${jam.length} 个实体盒侵入 x146..164/z±6 —— 坦克过不去)`);
-// ④ 岭上村: 教堂地标立在村台 (纵深据点+树爆庇护所)
-if(!regW.some(b2=>b2.type==='church'&&Math.hypot(b2.x-60,b2.z+160)<42)) errs.push('雾林: 岭上村缺教堂地标 (BUILD_REG type=church @村台)');
-// ⑤ 卡尔小径坦克坟场: 谷底残骸≥2 (史实: 装甲瓶颈的残骸线)
-const kallWreck=boxesW.filter(b2=>!b2.dead&&b2.maxY-b2.minY>1.4&&b2.minZ>140&&b2.maxZ<180&&b2.minX>-90&&b2.maxX<130&&b2.maxY-b2.minY<2.6).length;
+const jam=boxesW.filter(b2=>!b2.dead&&!b2.crush&&b2.maxX>82.1&&b2.minX<92.3&&b2.maxZ>-6&&b2.minZ<6&&b2.maxY-b2.minY>0.4); // 走廊内任何高度>0.4 的不可碾实体盒都算堵 (阴性验证: 单颗龙牙也必须抓到) —— 2026-11-14 缩图批窗口 82.1..92.3 + !crush
+if(jam.length) errs.push(`雾林: 西墙缺口装甲走廊被堵 (${jam.length} 个实体盒侵入 x82.1..92.3/z±6 —— 坦克过不去)`);
+// ④ 岭上村: 教堂地标立在村台 (纵深据点+树爆庇护所) —— 2026-11-14 缩图批: 锚 (60,-160)→(33.8,-90), 搜索半径 42 为窗口 (教堂相对偏移 ~16m 不缩) 不动
+if(!regW.some(b2=>b2.type==='church'&&Math.hypot(b2.x-33.8,b2.z+90)<42)) errs.push('雾林: 岭上村缺教堂地标 (BUILD_REG type=church @村台)');
+// ⑤ 卡尔小径坦克坟场: 谷底残骸≥2 (史实: 装甲瓶颈的残骸线) —— 2026-11-14 缩图批: 统计窗 z 140..180→78.8..101.3 / x -90..130→-50.6..73.1 (围绕缩后谷线与 kallWrecks)
+const kallWreck=boxesW.filter(b2=>!b2.dead&&b2.maxY-b2.minY>1.4&&b2.minZ>78.8&&b2.maxZ<101.3&&b2.minX>-50.6&&b2.maxX<73.1&&b2.maxY-b2.minY<2.6).length;
 if(kallWreck<2) errs.push(`雾林: 谷底坦克残骸不足 (${kallWreck}<2, 卡尔小径坟场缺失)`);
 // ⑥ 灌丛软遮蔽带: CROP_FIELDS≥5 (林下渗透路线的 Bot 视线遮蔽)
 const cfW=vm.runInContext('CROP_FIELDS',ctx);
 if(cfW.length<5) errs.push(`雾林: 灌丛软遮蔽带不足 (${cfW.length}<5, 林下无遮蔽语义)`);
 }
 // ── 2026-09-13 草原遭遇库尔斯克改版断言 (用户四项裁定: 无旗+可争夺强点 / 车站铁路+风车+坟场村社 / 全套纵深防线+雷区+麦田火 / 节制版炮火犁地)
+// 2026-11-14 缩图批: 阈值按 360 图实测重写 (×0.85 余量), 语义不变 —— 锚已随 2026-11-14 缩图批更新+语义不变
+// (实测: zSpan 166.0 / xSpan 184.5; 最近强点距 72.7 = 北原哨↔风车磨坊; 龙牙窗内 186 件含缺口火力点/炮位部件)
 if(CAMPAIGN.id==='steppe'){
 const hS=ctx.heightAt;
-// ① 三路扇面: 强点南北跨度≥280 / 东西跨度≥320 (终结旧版"一条对角线"), 最近两强点间距≥90
+// ① 三路扇面: 强点南北跨度≥141 / 东西跨度≥156 (终结旧版"一条对角线"), 最近两强点间距≥61
 const spS=CAMPAIGN.spawns||[];
 const xsS=spS.map(s=>s.x), zsS=spS.map(s=>s.z);
-if(Math.max(...zsS)-Math.min(...zsS)<280) errs.push(`草原: 强点南北跨度 ${(Math.max(...zsS)-Math.min(...zsS)).toFixed(0)}<280 —— 又回到"一条线"`);
-if(Math.max(...xsS)-Math.min(...xsS)<320) errs.push(`草原: 强点东西跨度 ${(Math.max(...xsS)-Math.min(...xsS)).toFixed(0)}<320 (640 图纵深不足)`);
+if(Math.max(...zsS)-Math.min(...zsS)<141) errs.push(`草原: 强点南北跨度 ${(Math.max(...zsS)-Math.min(...zsS)).toFixed(0)}<141 —— 又回到"一条线"`);
+if(Math.max(...xsS)-Math.min(...xsS)<156) errs.push(`草原: 强点东西跨度 ${(Math.max(...xsS)-Math.min(...xsS)).toFixed(0)}<156 (360 图纵深不足)`);
 let minFS=1e9;
 for(let i=0;i<spS.length;i++)for(let j=i+1;j<spS.length;j++) minFS=Math.min(minFS,Math.hypot(spS[i].x-spS[j].x,spS[i].z-spS[j].z));
-if(minFS<90) errs.push(`草原: 最近两强点间距 ${minFS.toFixed(0)}<90 (点位过密)`);
+if(minFS<61) errs.push(`草原: 最近两强点间距 ${minFS.toFixed(0)}<61 (点位过密)`);
 if(spS.length!==7) errs.push(`草原: 强点数 ${spS.length}≠7 (苏3/德3/车站中立)`);
-if(CAMPAIGN.matchMin!==22) errs.push('草原: matchMin≠22 (640 大图对局时长未覆盖 15 分钟默认)');
-// ② 东带防线: 龙牙双排存在 (≥120) + 三缺口装甲走廊净空 (走廊内任何高度>0.4 实体盒都算堵)
+if(CAMPAIGN.matchMin!==22) errs.push('草原: matchMin≠22 (对局时长未覆盖 15 分钟默认)');
+// ② 东带防线: 龙牙双排存在 (≥114) + 三缺口装甲走廊净空 (走廊内任何高度>0.4 实体盒都算堵)
+// 2026-11-14 缩图批: 带长 255→143.4 齿数近半 (本沙箱载荷实测 134 = 齿 ~80 + 铁丝网等带缘件; 全链路含 17-emplacements 约 186), 阈值 120→114 (实测×0.85)
 const boxesS=vm.runInContext('BOXES',ctx);
 const BS=CAMPAIGN.steppe.belt;
 const teethS=boxesS.filter(b=>!b.dead&&b.minX>BS.x0-4&&b.maxX<BS.x1+8&&b.maxY-b.minY>0.7&&b.maxY-b.minY<1.6).length;
-if(teethS<120) errs.push(`草原: 防线龙牙不足 (${teethS}<120, 双排带缺失)`);
+if(teethS<114) errs.push(`草原: 防线龙牙不足 (${teethS}<114, 双排带缺失)`);
 for(const g of BS.gaps){
 // 走廊净空测可通行中段 (内缩 7m): 两翼战壕/机枪贴走廊边缘是设计意图 (步兵侧射位), 不算堵
 const jamS=boxesS.filter(b2=>!b2.dead&&!b2.crush&&b2.maxX>BS.x0-4&&b2.minX<BS.x1+8&&b2.maxZ>g[0]+7&&b2.minZ<g[1]-7&&b2.maxY-b2.minY>0.4); // 只抓不可碾实体 (沙袋/箱桶可碾不算堵)
@@ -855,9 +936,10 @@ const n3=propsS.filter(pp=>Math.hypot(pp.x-s.x,pp.z-s.z)<s.r).length
 if(n3<3){ errs.push(`草原: 强点「${s.name}」圈内掩护不足 (props+建筑 ${n3}<3)`); break; }
 }
 // ⑥ 麦田带: CROP_FIELDS≥6 (七月金黄麦田, 可燃软遮蔽) ⑦ 装甲坟场: 残骸盒≥4
+// 2026-11-14 缩图批: 坟场残骸统计窗 x 60..180/z -185..-100 → 33.8..101.3 / -104.1..-56.3 (围绕缩后残骸带 wrecks x 42.8..91.7, z -92.3..-72)
 const cfS=vm.runInContext('CROP_FIELDS',ctx);
 if(cfS.length<6) errs.push(`草原: 麦田带不足 (${cfS.length}<6)`);
-const wreckS=boxesS.filter(b=>!b.dead&&b.maxY-b.minY>1.4&&b.minX>60&&b.maxX<180&&b.minZ>-185&&b.maxZ<-100).length;
+const wreckS=boxesS.filter(b=>!b.dead&&b.maxY-b.minY>1.4&&b.minX>33.8&&b.maxX<101.3&&b.minZ>-104.1&&b.maxZ<-56.3).length;
 if(wreckS<4) errs.push(`草原: 装甲坟场残骸不足 (${wreckS}<4)`);
 }
 // ── 2026-09-18 塔拉瓦环礁断言 (海滩+海 / 三路扇面 / 载具预留空间逻辑账) ──

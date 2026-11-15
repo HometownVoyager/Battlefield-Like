@@ -287,11 +287,67 @@ return h;
 const RIVER={moscow:{pts:[[-320,-238],[-180,-262],[-40,-246],[120,-268],[320,-244]],w:9,ice:true},
 burma:{pts:[[-165,62],[-70,32],[-8,62],[60,12],[120,42],[165,22]],w:8,ice:false},
 songhu:{pts:[[-165,-52],[-80,-42],[0,-58],[80,-32],[165,-42]],w:7,ice:false,d:2.8},
-hukawng:{pts:[[-30,-320],[-8,-224],[-16,-120],[-4,-10],[8,100],[-10,215],[4,320]],w:26,ice:false,d:14,ford:{x:-3.3,z:172,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源)
+hukawng:{pts:[[-22.8,-212],[-4.8,-133],[-9.5,-71.3],[-2.4,-5.9],[4.8,59.4],[-5.9,127.7],[5.3,212]],w:26,ice:false,d:14,ford:{x:-2,z:102.1,r:26}}}[CAMPAIGN.id]||null; // 2026-09-12 巨桥改版副本同步 (与 00-config 同源); 2026-11-14 缩图批同步
 const DELTA=CAMPAIGN.delta||null;
 const DELTA_CHANS=(DELTA&&DELTA.channels)||[];
 const BRIDGES=CAMPAIGN.bridges||(CAMPAIGN.bridge?[CAMPAIGN.bridge]:[]);
 const BRIDGE=BRIDGES[0]||null;
+// 03-terrain 副本 (2026-11-15): 柏林地铁 —— 下沉 + 厅坑压平 + 隧道带桥式抬升 (与 03-terrain 同源; 本体改动必同步)
+const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
+const METRO_FALL=0.4;
+const METRO_RECTS=[];
+if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
+let _mNoDep=false;
+function metroDep(x,z){
+if(!METRO) return 0;
+let dep=0;
+const d0=Math.hypot(x-METRO.x,z-METRO.z);
+if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
+for(const s of METRO_RECTS){
+if(!s||s.street) continue;
+const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
+const dd=Math.hypot(dx,dz);
+if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
+}
+return dep;
+}
+function metroFlatRect(x,z){
+if(!METRO||_mNoDep) return null;
+for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
+return null;
+}
+function metroFlatY(s){
+if(s._fy!==undefined) return s._fy;
+_mNoDep=true;
+const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
+_mNoDep=false;
+s._fy=base-(s.d||METRO.d);
+return s._fy;
+}
+function metroLiftNodes(s){
+if(s._ln) return s._ln;
+const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
+const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
+const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
+const segL=span/nS;
+_mNoDep=true;
+const ns=[];
+for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
+if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
+_mNoDep=false;
+s._ln={n:nS,segL,ns,alongZ};
+return s._ln;
+}
+function metroLiftY(s,x,z){
+const L=metroLiftNodes(s);
+const t=L.alongZ?(z-s.z0):(x-s.x0);
+const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
+const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
+const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
+const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
+return lo+(hi-lo)*u;
+}
 const _deckMap=new Map();
 function bridgeDeckY(B){
 const b=B||BRIDGE; if(!b) return 0;
@@ -302,11 +358,13 @@ return _deckMap.get(b);
 function heightAt(x,z,noBridge){
 let h=rawH(x,z);
 for(const f of FLATS){ const d=Math.hypot(x-f.x,z-f.z); if(d<f.r){ const s1=1-d/f.r; const s=s1*s1*(3-2*s1); h+=(f.h-h)*s; } }
+if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁下沉 (2026-11-15 含 street 矩形跳过)
 // 03-terrain 副本: 诺曼底博卡日下沉土路 (田块表存在即启用)
 if((CAMPAIGN.fields||[]).length){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } }
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
+if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -329,7 +387,7 @@ if(DELTA&&DELTA.ponds){ for(const pd of DELTA.ponds){ if(Math.hypot(x-pd.x,z-pd.
 return false;
 }
 function roadDist(x,z){ let d=CAMPAIGN.sineRoad?Math.abs(z-3*Math.sin(x*0.02)):1e9; for(const r of CAMPAIGN.roads) d=Math.min(d,seg(r[0],r[1],r[2],r[3],x,z)); return d; }
-return {heightAt,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
+return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
 }
 function runCampaign(campIdx){
 const THREE=makeThreeStub();
@@ -363,6 +421,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'js/00-config.js'),'utf8'),ctx,{f
 const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02);
+ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入)
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)

@@ -100,6 +100,17 @@ const dx=x-player.pos.x, dz=z-player.pos.z;
 if(dx*dx+dz*dz<WX_MM_NEAR*WX_MM_NEAR) return true;
 return lastFire!==undefined&&lastFire>-90&&nowT-lastFire<WX_MM_FIRE;
 }
+// ── 步兵地图圆点着色单源 (2026-11-13 观战中立批) ──
+// 小地图/大地图/部署图三处旧实现逐字重复 (僵尸灰青 / 小队白 / 同队蓝 / 敌红), 且观战态仍按
+// "小队=白"画 —— 观战者不指挥任何一方, 白点特权视角取消: 观战时本队一律阵营蓝, 敌方照常红
+// (mmEnemyVis 对观战恒 true, 双方等权可见)。非观战行为逐位不变。
+// 消费方: 本文件 drawMinimap/drawBigMap + 23-deploy 部署图 (typeof 守卫同 sfNavalMapSymbols 惯例)。
+function solMapDotColor(s){
+if(s.zombie||s.team===2) return '#9ecfa0';
+if(player.spectator) return (s.team===player.team)?'#5a9eff':'#ff5040';
+if(s.team===player.team) return s.inSquad?'#ffffff':'#5a9eff';
+return '#ff5040';
+}
 // ── 战场能见度综合计算 (用于小地图/大地图动态视野圆蒙版) ──
 function getMapVisDist(){
   let d = 9999;
@@ -329,23 +340,10 @@ for(const sol of soldiers){
 if(!sol.alive||sol.onVehicle) continue;
 const [px,py]=toMap(sol.pos.x,sol.pos.z);
 if(px<-10||py<-10||px>S+10||py>S+10) continue;
-if(sol.zombie || sol.team === 2){
-// PvZ 僵尸皮肤腐肤灰青亮色 (#9ecfa0)
-mmC.fillStyle='#9ecfa0';
-mmC.beginPath(); mmC.arc(px,py,3,0,TAU); mmC.fill();
-}else if(sol.team===player.team){
-if(sol.inSquad){
-mmC.fillStyle='#ffffff';
-mmC.beginPath(); mmC.arc(px,py,3,0,TAU); mmC.fill();
-}else{
-mmC.fillStyle='#5a9eff';
-mmC.beginPath(); mmC.arc(px,py,2.5,0,TAU); mmC.fill();
-}
-}else{
-if(!mmEnemyVis(sol.pos.x,sol.pos.z,sol.lastFiredT)) continue; // 夜/雨档: 敌方步兵 = 近距常显 + 开火后显形 (R3)
-mmC.fillStyle='#ff5040';
-mmC.beginPath(); mmC.arc(px,py,3,0,TAU); mmC.fill();
-}
+const _mc=solMapDotColor(sol);   // 着色单源 (2026-11-13 观战中立批): 观战态本队不再画小队白点
+if(_mc==='#ff5040'&&!mmEnemyVis(sol.pos.x,sol.pos.z,sol.lastFiredT)) continue; // 夜/雨档: 敌方步兵 = 近距常显 + 开火后显形 (R3)
+mmC.fillStyle=_mc;
+mmC.beginPath(); mmC.arc(px,py,_mc==='#5a9eff'?2.5:3,0,TAU); mmC.fill();
 }
 for(const t of tanks){
 if(!t.alive) continue;
@@ -577,23 +575,10 @@ const toM=(x,z)=>[S/2+x/MH*S/2, S/2+z/MH*S/2];
 for(const s of soldiers){
 if(!s.alive||s.onVehicle) continue;
 const [px,py]=toM(s.pos.x,s.pos.z);
-if(s.zombie || s.team === 2){
-// PvZ 僵尸皮肤腐肤灰青亮色 (#9ecfa0)
-c.fillStyle='#9ecfa0';
-c.beginPath(); c.arc(px,py,3,0,TAU); c.fill();
-}else if(s.team===player.team){
-if(s.inSquad){
-c.fillStyle='#ffffff';
-c.beginPath(); c.arc(px,py,3,0,TAU); c.fill();
-}else{
-c.fillStyle='#5a9eff';
-c.beginPath(); c.arc(px,py,2.5,0,TAU); c.fill();
-}
-}else{
-if(!mmEnemyVis(s.pos.x,s.pos.z,s.lastFiredT)) continue; // 夜/雨档: 敌方步兵同小地图规 (R3)
-c.fillStyle='#ff5040';
-c.beginPath(); c.arc(px,py,3,0,TAU); c.fill();
-}
+const _mc=solMapDotColor(s);   // 着色单源 (2026-11-13 观战中立批): 观战态本队不再画小队白点
+if(_mc==='#ff5040'&&!mmEnemyVis(s.pos.x,s.pos.z,s.lastFiredT)) continue; // 夜/雨档: 敌方步兵同小地图规 (R3)
+c.fillStyle=_mc;
+c.beginPath(); c.arc(px,py,_mc==='#5a9eff'?2.5:3,0,TAU); c.fill();
 }
 for(const t of tanks){
 if(!t.alive) continue;
@@ -771,6 +756,16 @@ function hudShow(id,v){ hudStyle(id,'display',v?'block':'none'); }
 // 双写点字段的兜底专用 (2026-09-28 D6): 绕过去重缓存、按 DOM 实际值幂等写 —— 供 20a-seats 直写同一属性
 // 的元素 (tankPip/mgPip/leadPip) 的收尾分支用, 走 hudShow 会因缓存失配漏写 (症状: 坦克准星残留)。
 function hudHideReal(id){ const st=el(id).style; if(st.display!=='none') st.display='none'; }
+// ★2026-11-13b 批①: FPV 沉浸门 (控弹期收起左下生命面板/右上击杀播报) —— 按 DOM 实际值幂等写 (hudHideReal 同纪律):
+//   不走 hudStyle 去重缓存, 因为观战 specViewHudTick 对 healthPanel **直写** display (另一个写点), 走缓存会在
+//   两写点交替时失配漏写。killfeed 用 visibility 而非 display: 成就弹框 (27-achievements) 以它的矩形定位,
+//   display:none 会把矩形塌成 0 令弹框顶到左上角; visibility 保持布局, 锚不塌 (淡出计时照走, 只是看不见)。
+function _ltImmHud(hide){
+const hp=el('healthPanel');
+if(hp&&hp.style.display!==(hide?'none':'')) hp.style.display=hide?'none':'';
+const kf=el('killfeed');
+if(kf&&kf.style.visibility!==(hide?'hidden':'')) kf.style.visibility=hide?'hidden':'';
+}
 let _lastHudMountState=null;
 function clearWeaponHUDCache(){
 _lastHudMountState=null;
@@ -1238,8 +1233,11 @@ hudSlowT=0.1;
 	// 左格阵营自适应 (2026-10-28 修复, 指导 §4.7): solo 右格已被丧尸数占位 ⇒ 左格是玩家唯一队伍行,
 	// 旧硬编码 TEAM_NAME[0] 在"选 1 队 (德军/日军) 开局"时穿帮成未参战的 0 队。teams/普通模式仍显 0 队。
 	const _pt=(ZOMBIE_MODE==='solo')?player.team:0;
-	el('tickets').innerHTML=`<span class="tl">${t(TEAM_NAME[_pt])} ${Math.ceil(tickets[_pt])}<span${tn}>${t('({0}人)',fieldCount(_pt))}</span></span> &nbsp;·&nbsp; ${t1cell}`+modeLine+wipeLine+
-	((SHOW_CTL_HINTS&&player.spectator&&!player.specViewHost)?`<div style="font-size:11px;color:#9fe8ff">${t('观战中 · 免伤 · 不被索敌 · 双击空格悬停/H气动飞行 · 左键可开火 · 控弹时T=弃弹传送 · F=按状态(幽灵坦克上=下车/舰艇上=鱼雷·下船/其余=召唤幽灵坦克)'+((typeof cmdSpecHudKeys==='function')?cmdSpecHudKeys():' · V=减速')+'(不耗资源)')}</div>`:'');   // 减速词条走 26-commander cmdSpecHudKeys 单源 (R8: 观战减速共键免读条; 2026-10-27 排查批接线 —— 旧写硬编码 'N=减速' 是换键 V 之前的旧串, 词典键已是 V ⇒ 查表必 miss: 英文整句退回中文 + 键名错)。附身中不显这条 (文案宣称"左键可开火"与只读借眼矛盾, 状态由 👁 徽标接管, 真附身批 2026-11-01)
+	// ★2026-11-11 性能批: 走 hudHTML 指纹去重 (22-hud hudText/hudStyle 同纪律) —— 旧版 10Hz 无条件
+	// innerHTML 重写整段 (拼 ~1KB 模板串 + HTML 重解析 + 子树重建 + style/layout 失效化), 而绝大多数
+	// 帧内容逐位相同 (票数/人数/词条没变)。同串短路后只有真变化才落 DOM。
+	hudHTML('tickets',`<span class="tl">${t(TEAM_NAME[_pt])} ${Math.ceil(tickets[_pt])}<span${tn}>${t('({0}人)',fieldCount(_pt))}</span></span> &nbsp;·&nbsp; ${t1cell}`+modeLine+wipeLine+
+	((SHOW_CTL_HINTS&&player.spectator&&!player.specViewHost)?`<div style="font-size:11px;color:#9fe8ff">${t('观战中 · 免伤 · 不被索敌 · 双击空格悬停/H气动飞行 · 左键可开火 · 控弹时T=弃弹传送 · F=按状态(幽灵坦克上=下车/舰艇上=鱼雷·下船/其余=召唤幽灵坦克)'+((typeof cmdSpecHudKeys==='function')?cmdSpecHudKeys():' · V=减速')+'(不耗资源)')}</div>`:''));   // 减速词条走 26-commander cmdSpecHudKeys 单源 (R8: 观战减速共键免读条; 2026-10-27 排查批接线 —— 旧写硬编码 'N=减速' 是换键 V 之前的旧串, 词典键已是 V ⇒ 查表必 miss: 英文整句退回中文 + 键名错)。附身中不显这条 (文案宣称"左键可开火"与只读借眼矛盾, 状态由 👁 徽标接管, 真附身批 2026-11-01)
 }
 if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
 el('timeTxt').style.display='none';
@@ -1263,9 +1261,9 @@ drawMinimap();
 if(bigmapOn&&(!player.alive||!player.deployed)){ bigmapOn=false; el('bigmapWrap').classList.add('hidden'); }
 if(bigmapOn) drawBigMap();
 drawCompass();
-// 小队HUD
+// 小队HUD (★2026-11-13 观战中立批: 观战态隐藏 —— 观战者不指挥小队, "跟随中"文案在观战时是误导)
 const sqEl=el('squadHUD');
-if(SQUAD.members.length&&player.deployed){
+if(SQUAD.members.length&&player.deployed&&!player.spectator){
 const alive=SQUAD.members.filter(s=>s.alive).length;
 sqEl.style.display='block';
 sqEl.innerHTML=`◆ 小队 <b>${alive}/${SQUAD.members.length}</b> · ${SQUAD.mode==='move'?'<b>进攻标记点</b>':'跟随中'}<br><span style="opacity:.65">[T] 标点进攻 · [Y] 跟随我</span>`;
@@ -1297,17 +1295,29 @@ hudStyle('lowOv','opacity',_hv?(_hhp<35?(1-_hhp/35)*0.85:0):(player.alive&&playe
 	if(player.loiter&&!player.loiter.dead){
 	const d=player.loiter;
 	const agl=Math.max(0,Math.round(d.pos.y-heightAt(d.pos.x,d.pos.z)));
-	hudText('tvBotL',t2('离地')+' '+agl+'m · '+t2('速度')+' '+Math.round(d.spd)+'m/s');
+	const boost=(keys.Space&&!player._ltSpace);   // ★2026-11-13b 批②: 尾推加速判定 (与 updateLoiters boost 同判据; ▸▸标/状态类/尾推本体三处共用一条)
+	const zoom=!!(mouse2Down&&!player._ltRClick);  // 开镜判定 (2026-11-10 OSD 批既有判据, 提出共用)
+	hudText('tvBotL',t2('离地')+' '+agl+'m · '+t2('速度')+' '+Math.round(d.spd)+'m/s'+(boost?' ▸▸ '+t2('加速'):''));
 	hudText('tvBotR',t2('离机')+' '+Math.round(d.pos.distanceTo(player.pos))+'m');
 	const _tc=Math.max(0,nowT), _tm=Math.floor(_tc/60)%100, _ts=Math.floor(_tc%60);
 	hudText('tvClock','T+'+(_tm<10?'0':'')+_tm+':'+(_ts<10?'0':'')+_ts+'.'+Math.floor(_tc*10%10));
-	hudShow('tvZoom',!!(mouse2Down&&!player._ltRClick));   // 开镜标: 与 updateCamera 巡飞分支同判据
-	hudStyle('tvLifeFill','width',Math.max(0,Math.min(100,d.life/(d.lifeMax||24)*100))+'%');
+	hudShow('tvZoom',zoom);   // 开镜标: 与 updateCamera 巡飞分支同判据
+	// ★2026-11-13b 批②: 开镜倍率实时读数 —— camera.fov 向 LOITER_ZOOM_FOV(30) 阻尼的过程中 ×1.0→×2.8
+	//   连续变化 (85/fov), 开镜有"变焦进行中"的观感; 沙箱/异常兜底恒 ×1.0。
+	hudText('tvZoom','ZOOM ×'+((typeof camera!=='undefined'&&camera&&camera.fov>1)?Math.round(85/camera.fov*10)/10:1));
+	// ★2026-11-13b 批②: 加速/开镜状态类挂 #tvOv (CSS 状态层: 加速=角标琥珀脉冲+暖色晕影+OSD 转暖;
+	//   开镜=四周压暗+分划加粗+ZOOM 标提亮) —— 与 'low' 低量脉冲同一写点 (hudClass 整串写, 状态叠加由类共存承担)。
+	hudClass('tvOv',(d.life<4?'low':'')+(boost?' boost':'')+(zoom?' zoom':''));
+	// ★2026-11-13b 批①: FPV 沉浸门 — 控弹期收起左下生命面板与右上击杀播报 (小地图/顶部战况/准星照旧)
+	_ltImmHud(true);
+	// ★2026-11-11 性能批: 存续条宽量化到整数 % —— 旧版每帧连续值 (d.life/lifeMax*100 连续排空) 令
+	// hudStyle 指纹去重失效 (每帧一次 style 写 + layout)。量化后 24s 存续只落 ≤100 次写, 视觉无差。
+	hudStyle('tvLifeFill','width',Math.max(0,Math.min(100,Math.round(d.life/(d.lifeMax||24)*100)))+'%');
 	hudStyle('tvLifeFill','background',d.life<4?'rgba(255,90,70,.9)':'rgba(150,255,180,.85)');
-	hudClass('tvOv',d.life<4?'low':'');
 	}else{
 	hudClass('tvOv','');
 	hudShow('tvZoom',false);
+	_ltImmHud(false);   // ★2026-11-13b 批①: 弃弹/引爆/阵亡/换局还原 (幂等真写, 与观战直写点自愈共存)
 	}
 nadeWarnT-=dt;
 if(nadeWarnT>0){
@@ -1400,6 +1410,9 @@ if(typeof clearMatchTimers==='function') clearMatchTimers();
 // 时停中回主菜单再点「继续」, 回来时 paused 仍是 true (战场静止而玩家多半已忘了自己按过 K)。菜单冻结
 // (menuHold) 与观战时停是两套冻结, 不该叠加 —— 回主菜单 = 退出观战工具态, 就地解除。
 if(typeof specTimeReset==='function') specTimeReset();
+// ★2026-11-14 重开局批: killcam 中回主菜单也收账 (原只 showDeploy/endMatch/enterSpecView 三点收账,
+// killcam 里回主页会在菜单上短暂挂 grayscale 滤镜+☠ 角标, 要等下次 showDeploy 才自愈)。killcamEnd 幂等。
+if(typeof killcamEnd==='function') killcamEnd();
 // 结算之后的主菜单 = 干净地图 (2026-09-17 世界还原批, 见 23b-worldrestore): 一局已决出胜负 (matchOver) 时
 // 没有"可继续的战局", 上一局的残骸/坍塌/焦土/尸体留在场上只会让主菜单航拍看到一片废墟 (用户实报:
 // "打完结算之后主界面的航拍图是经过摧残后的, 甚至还有场上剩余的人") —— 直接按开局快照还原世界。
@@ -1909,6 +1922,20 @@ diffButtons.forEach(b=>{
     updateHubRightPanel();
   };
 });
+// 兵力票池倍率 (2026-11-14 批加回, 旧版主菜单 hmulBtn 行随菜单改版被删): 只缩放兵力票池, 不改变在场
+// 人数 (startGame 读 sf_hmul: ×0.5≈83 票 / ×1≈165 / ×2≈330=原标准)。机制单源仍在 (00-config HMUL +
+// startGame), 这里只接大厅选择 UI; 改档写 sf_hmul, 下一局开局生效 (与战场规模同款"开局读档"口径)。
+let hubHmul=(()=>{ const v=parseFloat(localStorage.getItem('sf_hmul')); return isFinite(v)?Math.min(2,Math.max(0.5,v)):2; })();
+const hmulButtons=document.querySelectorAll('#hubHmulSeg button');
+hmulButtons.forEach(b=>{
+  b.classList.toggle('active',parseFloat(b.dataset.h)===hubHmul);
+  b.onclick=()=>{
+    hubHmul=Math.min(2,Math.max(0.5,parseFloat(b.dataset.h)||2));
+    localStorage.setItem('sf_hmul',String(hubHmul));
+    hmulButtons.forEach(x=>x.classList.toggle('active',x===b));
+    updateHubRightPanel();
+  };
+});
 const dnSeg=el('hubDayNightSeg');
 if(dnSeg){
   // (2026-11-10: ironbottom 锁夜分支随纯海战图下架摘除, 全部按钮恢复正常昼夜选择)
@@ -2323,10 +2350,18 @@ player.team=SETTINGS.team;
 BOTS_PER_TEAM=SIZE_OPTS[SIZE_IDX].bots;
 	const tk=Math.round(START_TICKETS*mul/2);
 	tickets[0]=tk; tickets[1]=tk;
+	// ★2026-11-14 重开局批扩围: 护栏原只罩 startMatch —— resetMatchState/resetPlayerForNewMatch 在护栏外,
+	//   这两处若抛则尾部旗标不落 = "点开始没反应"旧形状仍在。try 上移罩住整个开局链 (只护栏不清账, 口径不变)。
+	try{
 	resetMatchState(); // 清场播报/倒计时复位 (2026-09-06 B7b/P2-14: 21-match 暴露的唯一入口)
 	resetPlayerForNewMatch(); // 玩家回到"未落地"状态 (2026-09-16 二批修: 否则新一局沿用上一局的活人状态)
+// ★2026-11-14 批④护栏: startMatch 若中途抛异常, 下方开局尾部旗标 (menuHold/matchOver/matchRunning/
+//   showDeploy(false)) 就永远不会执行 ⇒ 真机表现为"点开始没反应/菜单僵住", 再点几次靠半初始化状态
+//   时好时坏 (用户实报④的第二种症状形状)。这里只护栏不清账: 异常打日志带栈, 尾部旗标照常落,
+//   局面保持可玩而不是僵死在菜单。
 	startMatch();
 	if(ZOMBIE_MODE&&typeof zombieMatchStart==='function') zombieMatchStart(); // 丧尸模式: ZP 初始/HUD/导演复位 (2026-10-06)
+	}catch(e){ console.warn('[startGame] 开局链中途异常 (已护栏, 局面继续):', e&&e.stack||e); }
 // 开局即"进入战局" (2026-09-16 本批): 四个开局标志一律归零/置位 ——
 //   matchOver 不复位会让"结算后就地重开"的新一局刚开局就处于结束态 (主循环继续冻结、部署按钮全废);
 //   menuHold 不清会让从主菜单重开的一局一进战场就冻着; 暂停面板可能残留在页面上。
@@ -2440,6 +2475,22 @@ syncMenuButtons();
 		};
 		}
 		}
+		// 手雷对友方造成伤害 (2026-11-14 批): 单源 EXPLO_FF (00-config), 默认开=现行为 (普通手雷伤双方)。
+		// 关=有归属爆炸不伤友军 (13-combat explodeAt/splashDamage/loiterDetonate 三口) + 友方手雷告警停用
+		// (updateNades)。改档即时生效不重载 (同 nadeMapMark 口径)。
+		{
+		const xb=el('exploFfBtn');
+		if(xb){
+		const syncX=()=>{ xb.textContent='💥 '+t('手雷对友方造成伤害')+': '+t(EXPLO_FF?'开':'关'); xb.classList.toggle('sel',EXPLO_FF); };
+		syncX();
+		xb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		EXPLO_FF=!EXPLO_FF;
+		localStorage.setItem('sf_explo_ff',EXPLO_FF?'1':'0');
+		syncX();
+		};
+		}
+		}
 		// 成就弹窗位置 (2026-11-11 数据批): 单钮循环 右上↔正下 —— 27-achievements achToastPump 每次弹出现读 sf_ach_pos, 改档即时生效不重载
 		{
 		const pb=el('achPosBtn');
@@ -2483,6 +2534,37 @@ syncMenuButtons();
 		AUTO_EXIT_VEH=!AUTO_EXIT_VEH;
 		localStorage.setItem('sf_autoexit',AUTO_EXIT_VEH?'1':'0');
 		syncX();
+		};
+		}
+		}
+		// 动态换弹速度开关 (2026-11-12 批, 游戏内容设置子栏目): 单源 DYN_RELOAD (00-config),
+		// 换弹起点 (19-input tryReload / 14-bots 六处) 实时读 ⇒ 改档下一次换弹就生效, 不重载。
+		{
+		const drb=el('dynReloadBtn');
+		if(drb){
+		const syncDR=()=>{ drb.textContent='⏱ '+t('动态换弹速度')+': '+t(DYN_RELOAD?'开':'关'); drb.classList.toggle('sel',DYN_RELOAD); };
+		syncDR();
+		drb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		DYN_RELOAD=!DYN_RELOAD;
+		localStorage.setItem('sf_dynreload',DYN_RELOAD?'1':'0');
+		syncDR();
+		};
+		}
+		}
+		// 死亡时视角切换 (2026-11-12 批): 单源 DEATHCAM_KILLER (00-config), die() 时读 —— 击杀者=killcam
+		// (0.5s 原镜头 → 击杀者带滤镜追尾, 20-player 相机分支), 自己=照旧。默认自己。
+		{
+		const dcb=el('deathCamBtn');
+		if(dcb){
+		const _dcNames=['自己','击杀者'];
+		const syncDC=()=>{ dcb.textContent='☠ '+t('死亡时视角')+': '+t(_dcNames[DEATHCAM_KILLER?1:0]); dcb.classList.toggle('sel',DEATHCAM_KILLER); };
+		syncDC();
+		dcb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		DEATHCAM_KILLER=!DEATHCAM_KILLER;
+		localStorage.setItem('sf_deathcam',DEATHCAM_KILLER?'killer':'self');
+		syncDC();
 		};
 		}
 		}
@@ -2930,7 +3012,14 @@ return;
 }
 // ★2026-10-30: 票尽门给调试观战放行 (specWillBe 单源见 18-game, 与 23-deploy 同一批注) ——
 //   观战开关开着时按钮照常可点, 部署将以观战身份入场。
-if(respawnCd>0) return;
+if(respawnCd>0){
+// 调试模式冷却 bypass (2026-11-14 用户令): 开着调试模式 (含待生效, specWillBe 单源) 时, 冷却读数中
+// 点「部署」= 跳过等待直接部署; 未开调试照旧无反应 (return), 冷却读数本身不受影响照常走秒
+// (24-main 的逐帧递减不碰)。!player.alive 门: 该 bypass 只服务死亡重部署读数 —— 活着开 Esc 页时
+// respawnCd 残值不得触发重部署。
+if(!player.alive&&(player.spectator||player.specWillBe())) deployPlayer();
+return;
+}
 deployPlayer(); // 己方兵力归零后不可再部署 (2026-09-04; 观战放行见上)
 };
 el('resumeBtn').onclick=()=>{

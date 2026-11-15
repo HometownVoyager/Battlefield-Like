@@ -392,6 +392,10 @@ animation:dirHitPulse .3s ease-out; }
 #oxyFill { display:block; height:100%; width:100%; background:#8fd8f0; }
 #oxyTxt { display:block; margin-top:3px; font-size:12px; color:#bfe6f4; text-shadow:0 1px 3px #000; letter-spacing:1px; }
 #blackOv { position:absolute; inset:0; background:#000; opacity:0; transition:opacity .8s; }
+/* 死亡时视角=击杀者 (2026-11-12 批): killcam 角标, #ui 内 blackOv 之前 (黑屏渐入时连带被压暗); 显示由 killcam 相机分支驱动, 收账 killcamEnd 单源藏回 */
+#kcInd { position:absolute; top:9%; left:50%; transform:translateX(-50%); color:rgba(255,118,106,.92); font-size:15px; letter-spacing:6px; text-shadow:0 1px 8px rgba(0,0,0,.85); pointer-events:none; white-space:nowrap; }
+/* 2026-11-14 重开局批: 主循环帧级护栏首错上屏 (24-main 置显示; body 直挂件不进 #ui, HUD 停更时依然可见) */
+#loopErrBar { display:none; position:fixed; left:50%; top:6px; transform:translateX(-50%); max-width:min(720px,92vw); background:rgba(112,12,10,.88); color:#ffd9d2; font:12px/1.5 Consolas,monospace; padding:3px 12px; border-radius:4px; z-index:60; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #scopeOv { position:absolute; inset:0; display:none; background:radial-gradient(circle at center, transparent 0, transparent 31vmin, rgba(0,0,0,.985) 33vmin); }
 #scopeOv::before { content:""; position:absolute; left:50%; top:0; width:1.5px; height:100%; background:rgba(0,0,0,.85); transform:translateX(-50%); }
 #scopeOv::after { content:""; position:absolute; top:50%; left:0; height:1.5px; width:100%; background:rgba(0,0,0,.85); transform:translateY(-50%); }
@@ -411,6 +415,13 @@ h1.title { font-size:52px; letter-spacing:10px; color:#e8dcb0; text-shadow:0 2px
 .subtitle { text-align:center; color:#9a9478; letter-spacing:5px; margin:6px 0 26px; font-size:15px; text-wrap:balance; }
 .secLabel { color:#b8ae88; letter-spacing:3px; font-size:13px; margin:18px 0 8px; border-bottom:1px solid rgba(200,180,130,.2); padding-bottom:4px; }
 .rowFlex { display:flex; gap:14px; flex-wrap:wrap; }
+/* ===== 设置面板卡片行化 (2026-11-12 排版批): 一项设置 = 一张卡, 标题居左/按钮居右/说明左对齐 =====
+   病根: 旧版每项 = secLabel + 按钮行 + 一段 text-align:center 的灰字说明, 说明行左忽右忽显乱 */
+.setCard { background:rgba(255,255,255,.04); border:1px solid rgba(210,200,160,.16); border-radius:6px; padding:12px 16px; margin:10px 0; }
+.setHead { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.setTitle { color:#d8c894; letter-spacing:2px; font-size:14px; font-weight:600; }
+.setCtrls { display:flex; gap:10px; flex-wrap:wrap; }
+.setDesc { font-size:12px; opacity:.6; line-height:1.7; margin-top:7px; text-align:left; }
 .bigBtn { pointer-events:auto; cursor:pointer; background:linear-gradient(180deg,#5a5236,#3a3422); color:#f0e6c0; border:1px solid #8a7c50; padding:14px 42px; font-size:20px; letter-spacing:6px; border-radius:4px; transition:all .15s; font-family:inherit; }
 .bigBtn:hover:not(:disabled):not(.off) { background:linear-gradient(180deg,#6e6544,#4a422c); box-shadow:0 0 18px rgba(220,190,110,.3); }
 .bigBtn:disabled { opacity:.4; cursor:default; }
@@ -507,8 +518,37 @@ text-shadow:0 0 6px rgba(80,255,140,.45),0 1px 2px rgba(0,0,0,.8); white-space:n
 #tvReticle .tvRc { position:absolute; left:-9px; top:-9px; width:18px; height:18px; border:1px solid rgba(150,255,180,.6); }
 #tvLifeWrap { position:absolute; left:50%; bottom:30px; transform:translateX(-50%); width:280px; height:6px; background:rgba(20,60,30,.55); border:1px solid rgba(140,255,170,.4); }
 #tvLifeFill { position:absolute; left:0; top:0; bottom:0; width:100%; background:rgba(150,255,180,.85); box-shadow:0 0 8px rgba(80,255,140,.5); }
-.helpDoc { font-size:13px; color:#b0ac96; line-height:2.05; }
+/* ── ★2026-11-13b 批②: FPV 加速/开镜状态层 (沉浸批) ──
+   加速 (.boost): 角标转琥珀脉冲 + 暖色晕影 + OSD 文字转暖提亮; 开镜 (.zoom): 四周压暗 + 分划加粗放大 +
+   ZOOM 标提亮。两态可叠加, 'low' 低量脉冲照旧共存 (tvLowPulse 只动 box-shadow, 不冲突)。 */
+#tvOv::before { content:''; position:absolute; inset:0; opacity:0; transition:opacity .18s;
+background:radial-gradient(ellipse at center, transparent 44%, rgba(255,130,30,.22) 100%); }
+#tvOv.boost::before { opacity:1; }
+#tvOv.boost .tvC { border-color:rgba(255,205,95,.9); animation:tvBoostPulse .5s steps(2,end) infinite; }
+@keyframes tvBoostPulse { 50% { border-color:rgba(255,140,45,.6); box-shadow:0 0 14px rgba(255,150,40,.7); } }
+#tvOv.boost .tvOsd { color:rgba(255,222,150,.95); text-shadow:0 0 7px rgba(255,170,60,.6),0 1px 2px rgba(0,0,0,.8); }
+#tvOv.boost #tvBotL { font-size:15px; }
+#tvOv.zoom::after { content:''; position:absolute; inset:0;
+background:radial-gradient(ellipse at center, transparent 34%, rgba(2,8,4,.52) 100%); }
+#tvOv.zoom #tvReticle .tvRk { background:rgba(255,232,170,.88); box-shadow:0 0 6px rgba(255,200,90,.7); }
+#tvOv.zoom #tvReticle .tvRc { left:-12px; top:-12px; width:24px; height:24px; border-color:rgba(255,222,150,.75); }
+#tvOv.zoom #tvZoom { color:#fff3c2; font-size:15px; text-shadow:0 0 8px rgba(255,200,90,.8); }
+.helpDoc { font-size:13px; color:#b0ac96; line-height:1.95; }
 .helpDoc b { color:#e2d6a2; font-weight:600; }
+/* ===== 游戏说明键位表化 (2026-11-12 排版批): 分节卡片 + 「按键帽 → 作用」两列行 + 要点列表 =====
+   病根: 旧版全宽长段落墙, 按键说明挤成一行长串, 分节只有一条细线 */
+.helpCard { background:rgba(255,255,255,.035); border:1px solid rgba(210,200,160,.14); border-radius:6px; padding:8px 16px 10px; margin:8px 0 16px; }
+.helpCard .helpDoc div { margin:6px 0; }
+.hkSub { color:#c9b98a; letter-spacing:2px; font-size:12.5px; font-weight:600; margin:10px 0 2px; }
+.helpKeys { margin:4px 0 2px; }
+.hkRow { display:flex; gap:12px; align-items:baseline; padding:4px 0; border-bottom:1px dashed rgba(255,255,255,.06); }
+.hkRow:last-child { border-bottom:none; }
+.hkKey { flex:none; min-width:60px; max-width:180px; text-align:center; background:rgba(255,255,255,.07); border:1px solid rgba(210,200,160,.3); border-radius:4px; padding:1px 9px; font-size:12px; color:#ffe9b0; font-weight:600; white-space:nowrap; }
+.hkDesc { font-size:13px; color:#b0ac96; line-height:1.7; }
+.helpPts { margin:4px 0 6px; padding:0; list-style:none; }
+.helpPts li { position:relative; padding-left:15px; margin:5px 0; font-size:13px; color:#b0ac96; line-height:1.8; }
+.helpPts li b { color:#e2d6a2; font-weight:600; }
+.helpPts li::before { content:'▸'; position:absolute; left:0; color:#c9b98a; }
 #deployFlex { display:flex; gap:26px; }
 #deployLeft { flex:1.35; } #deployRight { flex:1; }
 #deployMap { width:100%; border:1px solid rgba(210,200,160,.3); border-radius:4px; background:#141a10; }

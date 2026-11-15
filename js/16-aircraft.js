@@ -13,7 +13,9 @@ function updatePlaneWrecks(dt){
 for(let i=planeWrecks.length-1;i>=0;i--){
 const w=planeWrecks[i];
 if(w.state==='fall'){
+w.ageT=(w.ageT||0)+dt;
 w.vel.y-=8.5*dt;
+const _wkx0=w.pos.x, _wky0=w.pos.y, _wkz0=w.pos.z;   // 残骸建筑扫掠起点 (2026-11-13 批②)
 w.pos.addScaledVector(w.vel,dt);
 w.roll+=w.rollV*dt;
 w.pitch=dampF(w.pitch,-0.9,0.6,dt);
@@ -21,6 +23,55 @@ w.yaw+=w.rollV*0.06*dt;
 w.m.position.copy(w.pos);
 w.m.rotation.order='YXZ';
 w.m.rotation.set(-w.pitch,w.yaw,w.roll);
+// ── 残骸建筑扫掠 (2026-11-13 批②, 补三虫批①只盖存活机的缺口): 死亡下落段与存活机体同规 ——
+// 旧版 fall 段纯抛物线只贴地形/水面, 撞楼后残骸整只穿过建筑落地 (系统性缺口; 且 rayBox 起点
+// 在盒内不再报命中, 嵌进去后连再判的机会都没有)。复用存活机扫掠的共享槽/回调 (_plSwO/_plSwD/
+// _plSwHit/_plSwBoxCb/_plSwCylCb, 模块级零分配; 与 Plane.update 两处调用点在帧内串行, 无重入)。
+// 命中 = 就地迫降: 顺速度回退 0.4m 贴在命中面上, 走 rest 落账但**不打 crater** (地形凹坑会打到
+// 楼板下面), 刚 die 完的 0.6s 内也不补第二声爆炸/溅射 (die 现场已炸过一次, 双 boom+双溅射不正确)
+// —— 只焦黑化 + 挂火源 + 注册碰撞; 0.6s 后的真坠撞照地面档补全 (含结构伤害, 砸楼算战果)。
+{
+const _wkmx=w.pos.x-_wkx0, _wkmy=w.pos.y-_wky0, _wkmz=w.pos.z-_wkz0;
+const _wkmv=Math.sqrt(_wkmx*_wkmx+_wkmy*_wkmy+_wkmz*_wkmz);
+if(_wkmv>0.01){
+_plSwHit.on=false; _plSwHit.t=_wkmv+(w.size||3)*1.5;
+_plSwO.set(_wkx0,_wky0,_wkz0);
+_plSwD.set(_wkmx/_wkmv,_wkmy/_wkmv,_wkmz/_wkmv);
+const _wmrg=2.5;
+eachBoxNear(Math.min(_wkx0,w.pos.x)-_wmrg,Math.min(_wkz0,w.pos.z)-_wmrg,
+Math.max(_wkx0,w.pos.x)+_wmrg,Math.max(_wkz0,w.pos.z)+_wmrg,_plSwBoxCb);
+eachCylNear(Math.min(_wkx0,w.pos.x)-_wmrg,Math.min(_wkz0,w.pos.z)-_wmrg,
+Math.max(_wkx0,w.pos.x)+_wmrg,Math.max(_wkz0,w.pos.z)+_wmrg,_plSwCylCb);
+if(_plSwHit.on){
+const _wkTop=_plSwHit.ny>0.5;   // 顶面命中 (命中面法线 ny=+1; 圆柱 ny 恒 0 走侧面档) — 2026-11-14 残骸落点分档
+w.pos.set(_plSwHit.x-_plSwD.x*0.4,_plSwHit.y-_plSwD.y*0.4,_plSwHit.z-_plSwD.z*0.4);
+if(_wkTop){
+// 落在建筑顶: 贴顶安放 (2026-11-14 用户令 "残骸不要浮空, 要么落在地上, 要么落在建筑上") ——
+// 支撑面=命中楼顶 (旧版沿来向回退 0.4m = 贴顶/贴墙悬浮, 是浮空病根); onTop 标收尾原地消失 (二爆当帧摘除, 不沉)。
+w.pos.y=_plSwHit.y+0.45;
+w.state='rest'; w.vel.set(0,0,0); w.onTop=true;
+if(w.ageT>0.6){
+explosionFX(w.pos.clone().add(V3(0,0.8,0)));
+AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
+splashDamage(w.pos,w.attacker,-1,9,165,240);
+damageStructures(w.pos,8,280,w.attacker||null);
+}
+w.fireSrc=addFireSource(w.pos.x,w.pos.z,w.pos.y+0.8,4.2,w.restT,24,w.attacker||null);
+igniteArea(w.pos.x,w.pos.z,3.8,w.attacker||null);
+w.m.traverse(o=>{ if(o.isMesh) o.material=wreckMat; });
+w.m.rotation.set(rand(-0.15,0.15),w.yaw,rand(-0.4,0.4));
+w.m.position.copy(w.pos);
+w.col=registerDynCollider(w.pos.x,w.pos.y+0.7,w.pos.z,3.6,1.4,3.6);
+}else{
+// 撞墙 (侧面): 顺墙面滑落 —— 旧版"就地迫降"贴墙 0.4m 悬浮静置 = 用户实报"残骸浮空"的另一病根;
+// 改为轻微反弹 + 保留坠势, 由下方地面档收尾 (贴地/贴楼顶)。高速真坠撞 (ageT>0.6) 照旧给**一次**
+// 结构伤害 (砸楼算战果, _wkDmg 一锤账防滑落沿途重复扣), 不在此处爆炸 —— 落地/收尾还有档, 双 boom 不正确。
+w.vel.set(-_plSwD.x*2.2,w.vel.y*0.45,-_plSwD.z*2.2);
+if(w.ageT>0.6&&!w._wkDmg){ w._wkDmg=true; damageStructures(w.pos,8,280,w.attacker||null); }
+}
+}
+}
+}
 w.smokeT-=dt;
 if(w.smokeT<=0){
 w.smokeT=0.05;
@@ -30,15 +81,20 @@ spawnP(PT.flash,w.pos.x,w.pos.y,w.pos.z,rand(-1,1),rand(-1,1),rand(-1,1),rand(0.
 const gh=(typeof planeFloorY==='function')?planeFloorY(w.pos.x,w.pos.z):heightAt(w.pos.x,w.pos.z);
 // (2026-10-03 引入, 2026-11-10 注记改写): 水面上 heightAt 给的是水底 ⇒ 坠机在水底"触地爆炸",
 //   残骸沉在看不见的水底烧。改用水面地板 (与 planeFloorY 单源): 触水即爆+溅落, 残骸浮在水面烧完再沉。
-if(w.pos.y<=gh+0.6){
+if(w.state==='fall'&&w.pos.y<=gh+0.6){   // state 门 (2026-11-13 批②): 上面建筑扫掠已就地迫降时跳过地面档 (防双份爆炸/火源/碰撞)
 // 坠地爆炸: 无差别杀伤 + 留下焦黑残骸
 w.state='rest';
 w.pos.y=gh+0.45;
+// 撞楼档 (w.bld) 落地不炸不盖坑 (2026-11-14 用户令 "撞楼不出现爆炸坑"): die 现场在楼面已炸过一次,
+// 弹坑只归"坠毁在地上"; 二次爆炸在 rest 收尾 (restT 到点) —— 撞楼演出 = 楼面一炸 + 残骸贴地/贴楼
+// 燃烧一段时间 + 二次爆炸消失。
+if(!w.bld){
 explosionFX(w.pos.clone().add(V3(0,0.8,0)));
 AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
 splashDamage(w.pos,w.attacker,-1,9,165,240);
 damageStructures(w.pos,8,280,w.attacker||null); // 4参 = 破坏得分归属: 坠机撞塌的楼算击落者的战果
 crater(w.pos.x,w.pos.z,1.6,true);
+}
 // 坠机残骸 = 持续火源: 残骸停留期间燃起大火, 点燃周边植被并灼烧靠近者
 w.fireSrc=addFireSource(w.pos.x,w.pos.z,w.pos.y+0.8,4.2,w.restT,24,w.attacker||null);
 igniteArea(w.pos.x,w.pos.z,3.8,w.attacker||null);
@@ -57,13 +113,29 @@ w.smokeT=0.16;
 spawnP(PT.dark,w.pos.x+rand(-1,1),w.pos.y+0.8,w.pos.z+rand(-1,1),rand(-0.2,0.2),rand(0.8,1.6),rand(-0.2,0.2),0.8,1.5,rand(1.2,2),0.55,0.15);
 }
 if(w.restT<=0){
-// 残骸沉入地下: 开始下沉即熄火(不再是火源), 半沉撤碰撞, 全沉移除 —— 收敛 queueSink (2026-09-06 B7b/P2-4)
+// 撞楼档收尾 (2026-11-14 用户令): 二次爆炸 + 消失 (noCrater 显式压掉弹坑 —— 撞楼全程无坑);
+// 地面档维持既有"沉入地下"谢幕, 不加炸。
+if(w.bld){
+explosionFX(w.pos.clone().add(V3(0,0.8,0)),true);
+AudioSys.explosion(w.pos.distanceTo(camera.position)*0.8);
+splashDamage(w.pos,w.attacker,-1,9,165,240);
+damageStructures(w.pos,8,280,w.attacker||null); // 4参 = 破坏得分归属: 与坠撞/触地档同口径
+}
+// 贴楼顶安放的 (onTop): 二爆当帧原地消失 (2026-11-14 二令) —— 楼顶残骸再往下沉=整只捅穿楼板, 视觉诡异;
+// 其余残骸沉入地下谢幕: 开始下沉即熄火(不再是火源), 半沉撤碰撞, 全沉移除 —— 收敛 queueSink (2026-09-06 B7b/P2-4)
+if(w.onTop){
+if(w.fireSrc){ removeFireSource(w.fireSrc); w.fireSrc=null; }
+if(w.col){ killDynCollider(w.col); w.col=null; }
+scene.remove(w.m);
+const j=planeWrecks.indexOf(w); if(j>=0) planeWrecks.splice(j,1);
+}else{
 w.sinking=true;
 if(w.fireSrc){ removeFireSource(w.fireSrc); w.fireSrc=null; }
 queueSink({objs:[w.m],rest:0,sink:4,depth:4.6,
 onHalf:()=>{ if(w.col){ killDynCollider(w.col); w.col=null; } },
 onTick:(dtk,k)=>{ if(k<0.9&&Math.random()<dtk*2) spawnP(PT.dark,w.pos.x+rand(-1.6,1.6),w.m.position.y+rand(0.3,1),w.pos.z+rand(-1.6,1.6),rand(-0.3,0.3),rand(0.4,1),rand(-0.3,0.3),0.6,1.2,rand(0.8,1.3),0.5,0.45); },
 onDone:()=>{ scene.remove(w.m); const j=planeWrecks.indexOf(w); if(j>=0) planeWrecks.splice(j,1); }});
+}
 }
 }
 }
@@ -98,10 +170,11 @@ return (wy>-1e8)?Math.max(gh,wy):gh;
 // 豁免 (细杆撞不死机体, 低空掠林不算撞楼 — 05b-props 四处打标); 残骸/沙袋/拒马/油桶等碰撞盒
 // 照常致死。候选收集走 eachBoxNear/eachCylNear (RGRID 邻近), 回调提升为模块级 = 零分配 (与
 // 04-collision _cmS 同款纪律); 命中即结构受创 + crash 档机毁 (die 第二参, 见 die() 注)。
-const _plSwO=V3(), _plSwD=V3(), _plSwHit={on:false,t:0,x:0,y:0,z:0};
+const _plSwO=V3(), _plSwD=V3(), _plSwHit={on:false,t:0,x:0,y:0,z:0,ny:0};
 function _plSwTake(r){
 _plSwHit.on=true; _plSwHit.t=r.t;
 _plSwHit.x=_plSwO.x+_plSwD.x*r.t; _plSwHit.y=_plSwO.y+_plSwD.y*r.t; _plSwHit.z=_plSwO.z+_plSwD.z*r.t;
+_plSwHit.ny=r.ny||0;   // 命中面法线 y 分量 (rayBox 共享槽 _rbR 回传; rayCyl ny 恒 0=侧面) — 2026-11-14 残骸落点分档 (顶面贴楼 / 侧面滑落) 用
 }
 function _plSwBoxCb(b){
 if(b.dead||_plSwHit.on) return;
@@ -441,6 +514,9 @@ this.respawnT=3;
 }
 return;
 }
+// 时停期挂账的跳伞消费 (takeDmg 挂 _bailPend, 2026-11-14 批): 世界解冻 (dt>0) 第一帧补跳伞。
+// 放在 !alive 早退之后 —— 死机不消费 (机组随 die 链结算), 挂账残留在 respawn() 里复位。
+if(this._bailPend&&dt>0){ this._bailPend=false; this._bailCrew(); }
 const dCam=this.pos.distanceTo(camera.position);
 this.engine.update(120+this.speed*1.5, this.playerDriven?0.16:clamp(0.22-dCam/280,0,0.22));
 this.prop.rotation.z+=dt*(20+this.speed*0.5);
@@ -506,8 +582,11 @@ Math.max(_swx0,this.pos.x)+_mrg,Math.max(_swz0,this.pos.z)+_mrg,_plSwBoxCb);
 eachCylNear(Math.min(_swx0,this.pos.x)-_mrg,Math.min(_swz0,this.pos.z)-_mrg,
 Math.max(_swx0,this.pos.x)+_mrg,Math.max(_swz0,this.pos.z)+_mrg,_plSwCylCb);
 if(_plSwHit.on){
+// ★2026-11-13 批②: 死亡位拉回命中面前 0.5m —— 旧版残骸出生在帧末积分位, 机鼻余量 (1.5×size) 命中时
+// 帧末位可能已嵌墙/越墙, 残骸从盒内出生后 rayBox 不再报命中 ⇒ 永久穿楼。面外出生 + 下落扫掠接得住。
+this.pos.set(_plSwHit.x-_plSwD.x*0.5,_plSwHit.y-_plSwD.y*0.5,_plSwHit.z-_plSwD.z*0.5);
 if(typeof damageStructures==='function') damageStructures(_plSwHit,7,260,this.lastHitBy||null);
-this.die(this.lastHitBy||null,true);
+this.die(this.lastHitBy||null,true,true);   // 第三参=撞楼档 (2026-11-14): 残骸无弹坑/贴楼贴地/收尾二次爆炸
 return;
 }
 }
@@ -548,6 +627,15 @@ if(this.hp<=0){ this.die(this.burnBy||null); return; }
 }
 // (2026-11-10: B14 机-舰实体碰撞随大舰子系统下架摘除)
 const gh=planeFloorY(this.pos.x,this.pos.z);
+// 入水特效 (★2026-11-15 入水批): 触水坠机 (水面地板 = planeFloorY 单源) 先溅后毁 ——
+//   机级大水花+气泡 (scale 2.2~4.2, 强度随下沉率; 竖直速度用相邻帧 y 差折算 _wyPrev),
+//   旱地坠机不进此支 (waterYAt −1e8 哨兵)。waterYAt 是网格查表, 每帧每机一次开销可忽略。
+const wyQ=waterYAt(this.pos.x,this.pos.z);
+if(this.pos.y<gh+2&&wyQ>-1e8){
+const spd=(this._wyPrev!==undefined&&dt>0)?Math.max(0,(this._wyPrev-this.pos.y)/dt):0;
+if(typeof waterSplash==='function') waterSplash(V3(this.pos.x,wyQ+0.2,this.pos.z),clamp(2.2+spd*0.10,2.2,4.2),true,true,spd);
+}
+this._wyPrev=this.pos.y;
 if(this.pos.y<gh+2) this.die(this.lastHitBy||null,true); // crash 档 (三虫批②): 坠地=机毁人亡, 不再自动跳伞
 }
 planeAI(dt){
@@ -937,24 +1025,10 @@ if(asrc){ const dyA=angDiff(this.yaw,Math.atan2(asrc.pos.x-this.pos.x,asrc.pos.z
 else this.aiEvDir=Math.random()<0.5?1:-1;
 }
 else if(this.crewBot&&this.hp>0&&this.hp<this.maxHp*0.32){
-// 飞行员跳伞逃生
-// A#8 契约 §7: 投放链走 Bot.chuteBegin 单源 —— 同帧置 chuting/chute/onGround 三态 (chuteAirborne 才认得),
-// 并在开伞前收掉上一顶伞 (旧版只写 cb.chuting=true, 缺 chute/onGround ⇒ 伞降保护与索敌口径都判不出来)。
-const cb=this.crewBot;
-this.crewBot=null;
-// ★2026-10-26 排查轮二审 修复 (H2/P2 第二现场): 跳伞 = 本机从此**没有机组 Bot**, 而
-//   ①指挥官投弹令的唯一执行者是 planeAI, 而 planeAI 只在 `crewBot&&crewBot.alive` 时被调
-//     (update 的驾驶分派) —— 机组一走, 令就再没人能完成, 也不会再有人清它;
-//   ②旧写更彻底: 这一段只摘 crewBot 就走人, strikePt 与 cmdOrder.mode='strike' 原样挂着,
-//     玩家视角 = 那架敌机在指挥地图上永远"投弹中"、命令线一直指着早已没意义的点。
-//   现在摘人同时清令 (任务失败口径, 与 respawn 的机毁同义), 清账走 _cmdOrderClear 单源。
-//   注意调用点**在 this.crewBot=null 之后**且本方法不读 crewBot —— 清令不依赖"机组还在"这个前提
-//   (依赖它就会在这里静默跳过, 正是要修的病)。
-this._cmdOrderClear();
-cb.onVehicle=null;
-const px=this.pos.x, py=Math.max(this.pos.y-2,heightAt(this.pos.x,this.pos.z)+3), pz=this.pos.z;
-if(typeof cb.chuteBegin==='function') cb.chuteBegin(px,py,pz);
-else { cb.chuting=true; cb.pos.set(px,py,pz); cb.mesh.root.visible=true; cb.path=null; cb.state='idle'; cb.target=null; }
+// 飞行员跳伞逃生 —— 时停冻结期 (specTimeFrozen) AI 不得在冻住的世界里行动: 只挂 _bailPend 账,
+// 解冻后由 update (dt>0) 补跳 (2026-11-14 批, 与 14-bots 坦克乘员起火弃车同族)。非时停路径零漂移。
+if(typeof specTimeFrozen==='function'&&specTimeFrozen()) this._bailPend=true;
+else this._bailCrew();
 }
 else if(amt>8&&this.evadeT<=0&&Math.random()<PLANE_DIFF[SETTINGS.diff].evd){ // 7b-乙: 规避概率/时长接难度表 (旧写死 0.7/1.4~2.6)
 this.evadeT=rand(1.4,2.6)*PLANE_DIFF[SETTINGS.diff].evT; this.evadeDir=Math.random()<0.5?1:-1; this.state='patrol'; this.dogTgt=null;
@@ -967,7 +1041,25 @@ if(this.hp<=0) this.die(attacker);
 // 玩家分支不再走 AUTO_EXIT_VEH 自动跳伞 (旧版坠地瞬间还开伞 = "过于非人类", 用户实报);
 // 被击落/烧毁等**火力系机毁**不传 ⇒ 玩家照旧可自动跳伞逃生 (sf_autoexit 语义不变), AI 飞行员
 // 照旧 damage(999) 随机同殁。
-die(attacker,crash){
+// 跳伞动作单源 (2026-11-14 批从 takeDmg 内联块抽出): 摘机组 + 清令 + chuteBegin。
+// 时停冻结期 takeDmg 只挂 _bailPend, 由 update (dt>0) 消费本方法 —— AI 不得在冻住的世界里行动。
+// A#8 契约 §7: 投放链走 Bot.chuteBegin 单源 —— 同帧置 chuting/chute/onGround 三态 (chuteAirborne 才认得),
+// 并在开伞前收掉上一顶伞 (旧版只写 cb.chuting=true, 缺 chute/onGround ⇒ 伞降保护与索敌口径都判不出来)。
+_bailCrew(){
+const cb=this.crewBot;
+if(!cb) return;
+this.crewBot=null;
+// ★2026-10-26 排查轮二审 (H2/P2): 摘人同时清令 (任务失败口径, 与 respawn 的机毁同义), 清账走 _cmdOrderClear
+//   单源; 调用点在 this.crewBot=null 之后且本方法不读 crewBot —— 清令不依赖"机组还在"这个前提。
+this._cmdOrderClear();
+cb.onVehicle=null;
+const px=this.pos.x, py=Math.max(this.pos.y-2,heightAt(this.pos.x,this.pos.z)+3), pz=this.pos.z;
+if(typeof cb.chuteBegin==='function') cb.chuteBegin(px,py,pz);
+else { cb.chuting=true; cb.pos.set(px,py,pz); cb.mesh.root.visible=true; cb.path=null; cb.state='idle'; cb.target=null; }
+}
+die(attacker,crash,bld){
+// bld (2026-11-14 用户令): 撞楼档 —— 坠机演出分两档: 撞楼 = 楼面一炸 (无弹坑) + 残骸贴楼/贴地 +
+// 燃烧 restT 后二次爆炸消失; 坠地 = 触地一炸 + 弹坑 + 残骸沉入地下。bld 仅 16-aircraft 撞楼扫掠传 true。
 const spec=(typeof specRide==='function')&&specRide(this); // 观战者座驾: 车可以毁, 人绝不死 (2026-09-26H, 见下)
 this.alive=false; this.respawnT=rand(35,48); this.crew.alive=false;
 // (2026-11-10: 拦阻账清理随大舰子系统下架摘除)
@@ -1004,7 +1096,9 @@ vel:V3(fv.x*0.6,Math.min(fv.y*0.5,2),fv.z*0.6),
 yaw:this.yaw, pitch:this.pitch, roll:this.roll,
 rollV:rand(-2.5,2.5)+(Math.random()<0.5?1.6:-1.6),
 attacker:attacker||null, team:this.team,
-state:'fall', smokeT:0, restT:24, col:null
+state:'fall', smokeT:0, restT:24, col:null,
+bld:!!bld, onTop:false,   // 2026-11-14 残骸分档: 撞楼档 (无弹坑/贴楼贴地/收尾二次爆炸) + 顶面安放标 (收尾原地消失)
+size:this.def.size, ageT:0   // 2026-11-13 批②: 机鼻余量/坠撞双 boom 豁免窗要用
 });
 }catch(handoffErr){
 console.warn('[击落] 残骸交接异常 (本体已隐, 本架无坠落残骸):',handoffErr);
@@ -1019,15 +1113,20 @@ if(spec){ if(typeof specRideEject==='function') specRideEject(this); }
 // crash 档豁免 (2026-11-10 三虫批②): 坠地/撞楼/撞机是碰撞系机毁 —— 人已随机体坠地, 跳伞不成立,
 // 一律走 damage(999) 死亡链 (用户裁定"过于非人类")。仅火力系机毁 (被击落/烧毁) 保留自动逃生。
 else if(!crash&&AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){ autoExitWreck(this,true); }
-else player.damage(999,attacker,false);
+else{ if(bld) player._achPilotBld=true; // 成就普查字段 (2026-11-14 用户令): 驾机撞楼而亡 —— 27-achievements 死亡边沿轮询读, 读后即清
+player.damage(999,attacker,false); }
 }
+// 有人机记"机体账"时的折让 (2026-11-14 用户裁定): 有人战机**整体占 3 票** = 机体 (plane-1) 2 + 驾驶员 1
+// (驾驶员走下面 damage(999)→Bot.die 的既有 -1) ; 空机 (含飞行员先跳伞的) 照旧整机 plane(3)。
+// 跳伞驾驶员日后单独阵亡照常 -1 (Bot.die) ⇒ 全寿命上限仍 4 票。TICKET_COST.plane 本身不动 (勿硬编码 3)。
+const hadCrew=!!this.crewBot;
 if(this.crewBot){
 const cb=this.crewBot;
 this.crewBot=null;
 cb.onVehicle=null;
 cb.damage(999,attacker,false);
 }
-if(attacker&&(attacker.ffAll||attacker.team!==this.team)){ // ffAll: 观战幽灵坦克的无差别火力照常记分 (2026-09-17)
+if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力)
 attacker.kills=(attacker.kills||0)+1;
 // 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('击落战机',SCORE_TABLE.plane);
@@ -1036,8 +1135,8 @@ addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击落红档 (2026-09-30 批): 飞机无乘员 die 链兜底 (crewBot 走 damage(999)→Bot.die 有, 空机没有), 统一在此出档
 if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
-tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);
-explosionFX(this.pos.clone());
+tickets[this.team]=Math.max(0,tickets[this.team]-(hadCrew?TICKET_COST.plane-1:TICKET_COST.plane));
+explosionFX(this.pos.clone(),!!bld);   // 撞楼档不盖弹坑 (2026-11-14: 旧版 crater 恒打 heightAt = 爆点在楼面/半空, 坑却盖在正下方地上)
 AudioSys.explosion(this.pos.distanceTo(camera.position));
 }catch(e){
 // 单位已正确退场 (本体已隐 + 残骸已上): 只丢一次账/报, 不能把飞机挂在空中
@@ -1053,6 +1152,7 @@ this.yaw=this.team===0?0:Math.PI; this.pitch=0; this.roll=0;
 this.hp=this.maxHp; this.alive=true; this.crew.alive=true; this.speed=PLANE_FLIGHT.birthSpeed;
 // 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者不得跨生死携带 (机体模型重生复用)
 this.burning=false; this.burnBy=null; this.burnSrc=null; this.burnFxT=0;
+this._bailPend=false;   // 时停期挂账的跳伞不得跨生死携带 (2026-11-14 批, 同上口径)
 this.state='patrol'; this.stateT=rand(5,10); this.target=null;
 this.bombs=this.def.bombs; this.playerDriven=false; this.evadeT=0;
 // 指挥官投弹令一次性 (2026-10-26 指挥官批): 机毁 = 任务失败, 重生不带令。

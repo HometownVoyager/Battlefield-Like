@@ -254,31 +254,7 @@ const wreckMat=new THREE.MeshLambertMaterial({color:0x1e1c18,map:TEX.grime}); //
 // 自身高度≤1.3m(顶面相对其地面), 且无 dGroup 可撞塌/无 crush 可碾毁)直接驶上跨越 —— 不阻挡也不碾毁,
 // 障碍保持完好; 可摧毁的(沙袋/木箱/石墙, 高速撞毁/碾毁)与高障碍(拒马1.5m/石柱/建筑)维持原判定 ──
 const TANK_STEP=1.3;
-function tankRideH(x,z,baseY){
-// 坦克底盘目标高度: 地面与脚下/前方 2.2m 足印内可跨越障碍顶面取高者 (阻尼过渡呈上坡爬越感)
-// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (查询半径 2.25; 圆柱 r+1.9≤4.0 ⇒ 全场 r≤2.1 恒成立)
-let h=heightAt(x,z);
-const r2=2.2*2.2;
-eachBoxNear(x-2.25,z-2.25,x+2.25,z+2.25,b=>{
-if(b.dead) return;
-if(b.maxY<=baseY-0.25||b.maxY>baseY+TANK_STEP) return; // 足印内平齐/已过/太高都不算
-// 可跨越 = 障碍自身低矮(顶面高出其地面≤1.3m) 且 无 dGroup 撞塌/无 crush 碾毁 的可放行类别;
-// <0.7m 的本来就放行 (与碰撞循环口径一致), 高度按自身相对地面判定 — 不随坦克瞬时高度漂变
-const bh=b.maxY-b.gh;
-if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
-const cx=clamp(x,b.minX,b.maxX), cz=clamp(z,b.minZ,b.maxZ);
-const dx=x-cx, dz=z-cz;
-if(dx*dx+dz*dz<r2&&b.maxY>h) h=b.maxY;
-});
-eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,c=>{
-if(c.r<0.3) return;
-if(c.y1-c.y0>TANK_STEP) return; // 自身低矮
-if(c.y1<=baseY-0.25||c.y1>baseY+TANK_STEP) return;
-const dx=x-c.x, dz=z-c.z, q=c.r+1.9;
-if(dx*dx+dz*dz<q*q&&c.y1>h) h=c.y1;
-});
-return h;
-}
+// tankRideH (底盘目标高度) 已挪到 tankSurfH 之后: 回调提升与 _tsQ 同款, 见 _trQ (2026-11-11 性能批)。
 // 悬挂采样面高度 (tankSurfH): 地面与足下可跨越障碍顶面取高者 —— 不做 baseY 频带过滤,
 // 前/后/左/右采样点一旦贴到障碍顶面就推动俯仰/侧倾弹簧, 越过时产生"上坡-颠簸-下坡"的跨越姿态
 // 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (盒 1.6 / 圆柱 r+1.5≤4.0)
@@ -304,6 +280,104 @@ _tsQ.x=x; _tsQ.z=z; _tsQ.h=heightAt(x,z);
 eachBoxNear(x-1.6,z-1.6,x+1.6,z+1.6,_tsBoxCb);
 eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,_tsCylCb);
 return _tsQ.h;
+}
+// ── tankRideH 回调提升 (2026-11-11 性能批): 与上面 _tsQ 同款 —— 旧版每次分配 2 个内联闭包
+//    (baseY 频带过滤口径与 _tsBoxCb 不同, 不能共用)。复用前提 (逐处已核): 回调体内不再调
+//    tankRideH, 调用方串行消费返回值, 不跨调用持有。
+const _trQ={x:0,z:0,baseY:0,h:0};
+function _trBoxCb(b){
+if(b.dead) return;
+if(b.maxY<=_trQ.baseY-0.25||b.maxY>_trQ.baseY+TANK_STEP) return; // 足印内平齐/已过/太高都不算
+// 可跨越 = 障碍自身低矮(顶面高出其地面≤1.3m) 且 无 dGroup 撞塌/无 crush 碾毁 的可放行类别;
+// <0.7m 的本来就放行 (与碰撞循环口径一致), 高度按自身相对地面判定 — 不随坦克瞬时高度漂变
+const bh=b.maxY-b.gh;
+if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
+const cx=clamp(_trQ.x,b.minX,b.maxX), cz=clamp(_trQ.z,b.minZ,b.maxZ);
+const dx=_trQ.x-cx, dz=_trQ.z-cz;
+if(dx*dx+dz*dz<2.2*2.2&&b.maxY>_trQ.h) _trQ.h=b.maxY;
+}
+function _trCylCb(c){
+if(c.r<0.3) return;
+if(c.y1-c.y0>TANK_STEP) return; // 自身低矮
+if(c.y1<=_trQ.baseY-0.25||c.y1>_trQ.baseY+TANK_STEP) return;
+const dx=_trQ.x-c.x, dz=_trQ.z-c.z, q=c.r+1.9;
+if(dx*dx+dz*dz<q*q&&c.y1>_trQ.h) _trQ.h=c.y1;
+}
+function tankRideH(x,z,baseY){
+// 坦克底盘目标高度: 地面与脚下/前方 2.2m 足印内可跨越障碍顶面取高者 (阻尼过渡呈上坡爬越感)
+// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (查询半径 2.25; 圆柱 r+1.9≤4.0 ⇒ 全场 r≤2.1 恒成立)
+_trQ.x=x; _trQ.z=z; _trQ.baseY=baseY; _trQ.h=heightAt(x,z);
+eachBoxNear(x-2.25,z-2.25,x+2.25,z+2.25,_trBoxCb);
+eachCylNear(x-4.0,z-4.0,x+4.0,z+4.0,_trCylCb);
+return _trQ.h;
+}
+// ── 底盘碰撞回调提升 (2026-11-11 性能批): 旧版每辆坦克每帧 2 pass × 3 圆 = 6 个内联闭包 +
+//    2 个 [-1.95,0,1.95] 数组分配。上下文经模块槽 _tkC 传递 (车体/圆心/朝向/相位/推挤命中旗),
+//    判定语义与旧内联版逐位一致 (注释原文留在 Tank.update 内联段)。复用前提 (逐处已核):
+//    回调体内无 _tkC 重入 (crushCoverBox/damageStructureBy 不会同步重入其他坦克的 update ——
+//    坦克更新在主循环里逐辆串行), 每次查询前装载、即时消费。
+const _tkOff=[-1.95,0,1.95];
+const _tkC={t:null,cx:0,cz:0,sn:0,cs:0,pass:0,hit:false};
+function _tkBoxCb(b){
+const T=_tkC.t; if(!T) return;
+if(b.dead||T.pos.y+2<b.minY||T.pos.y>b.maxY) return;
+if(b.maxY-b.gh<0.7) return;
+const cxp=_tkC.cx, czp=_tkC.cz;
+const cx=clamp(cxp,b.minX,b.maxX), cz=clamp(czp,b.minZ,b.maxZ);
+const dx=cxp-cx, dz=czp-cz;
+const d2=dx*dx+dz*dz;
+if(d2>=1.55*1.55) return;
+const ramG=(b.dGroup&&!b.dGroup.dead)?b.dGroup:null;
+if(b.crush&&Math.abs(T.vel)>1.5){
+crushCoverBox(b);
+T.vel*=0.92;
+T.suspPV-=Math.sign(T.vel)*0.25;
+if(T.playerDriven) addTrauma(0.12);
+return;
+}
+if(!b.dGroup&&!b.crush&&b.maxY-b.gh<=TANK_STEP) return;
+let pnx=0, pnz=0;
+if(d2>1e-8){
+const d=Math.sqrt(d2);
+pnx=dx/d; pnz=dz/d;
+const push=Math.min(0.35,(1.55-d)/d); // 推挤限幅: 防深穿一帧瞬移再撞别处
+T.pos.x+=dx*push; T.pos.z+=dz*push;
+} else {
+// 圆心已进入盒内: 沿穿透最浅轴整体顶出, 防楔死原地
+const l=Math.min(cxp-b.minX,b.maxX-cxp), r2=Math.min(czp-b.minZ,b.maxZ-czp);
+if(l<r2){ pnx=(cxp-b.minX<b.maxX-cxp)?-1:1; T.pos.x+=pnx*(l+1.55); }
+else { pnz=(czp-b.minZ<b.maxZ-czp)?-1:1; T.pos.z+=pnz*(r2+1.55); }
+}
+if(_tkC.pass===0){
+const mvX=_tkC.sn*Math.sign(T.vel), mvZ=_tkC.cs*Math.sign(T.vel);
+const facing=-(pnx*mvX+pnz*mvZ);
+// ★ A2/B4: 正面全速撞 → 按动量扣血 (走 damageStructureBy = 与炮弹同一套账: 记分归属/受损档/坍塌链)。
+if(ramG&&Math.abs(T.vel)>=STRUCT_RAM.minSpeed&&facing>=STRUCT_RAM.face&&nowT-(T._ramT||-99)>=STRUCT_RAM.cd){
+T._ramT=nowT;
+damageStructureBy(ramG,STRUCT_RAM.k*T.vel*T.vel,T.playerDriven?player:(T.crewBot||T.crew),
+{x:(b.minX+b.maxX)/2,y:(b.minY+b.maxY)/2,z:(b.minZ+b.maxZ)/2});
+T.vel*=STRUCT_RAM.velAbsorb;
+T.suspPV-=Math.sign(T.vel)*0.9;
+if(T.playerDriven) addTrauma(0.28);
+return;
+}
+T.vel*=facing>0.5?0.35:facing>0.15?0.66:0.92;
+}
+_tkC.hit=true;
+}
+function _tkCylCb(c){
+const T=_tkC.t; if(!T) return;
+if(c.r<0.3) return;
+if(c.y1-c.y0<=TANK_STEP) return;
+const cxp=_tkC.cx, czp=_tkC.cz;
+const dx=cxp-c.x, dz=czp-c.z;
+const rr=c.r+1.5, d2=dx*dx+dz*dz;
+if(d2<rr*rr&&d2>1e-8){
+const d=Math.sqrt(d2), push=Math.min(0.3,(rr-d)/d*0.6);
+T.pos.x+=dx*push; T.pos.z+=dz*push;
+T.vel*=0.75;
+_tkC.hit=true;
+}
 }
 // ══════════════════════════════════════════════════════════════════════
 // 坦克剪影几何工厂 (2026-09-20 I2 批: 按国家/车型出可辨识剪影)
@@ -828,8 +902,11 @@ this.beaconMat.opacity=0.6+0.4*Math.sin(nowT*2.6+this.team*2.3);
 // firing = 本帧是否有开火请求 (firePlayerMG / turretAI 的 MG 分支置位) —— 消费式, 消费后本帧不再算开火。
 vehMgHeatTick(this,dt,this.mgTrig,this.playerDriven);
 this.mgTrig=false;
-	// 深谷激流: 坦克误入河道即熄火受淹 (AI寻路只会走大桥)
-	if(inRiverChannel(this.pos.x,this.pos.z)){
+	// 深谷激流: 坦克误入河道即熄火受淹 (AI寻路只会走大桥; 2026-11-15 水态门: 岸坡旱地不误判)
+	// ★入水批: 两道水障查询提为共享局部 (inRiv/wDep), 下方"入水特效"的水态沿检测共用, 不重复查询。
+	const inRiv=inRiverWater(this.pos.x,this.pos.z);
+	const wDep=waterDepthAt(this.pos.x,this.pos.z);
+	if(inRiv){
 	this.vel=dampF(this.vel,0,5,dt);
 	this.takeDmg(VEH_RAPIDS_DMG*dt,null,true); // 激流属于环境惩罚, 不享受装甲减免
 	if(this.playerDriven&&Math.random()<dt*2) showScorePop('⚠ 激流熄火! 快倒车离开河道');
@@ -837,10 +914,23 @@ this.mgTrig=false;
 	// 海面/深水 (2026-09-18 塔拉瓦批, 用户定案: 只减速受伤、不沉没销毁): 水深 >VEH_WATER_DEPTH 即进水熄火 ——
 	// 速度按 dampF 快速归零 + 每秒 VEH_WATER_DMG 环境伤 (不享受装甲减免, 与激流同口径);
 	// AI 坦克由 OCC 水障格 (occBlocked 记 2) 挡住不会开进海里, 只有玩家能开进去 (倒车可自救)
-	if(waterDepthAt(this.pos.x,this.pos.z)>VEH_WATER_DEPTH){
+	if(wDep>VEH_WATER_DEPTH){
 	this.vel=dampF(this.vel,0,5,dt);
 	this.takeDmg(VEH_WATER_DMG*dt,null,true);
 	if(this.playerDriven&&Math.random()<dt*2) showScorePop('⚠ 涉水熄火! 快倒车离开水面');
+	}
+	// 入水特效/音效 (★2026-11-15 入水批): 干→水的下降沿一记载具级大水花+扑通 —— scale 3.4
+	//   (车体级, 与 406mm 舰炮落水 3.2 档同量级) 带水下气泡; 跃迁账记车体 (_wasInWater),
+	//   水里倒车再进水/重生重新入水都会重发, 残骸期不进 (alive 门)。规模随车速的进深变化免了
+	//   —— 坦克没有竖直下落账, 车体尺寸档就是主参数。
+	{
+	const inW=!!(inRiv||wDep>VEH_WATER_DEPTH);
+	const wasW=!!this._wasInWater;
+	this._wasInWater=inW;
+	if(inW&&!wasW&&this.alive){
+	const wy=waterYAt(this.pos.x,this.pos.z);
+	if(wy>-1e8&&typeof waterSplash==='function') waterSplash(V3(this.pos.x,wy+0.1,this.pos.z),3.4,true,true);
+	}
 	}
 // 载具残血起火 (2026-11-09 批): 燃烧掉血账 —— 每秒烧 maxHp×VEH_BURN_FRAC/VEH_BURN_TIME, 自起火起
 // VEH_BURN_TIME 秒内必烧至损毁 (直接扣 hp 不走 takeDmg: 不刷伤害红闪/不刷 lastDmgT/不叠装甲减免);
@@ -914,75 +1004,20 @@ this.pos.x+=mvx; this.pos.z+=mvz;
 	// (旧实现任意接触 vel*=0.5, 轻微擦碰就降到爬行, 极易进退两难)
 	let hitObstacle=false;
 	for(let pass=0;pass<2;pass++){
-	for(const off of [-1.95,0,1.95]){
+	for(let oi=0;oi<3;oi++){
+	const off=_tkOff[oi];
 	const cxp=this.pos.x+sn*off, czp=this.pos.z+cs*off;
 	// 2026-09-06 B5/P0-2: 全量扫描改 RGRID 邻近候选 (推挤测试半径 1.55, 查询余量至 1.56)
-	eachBoxNear(cxp-1.56,czp-1.56,cxp+1.56,czp+1.56,b=>{
-	if(b.dead||this.pos.y+2<b.minY||this.pos.y>b.maxY) return;
-	if(b.maxY-b.gh<0.7) return;
-	const cx=clamp(cxp,b.minX,b.maxX), cz=clamp(czp,b.minZ,b.maxZ);
-	const dx=cxp-cx, dz=czp-cz;
-	const d2=dx*dx+dz*dz;
-		if(d2>=1.55*1.55) return;
-		// 2026-09-27N (A2/B4): 撞塌可毁墙体由"到速即整组销毁"改成**按动量扣血 + 正撞门限 + 冷却**。
-		//   旧版任意接触只要 |vel|>1.9 (≈6.8 km/h) 就把整组 (含 202 盒的 10.6m 楼段) 当场销毁,
-		//   既绕过 hp 也不经 destroyStructure 的得分归属 ⇒ 侧擦/轻推照样拆楼且不计分。
-		//   判定需要法线 (车是否真的正对着墙), 故放在下面算出 pnx/pnz 之后。
-		const ramG=(b.dGroup&&!b.dGroup.dead)?b.dGroup:null;
-		// 2026-09-02 越野碾压: 掩体(沙袋/木箱/石墙/树篱/倒木, 挂牌 crush)车速足够时直接碾毁通过, 不再被阻拦
-		if(b.crush&&Math.abs(this.vel)>1.5){
-	crushCoverBox(b);
-	this.vel*=0.92;
-	this.suspPV-=Math.sign(this.vel)*0.25;
-	if(this.playerDriven) addTrauma(0.12);
-	return;
-	}
-	// 2026-09-04 越野跨越: 低矮且无法摧毁的障碍(自身高度≤1.3m: 顶面相对其地面, 无 dGroup 可撞塌/无 crush 可碾毁)
-	// 直接放行不阻挡不碾毁, 底盘高度由 tankRideH 抬升作出爬越效果
-	if(!b.dGroup&&!b.crush&&b.maxY-b.gh<=TANK_STEP) return;
-	let pnx=0, pnz=0;
-	if(d2>1e-8){
-	const d=Math.sqrt(d2);
-	pnx=dx/d; pnz=dz/d;
-	const push=Math.min(0.35,(1.55-d)/d); // 推挤限幅: 防深穿一帧瞬移再撞别处
-	this.pos.x+=dx*push; this.pos.z+=dz*push;
-	} else {
-	// 圆心已进入盒内: 沿穿透最浅轴整体顶出, 防楔死原地
-	const l=Math.min(cxp-b.minX,b.maxX-cxp), r2=Math.min(czp-b.minZ,b.maxZ-czp);
-	if(l<r2){ pnx=(cxp-b.minX<b.maxX-cxp)?-1:1; this.pos.x+=pnx*(l+1.55); }
-	else { pnz=(czp-b.minZ<b.maxZ-czp)?-1:1; this.pos.z+=pnz*(r2+1.55); }
-	}
-		if(pass===0){
-		const mvX=sn*Math.sign(this.vel), mvZ=cs*Math.sign(this.vel);
-		const facing=-(pnx*mvX+pnz*mvZ);
-		// ★ A2/B4: 正面全速撞 → 按动量扣血 (走 damageStructureBy = 与炮弹同一套账: 记分归属/受损档/坍塌链)。
-		//   侧面擦挂 (facing<face) 与低速接触不再拆楼, 退化成下面的弹性推挤 (被墙挡住 + 掉速)。
-		if(ramG&&Math.abs(this.vel)>=STRUCT_RAM.minSpeed&&facing>=STRUCT_RAM.face&&nowT-(this._ramT||-99)>=STRUCT_RAM.cd){
-		this._ramT=nowT;
-		damageStructureBy(ramG,STRUCT_RAM.k*this.vel*this.vel,this.playerDriven?player:(this.crewBot||this.crew),
-		{x:(b.minX+b.maxX)/2,y:(b.minY+b.maxY)/2,z:(b.minZ+b.maxZ)/2});
-		this.vel*=STRUCT_RAM.velAbsorb;
-		this.suspPV-=Math.sign(this.vel)*0.9;
-		if(this.playerDriven) addTrauma(0.28);
-		return;
-		}
-		this.vel*=facing>0.5?0.35:facing>0.15?0.66:0.92;
-		}
-	hitObstacle=true;
-	});
-	eachCylNear(cxp-3.7,czp-3.7,cxp+3.7,czp+3.7,c=>{
-	if(c.r<0.3) return;
-	// 2026-09-04 越野跨越: 低矮圆柱(油桶/石碾/碎石堆等不可摧毁, 自身高度≤1.3m)直接驶过, 高度由 tankRideH 承接
-	if(c.y1-c.y0<=TANK_STEP) return;
-	const dx=cxp-c.x, dz=czp-c.z;
-	const rr=c.r+1.5, d2=dx*dx+dz*dz;
-	if(d2<rr*rr&&d2>1e-8){
-	const d=Math.sqrt(d2), push=Math.min(0.3,(rr-d)/d*0.6);
-	this.pos.x+=dx*push; this.pos.z+=dz*push;
-	this.vel*=0.75;
-	hitObstacle=true;
-	}
-	});
+	// 2026-09-27N (A2/B4): 撞塌可毁墙体 = 按动量扣血 + 正撞门限 + 冷却 (判定在 _tkBoxCb, 原注释随迁)。
+	// 2026-09-02/09-04 越野: crush 碾毁 / 低矮障碍 (≤1.3m) 跨越放行, 底盘高度由 tankRideH 抬升爬越。
+	// 2026-11-11 性能批: 6 个内联闭包 + 2 个数组分配 → 模块回调 _tkBoxCb/_tkCylCb + 上下文槽 _tkC。
+	_tkC.t=this; _tkC.cx=cxp; _tkC.cz=czp; _tkC.sn=sn; _tkC.cs=cs; _tkC.pass=pass;
+	_tkC.hit=false;
+	eachBoxNear(cxp-1.56,czp-1.56,cxp+1.56,czp+1.56,_tkBoxCb);
+	if(_tkC.hit) hitObstacle=true;
+	_tkC.hit=false;
+	eachCylNear(cxp-3.7,czp-3.7,cxp+3.7,czp+3.7,_tkCylCb);
+	if(_tkC.hit) hitObstacle=true;
 	}
 	}
 if(hitObstacle&&this.isAI) this.stuckT+=dt*2.2;
@@ -1622,7 +1657,7 @@ for(const s of this.crewSlots) if(!spec) settleCrewSlotDeath(s,attacker,this.tea
 }else{
 tickets[this.team]=Math.max(0,tickets[this.team]-(this.def.heavy?TICKET_COST.tankHeavy:TICKET_COST.tankLight));
 }
-if(attacker&&(attacker.ffAll||attacker.team!==this.team)){ // ffAll: 观战幽灵坦克的无差别火力照常记分 (2026-09-17)
+if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力, 毁"己方"载具不记分不播报)
 // 一次车毁只出一条战报 (victim 写清 3 名乘员; 玩家在内时死亡链另有 1 行 ⇒ 合计 ≤2 行)
 // ★2026-09-26 修: **空车**不吹"乘员×3" —— 上面空车分支明确"没有人可杀 (0 死 0 杀)", 战报却照写 3 名乘员,
 // 观感是"打死三个人的战报、记分板上零击杀" (与被炸毁的无人坦克对不上)。有人才写乘员数, 空车只报车名。
@@ -1804,7 +1839,7 @@ spawnP(PT.flash,s.pos.x,s.pos.y,s.pos.z,0,0,0,0.12,0,0.07,0.9,0,true);
 spawnP(PT.spark,s.pos.x,s.pos.y,s.pos.z,0,0,0,0.16,-0.1,0.09,1,0,true);
 }
 }
-let hitD=step+0.5, hit=null, hitTank=null, hitTruck=null, hitSol=null;
+let hitD=step+0.5, hit=null, hitTank=null, hitTruck=null, hitSol=null, hitPl=null;
 const wr=raycastWorld(s.pos,dir,hitD);
 if(wr){ hitD=wr.dist; hit=wr; }
 for(const t of tanks){
@@ -1817,6 +1852,11 @@ if(!t.alive||t.team===s.team) continue;
 const r=rayCyl(s.pos,dir,shPad>0?truckHitCylR(t,shPad,_shTrkCyl):truckHitCyl(t,_shTrkCyl),hitD);
 if(r){ hitD=r.t; hit=r; hitTruck=t; hitTank=null; hitSol=null; }
 }
+// 对空判定 (2026-11-14 用户令 "坦克炮弹等也能命中飞机并正常造成伤害"): 7c 单源 planeHitTest 线段-球,
+// excludeTeam=弹体队 (友机豁免, 与上面坦克/卡车 t.team===s.team 同一门; 观战/幽灵坦克 team=-1 不豁免
+// =可打双方, 与 2026-11-09 观战中立批口径一致)。坦克主炮/火箭筒/反坦克炮/岸防炮/舰炮全走本函数。
+const ph=(typeof planeHitTest==='function')?planeHitTest(s.pos,dir,hitD,s.team):null;
+if(ph){ hitD=ph.t; hit=ph; hitPl=ph.pl; hitTank=null; hitTruck=null; hitSol=null; }
 const sr=raySoldiers(s.pos,dir,hitD,(_shRayOpt.team=s.team,_shRayOpt),shPad);
 if(sr){ hitD=sr.t; hitSol=sr.sol; hitTank=null; hitTruck=null; hit=sr; }
 if(hit){
@@ -1827,6 +1867,7 @@ if(typeof markHitCls==='function') markHitCls('shell');
 const _fbP=s.owner&&s.owner.isPlayer;
 if(hitTank){ hitTank.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380):rand(260,330)),s.owner,true); if(_fbP&&hitTank.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
 if(hitTruck){ hitTruck.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380):rand(260,330)),s.owner); if(_fbP&&hitTruck.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }
+if(hitPl){ hitPl.takeDmg(s.dmgV?s.dmgV+rand(-30,30):(s.kind==='at'?rand(300,380):rand(260,330)),s.owner); if(_fbP&&hitPl.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); } // 空中直击 (2026-11-14): 与坦克同伤害口径 —— 直接命中机体=重创/击落, takeDmg 内含跳伞/起火/难度乘区全链
 // ★2026-10-06 难度批 (标准档): 炮弹/火箭直击步兵对**玩家** 260→180 —— 旧值无难度乘区、无衰减,
 //   被坦克炮/火箭筒蹭到即近殁, 是"总被秒杀"的又一主诉源; Bot 步兵维持 260 (互殴烈度不变)。
 if(hitSol){ hitSol.damage(hitSol.isPlayer?180:260,s.owner,false); if(_fbP&&hitSol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('shell'); }

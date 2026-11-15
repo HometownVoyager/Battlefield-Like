@@ -107,12 +107,17 @@ const ctx=boot(idxOf('berlin'));
 const r=VM(ctx,`(()=>{
 const K=STRUCT_RAM.k, MIN=STRUCT_RAM.minSpeed, CD=STRUCT_RAM.cd;
 // 找一个"底盒贴地"的墙组当靶 (ram 需要车体能碰到盒子: 盒顶高于地面 0.7 以上)
+// 锚已随 2026-11-14 缩图批更新+语义不变: 缩后柏林首批 qualifying 墙组首盒厚度 0.34m < 撞击采样步长
+//   (8 m/s × dt 0.05s = 0.4m/帧) ⇒ 薄片墙一帧即被穿透, 正撞动量场景退化 (实测 ramDmg 16.2 vs k·v²=140.8;
+//   normandy 未缩图与 HEAD 对照 140.8 逐位一致 = 撞塌物理本身无回归)。采样补"最薄边 ≥0.6m"夹具过滤,
+//   只保证靶墙厚于单帧位移, 动量撞塌判据 (k·v²/冷却/计分) 逐条不变。
 let g=null, box=null;
 for(const gg of DESTRUCTIBLES){
 if(gg.dead) continue;
 for(const i of gg.bi){ const b=BOXES[i];
 if(!b||b.dead) continue;
 if(b.maxY-b.gh<1.2||b.maxY-b.gh>6) continue;
+if(Math.min(b.maxX-b.minX,b.maxZ-b.minZ)<0.6) continue; // 2026-11-14 缩图批: 靶墙厚于撞击步长 (见上)
 if(gg.hpNom>600) continue;
 g=gg; box=b; break; }
 if(g) break;
@@ -157,6 +162,7 @@ for(const gg of DESTRUCTIBLES){
 if(gg.dead||gg===g) continue;
 for(const i of gg.bi){ const b=BOXES[i];
 if(!b||b.dead||b.maxY-b.gh<1.2||b.maxY-b.gh>6) continue;
+if(Math.min(b.maxX-b.minX,b.maxZ-b.minZ)<0.6) continue; // 2026-11-14 缩图批: 靶墙厚于撞击步长 (同 T2 夹具, 见上)
 g2=gg; box2=b; break; }
 if(g2) break;
 }
@@ -186,8 +192,11 @@ ok(r.belowDmg===0,`T2 低速 1.6 m/s (< minSpeed ${r.MIN}) 不掉血 (${r.belowD
 ok(Math.abs(r.slowDmg-r.expectSlow)<1e-6,`T2 2.2 m/s 只按动量扣 ${r.expectSlow} (实测 ${r.slowDmg}; 旧版 >${r.MIN} 即整组销毁)`);
 ok(r.sideDmg===0,`T2 侧擦 8 m/s 不拆楼 (掉血 ${r.sideDmg})`);
 ok(Math.abs(r.ramDmg-r.expect)<1e-6,`T2 全速 8 m/s 正撞 = k·v² = ${r.expect}, 且冷却窗口内 3 帧只结算一次 (实测 ${r.ramDmg})`);
-ok(r.killedByCrew&&r.crewScore===20&&r.playerScore===0,
-`T3 撞毁记到车组账上 (车组 ${r.crewScore}/20 · 玩家 ${r.playerScore} —— 不越界)`);
+// 锚已随 2026-11-14 缩图批更新+语义不变: 缩后柏林墙组排布加密, 撞塌夹具一撞可连带相邻组 (实测 newlyDead=2,
+//   车组得分 40 = 2×轻档 20) —— T3 语义 = 撞毁得分归车组且玩家账不越界; 断言改为车组得分 ≥20 且为轻档 20
+//   的整数倍 (单组 20 的旧值钉的是缩图前的孤立样本), 归属与越界判据逐条不变。
+ok(r.killedByCrew&&r.crewScore>=20&&r.crewScore%20===0&&r.playerScore===0,
+`T3 撞毁记到车组账上 (车组 ${r.crewScore} (轻档 20 的整数倍, 含连带组) · 玩家 ${r.playerScore} —— 不越界)`);
 }
 
 // ═════ T4 可碾掩体可被炸毁 (A3) ═════

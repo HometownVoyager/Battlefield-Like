@@ -185,17 +185,22 @@ default:{x:-0.24,dy:0.10,dz:0.545},
 // 站↔趴的过渡按**当前**骨盆俯角平滑混合 (站 0.05 / 蹲 0.14 / 疾跑 0.30 / 趴 1.50):
 // 硬切换会在站→趴的 0.4s 里让枪瞬移半米; 骨盆俯角本身就是 dampF 过的, 用同一个量做插值权即连续。
 const GUN_MOUNT_BLEND0=0.40, GUN_MOUNT_BLEND1=1.30;
+// ★2026-11-11 性能批: 返回值槽位化 (旧版每次 new 一个 {x,y,z})。全部调用点 (14-bots updateMesh 挂点 /
+// 20-player 姿态机挂点 / mountGunModel / _gunAnchorTorso 内部) 逐一核对过: 结果**即时串行消费**,
+// 无同帧双持 —— 槽位复用逐位等价。数值全量写入 (站/蹲疾跑路径也经槽, 消费方不再共享 GUN_MOUNT 表对象)。
+const _gm={x:0,y:0,z:0};
 function gunMountOf(kind,pp){
 const k=kind||'rifle';
 const st=GUN_MOUNT_BY_KIND[k]||GUN_MOUNT_BY_KIND.default;
 const p=pp||0;
-if(p<=GUN_MOUNT_BLEND0) return st;            // 站/蹲/疾跑: 原值, 逐位不变
+if(p<=GUN_MOUNT_BLEND0){ _gm.x=st.x; _gm.y=st.y; _gm.z=st.z; return _gm; }  // 站/蹲/疾跑: 原值, 逐位不变
 const pr=GUN_MOUNT_PRONE[k]||GUN_MOUNT_PRONE.default;
 let kk=clamp((p-GUN_MOUNT_BLEND0)/(GUN_MOUNT_BLEND1-GUN_MOUNT_BLEND0),0,1);
 kk=kk*kk*(3-2*kk);
 const c=Math.cos(p), s=Math.sin(p);
 const ly=pr.dy*c+pr.dz*s, lz=-pr.dy*s+pr.dz*c;
-return {x:st.x+(pr.x-st.x)*kk, y:st.y+(ly-st.y)*kk, z:st.z+(lz-st.z)*kk};
+_gm.x=st.x+(pr.x-st.x)*kk; _gm.y=st.y+(ly-st.y)*kk; _gm.z=st.z+(lz-st.z)*kk;
+return _gm;
 }
 // ═════ 持握姿态表 (单源) — 2026-10-27 通讯仪批 ═════
 // 为什么需要这张表: 姿态机 (20-player updatePlayerAvatar / 14-bots updateMesh) 里的四分支
@@ -297,13 +302,18 @@ return Math.hypot(hx2-vx,hy2-vy,hz2-vz);
 //   几何来源: 逐网格读 geometry.parameters (真 three 有); 桩沙箱没有 parameters 时退化为"只按各部件 position 求轴范围"
 //   —— 仍是几何信息而非写死坐标, 桩里能跑、只是略粗。缓存按 kind 一份 (建一次临时模型)。
 const _gunAnchorCache={};
+const _euT={x:0,y:0,z:0}; // _eulerXYZ 复用槽 (2026-11-11 性能批): 唯一调用点 _gunAnchorTorso 即时消费
 function _eulerXYZ(p,rx,ry,rz){ // 躯干局部 = Rx·Ry·Rz·gunG局部 (与 three 的 Euler 'XYZ' 同序; 纯算术)
-if(!rx&&!ry&&!rz) return {x:p.x,y:p.y,z:p.z};
+// 自别名安全 (2026-11-11): 调用方可能把上一轮返回的 _euT 原样传回 (探针 handTorso 即如此),
+// 逐分量先写 _euT.x 再读 p.x 会读到已覆盖的新值 ⇒ 入参三轴必须先快照进局部。
+const px=p.x, py=p.y, pz=p.z;
+if(!rx&&!ry&&!rz){ _euT.x=px; _euT.y=py; _euT.z=pz; return _euT; }
 const a=Math.cos(rx||0), b=Math.sin(rx||0), c=Math.cos(ry||0), d=Math.sin(ry||0), e=Math.cos(rz||0), f=Math.sin(rz||0);
 const m00=c*e, m01=-c*f, m02=d;
 const m10=a*f+b*e*d, m11=a*e-b*f*d, m12=-b*c;
 const m20=b*f-a*e*d, m21=b*e+a*f*d, m22=a*c;
-return {x:m00*p.x+m01*p.y+m02*p.z, y:m10*p.x+m11*p.y+m12*p.z, z:m20*p.x+m21*p.y+m22*p.z};
+_euT.x=m00*px+m01*py+m02*pz; _euT.y=m10*px+m11*py+m12*pz; _euT.z=m20*px+m21*py+m22*pz;
+return _euT;
 }
 function gunGeomStations(kind){
 const k=kind||'rifle';
@@ -336,27 +346,42 @@ const res={grip:{x:0,y:yAt(zGrip),z:zGrip}, fore:{x:0,y:yAt(zFore),z:zFore}, zMi
 _gunAnchorCache[k]=res;
 return res;
 }
+const _gco={x:0,y:0,z:0}; // gunCarryOffset 复用槽 (2026-11-11 性能批): 唯一调用点 _gunAnchorTorso 即时消费
 function gunCarryOffset(kind){
 const k=kind||'rifle';
 const fwd=(CARRIED_FWD[k]!==undefined)?CARRIED_FWD[k]:CARRIED_FWD.rifle;
-return {x:0,y:-0.02,z:fwd};
+_gco.x=0; _gco.y=-0.02; _gco.z=fwd;
+return _gco;
 }
-function _gunAnchorTorso(kind,which,rx,ry,rz,pp){
+// ── 枪上锚点链槽位契约 (2026-11-11 性能批, 调用点逐一核对过) ──
+// 旧版每次 gunGripPoint/gunForePoint/gunAxisPoint 调用分配 3~15 个短命对象 (每 Bot 每帧 ~15-25 个,
+// 22 人 × LOD ≈ 每帧 250-350 个 = 全库剩余最大的常驻 GC 源)。槽位化规则:
+//   · 三个对外槽各独立: gunGripPoint→_gaGrip / gunForePoint→_gaFore / gunAxisPoint→_gaAxis;
+//   · 枪轴点内部临时槽 _gatA/_gatB **不写**对外槽 —— 14-bots 的 gp(_gaGrip) 在 gunAxisPoint 回退循环
+//     与两次 armIK 之间一直活着, 内部若借用对外槽会把 gp 冲掉;
+//   · 消费即时: 20-player 右臂块 (gunGripPoint→回退→armIK) 在左臂块 (gunForePoint→gunAxisPoint→armIK)
+//     之前完成, 同槽不跨块存活; mountGunModel / 两处挂点 dampF 均单调用即用。
+const _gaGrip={x:0,y:0,z:0}, _gaFore={x:0,y:0,z:0}, _gaAxis={x:0,y:0,z:0};
+const _gatA={x:0,y:0,z:0}, _gatB={x:0,y:0,z:0}, _gatP={x:0,y:0,z:0};
+function _gunAnchorTorso(kind,which,rx,ry,rz,pp,out){
 const st=gunGeomStations(kind), a=(which==='fore')?st.fore:st.grip, co=gunCarryOffset(kind);
 // 模型空间 → gunG 局部: mountGunModel 把模型 rotation.y=PI (x→-x, z→-z) 并加 carryOffset
-const p=_eulerXYZ({x:-a.x+co.x, y:a.y+co.y, z:-a.z+co.z}, rx, ry, rz);
+_gatP.x=-a.x+co.x; _gatP.y=a.y+co.y; _gatP.z=-a.z+co.z;
+const p=_eulerXYZ(_gatP,rx,ry,rz);
 const mo=gunMountOf(kind,pp);   // 挂点按枪种取 (扛肩式火箭筒挂点不同) + 按躯干俯角取 (趴姿挂点不同, A1)
-return {x:mo.x+p.x, y:mo.y+p.y, z:mo.z+p.z};
+out.x=mo.x+p.x; out.y=mo.y+p.y; out.z=mo.z+p.z;
+return out;
 }
-function gunGripPoint(kind,rx,ry,rz,pp){ return _gunAnchorTorso(kind,'grip',rx,ry,rz,pp); }   // 握把点 (躯干局部系)
-function gunForePoint(kind,rx,ry,rz,pp){ return _gunAnchorTorso(kind,'fore',rx,ry,rz,pp); }   // 护木点 (躯干局部系)
+function gunGripPoint(kind,rx,ry,rz,pp){ return _gunAnchorTorso(kind,'grip',rx,ry,rz,pp,_gaGrip); }   // 握把点 (躯干局部系)
+function gunForePoint(kind,rx,ry,rz,pp){ return _gunAnchorTorso(kind,'fore',rx,ry,rz,pp,_gaFore); }   // 护木点 (躯干局部系)
 // 可达性辅助 (调用方用): 把"沿枪身轴从握把到护木的某点"作为 IK 目标, 使左/右手**永远落在枪上**。
 //   t=0 → 握把, t=1 → 护木; 返回躯干局部点。护木点超臂长时调用方可取可达的 t (见 20-player 的左臂处理)。
 function gunAxisPoint(kind,t,rx,ry,rz,pp){
 const k=kind||'rifle';
-const gp=_gunAnchorTorso(k,'grip',rx,ry,rz,pp), fp=_gunAnchorTorso(k,'fore',rx,ry,rz,pp);
+const gp=_gunAnchorTorso(k,'grip',rx,ry,rz,pp,_gatA), fp=_gunAnchorTorso(k,'fore',rx,ry,rz,pp,_gatB);
 const u=clamp(t,0,1);
-return {x:gp.x+(fp.x-gp.x)*u, y:gp.y+(fp.y-gp.y)*u, z:gp.z+(fp.z-gp.z)*u};
+_gaAxis.x=gp.x+(fp.x-gp.x)*u; _gaAxis.y=gp.y+(fp.y-gp.y)*u; _gaAxis.z=gp.z+(fp.z-gp.z)*u;
+return _gaAxis;
 }
 // ═════ 腿部骨骼常量 + 两连杆矢状面反解 (单源) ═════
 // LEG_L1/LEG_L2 = 髋→膝 / 膝→踝 的骨长 (mkLeg 的骨盒与关节站位即由它们决定 —— 改这里就是改骨架);
@@ -368,9 +393,14 @@ const LEG_L1=0.46, LEG_L2=0.48, LEG_ANKLE2SOLE=0.03;
 //   输出 = {hip:相对"正下方"的世界大腿角, knee:膝弯角 (0=直腿)}。
 //   为什么必须反解而不是写死角度: 骨盆前倾 pp 是 dampF 过渡的 (站→趴要 ~0.4s), 写死角度的腿在这段时间里
 //   指向地面 → 实测趴姿切换瞬间脚穿地 0.72m; 蹲姿稳态两脚也各穿地 0.17/0.29m。反解 + 减去 pp 之后,
-//   脚**始终**落在目标高度, 与骨盆高度/前倾进度无关。kneeUp=true 用于趴姿 (膝朝上, 腿贴地不穿地)。
+//   脚**始终**落在目标高度, 与骨盆高度/前倾进度无关。kneeUp/pole 方向即膝弯方向: pole-up (膝峰在髋踝线
+//   上方) 几何上必然伴随小腿"向脚尖方向折" = 反关节超伸 —— 趴姿自 2026-11-13b 批⑤起改 kneeUp=false
+//   (膝落回贴地段 + 膝弯转人类屈曲方向, 与 20-player/14-bots 两处消费点同批同规)。
 //   ★ 2026-09-26 (A2): 本函数从 14-bots 的 Bot.prototype.legIK 提到这里做**单源** —— 玩家第三人称
 //   (20-player) 当时没跟这次反解改造, 两条路径各写一份 ⇒ 玩家长时间保持"修前"的穿地数值。
+// 交替双槽 (2026-11-11 性能批): 六个调用点 (14-bots LL,RR / cL,cR 与 20-player 同两对) 全部是
+// "A,B 连续两调后同帧消费" —— 交替命中保证两份结果同时活着; 结果只读, 下一帧复用。
+const _legA={hip:0,knee:0}, _legB={hip:0,knee:0}; let _legFlip=0;
 function legIKPose(hp,fy,dz,kneeUp){
 const a=LEG_L1, b=LEG_L2;
 const dy=fy-hp;
@@ -382,7 +412,9 @@ const beta=Math.acos(cosB);
 const hipW=kneeUp?dir+beta:dir-beta;
 const inner=Math.acos(clamp((a*a+b*b-D*D)/(2*a*b),-1,1));
 const bend=Math.PI-inner;
-return kneeUp?{hip:hipW,knee:-bend}:{hip:hipW,knee:bend};
+const o=(_legFlip^=1)?_legA:_legB;
+o.hip=hipW; o.knee=kneeUp?-bend:bend;
+return o;
 }
 const _soldierFlBaseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:14;
 const _soldierFlGeo=new THREE.ConeGeometry(1.0,_soldierFlBaseL,10,1,true);

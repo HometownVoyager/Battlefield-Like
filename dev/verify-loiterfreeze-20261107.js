@@ -5,7 +5,7 @@
 //   ③ 退场吞空格边沿: 操控退场瞬间仍按着空格 ⇒ 本体松开前不吃残跳/残升/残加速
 //     (旧写实测: 弹死后按住空格在步行态反复起跳 = 用户实报"在地上不停跳跃"; 悬停态残升)
 //   ④ 小地图: 弹体菱形标记常显 (不开大地图也可见) + 操控中以弹体为中心/朝向 (本体箭头挪实际位置)
-//   ⑤ C/Z/X 姿态键操控中定身 + 面板提示 "本体定身" + 版本戳 20261111a
+//   ⑤ C/Z/X 姿态键操控中定身 + 面板提示 "本体定身" + 版本戳 20261115b
 // 用法: node dev/verify-loiterfreeze-20261107.js [--neg]
 //   --neg = 阴性对照: 单行锚还原旧写法, 行为判据必须报红 (9 处补丁, 累积应用, 对认按红名)。
 // 口径: 与 verify-flyaim-loiterkey-20261106 同款 boot (真 three + index.html 全脚本链 + startBtn 开局)。
@@ -30,8 +30,8 @@ const PATCHES=[
  ['js/13-combat.js','if(shooter.flying&&shooter.flyAero){ shooter.flyAero=false; shooter.vel.set(0,0,0); shooter._aeroSpd=0; }',''],
  // N3 退场吞空格边沿退场 (弹死后按住空格 → 本体连跳/残升复现; 两处同锚)
  ['js/13-combat.js','if(player.loiter===d){ player.loiter=null; player._ltSpace=!!keys.Space; }','if(player.loiter===d){ player.loiter=null; }'],
- // N4 跳跃门摘吞边沿 (同上, 步行态路径)
- ['js/20-player.js','if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1)','if(keys.Space&&!cmdLock&&p.onGround&&p.stamina>0.1)'],
+ // N4 跳跃门摘吞边沿 (同上, 步行态路径; ★2026-11-14 跟码: 批③给门尾加了 !headGrazeBlocked(p.pos), 锚跟到新门文本)
+ ['js/20-player.js','if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)','if(keys.Space&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)'],
  // N5 帧首清零退场 (退场吞边沿旗永不清 ⇒ 松开重按也跳不了, "松开恢复"判据红)
  ['js/20-player.js','if(!keys.Space) p._ltSpace=false;',''],
  // N6 悬停升摘吞边沿 (退场后按住空格悬停残升复现; 悬停升/自由飞行升两处同锚)
@@ -63,7 +63,7 @@ assert('20 旧"观战飞行保持机动"分支绝迹',!s20.includes('{ p.stamina
 assert('20 _ltSpace 清零上提帧首 (全文恰 1 处, 且在 meleeCd 行之后)',
  cnt(s20,/if\(!keys\.Space\) p\._ltSpace=false;/g)===1
  &&s20.indexOf('if(!keys.Space) p._ltSpace=false;')>s20.indexOf('p.meleeCd-=dt; p.resupplyCd-=dt;'));
-assert('20 跳跃门含 !p._ltSpace',s20.includes('if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1)'));
+assert('20 跳跃门含 !p._ltSpace (★2026-11-14 跟码: 门尾含批③ !headGrazeBlocked)',s20.includes('if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)'));
 assert('20 悬停升门含 !p._ltSpace (两处: 悬停+自由飞行)',cnt(s20,/if\(keys\.Space&&!p\._ltSpace\) ty\+=1;/g)===2);
 assert('20 气动加速门含 !p._ltSpace',s20.includes('((keys.Space&&!p._ltSpace)?40:13)'));
 assert('13 fireLoiter 气动→悬停切换在 (清速度+_aeroSpd)',
@@ -86,9 +86,9 @@ assert('22 面板提示含"本体定身" / i18n 新键在旧键已摘',
  &&i18n.includes("'鼠标 制导 · 左键 自爆 · 空格 加速 · 右键 开镜 · U 切换视角 · 本体定身':")
  &&!i18n.includes("'鼠标 制导 · 左键 自爆 · 空格 加速 · 右键 开镜 · U 切换视角':"));
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('版本戳 20261111a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106b 清零 (2026-11-10 海战移除批判据跟码)',
- [...idx.matchAll(/20261111a/g)].length>=48&&idx.includes("window.__sfStyleVer='20261111a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261111a')).length===45
+assert('版本戳 20261115b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106b 清零 (2026-11-10 海战移除批判据跟码)',
+ [...idx.matchAll(/20261115b/g)].length>=48&&idx.includes("window.__sfStyleVer='20261115b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115b')).length===45
  &&!idx.includes('20261106b')&&!gf.includes('20261106b'));
 }
 

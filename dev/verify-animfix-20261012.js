@@ -61,7 +61,8 @@ assert('10-A 左臂基准角单源 (VM_LARM_Y 落在合法带内)',
  s10.includes('const VM_LARM_Y=-0.95;'));
 assert('10-A vmHandLSnap / vmHandLFix 单源就位 (掌心保点 = vmPalmOf 反解腕位)',
  s10.includes('function vmHandLSnap(pose){')&&s10.includes('if(r.y<=-0.6&&r.y>=-1.05) return pose;')
- &&s10.includes('function vmHandLFix(pos,rot){')&&s10.includes('return vmHandLSnap({pos:pos, rot:V3(r0.x,r0.y||0,r0.z||0)});'));
+ &&s10.includes('function vmHandLFix(px,py,pz,rx,ry,rz){')// 2026-11-13 C 项: vmHandLFix 改标量入参+_ovL 槽 (单源链不变)
+ &&s10.includes('return vmHandLSnap(_ovL);'));
 // 左下置弹匣的**物理**换匣 (BAR/百式 = side=1 的左手持匣) 也过袖管归位 —— 它的 rotY 是解算出来的
 // (-0.09~-0.24), 不过这一道就还是"左臂在画面右半"
 assert('10-A 左手持匣路径 (vmHoldPose side=1) 同样过袖管归位',
@@ -70,10 +71,12 @@ assert('10-A 左手持匣路径 (vmHoldPose side=1) 同样过袖管归位',
 const fixCount=(s10.match(/handLOverride=vmHandLFix\(/g)||[]).length;
 assert('10-A 六处动作覆盖位姿全部走 vmHandLFix (无一处裸字面量)',fixCount>=6,`实测 ${fixCount} 处`);
 assert('10-A 包扎位姿同样走单源 (旧版 armRotY=+1.2 已退场)',
- s10.includes('const armL=vmHandLFix(V3(-0.08,-0.035,-0.05),V3(0.12,1.2,0.08));')
+ s10.includes('const armL=vmHandLFix(-0.08,-0.035,-0.05,0.12,1.2,0.08);')
  &&!s10.includes('let armPos=V3(-0.125,-0.038,-0.05), armRotY=1.2;'));
+// 2026-11-13 C 项: 包扎右臂改 _ovR 槽位写法 (vmWristFor 同式反解, rot 仍是 0.28+cosφ·0.20 正角带)
 assert('10-A 包扎右臂袖管朝向正角+掌心精确解算就位',
- s10.includes('handROverride={pos:vmWristFor(rPalm.x,rPalm.y,rPalm.z,rRot.x,rRot.y,rRot.z), rot:rRot};'));
+ s10.includes('const rRot=_ovR.rot; rRot.set(0.28+Math.cos(phi)*0.20, 0.74+Math.sin(phi)*0.08, -0.06);')
+ &&s10.includes('handROverride=_ovR; _ovR.pos.copy(vmWristFor(rPalm.x,rPalm.y,rPalm.z,rRot.x,rRot.y,rRot.z));'));
 assert('10-C vmAbortAction / vmBandageHide 收尾单源就位',
  s10.includes('function vmAbortAction(){')&&s10.includes('function vmBandageHide(){'));
 assert('10-C 包扎分支的自行打断也走残留收尾单源',
@@ -110,7 +113,7 @@ assert('19-C H 再按 = 极少加快不取消 (★2026-10-30 判据跟走: 用�
  &&s19.includes('player.bandaging=Math.max(0.01,player.bandaging-_bb);')
  &&!s19.includes("player.cancelReadBar('包扎已取消');"));
 assert('19-C 读条中左键 = 取消且**吞掉这次点击** (不顺势走火; 锚已随 2026-10-25 批更新: 举雷待发除外——左键非有意取消, 收雷只走 X/✕)',
- s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)){")&&s19.includes("player.cancelReadBar('已取消');\nreturn;\n}\nif(e.button===0) mouseDown=true;"));
+ s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){")&&s19.includes("player.cancelReadBar('已取消');\nreturn;\n}\nif(e.button===0) mouseDown=true;")); /* ★2026-11-13 批跟码: 换弹中左键豁免 (用户令④), 举雷例外保留 */
 assert('19-C 包扎读条时长走 BANDAGE_T 单源 (2.6 字面量已收)',
  s19.includes('player.bandaging=BANDAGE_T;')&&s19.includes('VM.stateDur=BANDAGE_T;'));
 
@@ -138,9 +141,9 @@ assert('i18n 新增读条文案全部有英文键',
 const sh=SRC('index.html');
 const stamps=[...sh.matchAll(/\?v=([0-9a-z]+)/g)].map(m=>m[1]);
 const stampSet=[...new Set(stamps)].sort();
-assert('index.html 版本戳全量唯一 20261111a',
- stamps.length>40&&stampSet.join(',')==='20261111a'
- &&stamps.filter(s=>s==='20261111a').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
+assert('index.html 版本戳全量唯一 20261115b',
+ stamps.length>40&&stampSet.join(',')==='20261115b'
+ &&stamps.filter(s=>s==='20261115b').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
 }
 
 // ── 沙箱装载 (真 three) ───────────────────────────────────────

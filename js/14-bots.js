@@ -7,6 +7,10 @@
 // 出生时 Bot.laneDx/laneDz 记录本路出发方位 (17-emplacements.pickSpawnPoint 按 lane 扇区给定);
 // 目标与该方位夹角越小加分越多 (最大 46) —— 分在左/中/右出发区的同一批人因此各扑一路,
 // 而不是又汇成一股再挤在同一个点上。与"同目标人数惩罚"互补, 不覆盖距离项。
+// ── updateMesh IK 链复用槽 (2026-11-11 性能批): 旧版每次 updateMesh 分配 shLp/ikR/ikL 三个短命对象
+// (每 Bot 每帧, 22 人 × LOD ≈ 每帧 40-70 个)。消费即时串行: shLp 只进距离判断, ikR/ikL 各自算完
+// 当帧 lerp 消费, 无同帧双持 —— 槽位复用逐位等价。
+const _ikShL={x:0.28,y:0.5,z:0}, _ikR={x:0,y:0,z:0,el:0}, _ikL={x:0,y:0,z:0,el:0};
 function laneAlignBonus(self,x,z){
 if(self.laneDx===undefined||self.laneDz===undefined) return 0;
 const dx=x-self.pos.x, dz=z-self.pos.z, l=Math.hypot(dx,dz);
@@ -55,6 +59,12 @@ const FLEE_DA=[0,0.6,-0.6,1.2,-1.2,1.9,-1.9];
 function _botMoveProbe(b,a){
 const px=b.pos.x+Math.sin(a)*1.1, pz=b.pos.z+Math.cos(a)*1.1;
 if(occBlocked(px,pz,b.swim||b.onCapDeck)) return false; // 游泳态 (2026-09-18): 深水格放行, 只躲实体 —— 落水后游得回岸; onCapDeck (P4 2026-09-30): 站在大舰甲板上时水障格同样放行 (甲板是海上陆地, OCC 里那格是海)
+// ── 载具壳体障碍探针 (2026-11-12 实机反馈批: "士兵不把载具当障碍物, 顶着车壳挤") ──
+// 旧探针只查静态 OCC + 膝高射线; 载具是动态实体不在 OCC 里, 走位的 Bot 一头撞进车壳,
+// 只靠 vehiclePushSoldiers 的侧向推挤硬顶 —— 观感就是"贴着坦克又推又卡"。这里把车壳
+// OBB(+0.5m 余量) 也当障碍: 探针点(前方1.1m)落在壳内 = 此路不通, moveDir 的备选角扫描
+// (MOVE_DA) 自然沿车壳绕行。toVehicle 状态豁免认领目标 (要贴壳才够到上车判定 _surf<0.55)。
+if(!b.swim&&!b.onCapDeck&&_vehProbeBlocked(b,px,pz)) return false; // 游泳态放行 (与水障格同规); 甲板行人不躲甲板下的艇壳 (否则大舰甲板上寸步难行)
 // 膝高射线兜底: 仅在步兵连续滞留 b.stuckT > 0.25s 且有预算时才触发 3D 射线检测
 // (复用槽 _prO/_prD: raycastWorld 只读入参, 结果走 _rcResult 共享槽 —— 不跨调用持有)
 if(b.stuckT>0.25&&RAY_BUDGET.used<RAY_BUDGET.maxPerFrame){
@@ -64,8 +74,47 @@ if(low) return false;
 }
 return true;
 }
+// ── 载具壳体 OBB 障碍 (2026-11-12 实机反馈批, 与上面 _botMoveProbe 配套) ──────────────
+// 单源口径与推挤几何**同参** (15-vehicles:1041 / 15b-trucks:130 / 15d-naval:973):
+//   坦克 hx=max(2.05,halfW) hz=def.hullL/2+0.45 · 卡车 hx=1.05 hz=3.7 · 两栖/艇 hx=max(2.05,halfW) hz=spec.hullL/2+0.45
+// 残骸同样算障碍 (坦克/卡车残骸只注册 DynCollider 不再走推挤, 是街口"卡死"最常出的实体)。
+// 覆盖门与 vehiclePushSoldiers 的 yMax=1.9 同门 (楼上/桥上的步兵不躲桥下车)。性能: 先轴对齐
+// 粗筛 (±9m) 再做 OBB 变换, 每探针点至多 3×(坦克+卡车+艇) 次廉价判定, 无分配。
+const _vehObsM=0.5, _vhObs={hx:0,hz:0};
+function _vehObsDims(v){
+if(typeof tanks!=='undefined'&&tanks.indexOf(v)>=0){ _vhObs.hx=Math.max(2.05,v.halfW||2.05); _vhObs.hz=((v.def&&v.def.hullL)||4.6)/2+0.45; return true; }
+if(typeof trucks!=='undefined'&&trucks.indexOf(v)>=0){ _vhObs.hx=1.05; _vhObs.hz=3.7; return true; }
+if(typeof navalCraft!=='undefined'&&navalCraft.indexOf(v)>=0){ _vhObs.hx=Math.max(2.05,v.halfW||2.05); _vhObs.hz=((v.spec&&v.spec.hullL)||4.6)/2+0.45; return true; }
+return false;
+}
+function _vehObsTest(v,px,pz,b){
+if(b.state==='toVehicle'&&b.targetVeh===v) return false; // 认领目标豁免: 要贴壳才够到上车判定 (2026-11-03 _surf<0.55 口径)
+if(b.pos.y>v.pos.y+1.9) return false;                    // 高处步兵不躲车壳 (与 vehiclePushSoldiers yMax 同门)
+const dx=px-v.pos.x; if(dx>9||dx<-9) return false;
+const dz=pz-v.pos.z; if(dz>9||dz<-9) return false;
+if(!_vehObsDims(v)) return false;
+const mx=_vhObs.hx+_vehObsM, mz=_vhObs.hz+_vehObsM;
+const cs=Math.cos(v.yaw), sn=Math.sin(v.yaw);
+// 外接盒粗筛必须随 yaw 旋转 (2026-11-12 T7 端到端实锤): 旧版拿局部 mx/mz 直接当世界轴界 ——
+// 车一横 (yaw=HPI) 两个界正好互换, 探针点偏出横向廊 2.55m 但仍在纵向廊 4.4m 内时被误判
+// "界外"=放行=侧腹撞壳 (端到端 minSurf -0.5)。世界 AABB 半宽 = |mx·cs|+|mz·sn| / |mx·sn|+|mz·cs|。
+const wex=Math.abs(mx*cs)+Math.abs(mz*sn), wez=Math.abs(mx*sn)+Math.abs(mz*cs);
+if(dx>wex||dx<-wex||dz>wez||dz<-wez) return false;       // OBB 的世界轴对齐外接盒粗筛 (随 yaw 旋转)
+const lx=dx*cs-dz*sn, lz=dx*sn+dz*cs;                    // 轴配对与 vehiclePushSoldiers 同参: lx 横向 hx / lz 纵向 hz
+return Math.abs(lx)<mx&&Math.abs(lz)<mz;
+}
+function _vehProbeBlocked(b,px,pz){
+if(typeof tanks!=='undefined'){ for(let i=0;i<tanks.length;i++){ if(_vehObsTest(tanks[i],px,pz,b)) return true; } }
+if(typeof trucks!=='undefined'){ for(let i=0;i<trucks.length;i++){ if(_vehObsTest(trucks[i],px,pz,b)) return true; } }
+if(typeof navalCraft!=='undefined'){ for(let i=0;i<navalCraft.length;i++){ if(_vehObsTest(navalCraft[i],px,pz,b)) return true; } }
+return false;
+}
 // ── Bot AI 全局帧射线预算器 (Phase 1 任务 1.3) ──
 const RAY_BUDGET={maxPerFrame:12,used:0};
+const PROX_SPOT_R=12; // 近距强制感知半径 (2026-11-14): perceive 里 12m 内的候选射线不吃预算门 ——
+// 全体共享 12 发/帧在混战中超订阅, 排在更新序后面的 Bot 每轮拿 0 发"新目标"射线, 贴脸/擦肩的
+// 陌生敌人永远进不了 target ("面对面走过像没看见"主根因; 2026-11-03 批只修了"当前目标"优先复核)。
+// 近距射线天然短 (≤12m), 成本远低于 95m 远射, 豁免预算的边际开销可忽略。
 let _lastRayBudgetFrame=-1;
 function tickBots(){ RAY_BUDGET.used=0; }
 function _ensureRayBudgetReset(){
@@ -818,8 +867,14 @@ if(chuteAirborne(e)) continue;
 const ang=Math.atan2(dx,dz);
 const isCur=(e===this.target&&nowT-this.lastSeenT<3);
 const maxAng=(eFlOn||eVehOn)?(1.15+(2.4-1.15)*darkRatio):1.15; // 周围 Bot 余光散射视锥放宽角随 darkRatio 在 1.15 到 2.4 之间平滑过渡
-if(!isCur&&!this._eSearchLit&&Math.abs(angDiff(this.yaw,ang))>maxAng) continue;
-const heard=d<9||(e.lastFiredT&&nowT-e.lastFiredT<1.5&&d<70*(NIGHT_MODE?NIGHT_CFG.hearGunMul:1)*WX_CFG.hearGunMul); // 听枪半径: 夜档加大(开火暴露) ×天气缩小 (天气设计 §5-8)
+// ★2026-11-14 (实机"面对面擦肩走过像没看见"之二): 近距脚步感知必须压在 FOV 门**之前** ——
+// 旧版 heard 在 FOV 门之后才算, d<9 对朝向门是死代码 (verify-botprox S2/S5 红先实锤: 背后 8m 视而不见)。
+// heardClose 只豁免朝向门 (脚步是全向的); 听枪 (heard 的第二支) 方位不明, 保持旧语义不豁免 FOV
+// —— 枪声只走循环外 gunEvents 兜底块 (记 lastSeenPos 不锁目标, weather/daynight 探针钉此语义)。
+// 蹲行脚步声减半 (4m): 蹲姿潜行从背后接近仍有效; 9m 全向只对站立/奔跑目标成立。
+const heardClose=d<(e.crouch?4:9);
+const heard=heardClose||(e.lastFiredT&&nowT-e.lastFiredT<1.5&&d<70*(NIGHT_MODE?NIGHT_CFG.hearGunMul:1)*WX_CFG.hearGunMul); // 听枪半径: 夜档加大(开火暴露) ×天气缩小 (天气设计 §5-8)
+if(!isCur&&!this._eSearchLit&&!heardClose&&Math.abs(angDiff(this.yaw,ang))>maxAng) continue;
 if(!isCur&&!heard&&d>vD*0.85&&e.crouch) continue;
 const tp=_pvT.set(e.pos.x,e.pos.y+(e.crouch?1.0:1.4),e.pos.z); // 复用槽: 本迭代内消费完, 不跨候选持有
 const dir=_pvD.copy(tp).sub(eye); const dist=dir.length(); dir.normalize();
@@ -827,12 +882,17 @@ if(isCur){
 // ★2026-11-03: 当前目标的通视复核已在循环外带优先权做掉 (见循环前 _curBlk 块), 这里只消费结论;
 // 被挡 ⇒ 本周期不再把当前目标记为可见 (lastSeenT 停止刷新 ⇒ 0.6s 后开火门自然关上, 转压制)。
 if(this._curBlk) continue;
-}else if(RAY_BUDGET.used<RAY_BUDGET.maxPerFrame){
+}else if(d<PROX_SPOT_R||RAY_BUDGET.used<RAY_BUDGET.maxPerFrame){
+// ★2026-11-14 (实机"面对面擦肩走过像没看见"之一): 近距强制感知 —— PROX_SPOT_R 内的候选射线
+// 不吃预算门 (超预算也照发, 与上方"当前目标优先复核"同款超发特权, 照旧入账)。根因: 全体共享
+// 12 发/帧在混战中超订阅, 排在更新序后面的 Bot 每轮拿 0 发新目标射线, 贴脸的陌生敌人永远
+// 进不了 target (verify-botprox S1/S9 红先实锤)。近距射线天然短 (≤12m), 成本远低于 95m 远射;
+// 远距候选超预算仍跳过 (饿死语义保持 = botai-T2 26m 端到端兼容)。
 RAY_BUDGET.used++;
 const blockHit=raycastWorld(eye,dir,dist);
 if(blockHit&&blockHit.dist<dist-0.6) continue;
 }else{
-continue; // 超预算且非当前目标: 推迟到下一周期检测
+continue; // 超预算且非当前目标: 推迟到下一周期检测 (近距豁免在上一分支, 远距饿死语义保持)
 }
 // 烟雾遮蔽: bot 无法看穿烟墙
 if(SMOKES.length&&smokeBlocksLOS(eye.x,eye.y,eye.z,tp.x,tp.y,tp.z)) continue;
@@ -934,8 +994,11 @@ else this.emplGo=null;
 else if(!this.emplMount(g,eg.kind)) this.emplGo=null;
 else return;
 }
-// 小队指令: 最高优先级, 只有敌人近身(20m内)才暂缓执行
-if(this.inSquad&&!(engaged&&distT<20)){
+// 小队指令: 最高优先级, 只有敌人近身(20m内)才暂缓执行。
+// ★2026-11-13 观战中立批: player.spectator (调试观战/自由观战/部署页观战) 时小队不再听令 ——
+// 旧门只有 follow 分支的 player.alive, 调试观战 alive=true ⇒ 小队跟着幽灵满图跑 (用户实报);
+// move (标点进攻) 分支连 alive 门都没有, 一并堵上。观战者不指挥任何一方 (与 T/Y 键的观战拦截同规)。
+if(this.inSquad&&!player.spectator&&!(engaged&&distT<20)){
 if(SQUAD.mode==='move'){
 const d=Math.hypot(SQUAD.pos.x-this.pos.x,SQUAD.pos.z-this.pos.z);
 if(d>7){
@@ -1030,7 +1093,7 @@ if(this.slots&&this.slots[0]) this.slots[0].mag=this.mag;   // 弹药账对齐 (
 this.mesh.armR.sh.userData.swing=0.15;
 this.fireT=60/this.def.rpm*rand(1.2,1.8);
 if(this.def.type==='bolt') this.boltT=this.def.boltT||1.2;
-if(this.mag<=0&&this.canReload()) this.reloadT=this.def.reload;
+if(this.mag<=0&&this.canReload()) this.reloadT=this.def.reload*dynReloadFac(this.mag,this.def.mag); // 动态换弹速度 (2026-11-12, 单源 dynReloadFac)
 this.prone=dTk>30;
 }
 }
@@ -1256,14 +1319,15 @@ if(empInReach(mg,this.pos.x,this.pos.y,this.pos.z,14)&&this.emplMount(mg,'mg')) 
 if(!this.defendPt||Math.random()<0.3){
 let best=null,bd=1e9;
 for(const cp of coverPoints){
-if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 驻守点避开火线/树爆弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
 const d=Math.hypot(cp.x-f.x,cp.z-f.z);
 // 掩体限制在旗圈以内: 守方站在圈内才能真正阻断敌方占领
-if(d<f.r*0.85){
+// ★2026-11-11 性能批: 距离门前置 —— coverPoints 一局数百个, 旧版每点先跑 fireThreat+tbThreat
+// (各 ~25 格火场扫描) 再算距离, 旗圈外的大多数点纯白扫 (两个谓词均为纯函数, 顺序不影响结果)。
+if(d>=f.r*0.85) continue;
+if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 驻守点避开火线/树爆弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
 // ★2026-11-03 驻点占用账 (F 修): 同队已有人占/将占的点加罚, 全队不再评出同一个最优解叠成一坨
 const dd=d+rand(0,14)+coverCrowdAt(this,cp.x,cp.z)*9;
 if(dd<bd){ bd=dd; best=cp; }
-}
 }
 this.defendPt=best||{x:f.x+rand(-6,6),z:f.z+rand(-6,6)};
 // (2026-11-10: 甲板驻点夹取随大舰子系统下架摘除)
@@ -1528,7 +1592,11 @@ if(!v.alive||v.crewBot!==this){ this.onVehicle=null; this.mesh.root.visible=true
 else {
 // 载具残血起火 Bot 对齐 (2026-11-09 批): 座驾起火 = VEH_BURN_TIME 秒内必毁 ⇒ 立即弃车
 // (dismountVehicle(true) 的 bailing 档: noEnterT 12s 防他人再上 + 撤位滑步 + 压制值), 死守没有意义。
-if(v.burning&&v.kind==='tank'){
+// ★2026-11-14 批 (用户实报"时停中残血坦克乘员主动下车"): 冻结世界 (dt=0: 观战时停/布势/K时停) 里
+//   AI 不得行动 —— 本判定原来不吃 dt, 而乘员 Bot 每帧都进 update (onVehicle 旁路 tickSkip), 于是在
+//   时停里照常弃车。加 dt>0 门: 冻结期只挂 burning 账不动人, 解冻后第一帧照常弃车 (与 16-aircraft
+//   跳伞挂账 _bailPend 同族)。死亡链不走这里 (Tank.die 的 crewKill 另行结算), 不受影响。
+if(v.burning&&v.kind==='tank'&&dt>0){
 this.crewStillT=0;
 this.dismountVehicle(true);
 this.pickObjective();
@@ -1891,7 +1959,7 @@ this.nadeAnimT-=dt;
 this.mesh.armR.sh.userData.swing=0.6;
 if(this.nadeAnimT<=0){
 this.atn--; this.nadeCd=rand(8,14);
-if(this.cls===3&&this.def.rocket&&this.slots[0]&&this.mag<=0&&this.slots[0].reserve>0){ this.reloadT=this.def.reload; } // 2026-09-28 兵种8→5: 反坦克=3
+if(this.cls===3&&this.def.rocket&&this.slots[0]&&this.mag<=0&&this.slots[0].reserve>0){ this.reloadT=this.def.reload*dynReloadFac(this.mag,this.def.mag); } // 2026-09-28 兵种8→5: 反坦克=3; 动态换弹速度 (2026-11-12)
 const eye=this.eyePos();
 const lead=V3(tk.pos.x+Math.sin(tk.yaw)*tk.vel*0.5,tk.pos.y+0.8,tk.pos.z+Math.cos(tk.yaw)*tk.vel*0.5);
 const dist=eye.distanceTo(lead);
@@ -1936,7 +2004,7 @@ moveYaw=this.followPath(dt)??Math.atan2(this.coverPt.x-this.pos.x,this.coverPt.z
 this.crouch=false; this.prone=false;
 } else {
 this.coverT-=dt;
-if(this.mag<this.def.mag*0.4&&this.reloadT<=0&&this.canReload()){ this.reloadT=this.def.reload; }
+if(this.mag<this.def.mag*0.4&&this.reloadT<=0&&this.canReload()){ this.reloadT=this.def.reload*dynReloadFac(this.mag,this.def.mag); } // 动态换弹速度 (2026-11-12): 主动补弹档, 系数随已耗浮动 — Bot 侧唯二真实变档点之一
 if(this.hp<50&&this.bandages>0&&this.bandageT<=0&&this.reloadT<=0&&this.coverT>1.2){ this.bandageT=2.2; }
 // 探头循环: 蹲瞄(藏) → 侧出/越顶射击1~1.7s → 缩回 (实现旧版遗留未用的 peekT)
 if(this.peekPhase==='in'){
@@ -2174,7 +2242,7 @@ let detoured=false;
 if(this.stuckN>=3){
 const s=this.unstickDir;
 const dx=this.pos.x+Math.sin(this.yaw+HPI*s)*7, dz=this.pos.z+Math.cos(this.yaw+HPI*s)*7;
-if(!occBlocked(dx,dz)&&NAV.lineClear(this.pos.x,this.pos.z,dx,dz)){
+if(!occBlocked(dx,dz)&&!_vehProbeBlocked(this,dx,dz)&&NAV.lineClear(this.pos.x,this.pos.z,dx,dz)){ // 绕行点也不许落在车壳里 (2026-11-12 避车批)
 if(this.path){ this.path.unshift([dx,dz]); this.pathI=0; }
 else this.setPathTo(dx,dz);
 // 绕行保护期: 防止小队/目标点重寻路立刻覆盖刚插入的绕行点
@@ -2219,7 +2287,7 @@ const aimGate=dT>50?0.08:(dT>25?0.11:0.16);
 	else if(this.def.rocket||(this.def.mortar&&dT<22)){
 // 反坦克兵/迫击炮兵近距离改用手枪自卫
 if(this.pReloadT<=0&&this.fireT<=0){
-if(this.pMag<=0&&(!this.slots||!this.slots[1]||this.slots[1].reserve>0)){ this.pReloadT=this.slots[1]?this.slots[1].def.reload:2; }
+if(this.pMag<=0&&(!this.slots||!this.slots[1]||this.slots[1].reserve>0)){ this.pReloadT=this.slots[1]?this.slots[1].def.reload*dynReloadFac(this.pMag,this.slots[1].def.mag):2; } // 动态换弹速度 (2026-11-12)
 else {
 this.shootAt(this.target,this.slots[1].def);
 this.fireT=(60/this.slots[1].def.rpm)*rand(1.4,2.4);
@@ -2270,7 +2338,7 @@ if(this.def.type==='bolt') this.boltT=this.def.boltT||1.0;
 }
 if(this.mag<=0&&this.reloadT<=0){
 // 弹尽 (2026-11-03 弹药账对齐): 有备弹照常换; 备弹尽 → 寻补给 (supplyGo) / 搜刮保底, 不再空转 reloadT
-if(this.canReload()) this.reloadT=this.def.reload*rand(1,1.25);
+if(this.canReload()) this.reloadT=this.def.reload*dynReloadFac(this.mag,this.def.mag)*rand(1,1.25); // 动态换弹速度 (2026-11-12)
 else this.drySeekSupply();
 }
 this.updateMesh(dt,Math.hypot(this.vel.x,this.vel.z));
@@ -2425,14 +2493,17 @@ if(_botMoveProbe(this,yaw+MOVE_DA[di])){ yaw+=MOVE_DA[di]; found=true; break; }
 if(!found){
 if(this.dirFlipT>0) this.dirFlipT-=dt;
 if(this.dirFlipT<=0){ this.dirFlipSign=Math.random()<0.5?1:-1; this.dirFlipT=DIR_FLIP_MIN; }
-yaw+=HPI*this.dirFlipSign;
+const fy=yaw+HPI*this.dirFlipSign;
+// 兜底侧移也要过探针 (2026-11-12 避车批): 全向堵死时 perpendicular 一脚会踩进车壳 (端到端探针
+// 实测最深 -1.1m) —— 侧移向不通就本帧驻足 (speed=0, vel 归零), 下帧再试, 不再无探针位移。
+if(_botMoveProbe(this,fy)) yaw=fy; else speed=0;
 }
 }
 }
 	const cr=this.prone?0.28:this.crouch?0.5:1;
 	const wf=nowT-(this.wireT||-9)<0.3?0.42:1;
 	// 深谷激流: 涉水大幅减速并持续受创; 被激流冲向下游 1.5m/s (2026-09-06 B7b/D5: 与玩家同参, README 口径兑现)
-	const riv=inRiverChannel(this.pos.x,this.pos.z);
+	const riv=inRiverWater(this.pos.x,this.pos.z); // 2026-11-15 水态门 (同玩家侧: 干岸坡不吃激流伤/冲移)
 	if(riv){
 	this.damage(RAPIDS_DMG*dt,null,false);
 	const rd=riverDirAt(this.pos.x,this.pos.z);
@@ -2453,6 +2524,21 @@ yaw+=HPI*this.dirFlipSign;
 	this.swim=swimming;
 	this.wading=WS.state==='wade';
 	const wet=WS.state==='wet';
+	// 入水跃迁特效/音效 (★2026-11-15 入水批): 与玩家 20-player 的水态跃迁同规 —— 只在干→湿的
+	//   下降沿发一记扑通 (湿→涉水→游泳的升级不重发), 规模随落水速度变化; Bot 没有竖直速度账,
+	//   用相邻帧 pos.y 差折算 (_wyPrev 上帧脚底高度, 游泳态贴水面后差≈0 → 自然回落到最小档)。
+	{
+	const wPrev=this._wStatePrev||'dry';
+	if(WS.state!==wPrev){
+	this._wStatePrev=WS.state;
+	const wetNow=WS.state!=='dry', wetPrev=wPrev!=='dry';
+	if(wetNow&&!wetPrev){
+	const spd=(this._wyPrev!==undefined&&dt>0)?Math.max(0,(this._wyPrev-this.pos.y)/dt):0;
+	if(typeof waterSplash==='function') waterSplash(V3(this.pos.x,WS.wy,this.pos.z),clamp(0.6+spd*0.09,0.6,2.2),spd>5,false);
+	}
+	}
+	}
+	this._wyPrev=this.pos.y;
 if(swimming){
 // (2026-11-10: opensea 游向本队舰劫持随纯海战图下架摘除, 落水自救恢复"朝最近岸游"单支)
 { const sd=shoreDirAt(this.pos.x,this.pos.z); if(sd){ yaw=Math.atan2(sd[0],sd[1]); this.yaw=yaw; } }
@@ -2655,10 +2741,12 @@ if(prone){
 // A#10 审计②: 改为"脚落在地面上"的反解 (旧版写死 hip=0.04 让腿在趴姿过渡期指向地面 → 脚穿地 0.72m)。
 // 高度基准取**当前**骨盆高 (m.pelvis.position.y, 仍在 dampF 过渡中), 不是目标高 —— 否则站→趴的
 // 0.5s 里骨盆还在 0.94 而反解按 0.22 排腿, 腿被拉长 → 脚依旧穿地。脚关节目标 ~0.11m, 爬行时前后交替 ±0.16m。
+// ★2026-11-13b 批⑤: kneeUp true→false 与 20-player 同批同规 —— pole 翻下 = 膝贴地 + 膝弯转人类屈曲方向
+// (旧 pole-up 是反关节超伸: 膝峰拱到髋线上方 0.25~0.37, 小腿向脚尖方向折, 用户实报"膝盖向上弯曲")。
 const hpNow=m.pelvis.position.y;
 const cr=clamp(speed/1.2,0,1)*0.35;
-const LL=this.legIK(hpNow,0.11+Math.max(0,S)*0.13*cr,-0.92+S*0.16*cr,true);
-const RR=this.legIK(hpNow,0.11+Math.max(0,-S)*0.13*cr,-0.92-S*0.16*cr,true);
+const LL=this.legIK(hpNow,0.11+Math.max(0,S)*0.13*cr,-0.92+S*0.16*cr,false);
+const RR=this.legIK(hpNow,0.11+Math.max(0,-S)*0.13*cr,-0.92-S*0.16*cr,false);
 m.legL.hip.rotation.x=dampF(m.legL.hip.rotation.x,LL.hip-pp,10,dt);
 m.legR.hip.rotation.x=dampF(m.legR.hip.rotation.x,RR.hip-pp,10,dt);
 m.legL.knee.rotation.x=dampF(m.legL.knee.rotation.x,LL.knee,10,dt);
@@ -2743,7 +2831,7 @@ if((handK>0||handKL>0)&&typeof armIK==='function'&&typeof gunGripPoint==='functi
 const gp=gunGripPoint(this.gunKind,gunX_t,gunY_t,gunZ_t,pp);
 const L1=(typeof ARM_L1==='number')?ARM_L1:0.32, L2=(typeof ARM_L2==='number')?ARM_L2:0.30;
 const reach=L1+L2-0.02;
-const shLp={x:0.28,y:0.5,z:0};   // 左肩在躯干局部系 (ARM_SIDE.L=+1)
+const shLp=_ikShL;   // 左肩在躯干局部系 (ARM_SIDE.L=+1) (2026-11-11 性能批: 模块槽, 见文件头)
 let fp=(typeof gunForePoint==='function')?gunForePoint(this.gunKind,gunX_t,gunY_t,gunZ_t,pp):gp;
 // infantry 实测提醒: 冻结挂点下左肩到护木 ≈0.85m > 臂长 0.62m ⇒ 左手沿**枪身轴**回退到可达的 t
 // (gunAxisPoint), 手仍在枪上而不是空气里。回退 4 步即可 (t: 1 → 0.25)。
@@ -2757,9 +2845,9 @@ t=Math.max(0,t-0.25);
 }
 // armIK 直接写 group.rotation —— 先把 IK 结果读回来, 再与基准值混合, 最后由 dampF 统一写回
 const resR=armIK(m.armR.sh,m.armR.elm,gp);
-const ikR={x:m.armR.sh.rotation.x,y:m.armR.sh.rotation.y,z:m.armR.sh.rotation.z,el:m.armR.elm.rotation.x};
+const ikR=_ikR; ikR.x=m.armR.sh.rotation.x; ikR.y=m.armR.sh.rotation.y; ikR.z=m.armR.sh.rotation.z; ikR.el=m.armR.elm.rotation.x;
 const resL=armIK(m.armL.sh,m.armL.elm,fp);
-const ikL={x:m.armL.sh.rotation.x,y:m.armL.sh.rotation.y,z:m.armL.sh.rotation.z,el:m.armL.elm.rotation.x};
+const ikL=_ikL; ikL.x=m.armL.sh.rotation.x; ikL.y=m.armL.sh.rotation.y; ikL.z=m.armL.sh.rotation.z; ikL.el=m.armL.elm.rotation.x;
 if(handK>0){ shR=lerp(shR,ikR.x,handK); shRy=lerp(shRy,ikR.y,handK); shRz=lerp(shRz,ikR.z,handK); elR=lerp(elR,ikR.el,handK); }
 if(handKL>0){ shL=lerp(shL,ikL.x,handKL); shLy=lerp(shLy,ikL.y,handKL); shLz=lerp(shLz,ikL.z,handKL); elL=lerp(elL,ikL.el,handKL); }
 // 残差留档 (探针/交付证据用: 超臂长时 armIK 钳到可达球面并如实返回)
@@ -4184,7 +4272,7 @@ if(b.slots&&b.slots[0]) b.slots[0].mag=b.mag;   // 弹药账对齐 (2026-11-03)
 b.mesh.armR.sh.userData.swing=0.15;
 b.fireT=60/b.def.rpm*rand(1.2,1.8);
 if(b.def.type==='bolt') b.boltT=b.def.boltT||1.2;
-if(b.mag<=0&&b.canReload()) b.reloadT=b.def.reload;
+if(b.mag<=0&&b.canReload()) b.reloadT=b.def.reload*dynReloadFac(b.mag,b.def.mag); // 动态换弹速度 (2026-11-12, 坦克乘员 bot 同规)
 b.prone=d>30;
 return true;
 }

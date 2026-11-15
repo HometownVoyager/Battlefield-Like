@@ -224,8 +224,8 @@ assert('i18n 旧 N 键词条已全部退场 (无残留)',!i18n.includes('N=减�
 const sidx=srcOf('index.html');
 assert('index.html 帮助面板: 近战键标 N + 减速键标 V',
  sidx.includes('<b>N</b> 近战')&&sidx.includes('<b>N</b> 近战刺刀')&&sidx.includes('按住 V 时间减速'));
-assert('index.html 帮助面板新增「指挥官兵种」整节 (三命令键/集火/减速/布势撤销)',
- sidx.includes('指挥官兵种</div>')&&sidx.includes('<b>左键点地图</b> 集火该点'));
+assert('index.html 帮助面板新增「指挥官兵种」整节 (三命令键/集火/减速/布势撤销) (2026-11-12 键位表化判据跟码)',
+ sidx.includes('指挥官兵种</div>')&&sidx.includes('<span class="hkKey" data-i18n>左键点地图</span><span class="hkDesc" data-i18n-html>集火该点'));
 }
 
 // ── ② 沙箱行为 ───────────────────────────────────────────────

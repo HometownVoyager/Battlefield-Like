@@ -113,6 +113,7 @@ t+=sl+wr(0.14,0.26);
 // 语义分区表驱动: CAMPAIGN.city.streets(街道矩形)/blocks(街块) —— 03-terrain 色带/布局/小地图共读
 // 沿街成排建筑: 每个街块找最近街缘, 沿缘成排落位 (面朝街道) —— 街廊由建筑"墙"围合, 不再草地撒房
 // spacing (可选): 同排建筑间距, 默认 16m (斯大林格勒/原柏林行为不变); 柏林 640 大地图放宽到 24m 控建筑总量
+// 2026-11-14 缩图批: 柏林/莫斯科 640→360, 两图调用点恢复默认 16 (缩后街块 ×0.5625 与 24→16 抵消, 每街块落屋数不变)
 function cityBlockRows(heavy,spacing){
 const ct=CAMPAIGN.city; if(!ct) return;
 const SP=spacing||16;
@@ -136,7 +137,7 @@ if(side==='W'){bx=b.x0+off;bz=u;ry=-HPI;}
 else if(side==='E'){bx=b.x1-off;bz=u;ry=HPI;}
 else if(side==='N'){bz=b.z0+off;bx=u;ry=Math.PI;}
 else{bz=b.z1-off;bx=u;ry=0;}
-if(streetDist(bx,bz)<dep/2+4.0) continue; // 锚点距街缘≥进深一半+4 (含 placeAt ±2.5 抖动与足迹余量)
+if(streetDist(bx,bz)<dep/2+3.6) continue; // 锚点距街缘≥进深一半+余量 (含 placeAt ±2.5 抖动与足迹余量) —— 2026-11-14 缩图批 4.0→3.6: 街块-街道间隙 2.5→1.4 (等比), 旧余量恰好卡线 (圆整后 0.1m 级亏损吃掉 6 成候选), 缩后墙脸距路缘最窄 ~1.1m (旧 ~2.6m), 合"废墟围城"口径
 const p=placeAt(bx,bz,ry,wid,dep,{maxDh:1.2});
 if(!p) continue;
 // placeAt 兜底强放会绕过旗点检查 —— 落位后复核旗点净距, 过近则弃建 (足迹保留成豁口)
@@ -297,6 +298,10 @@ mesh(boxGeo(3.8,0.25,3.8),MAT.woodDark,x,g0+5.1,z); // 承台环梁 (visual)
 const tank=mesh(new THREE.CylinderGeometry(2.0,2.2,2.6,12),MAT.metal,x,g0+6.5,z);
 CYLS.push({x,z,r:2.2,y0:g0+5.2,y1:g0+7.8});
 mesh(new THREE.ConeGeometry(2.25,1.4,12),MAT.roof,x,g0+8.5,z);
+// 锥顶碰撞 (★2026-11-15 锥体碰撞批): 水塔锥顶原本纯视觉, 子弹穿顶。两档圆柱贴形
+//   (r(y)=2.25·(1−(y−7.8)/1.4) 带中点); noNav:1 不入 OCC 导航烘焙 (塔腿间地面可穿行)。
+CYLS.push({x,z,r:1.7,y0:g0+7.8,y1:g0+8.5,noNav:1});
+CYLS.push({x,z,r:0.6,y0:g0+8.5,y1:g0+9.2,noNav:1});
 addSnowCap(tank);
 }
 // ═══════════ 柏林加密三件套 (2026-09-09 用户实机反馈"柏林城内太过于空荡") ═══════════
@@ -317,7 +322,7 @@ const dW=Math.abs(s.x1-b.x0), dE=Math.abs(s.x0-b.x1), dN=Math.abs(s.z1-b.z0), dS
 if(dW<best){best=dW;used='W';} if(dE<best){best=dE;used='E';}
 if(dN<best){best=dN;used='N';} if(dS<best){best=dS;used='S';}
 }
-const Lmin=core?20:16, Lmax=core?32:26;
+const Lmin=core?11:9, Lmax=core?18:15; // 2026-11-14 缩图批: 街块 59×79→33×44, 墙长/进深档 ×0.5625 缩到能放下 (建筑本体尺寸不变)
 const fd=core?(wr(0,1)<0.5?11:10):9;
 const edges=[
 ['N',b.x1-b.x0,(u)=>[b.x0+u, b.z0+fd/2+2.6, Math.PI]],
@@ -327,14 +332,14 @@ const edges=[
 for(const [side,len,at] of edges){
 if(side===used) continue;
 if(!core&&side!=='S'&&wr(0,1)<0.5) continue; // 郊野带: 只南边必做, 其余半数
-let u=15+wr(0,4); // 角部内缩 15m: 让开 cityBlockRows 主排的转角楼 (实测 7m 内缩 → 189 次足迹相撞)
-const uEnd=len-15-wr(0,4);
-while(u<uEnd-14){
+let u=8.5+wr(0,4); // 2026-11-14 缩图批: 角部内缩 15→8.5 (旧值: 让开 cityBlockRows 主排的转角楼, 实测 7m 内缩 → 189 次足迹相撞; 缩后街块 33×44, 15m 内缩会吃满整条边=零街墙)
+const uEnd=len-8.5-wr(0,4);
+while(u<uEnd-8){
 const L=Math.min(wr(Lmin,Lmax),uEnd-u);
 if(L<Lmin*0.8) break;
 const [bx,bz,ry]=at(u+L/2);
-u+=L+wr(6,core?11:15)+2; // 推进量按计划长度 (与放置结果无关, 保证节奏稳定)
-if(streetDist(bx,bz)<fd/2+4.0) continue; // 锚点距街缘≥进深一半+4 (同 cityBlockRows)
+u+=L+wr(3.4,core?6.2:8.4)+2; // 推进量按计划长度 (与放置结果无关, 保证节奏稳定) —— 2026-11-14 缩图批 ×0.5625
+if(streetDist(bx,bz)<fd/2+3.6) continue; // 锚点距街缘≥进深一半+余量 (同 cityBlockRows) —— 2026-11-14 缩图批 4.0→3.6 (街块-街道间隙 2.5→1.4, 旧余量恰好卡线)
 let nearFlag=false;
 for(const fc of CAMPAIGN.flags){ if(Math.hypot(bx-fc.x,bz-fc.z)<Math.max(L,fd)*0.5+4.2){ nearFlag=true; break; } }
 if(nearFlag) continue;
@@ -363,8 +368,11 @@ for(const b of ct.blocks){
 const core=Math.abs((b.z0+b.z1)/2)<108;
 const n=core?12:6;
 for(let i=0;i<n;i++){
-const x=b.x0+12+wr(0,Math.max(1,b.x1-b.x0-24));
-const z=b.z0+12+wr(0,Math.max(1,b.z1-b.z0-24));
+// 2026-11-14 复核批: 窄块 (柏林⑤北 x9.4 / 莫斯科南中段 6.7) 的固定 +12 内缩会把散布推出块缘
+//   (实测 rubblePile 落进国会大厦西门 66.4,27.7) → 内缩随跨度自适应; 宽块 ix/iz=12 与旧值逐位一致 (零漂移)
+const _ix=Math.max(2,Math.min(12,(b.x1-b.x0)/2-2)), _iz=Math.max(2,Math.min(12,(b.z1-b.z0)/2-2));
+const x=b.x0+_ix+wr(0,Math.max(1,b.x1-b.x0-2*_ix));
+const z=b.z0+_iz+wr(0,Math.max(1,b.z1-b.z0-2*_iz));
 if(!freeSpot(x,z,2.2)) continue;
 const r=wr(0,1);
 if(r<0.30) rubblePile(x,z,wr(1.5,2.6));
@@ -380,27 +388,43 @@ else barrel(x,z);
 const nS=core?2:1;
 for(let k=0;k<nS;k++){
 if(!core&&wr(0,1)<0.5) continue;
-const x=b.x0+(b.x1-b.x0)/2+wr(-9,9), z=b.z0+(b.z1-b.z0)/2+wr(-11,11);
+// 2026-11-14 缩图批: 棚屋锚点贴"远街缘"9.5m (旧: 块心 ±9/±11 —— 缩块上与主排建筑包络相撞, strict 失败率 31/32;
+//   主排建筑包络 ≤15.6m/缘, 远缘锚 9.5m 距主排墙 ≥4.6m; 足迹含 margin 抖动后仍不出块缘 → 不入街矩形)
+let best=1e9, rs='W';
+for(const s of ct.streets){
+const dW=Math.abs(s.x1-b.x0), dE=Math.abs(s.x0-b.x1), dN=Math.abs(s.z1-b.z0), dS=Math.abs(s.z0-b.z1);
+if(dW<best){best=dW;rs='W';} if(dE<best){best=dE;rs='E';}
+if(dN<best){best=dN;rs='N';} if(dS<best){best=dS;rs='S';}
+}
+const spanP=(rs==='W'||rs==='E')?b.x1-b.x0:b.z1-b.z0;
+if(spanP<29) continue; // 垂直跨度 <29 (如⑤北 x9.4 / ③北 z15.3 / 莫斯科南中段窄条) 放不下 7×6 棚屋+双侧净距, 跳过
+const x=rs==='W'?b.x1-9.5+wr(-2,2):rs==='E'?b.x0+9.5+wr(-2,2):(b.x0+b.x1)/2+wr(-5,5);
+const z=rs==='N'?b.z1-9.5+wr(-2,2):rs==='S'?b.z0+9.5+wr(-2,2):(b.z0+b.z1)/2+wr(-5,5);
+// 2026-11-15: 街内禁落 (placeAt 之前门 —— placeAt 成功即登记足迹, 后门会留孤儿足迹) —— 广场类 street
+//   rect 会打进街块 (莫斯科教堂广场: 块北缘 z6.5 在广场带 5.6..19.1 之内), "块缘锚 9.5m"对这种块把棚屋
+//   摆进广场/街道 (旧版靠"卡在房子里"的残墙占位恰好挡住; 墙迁走后棚屋落到教堂旗上 1.6m)。
+//   阈值 8.5 = 棚屋出街需 6 (半对角 4.6+余量) + placeAt 抖动 ±2.5。
+if(streetDist(x,z)<8.5) continue;
 const p=placeAt(x,z,wr(0,TAU),7,6,{maxDh:1.2,strict:true});
 if(p) ruinedHouse(p.x,p.z,7,6,p.ry,MAT.brick,0.55);
 }
 }
 }
 function berlinStreet(){
-// 主街电车 (东西大道 z=0): 双轨+架空线 —— 分三段避开地铁广场/隧道 (x -80..-40 空出)
-tramRails(-244,-80,0); tramRails(-40,120,0); tramRails(160,244,0);
-tramWreck(-120,4.6,HPI+0.05); tramWreck(64,-4.6,HPI-0.04); tramWreck(-176,4.6,HPI+0.03);
-// 街灯: 主街两侧 + 中央纵街 (x=-70) 两侧
-for(let x=-250;x<=250;x+=34){
+// 主街电车 (东西大道 z=0): 双轨+架空线 —— 分三段避开地铁广场/隧道 (x -45..-22.5 空出)  // 2026-11-14 缩图批 ×0.5625
+tramRails(-137.3,-45,0); tramRails(-22.5,67.5,0); tramRails(90,137.3,0);
+tramWreck(-67.5,2.6,HPI+0.05); tramWreck(36,-2.6,HPI-0.04); tramWreck(-99,2.6,HPI+0.03);
+// 街灯: 主街两侧 + 中央纵街 (x=-39.4) 两侧 (区间/步距 ×0.5625; 灯侧摆 ±7.2 相对偏移不缩)
+for(let x=-140.6;x<=140.6;x+=19.1){
 lampPost(x,7.2,Math.PI/2); lampPost(x+17,-7.2,-Math.PI/2);
 }
-for(let z=-190;z<=190;z+=34){
+for(let z=-106.9;z<=106.9;z+=19.1){
 if(Math.abs(z)<12) continue;
-lampPost(-63.4,z,0); lampPost(-76.6,z,Math.PI);
+lampPost(-35.7,z,0); lampPost(-43.1,z,Math.PI);
 }
-// 街边瓦砾带 (沿主街两侧建筑线): 成片碎石, 贴墙铺开
-debrisLine(-236,10.8,150,10.8,15);
-debrisLine(-236,-10.8,150,-10.8,15);
+// 街边瓦砾带 (沿主街两侧建筑线): 成片碎石, 贴墙铺开 (2026-11-14 缩图批 ×0.5625)
+debrisLine(-132.8,6.1,84.4,6.1,8.4);
+debrisLine(-132.8,-6.1,84.4,-6.1,8.4);
 // 街道散布 (车残骸/弹坑/枯树/沙袋/拒马/油桶): 主街与中央纵街沿线
 const scatter=(x,z)=>{
 if(!freeSpot(x,z,2.2)) return;
@@ -412,8 +436,8 @@ else if(r<0.72) sandbagWall(x,z,3.2,wr(0,3));
 else if(r<0.82) hedgehog(x,z);
 else if(r<0.92) barrel(x,z);
 };
-for(let x=-244;x<=244;x+=26) scatter(x+wr(-4,4),wr(-6,6));
-for(let z=-200;z<=200;z+=26){ if(Math.abs(z)<12) continue; scatter(-70+wr(-6,6),z+wr(-4,4)); }
+for(let x=-137.3;x<=137.3;x+=14.6) scatter(x+wr(-4,4),wr(-6,6)); // 2026-11-14 缩图批 区间/步距 ×0.5625, 抖动不缩
+for(let z=-112.5;z<=112.5;z+=14.6){ if(Math.abs(z)<12) continue; scatter(-39.4+wr(-6,6),z+wr(-4,4)); }
 }
 // -- 城市组·柏林 (2026-09-09 点位改版): 640 大地图 + 三路推进 6 旗 + 国会大厦/防空塔双地标 + 地铁站厅 --
 // 布局拓扑 (用户定案): 苏军主基西侧(-290,0) / 德军主基东侧(290,0), 六旗 2D 扇面:
@@ -421,7 +445,7 @@ for(let z=-200;z<=200;z+=26){ if(Math.abs(z)<12) continue; scatter(-70+wr(-6,6),
 //   ③市中心(-55,0) = 中央地铁广场 (站厅+地下通道); ④防空塔(-55,198) ⑤街垒区(-55,-198) = 南北纵深;
 //   ⑥国会大厦(150,0) = 东端终点大城标 (德军主基前 140m)
 function layoutBerlin(){
-cityBlockRows(true,24); // 640 大地图: 间距放宽到 24m 控建筑总量 (58→48 栋量级)
+cityBlockRows(true); // 2026-11-14 缩图批 640→360: 恢复默认间距 16 (旧 640 图放宽到 24 控总量; 缩后街块 ×0.5625 与 24→16 抵消, 每街块落屋数不变)
 // 通用小件 (仅本图): 无杆轨道线 (纯视觉不占位) / 平板车皮 (坦克不可碾) / 街垒段线
 const railLine=(x0,x1,z)=>{
 for(let x=x0;x<x1-2;x+=4){
@@ -454,57 +478,59 @@ railBarricade(x0+(x1-x0)*t+wr(-0.8,0.8), z0+(z1-z0)*t+wr(-0.8,0.8), ry+wr(-0.12,
 }
 };
 // ── ① 北站场: 铁路货场 (轨道横贯旗区 + 平板车皮 + 货栈 + 烧毁坦克) ──
-railLine(-226,-178,140); railLine(-226,-178,156);
-railFlatcar(-208,140,HPI+0.03); railFlatcar(-188,156,HPI-0.04);
-{ const p=placeAt(-186,172,0.12,9.5,13.5,{maxDh:1.2}); if(p) buildBarn(p.x,p.z,p.ry); }
-tankWreck(-214,168,0.5);
-ingotStack(-204,126,0.3); ingotStack(-186,122,-0.2);
-crate(-196,132,1.2,0.5); barrel(-200,170);
+railLine(-127.1,-100.1,78.8); railLine(-127.1,-100.1,87.8); // 2026-11-14 缩图批 ×0.5625
+railFlatcar(-117,78.8,HPI+0.03); railFlatcar(-105.8,87.8,HPI-0.04);
+{ const p=placeAt(-104.6,112.9,0.12,9.5,13.5,{maxDh:1.2}); if(p) buildBarn(p.x,p.z,p.ry); } // 2026-11-14 缩图批 (货栈锚点缩放, 尺寸不变); 复核批 2026-11-14: 纯缩值 (-104.6,96.8) 与远北块①的成排 block 足迹互穿 (placeAt 8 试全败走兜底强放) → 北移出块: 足迹 z0=104.6 距块缘 103.5 净距 1.09m、街道 ≥9m、旗距 29.7≤30、轨道线 (z 78.8/87.8) 以北 16.8m
+tankWreck(-120.4,94.5,0.5);
+ingotStack(-114.8,70.9,0.3); ingotStack(-104.6,68.6,-0.2);
+crate(-110.3,74.3,1.2,0.5); barrel(-112.5,95.6);
 // ── ② 南街区: 居民街区 (成排废楼由 cityBlockRows 落位) + 街垒网 + 瓦砾 + 弹坑 ──
-barricadeLine(-214,-134,-214,-164,9);
-barricadeLine(-166,-134,-166,-164,9);
-tankWreck(-206,-168,-0.5);
-for(const [rx,rz] of [[-190,-124],[-184,-172],[-172,-138]]){
+barricadeLine(-120.4,-75.4,-120.4,-92.3,5.1); // 2026-11-14 缩图批 ×0.5625 (step 同缩保根数)
+barricadeLine(-93.4,-75.4,-93.4,-92.3,5.1);
+tankWreck(-115.9,-94.5,-0.5);
+for(const [rx,rz] of [[-106.9,-69.8],[-103.5,-96.8],[-96.8,-77.6]]){ // 2026-11-14 缩图批 ×0.5625 (抖动 ±3 不缩)
 for(let i=0;i<2;i++){
 const px=rx+wr(-3,3), pz=rz+wr(-3,3);
 if(freeSpot(px,pz,2)) rubblePile(px,pz,wr(1.8,2.6));
 }
 }
-if(freeSpot(-198,-150,2.2)) crater(-198,-150,2.2); if(freeSpot(-180,-160,2.2)) crater(-180,-160,2.0);
+if(freeSpot(-111.4,-84.4,2.2)) crater(-111.4,-84.4,2.2); if(freeSpot(-101.3,-90,2.2)) crater(-101.3,-90,2.0);
 // ── ③ 市中心: 地铁站厅 + 地下通道 (地标机制) + 广场街景 ──
 metroStation();
-railBarricade(-40,2,HPI); railBarricade(-30,-6,0);
-tankWreck(-20,10,1.2);
-if(freeSpot(-72,20,2.2)) crater(-72,20,2.2); if(freeSpot(-36,-16,2.2)) crater(-36,-16,2.0);
+railBarricade(-22.5,1.1,HPI); railBarricade(-16.9,-3.4,0); // 2026-11-14 缩图批 ×0.5625
+tankWreck(-2,5.6,1.2); // 2026-11-14 缩图批: 缩值 (-11.3,5.6) 落进新北站厅 (x≤-7.9), 东移至厅东缘外
+if(freeSpot(-40.5,11.3,2.2)) crater(-40.5,11.3,2.2); if(freeSpot(-20.3,-9,2.2)) crater(-20.3,-9,2.0); // 前者落街3内=旧版同款街内弹坑
 // ── ④ 防空塔 (地标 + 塔顶高炮): 塔基工事 + 旗前沙袋/铁丝网 ──
-flakTower(-55,216,Math.PI);
-sandbagWall(-55,204,5,0);
-barbedWire(-55,200,0,4.2);
-{ const px=-44,pz=210; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
-{ const px=-66,pz=210; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
+flakTower(-26.9,129.4,Math.PI); // 2026-11-14 缩图批: 旗(-30.9,111.4)北 18m 相对偏移不缩; x 东移 4m —— 缩后旗距街3东缘(-34.9)仅 4.1m, 固定 14×14 塔基放不下 (旧版塔缘贴街缘 0m), 微移后净距 1m
+sandbagWall(-30.9,117.4,5,0);   // 旗+6 相对偏移不缩
+barbedWire(-30.9,113.4,0,4.2);  // 旗+2 相对偏移不缩
+{ const px=-24.8,pz=118.1; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); } // 2026-11-14 缩图批 ×0.5625
+{ const px=-37.1,pz=118.1; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
 // ── ⑤ 街垒区: 三层街垒纵深 + 坦克残骸 + 铁丝网 + 钢锭/沙袋 ──
-barricadeLine(-92,-198,-18,-198,8);
-barricadeLine(-92,-186,-18,-186,9);
-barricadeLine(-86,-210,-24,-210,9);
-tankWreck(-70,-206,0.8); tankWreck(-30,-190,-0.6);
-barbedWire(-78,-192,0,4.2); barbedWire(-40,-204,0,4.2);
-ingotStack(-60,-214,0.2); sandbagWall(-44,-196,3.5,0);
+barricadeLine(-51.8,-111.4,-10.1,-111.4,4.5); // 2026-11-14 缩图批 ×0.5625 (step 同缩)
+barricadeLine(-51.8,-104.6,-10.1,-104.6,5.1);
+barricadeLine(-48.4,-118.1,-13.5,-118.1,5.1);
+tankWreck(-39.4,-115.9,0.8); tankWreck(-16.9,-106.9,-0.6);
+barbedWire(-43.9,-108,0,4.2); barbedWire(-22.5,-114.8,0,4.2);
+ingotStack(-33.8,-120.4,0.2); sandbagWall(-24.8,-110.3,3.5,0);
 // ── ⑥ 国会大厦 (地标: 可进/可爬屋顶/穹顶废墟) + 前庭广场 ──
-reichstag(150,48,Math.PI);
-stoneWall(112,20,132,20); stoneWall(168,20,188,20);
-tankWreck(104,-12,0.3); tankWreck(196,14,-0.8);
-if(freeSpot(120,26,2.4)) crater(120,26,2.4); if(freeSpot(178,30,2.4)) crater(178,30,2.2); if(freeSpot(150,-18,2.2)) crater(150,-18,2.0);
-{ const px=132,pz=18; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
-{ const px=168,pz=18; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
+// 2026-11-14 缩图批: 纯缩锚 (84.4,27, ry=PI) 与街6 (x0=91.1) 相撞 10.3m (固定 34×24 足迹);
+//   改 ry=-HPI (长轴转竖、正门朝西对旗) + 锚点西移 6.3m → 足迹 x 66.1..90.1 双侧净距≥1m, 街块⑤ (x1=63.1) 得以保留; 旗距 27.7≤30
+reichstag(78.1,27,-HPI);
+stoneWall(63,7.5,74.3,7.5); stoneWall(94.5,7.5,105.8,7.5); // 2026-11-14 缩图批: z 11.3→7.5 (缩值压新楼南脸 z0=10, 北移贴脸 2.5m 清主街 3m); 东墙横过街6=旧版同款
+tankWreck(58.5,-6.8,0.3); tankWreck(110.3,7.9,-0.8);
+if(freeSpot(60,16,2.4)) crater(60,16,2.4); if(freeSpot(104,16.9,2.4)) crater(104,16.9,2.2); if(freeSpot(84.4,-10.1,2.2)) crater(84.4,-10.1,2.0); // 2026-11-14 缩图批: 前者缩值落新楼足迹内→西移入块⑤庭院; 次者缩值压街6东缘→东移 3.9
+{ const px=63.5,pz=7.5; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); } // 2026-11-14 缩图批: 缩值落新楼足迹/街6内→改西脸两角侧翼
+{ const px=63.5,pz=46.5; if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
 // ── ⑦ 城内加密 (2026-09-09 用户实机反馈"柏林城内太过于空荡") ──
 berlinBlockWalls();  // 街块四边围合 (排楼街墙)
 berlinCourtyards();  // 街块内部庭院
 berlinStreet();      // 街道家具 (电车轨/街灯/瓦砾带/散布)
 // ── 城市街景 (核心城区限界内铺街垒, 郊野不铺) + 守方(德军)工事模板 ──
-cityDressing(true,{x0:-250,z0:-230,x1:210,z1:230});
+cityDressing(true,{x0:-140.6,z0:-129.4,x1:118.1,z1:129.4}); // 2026-11-14 缩图批 ×0.5625
 defWorks(); // 守方=德军 (campaign.defSide=1, 00-config 单源)
-// ── 郊野废墟带 (城网之外): 枯树/瓦砾/弹坑 —— 640 大地图不空 ──
-for(const [ox,oz] of [[-280,220],[-200,-240],[-120,250],[60,250],[220,-220],[260,120],[-260,-60],[40,-250],[-300,-160],[300,200]]){
+// ── 郊野废墟带 (城网之外): 枯树/瓦砾/弹坑 —— 缩图后仍不空 (2026-11-14 锚点 ×0.5625, 抖动 ±9 不缩) ──
+for(const [ox,oz] of [[-157.5,123.8],[-112.5,-135],[-67.5,140.6],[33.8,140.6],[123.8,-123.8],[146.3,67.5],[-146.3,-33.8],[22.5,-140.6],[-168.8,-90],[168.8,112.5]]){
 for(let i=0;i<4;i++){
 const x=ox+wr(-9,9), z=oz+wr(-9,9);
 if(roadDist(x,z)<7||cityUrban(x,z)||!freeSpot(x,z,1.2)) continue;
@@ -658,7 +684,7 @@ const dts=[[40,10],[-44,20],[60,-50]];
 for(const [px,pz] of dts){ if(freeSpot(px,pz,1.5)) deadTree(px,pz); }
 }
 }
-// -- 黄土沟壑 (百团, 2026-09-12 立体化重制: 640 大地图 · 5库扇面 · 坡道网络 · 沟底可玩) --
+// -- 黄土沟壑 (百团, 2026-09-12 立体化重制: 5库扇面 · 坡道网络 · 沟底可玩; 2026-11-14 缩图批 640→360) --
 function layoutLoess(){
 const L=CAMPAIGN.loess;
 // 窑洞村: 贴塬缘崖 (caveVillages 语义表, 北沟南缘×2 / 南沟北缘×2) —— 每村 1 孔可进窑洞 + 村口杂物
@@ -667,17 +693,20 @@ for(const cv of L.caveVillages){
 // 窑洞朝向沟壑: ry 指向沟
 const p=placeAt(cv.x,cv.z,cv.ry,7,5,{maxDh:1.2});
 if(p) caveDwelling(p.x,p.z,p.ry);
-if(freeSpot(cv.x+4,cv.z+3,2)) sandbagWall(cv.x+4,cv.z+3,3,HPI);
-if(freeSpot(cv.x-3,cv.z+4,1.2)) crate(cv.x-3,cv.z+4,1.1,wr(0,3));
+// 2026-11-14 缩图批: 沟壁带(w=14)不随缩, 村口杂物改放窑洞背沟侧 (cv.ry 反向, 横向再偏 3m), 避免缩后落进崖壁
+const bax=-Math.sin(cv.ry), baz=-Math.cos(cv.ry);
+if(freeSpot(cv.x+bax*8,cv.z+baz*8,2)) sandbagWall(cv.x+bax*8,cv.z+baz*8,3,HPI);
+if(freeSpot(cv.x+bax*10-baz*3,cv.z+baz*10+bax*3,1.2)) crate(cv.x+bax*10-baz*3,cv.z+baz*10+bax*3,1.1,wr(0,3));
 }
 }
 // 铁路专线: 中塬南缘东西向 (rail 语义表) —— 双轨+枕木+平板车 (不可碾);
 // 跨巷沟段由 bridges 表建铁路木桥 (buildWorld 通用分派), 桥面=塬面高=拉锯通道
 if(L&&L.rail){
 railLine(L.rail.x0,L.rail.z0,L.rail.x1,L.rail.z1);
-railFlatcar(L.rail.x0+28,L.rail.z0+3,HPI+0.04);
-railFlatcar((L.rail.x0+L.rail.x1)/2-58,(L.rail.z0+L.rail.z1)/2+2,HPI-0.03);
-railFlatcar(L.rail.x1-30,L.rail.z1+2,HPI+0.05);
+// 2026-11-14 缩图批: 平板车沿轨里程按 ×0.5625 缩 (28/97/280 → 15.8/46.7/157.5), 避开缩后桥跨与坡道走廊
+railFlatcar(L.rail.x0+15.8,L.rail.z0+1.7,HPI+0.04);
+railFlatcar(L.rail.x0+46.7,L.rail.z0+1.1,HPI-0.03);
+railFlatcar(L.rail.x1-33,L.rail.z1+1.1,HPI+0.05);
 }
 // 坡道堑口标桩: 每条坡道两端外侧各一组木箱/油桶 —— 玩家一眼认出过沟通道 (偏移 5.2m 不占走廊中线)
 if(L&&L.ramps){
@@ -694,96 +723,104 @@ if(freeSpot(ex2,ez2,1)) barrel(ex2,ez2);
 }
 // ── 5 库分层布景 (旗点=补给库, buildWorld 破袭循环在各旗位建库本体; 这里布阵地特色) ──
 // 注意顺序: 建筑先落位注册足迹, 旗点通用点缀最后撒 (freeSpot 才能避开新建筑足迹)
+// 2026-11-14 缩图批 ×0.5625: 摆件坐标随缩; 沟壁带/坡道走廊(11m)/桥跨等物理尺度不缩, 冲突处逐件外挪并注明
 const F=CAMPAIGN.flags;
 // 铁路库 (旗0·塬面层·主线目标): 仓库房+站台沙袋, 紧贴铁路线
+// 2026-11-14 缩图批: 房-旗相对偏移保持旧绝对值 (−16,+14) —— 破袭旗位预留足迹 (5.5×5.5+0.8) 尺寸不缩,
+//   缩值偏移 (−9,+7.9) 会让 9×6 仓房压旗位预留区 → placeAt 漂移进据点甲; 房体 9×6 不缩, 相对净空 1:1
 {
-const p=placeAt(-78,-56,0.3,9,6,{maxDh:1.6}); if(p) cnHouse(p.x,p.z,p.ry,9,6);
-if(freeSpot(-46,-80,2)) sandbagWall(-46,-80,5,0.1);
-if(freeSpot(-76,-84,2)) sandbagWall(-76,-84,4,HPI);
+const p=placeAt(-50.9,-25.4,0.3,9,6,{maxDh:1.6}); if(p) cnHouse(p.x,p.z,p.ry,9,6);
+if(freeSpot(-25.9,-45,2)) sandbagWall(-25.9,-45,5,0.1);
+if(freeSpot(-42.8,-47.3,2)) sandbagWall(-42.8,-47.3,4,HPI);
 }
 // 窑洞村 (旗1·塬面层): 村舍两栋沿村缘 (placeBuild 环形选址, 不压旗)
 {
-let p=placeBuild(70,105,13,6,5,{ring0:8}); if(p) cnHouse(p.x,p.z,p.ry,6,5);
-p=placeBuild(70,105,13,6,5,{ring0:8}); if(p) cnHouse(p.x,p.z,p.ry,6,5);
+let p=placeBuild(39.4,59.1,13,6,5,{ring0:8}); if(p) cnHouse(p.x,p.z,p.ry,6,5); // 2026-11-14 缩图批 ×0.5625
+p=placeBuild(39.4,59.1,13,6,5,{ring0:8}); if(p) cnHouse(p.x,p.z,p.ry,6,5);
 }
 // 东峁顶 (旗2·山脊层): 守方环形工事 —— 碉堡扼西坡 + 双机枪 + 环顶沙袋四向 (居高临下)
 // 碉堡锚点距旗心 ≥12m: buildDepot 会在旗周 ±4m 撒油桶/沙袋, 太近会落进碉堡足迹 (verify-layouts 抓过)
 {
-const fx=245, fz=95;
-const p=placeAt(fx+10,fz+7,-0.2,8,5,{maxDh:1.6}); if(p) bunker(p.x,p.z,Math.atan2(142-p.x,82-p.z));
-if(freeSpot(fx-8,fz+6,1.5)) mg42(fx-8,fz+6,Math.atan2(142-fx,82-fz),1);
-if(freeSpot(fx-4,fz-9,1.5)) mg42(fx-4,fz-9,Math.atan2(146-fx,-60-fz),1);
-for(const [wx,wz,wf] of [[fx,fz+30,0],[fx,fz-30,Math.PI],[fx-30,fz,-HPI],[fx+30,fz,HPI]]){
+const fx=137.8, fz=53.4; // 2026-11-14 缩图批 ×0.5625
+const p=placeAt(fx+10,fz+7,-0.2,8,5,{maxDh:1.6}); if(p) bunker(p.x,p.z,Math.atan2(79.9-p.x,46.1-p.z)); // face 目标 (142,82)→(79.9,46.1) 同缩
+if(freeSpot(fx-8,fz+6,1.5)) mg42(fx-8,fz+6,Math.atan2(79.9-fx,46.1-fz),1);
+if(freeSpot(fx-4,fz-9,1.5)) mg42(fx-4,fz-9,Math.atan2(82.1-fx,-33.8-fz),1); // 目标 (146,−60)→(82.1,−33.8) 同缩
+for(const [wx,wz,wf] of [[fx,fz+30,0],[fx,fz-30,Math.PI],[fx-18,fz,-HPI],[fx+30,fz,HPI]]){ // 2026-11-14 缩图批: 西向 30→18 (东沟壁带不缩, 缩后 ±30 落带内)
 if(freeSpot(wx,wz,2)) sandbagWall(wx,wz,4.5,wf);
 }
 }
 // 西沟口 (旗3·沟底层·渡台): 渡口工事 —— 台缘沙袋双向 + 拒马 + 木箱 (无建筑: 渡台窄)
 {
-if(freeSpot(-175,-24,2)) sandbagWall(-175,-24,4.5,0);
-if(freeSpot(-184,-40,2)) sandbagWall(-184,-40,4,HPI);
-if(freeSpot(-166,-46,1.5)) hedgehog(-166,-46);
-if(freeSpot(-170,-30,1.2)) crate(-170,-30,1.2,0.4);
+if(freeSpot(-98.4,-13.5,2)) sandbagWall(-98.4,-13.5,4.5,0);   // 2026-11-14 缩图批 ×0.5625 (全在缩后渡台矩形内)
+if(freeSpot(-103.5,-22.5,2)) sandbagWall(-103.5,-22.5,4,HPI);
+if(freeSpot(-93.4,-25.9,1.5)) hedgehog(-93.4,-25.9);
+if(freeSpot(-95.6,-16.9,1.2)) crate(-95.6,-16.9,1.2,0.4);
 }
 // 南沟仓 (旗4·沟底层·仓台): 粮仓带 —— 木箱垛+沙袋+粮囤(油桶组)
 {
-if(freeSpot(130,-156,2)) sandbagWall(130,-156,4.5,0.2);
-if(freeSpot(148,-140,2)) sandbagWall(148,-140,4,HPI+0.2);
-if(freeSpot(132,-140,1.2)) crate(132,-140,1.3,0.3);
-if(freeSpot(146,-154,1)) barrel(146,-154);
-if(freeSpot(148,-152,1)) barrel(148,-152);
+if(freeSpot(73.1,-87.8,2)) sandbagWall(73.1,-87.8,4.5,0.2);
+if(freeSpot(83.3,-78.8,2)) sandbagWall(83.3,-78.8,4,HPI+0.2);
+if(freeSpot(74.3,-78.8,1.2)) crate(74.3,-78.8,1.3,0.3);
+if(freeSpot(82.1,-86.6,1)) barrel(82.1,-86.6);
+if(freeSpot(83.3,-85.5,1)) barrel(83.3,-85.5);
 }
 // ── 据点与村落加密包 (2026-09-12 用户实机意见"建筑太少太空荡") ──
 // 日军铁路据点带 ×3 (史实: 正太路沿线"乌龟壳"据点): 碉堡/炮楼+兵舍+铁丝网+龙牙, 守铁路与桥
+// 2026-11-14 缩图批 ×0.5625: 桥西南侧旧锚缩后落沟壁带(gd≈12)/R10 走廊(11m 不缩)夹死 → 甲/乙整体北移过铁路线,
+//   丙 炮楼/兵舍避 R8 走廊 (走廊/壁带为物理尺度不缩, 逐处注明)
 {
-// 据点甲: 铁路桥西桥头 (碉堡扼桥+兵舍+铁丝网+龙牙门)
-const pA=placeAt(-46,-92,-0.3,8,5,{maxDh:1.6}); if(pA) bunker(pA.x,pA.z,Math.atan2(-120-pA.x,-84-pA.z));
-const pA2=placeAt(-58,-96,0.2,5,4,{maxDh:1.6}); if(pA2) logCabin(pA2.x,pA2.z,pA2.ry);
-barbedWire(-38,-90,0.2,5); barbedWire(-34,-78,HPI,4);
-if(freeSpot(-40,-76,0.9)) dragonTooth(-40,-76,0.3);
-if(freeSpot(-36,-73,0.9)) dragonTooth(-36,-73,-0.2);
+// 据点甲: 铁路桥西桥头 (碉堡扼桥+兵舍+铁丝网+龙牙门) —— 缩后改桥西北侧
+// 2026-11-14 缩图批: 铁路库库体(旗位)在缩后占 (−41..−29,−46..−33), R10 走廊(11m 不缩)贴桥南 ——
+//   碉堡/兵舍西移让开库体足迹, 龙牙门改守库区南口 (库体为固定尺寸, 相对净空按 1:1 重算)
+const pA=placeAt(-46,-38,-0.3,8,5,{maxDh:1.6}); if(pA) bunker(pA.x,pA.z,Math.atan2(-67.5-pA.x,-47.3-pA.z)); // face 目标 (−120,−84)→(−67.5,−47.3) 同缩
+const pA2=placeAt(-57,-44,0.2,5,4,{maxDh:1.6}); if(pA2) logCabin(pA2.x,pA2.z,pA2.ry);
+barbedWire(-57,-36,HPI,4); barbedWire(-44,-30.5,0.2,5);
+if(freeSpot(-28,-44,0.9)) dragonTooth(-28,-44,0.3);
+if(freeSpot(-31.5,-49.5,0.9)) dragonTooth(-31.5,-49.5,-0.2);
 // 据点乙: 铁路桥东桥头
-const pB=placeAt(4,-92,0.35,8,5,{maxDh:1.6}); if(pB) bunker(pB.x,pB.z,Math.atan2(80-pB.x,-84-pB.z));
-barbedWire(12,-86,HPI,4.5); barbedWire(10,-100,0,4);
-if(freeSpot(14,-96,1.2)) crate(14,-96,1.2,0.5);
+const pB=placeAt(9,-40.5,0.35,8,5,{maxDh:1.6}); if(pB) bunker(pB.x,pB.z,Math.atan2(45-pB.x,-47.3-pB.z)); // face 目标 (80,−84)→(45,−47.3) 同缩
+barbedWire(17.5,-47.5,HPI,4.5); barbedWire(17,-32.5,0,4);
+if(freeSpot(16.5,-43,1.2)) crate(16.5,-43,1.2,0.5);
 // 据点丙: 铁路东段炮楼+兵舍 (望南沟坡道口)
-placeTower(126,-72);
-const pC=placeAt(132,-94,-0.2,5,4,{maxDh:1.6}); if(pC) logCabin(pC.x,pC.z,pC.ry);
-barbedWire(120,-92,0.15,4.5);
+placeTower(70.9,-30);
+const pC=placeAt(55,-53,-0.2,5,4,{maxDh:1.6}); if(pC) logCabin(pC.x,pC.z,pC.ry);
+barbedWire(48.3,-51.9,0.15,4.5);
 }
 // 塬面村落组团 ×2 + 川地村 ×1 (4~6 间瓦房+院墙石墙 —— 消除"塬上一马平川无村"的空荡感)
+// 2026-11-14 缩图批: 村锚点 ×0.5625, 但**村内房距保持旧绝对间距** (瓦房 7×5.5 尺寸不缩, 缩后房距会互相压足迹)
 {
 // 中塬西村 (麦田以北, 塬北线以南)
-const V1=[[-128,58,0.2],[-116,62,-0.35],[-124,70,0.05],[-112,72,0.5]];
+const V1=[[-72,34.6,0.2],[-57.6,39.4,-0.35],[-67.2,49,0.05],[-52.8,51.4,0.5]]; // 2026-11-14 缩图批: 锚点缩, 房距按旧间距 ×1.2 (房体 7×5.5 不缩, 缩值房距会互压足迹), 整体北移 2m 让 R9 走廊
 for(const [hx,hz,hr] of V1){ const p=placeAt(hx,hz,hr,7,5.5,{maxDh:1.6}); if(p) cnHouse(p.x,p.z,p.ry,7,5.5); }
-stoneWall(-132,52,-114,54); stoneWall(-108,66,-108,78);
-if(freeSpot(-120,64,1)) barrel(-120,64);
-// 中塬东村 (东麦田东北)
-const V2=[[112,52,0.3],[126,56,-0.2],[118,64,0.1],[132,66,-0.45]];
+stoneWall(-76,28.6,-58,30.6); stoneWall(-52,42.6,-52,54.6);
+if(freeSpot(-64,40.6,1)) barrel(-64,40.6);
+// 中塬东村 (东麦田东北) —— 南移 14m 让 R3 走廊 (走廊 11m 不缩, 缩值房距 R3 线仅 4.9m)
+const V2=[[63,15.3,0.3],[77,19.3,-0.2],[69,27.3,0.1],[83,29.3,-0.45]];
 for(const [hx,hz,hr] of V2){ const p=placeAt(hx,hz,hr,7,5.5,{maxDh:1.6}); if(p) cnHouse(p.x,p.z,p.ry,7,5.5); }
-stoneWall(108,48,134,50);
-if(freeSpot(122,60,1.2)) crate(122,60,1.2,0.7);
-// 西川村 (攻方推进线侧翼) —— 房间距按旋转后最大包络留 2m+, 防足迹相叠
-const V3=[[-236,-50,0.15],[-224,-44,-0.3],[-232,-32,0.4]];
+stoneWall(59,11.3,85,13.3);
+if(freeSpot(73,23.3,1.2)) crate(73,23.3,1.2,0.7);
+// 西川村 (攻方推进线侧翼) —— 房间距按旋转后最大包络留 2m+, 防足迹相叠 (西移 3m 让西沟壁带)
+const V3=[[-135.8,-28.1,0.15],[-123.8,-22.1,-0.3],[-131.8,-10.1,0.4]];
 for(const [hx,hz,hr] of V3){ const p=placeAt(hx,hz,hr,7,5.5,{maxDh:1.6}); if(p) cnHouse(p.x,p.z,p.ry,7,5.5); }
-stoneWall(-236,-42,-218,-40);
-if(freeSpot(-226,-52,1)) barrel(-226,-52);
+stoneWall(-135.8,-20.1,-117.8,-18.1);
+if(freeSpot(-125.8,-30.1,1)) barrel(-125.8,-30.1);
 }
 // 峁顶工事: 西北峁/南峁 (制高点哨塔/木屋+沙袋环 —— 川地制高点有内容可打)
 {
-placeTower(-120,232);
-const pM=placeAt(-112,240,0.3,6,5,{maxDh:1.6}); if(pM) logCabin(pM.x,pM.z,pM.ry);
-if(freeSpot(-120,224,2)) sandbagWall(-120,224,4,0);
-if(freeSpot(-112,248,1.5)) mg42(-112,248,Math.atan2(70+112,105-248),1);
-const pS=placeAt(70,-234,0.2,6,5,{maxDh:1.6}); if(pS) logCabin(pS.x,pS.z,pS.ry);
-if(freeSpot(70,-246,2)) sandbagWall(70,-246,4,Math.PI);
-if(freeSpot(78,-236,1.5)) hedgehog(78,-236);
+placeTower(-67.5,130.5);
+const pM=placeAt(-58.5,140,0.3,6,5,{maxDh:1.6}); if(pM) logCabin(pM.x,pM.z,pM.ry); // 2026-11-14 缩图批: 塔 Cab 相对偏移保持 (+9/+9.5), 缩值 (+4.5,+4.5) 会压塔足迹
+if(freeSpot(-67.5,122.5,2)) sandbagWall(-67.5,122.5,4,0);
+if(freeSpot(-58.5,146.5,1.5)) mg42(-58.5,146.5,Math.atan2(39.4+58.5,59.1-146.5),1); // face 目标 (70,105)→(39.4,59.1) 同缩
+const pS=placeAt(39.4,-131.6,0.2,6,5,{maxDh:1.6}); if(pS) logCabin(pS.x,pS.z,pS.ry);
+if(freeSpot(39.4,-138.4,2)) sandbagWall(39.4,-138.4,4,Math.PI);
+if(freeSpot(43.9,-132.8,1.5)) hedgehog(43.9,-132.8);
 }
 // 基地营区加建: 守方碉堡+炮楼 / 攻方营房粮秣库 (通用营区帐篷/沙袋之外 —— 碉堡避开通用营区 x±10 散布带)
 {
-const pD=placeAt(250,36,-HPI,8,5,{maxDh:1.6}); if(pD) bunker(pD.x,pD.z,Math.atan2(142-pD.x,82-pD.z));
-placeTower(274,-2);
-const pO=placeAt(-258,16,0.2,9.5,13.5,{maxDh:1.6}); if(pO) buildBarn(pO.x,pO.z,pO.ry);
-const pO2=placeAt(-276,8,-0.3,5,4,{maxDh:1.6}); if(pO2) logCabin(pO2.x,pO2.z,pO2.ry);
+const pD=placeAt(140.6,20.3,-HPI,8,5,{maxDh:1.6}); if(pD) bunker(pD.x,pD.z,Math.atan2(79.9-pD.x,46.1-pD.z)); // face 目标 (142,82)→(79.9,46.1) 同缩; 2026-11-14 缩图批 ×0.5625
+placeTower(154.1,-1.1);
+const pO=placeAt(-145.1,15,0.2,9.5,13.5,{maxDh:1.6}); if(pO) buildBarn(pO.x,pO.z,pO.ry); // 2026-11-14 缩图批: z 9→15 —— 通用营区模板箱位 (base+4/+10, 固定偏移) 缩后落仓房足迹内, 北移让位 (仓体 9.5×13.5 不缩)
+const pO2=placeAt(-155.3,4.5,-0.3,5,4,{maxDh:1.6}); if(pO2) logCabin(pO2.x,pO2.z,pO2.ry);
 }
 // 攻方前出点营地 (spawns 语义表): 帐篷+沙袋+杂物 (17-emplacements 再配固定火力朝敌基)
 for(const sp of (CAMPAIGN.spawns||[])){
@@ -793,17 +830,18 @@ if(freeSpot(sp.x+6,sp.z+3,2)) sandbagWall(sp.x+6,sp.z+3,4,HPI);
 if(freeSpot(sp.x-6,sp.z-2,2)) sandbagWall(sp.x-6,sp.z-2,4,0); // 2026-09-25 修: 旧版写成 3 参 (sp.x-6,sp.z-2,0) —— 0 落到 len、ry 缺省 undefined ⇒ Math.cos(undefined)=NaN, 整堵墙不可见且往 BOXES/coverPoints 里灌 NaN
 if(freeSpot(sp.x+4,sp.z-6,1.2)) crate(sp.x+4,sp.z-6,1.2,0.5);
 }
-// 哨塔: 塬面东西各一座 (中塬纵深观察)
-placeTower(-120,40); placeTower(96,44);
-// 弹坑/枯树/拒马零散: 沟底渗透路线的掩体点缀 (freeSpot 查建筑足迹)
-if(freeSpot(-120,-84,2.2)) crater(-120,-84,2.2);
-if(freeSpot(60,-88,2.0)) crater(60,-88,2.0);
-if(freeSpot(-40,60,2.2)) crater(-40,60,2.2);
-{ if(freeSpot(-14,88,1.5)) deadTree(-14,88); }
-{ if(freeSpot(150,-40,1.5)) deadTree(150,-40); }
-{ if(freeSpot(-108,-108,1.5)) deadTree(-108,-108); }
-{ if(freeSpot(96,180,1.5)) hedgehog(96,180); };
-{ if(freeSpot(-96,-160,1.5)) hedgehog(-96,-160); };
+// 哨塔: 塬面东西各一座 (中塬纵深观察) —— 2026-11-14 缩图批: 缩值 (−67.5,22.5)/(54,24.8) 分别落 R9/R3 走廊,
+// 东塔缩值再落东沟壁带 (92,64) gd≈10 → 让出: 西 (−72,60) 清 V1 村北缘+R9 走廊, 东 (84,64) 清 R3 走廊+东沟壁带
+placeTower(-72,60); placeTower(84,64);
+// 弹坑/枯树/拒马零散: 沟底渗透路线的掩体点缀 (freeSpot 查建筑足迹) —— 2026-11-14 缩图批 ×0.5625
+if(freeSpot(-67.5,-47.3,2.2)) crater(-67.5,-47.3,2.2);
+if(freeSpot(33.8,-49.5,2.0)) crater(33.8,-49.5,2.0);
+if(freeSpot(-22.5,33.8,2.2)) crater(-22.5,33.8,2.2);
+{ if(freeSpot(-7.9,49.5,1.5)) deadTree(-7.9,49.5); }
+{ if(freeSpot(84.4,-22.5,1.5)) deadTree(84.4,-22.5); }
+{ if(freeSpot(-60.8,-60.8,1.5)) deadTree(-60.8,-60.8); }
+{ if(freeSpot(54,101.3,1.5)) hedgehog(54,101.3); };
+{ if(freeSpot(-54,-90,1.5)) hedgehog(-54,-90); };
 // 旗点通用点缀 (置于全部建筑落位之后 —— freeSpot 避开足迹)
 F.forEach(f=>{
 { const px=f.x+wr(-8,8), pz=f.z+wr(-8,8); if(freeSpot(px,pz,2)) sandbagWall(px,pz,4,wr(0,3)); };
@@ -895,6 +933,9 @@ function layoutDeepJungle(){
 // ── 巨桥改版 (2026-09-12): 640 大图, 主题=大龙河大桥 (grandBridge 由 buildWorld 分派) ──
 // 三路扇面旗点: 桥面旗由 grandBridge 布置, 岸旗营地+村寨; 主桥/石桥桥头工事; 徒涉滩渡口
 const MS2=MAP_SIZE/2;
+// 2026-11-14 缩图批: 旗位 halo 强制清格 (r=5) —— 缩后旗点与周边村舍/营地布景贴得更近 (建筑尺寸不缩),
+// 随机布景可能把旗格封成 1 格孤岛 (东岸寨 seed42 实测), 与 buildBridge/grandBridge 的桥面清格同惯例
+for(const f of CAMPAIGN.flags) NAV_CLEARS.push({x:f.x,z:f.z,r:5});
 CAMPAIGN.flags.forEach((f,i)=>{
 if(onBridge(f.x,f.z,4)) return;
 placeTower(f.x+6,f.z+5);
@@ -911,7 +952,8 @@ if(i%2===0){ p=placeBuild(f.x,f.z,12,6,5); if(p) cnHouse(p.x,p.z,p.ry,6,5); }
 });
 // 村寨加密 (北线两岸桥头村落): 西岸村/东岸寨各加 2 栋瓦房, 东滩/西滩各 1 栋木屋
 // (用 placeBuild 带互斥检索 —— placeAt 有无条件兜底, 挤进旗点营地足迹会造成重叠)
-for(const [vx,vz,n] of [[-190,-150,2],[150,-195,2],[-110,175,1],[150,185,1]]){
+// 2026-11-14 缩图批 ×0.59375 (640→380; 与旗点表同源)
+for(const [vx,vz,n] of [[-112.8,-89.1,2],[89.1,-115.8,2],[-65.3,103.9,1],[89.1,109.8,1]]){
 for(let k=0;k<n;k++){
 const p=placeBuild(vx+wr(-16,16),vz+wr(-16,16),18,6,5,{maxDh:1.0});
 if(p) cnHouse(p.x,p.z,p.ry,6,5);
@@ -990,8 +1032,10 @@ NAV_CLEARS.push({x:F.x+k*11*px2,z:F.z+k*11*pz2,r:2.6});
 }
 // 河岸哨塔 (2026-09-12 实机修复: 旧位 (-16,-18) 等按欧氏距离估河距, 实际河线大体沿桥横向走,
 // 河距≈沿河向坐标 —— 旧塔半截泡在激流里; 全部迁至河距≥30m 的岸上)
-placeTower(-44,-24); placeTower(34,28); placeTower(-46,-196); placeTower(38,146);
-if(freeSpot(-46,-34,2)) crater(-46,-34,2.2); if(freeSpot(40,16,2)) crater(40,16,2.0); if(freeSpot(-28,30,2)) crater(-28,30,1.8); if(freeSpot(28,-30,2)) crater(28,-30,2.2); // 固定弹坑 (岸上, 避深切带)
+// 2026-11-14 缩图批 ×0.59375: 缩值距缩后河线仅 20~23m (w26 不缩, 落深切带) → 按"河距≥30m"重钉:
+// (−35.5,−14.3)/(32,16.6)/(−42,−120)/(33,86.7) —— 并避开巨桥登塔梯/北石桥桥头碉堡足迹
+placeTower(-35.5,-14.3); placeTower(32,16.6); placeTower(-42,-120); placeTower(33,86.7);
+if(freeSpot(-36,-20.2,2)) crater(-36,-20.2,2.2); if(freeSpot(34,9.5,2)) crater(34,9.5,2.0); if(freeSpot(-31,17.8,2)) crater(-31,17.8,1.8); if(freeSpot(27,-17.8,2)) crater(27,-17.8,2.2); // 固定弹坑 (岸上, 避深切带; 2026-11-14 缩图批 河距≥31m 重钉)
 // 基地加建: 碉堡面向敌基 + 哨塔 + 帐篷 (通用营区模板之外)
 // 非可碾件 (碉堡/哨塔/拒马) 一律距基地中心 ≥19m —— 坦克出生环带 (findFreeSpawn ≈13m) 前方 2.6m 内不得有混凝土阻挡
 CAMPAIGN.bases.forEach((b,t)=>{
@@ -1052,10 +1096,11 @@ dragonTooth(rowX+wr(-0.8,0.8),z+st+wr(-0.8,0.8),wr(0,3));
 }
 }
 // 缺口封锁 (面东=来敌方向): 公路缺口双机枪 (走廊净空不放建筑), 北/南缺口 机枪+翼侧碉堡
+// 2026-11-14 缩图批 640→360 ×0.5625: 北/南缺口选位阈值 ±100 随缺口中心缩放 (±56.3), 否则缩后缺口双双落空只配双机枪
 for(const g of B.gaps){
 mg42(B.x0-4,g[0]-4,HPI,0);
-if(g[0]<-100) bunker(B.x0-2,g[1]+8,HPI);        // 北缺口: 碉堡坐南翼 (压走廊东进线)
-else if(g[1]>100) bunker(B.x0-2,g[0]-8,HPI);    // 南缺口: 碉堡坐北翼
+if(g[0]<-56.3) bunker(B.x0-2,g[1]+8,HPI);        // 北缺口: 碉堡坐南翼 (压走廊东进线) (2026-11-14 缩图批: 阈值 -100→-56.3 随缺口缩)
+else if(g[1]>56.3) bunker(B.x0-2,g[0]-8,HPI);    // 南缺口: 碉堡坐北翼 (2026-11-14 缩图批: 阈值 100→56.3 随缺口缩)
 else mg42(B.x0-4,g[1]+5,HPI,0);                 // 公路缺口: 第二挺机枪
 barbedWire(B.x1+6,g[0]-7,HPI,4.2);
 barbedWire(B.x1+6,g[1]+7,HPI,4.2);
@@ -1073,8 +1118,9 @@ atMine(x,z,(mi++%4===0));
 }
 }
 // 炮火犁过的接近地带: 反坦克壕与雷区之间散弹坑 (焦土带观感)
+// 2026-11-14 缩图批 640→360 ×0.5625: 焦土带 x=124→69.8 (缩后仍居反坦克壕 66.4 与雷带 70.3..88.3 之间); 沿 z 步进 14/8/26 为地貌节奏不缩
 for(const r of (ST.mines?ST.mines.zRuns:[])){
-for(let z=r[0]+14;z<r[1]-8;z+=26) crater(124+wr(-2,2),z+wr(-4,4),wr(1.8,2.8));
+for(let z=r[0]+14;z<r[1]-8;z+=26) crater(69.8+wr(-2,2),z+wr(-4,4),wr(1.8,2.8));   // 2026-11-14 缩图批 ×0.5625 (124→69.8)
 }
 }
 // ── ② 铁路与车站 (普罗霍罗夫卡轴): 纵贯双段 (站段留空) + 站台/站房/水塔/货栈/侧线平板车 ──
@@ -1132,7 +1178,7 @@ if(ST&&ST.wrecks){
 for(const [wx,wz,wry] of ST.wrecks){
 if(freeSpot(wx,wz,3.5)&&propFree(wx,wz,3.4)) tankWreck(wx,wz,wry);
 }
-crater(120,-176,3.2); crater(134,-112,2.6); crater(72,-146,2.4); crater(168,-160,2.2);
+crater(67.5,-99,3.2); crater(75.4,-63,2.6); crater(40.5,-82.1,2.4); crater(94.5,-90,2.2);   // 2026-11-14 缩图批 ×0.5625 (坟场焦土随缩后残骸带)
 }
 // ── ⑤ 麦田农庄 (khutor): 三木屋+谷仓+院墙+村心柳 (村社台地 FLATS 已平) ──
 // ★2026-09-26 修 (P0-3 死袋): 建筑外推到 ≥12m 并**只在北/东两侧成环**, 南/西 = 敞开的场院口。
@@ -1168,8 +1214,8 @@ if(freeSpot(sp.x-5.5,sp.z+10,1.5)) crate(sp.x-5.5,sp.z+10,1.1,wr(0,3));
 if(freeSpot(sp.x,sp.z-10,1)) barrel(sp.x,sp.z-10);
 if(freeSpot(sp.x+10,sp.z+5,1.5)) hedgehog(sp.x+10,sp.z+5);
 }
-placeTower(-128,-146);
-placeTower(176,4);
+placeTower(-78,-79);   // 2026-11-14 缩图批 ×0.5625 (北原哨哨塔; 缩值 (-72,-82.1) 距强点 4.7m —— 塔足迹 reach~8.8m 盖占领点, 外推到 9.4m 并让开北侧支撑壕)
+placeTower(100.1,4.5);   // 2026-11-14 缩图批 ×0.5625 (东岗哨塔; 缩值 (99,2.3) 距强点 7.6m 过近, 沿旧方位外推到 10.1m 防足迹盖占领点)
 // ── ⑦ 全图散布 (640 尺度): 草垛/弹坑/枯树拒马/电话线杆 (杆沿三路公路网) ──
 const mineX=ST&&ST.mines?[ST.mines.x0-5,ST.mines.x1+5]:null;
 const inMineBand=(x,z)=>mineX&&x>mineX[0]&&x<mineX[1]&&(ST.mines.zRuns||[]).some(r=>z>r[0]-3&&z<r[1]+3);
@@ -1184,9 +1230,9 @@ mesh(new THREE.CylinderGeometry(1.1,1.1,1.6,12),MAT.hay,hx,hg+0.8,hz);
 CYLS.push({x:hx,z:hz,r:1.15,y0:hg,y1:hg+1.6});
 coverPoints.push({x:hx,z:hz-2});
 }
-crater(-40,-60,2.6); crater(30,44,2.4); crater(-90,30,2.2); crater(60,-90,2.5);
-crater(-150,90,2.8); crater(150,60,2.6); crater(-20,120,2.4); crater(90,-40,2.5);
-crater(-200,-60,2.8); crater(210,80,2.6);
+crater(-22.5,-33.8,2.6); crater(16.9,24.8,2.4); crater(-50.6,16.9,2.2); crater(33.8,-50.6,2.5);   // 2026-11-14 缩图批 ×0.5625 (散布弹坑随缩)
+crater(-84.4,50.6,2.8); crater(84.4,33.8,2.6); crater(-11.3,67.5,2.4); crater(50.6,-22.5,2.5);   // 2026-11-14 缩图批 ×0.5625
+crater(-112.5,-33.8,2.8); crater(118.1,45,2.6);   // 2026-11-14 缩图批 ×0.5625
 for(let i=0;i<14;i++){
 const x=wr(-(MS2-40),MS2-40), z=wr(-(MS2-40),MS2-40);
 if(!spawnKeepClear(x,z,10)) continue;   // 强点净空 10m (同上; 拒马 r=0.85 也会封格)
@@ -1225,8 +1271,10 @@ if(Math.abs(z)<B.gapZ) continue;
 dragonTooth(rowX+wr(-0.8,0.8),z+st+wr(-0.8,0.8),wr(0,3));
 }
 }
-// 带后永备火力点×3 (面西=来敌方向; 面向=-HPI 即本地 +z 轴指向世界 -x)
-for(const [px,pz] of [[168,-118],[172,36],[168,150]]){
+// 带后永备火力点×3 (面西=来敌方向; 面向=-HPI 即本地 +z 轴指向世界 -x) —— 2026-11-14 缩图批 ×0.5625:
+//   缩值 (94.5/96.8) 距龙牙带外缘 (x1=91.3+抖动 0.8=92.1) 仅 2.4m < propFree 4.2 → 2/3 碉堡被拒;
+//   统一放带后 6.2m (x=97.5, 旧版带后 9~13m 的等效让位), 2# z 20.3→35 让开坝路弯道 (缩后路距 2.3m 会压路, 旧版 6.3m)
+for(const [px,pz] of [[97.5,-66.4],[97.5,35],[97.5,84.4]]){
 if(freeSpot(px,pz,4.2)&&propFree(px,pz,4.2)) bunker(px,pz,-HPI+wr(-0.1,0.1));
 }
 // 缺口两翼机枪 (封走廊) + 缺口前防坦克拒马对 (西侧拦头, 中间留车行缝)
@@ -1234,8 +1282,8 @@ mg42(B.x0-4,-B.gapZ-5,-HPI,1);
 mg42(B.x0-4, B.gapZ+5,-HPI,1);
 if(freeSpot(B.x0-11,-9,1.5)) hedgehog(B.x0-11,-9);
 if(freeSpot(B.x0-11, 9,1.5)) hedgehog(B.x0-11, 9);
-// 带前铁丝网 (西面) 数段
-for(const wz of [-64,-138,84,196]) if(freeSpot(B.x0-8,wz,1.6)&&propFree(B.x0-8,wz,1.6)) barbedWire(B.x0-8,wz,-HPI,4.2);
+// 带前铁丝网 (西面) 数段 —— 2026-11-14 缩图批 ×0.5625 (z 表随缩, x=B.x0−8 自动)
+for(const wz of [-36,-77.6,47.3,110.3]) if(freeSpot(B.x0-8,wz,1.6)&&propFree(B.x0-8,wz,1.6)) barbedWire(B.x0-8,wz,-HPI,4.2);   // 2026-11-14 缩图批 ×0.5625
 }
 // ── ② 岭上村 (Vossenack 型岭顶村社): 教堂地标+谷仓+石屋+院墙 —— 纵深据点, 屋顶/屋内=树爆庇护所 ──
 //    村社最先落位 (台地 FLATS 已平, placeAt 锚点此后无足迹冲突)
@@ -1256,7 +1304,7 @@ stoneWall(V.x+20,V.z+4,V.x+24,V.z+14); // 村东院墙
 for(const [wx,wz,wry] of WD.kallWrecks){
 if(freeSpot(wx,wz,3.5)&&propFree(wx,wz,3.4)) tankWreck(wx,wz,wry);
 }
-placeTower(-46,132); placeTower(52,196); // 谷缘哨塔 (两岸各一, 俯瞰谷底堑口)
+placeTower(-25.9,74.3); placeTower(29.3,110.3); // 谷缘哨塔 (两岸各一, 俯瞰谷底堑口) —— 2026-11-14 缩图批 ×0.5625 (距缩后谷线 17.9/20.7m, 在 15m 谷带外缘之外的平地)
 // 堑口标桩 (车辆堑口两端木箱+油桶; 步兵堑口只标桩) —— Bot/玩家读出过谷通道
 {
 // 2026-09-25 修: ramps 表是 {x0,z0,x1,z1,w} (00-config WD.*.ravine), **没有 x 字段** ——
@@ -1343,28 +1391,30 @@ fernClump(x,z);
 }
 }
 // ── ⑥ 防火带家具与毁损林相: 弹坑线 (炮火犁过的走廊) + 倒木 (卧姿掩体, 坦克可碾) ──
-crater(-60,5,2.2); crater(30,-9,2.0); crater(96,7,2.4); crater(-120,-7,2.0); crater(58,9,1.9);
-crater(-152,44,2.1); crater(-70,132,2.2); crater(24,92,2.0); crater(120,-52,2.3);
+crater(-33.8,2.8,2.2); crater(16.9,-5.1,2.0); crater(54,3.9,2.4); crater(-67.5,-3.9,2.0); crater(32.6,5.1,1.9);   // 2026-11-14 缩图批 ×0.5625 (防火带弹坑线随缩)
+crater(-85.5,24.8,2.1); crater(-39.4,74.3,2.2); crater(13.5,51.8,2.0); crater(67.5,-29.3,2.3);   // 2026-11-14 缩图批 ×0.5625
 for(let i=0;i<12;i++){
 const x=wr(-(MS2-40),MS2-40), z=wr(-(MS2-40),MS2-40);
 if(roadDist(x,z)<4||woodRavineDist(x,z)<WOOD.ravine.w+2||!freeSpot(x,z,1.6)) continue;
 fallenLog(x,z,wr(0,Math.PI));
 }
-// 谷底泥径倒木×4 (卡尔小径的林障)
-for(const [lx,lz] of [[-20,162],[24,159],[66,156],[-64,164]]){
+// 谷底泥径倒木×4 (卡尔小径的林障) —— 2026-11-14 缩图批 ×0.5625 (随缩后谷线)
+for(const [lx,lz] of [[-11.3,91.1],[13.5,89.4],[37.1,87.8],[-36,92.3]]){
 if(freeSpot(lx,lz,1.6)) fallenLog(lx,lz,wr(-0.5,0.5)+HPI);
 }
 // ── ⑦ 基地加建: 碉堡面向敌基+哨塔+拒马 (非可碾件一律距基地中心≥19m —— 坦克出生环带净空, 胡康口径) ──
+// 2026-11-14 缩图批 640→360 ×0.5625: 基地 (∓160.3) 距图缘仅 19.7m, 碉堡前出 +20 会推出图缘 (180.3)
+//   → 前出改 +13 (中心 173.3, 足迹外缘 176.8 ≤178; 距基心 hypot(13,16)=20.6 仍 ≥19m 净空), 拒马 +18→+15 (可碾件, 178.3→175.3 出界修正)
 CAMPAIGN.bases.forEach((b,t)=>{
 const sgn=b.x<0?1:-1;
-const pB=placeAt(b.x+sgn*20,b.z+16,0,7,6,{maxDh:1.2});
+const pB=placeAt(b.x+sgn*13,b.z+16,0,7,6,{maxDh:1.2});   // 2026-11-14 缩图批: 前出 20→13 (360 图图缘净空, ≥19m 环带保住)
 // ★ 2026-09-26 A8 修: 朝向符号写反 —— 碉堡的'前墙' = 局部 +z = face 方向 = (sin face, cos face),
 //   而 `sgn` 是从基地指向地图中心 (= 敌军来向) 的方向。旧式 atan2(**-sgn**·100,30) 让射击孔朝地图**外缘**
 //   (背对来敌, 整座碉堡等于一堵无孔墙)。只翻 x 项符号, 作者原来的 +30 (北偏) 保留。
 if(pB) bunker(pB.x,pB.z,Math.atan2(sgn*100,30));
 placeTower(b.x-sgn*10,b.z-18);
 const pT=placeAt(b.x+sgn*6,b.z-14,0.3,6,5,{maxDh:1.2}); if(pT) tent(pT.x,pT.z,pT.ry);
-if(freeSpot(b.x+sgn*18,b.z+8,1.5)) hedgehog(b.x+sgn*18,b.z+8);
+if(freeSpot(b.x+sgn*15,b.z+8,1.5)) hedgehog(b.x+sgn*15,b.z+8);   // 2026-11-14 缩图批: 18→15 (360 图图缘净空)
 });
 }
 // -- 断崖公路劫道 (canyon): 伏击山谷 —— 谷底走廊, 两侧山坡中高处为伏击带,
@@ -1432,7 +1482,7 @@ const dW=Math.abs(s.x1-b.x0), dE=Math.abs(s.x0-b.x1), dN=Math.abs(s.z1-b.z0), dS
 if(dW<best){best=dW;used='W';} if(dE<best){best=dE;used='E';}
 if(dN<best){best=dN;used='N';} if(dS<best){best=dS;used='S';}
 }
-const Lmin=core?20:16, Lmax=core?32:26;
+const Lmin=core?11:9, Lmax=core?18:15; // 2026-11-14 缩图批: 街块 59×79→33×44, 墙长/进深档 ×0.5625 缩到能放下 (建筑本体尺寸不变)
 const fd=core?(wr(0,1)<0.5?11:10):9;
 const edges=[
 ['N',b.x1-b.x0,(u)=>[b.x0+u, b.z0+fd/2+2.6, Math.PI]],
@@ -1442,14 +1492,14 @@ const edges=[
 for(const [side,len,at] of edges){
 if(side===used) continue;
 if(!core&&side!=='S'&&wr(0,1)<0.5) continue; // 城缘纵深带: 只南边必做, 其余半数
-let u=15+wr(0,4); // 角部内缩 15m: 让开 cityBlockRows 主排的转角楼 (柏林批次实证值)
-const uEnd=len-15-wr(0,4);
-while(u<uEnd-14){
+let u=8.5+wr(0,4); // 2026-11-14 缩图批: 角部内缩 15→8.5 (旧值: 让开 cityBlockRows 主排的转角楼, 柏林批次实证值; 缩后街块 33×44, 15m 内缩会吃满整条边=零街墙)
+const uEnd=len-8.5-wr(0,4);
+while(u<uEnd-8){
 const L=Math.min(wr(Lmin,Lmax),uEnd-u);
 if(L<Lmin*0.8) break;
 const [bx,bz,ry]=at(u+L/2);
-u+=L+wr(6,core?11:15)+2; // 推进量按计划长度 (与放置结果无关, 保证节奏稳定)
-if(streetDist(bx,bz)<fd/2+4.0) continue; // 锚点距街缘≥进深一半+4 (同 cityBlockRows)
+u+=L+wr(3.4,core?6.2:8.4)+2; // 推进量按计划长度 (与放置结果无关, 保证节奏稳定) —— 2026-11-14 缩图批 ×0.5625
+if(streetDist(bx,bz)<fd/2+3.6) continue; // 锚点距街缘≥进深一半+余量 (同 cityBlockRows) —— 2026-11-14 缩图批 4.0→3.6 (街块-街道间隙 2.5→1.4, 旧余量恰好卡线)
 let nearFlag=false;
 for(const fc of CAMPAIGN.flags){ if(Math.hypot(bx-fc.x,bz-fc.z)<Math.max(L,fd)*0.5+4.2){ nearFlag=true; break; } }
 if(nearFlag) continue;
@@ -1475,8 +1525,11 @@ for(const b of ct.blocks){
 const core=Math.abs((b.z0+b.z1)/2)<60;
 const n=core?12:6;
 for(let i=0;i<n;i++){
-const x=b.x0+12+wr(0,Math.max(1,b.x1-b.x0-24));
-const z=b.z0+12+wr(0,Math.max(1,b.z1-b.z0-24));
+// 2026-11-14 复核批: 窄块 (柏林⑤北 x9.4 / 莫斯科南中段 6.7) 的固定 +12 内缩会把散布推出块缘
+//   (实测 rubblePile 落进国会大厦西门 66.4,27.7) → 内缩随跨度自适应; 宽块 ix/iz=12 与旧值逐位一致 (零漂移)
+const _ix=Math.max(2,Math.min(12,(b.x1-b.x0)/2-2)), _iz=Math.max(2,Math.min(12,(b.z1-b.z0)/2-2));
+const x=b.x0+_ix+wr(0,Math.max(1,b.x1-b.x0-2*_ix));
+const z=b.z0+_iz+wr(0,Math.max(1,b.z1-b.z0-2*_iz));
 if(!freeSpot(x,z,2.2)) continue;
 const r=wr(0,1);
 if(r<0.30) rubblePile(x,z,wr(1.5,2.6));
@@ -1491,7 +1544,23 @@ else barrel(x,z);
 const nS=core?2:1;
 for(let k=0;k<nS;k++){
 if(!core&&wr(0,1)<0.5) continue;
-const x=b.x0+(b.x1-b.x0)/2+wr(-9,9), z=b.z0+(b.z1-b.z0)/2+wr(-11,11);
+// 2026-11-14 缩图批: 棚屋锚点贴"远街缘"9.5m (旧: 块心 ±9/±11 —— 缩块上与主排建筑包络相撞, strict 失败率 31/32;
+//   主排建筑包络 ≤15.6m/缘, 远缘锚 9.5m 距主排墙 ≥4.6m; 足迹含 margin 抖动后仍不出块缘 → 不入街矩形)
+let best=1e9, rs='W';
+for(const s of ct.streets){
+const dW=Math.abs(s.x1-b.x0), dE=Math.abs(s.x0-b.x1), dN=Math.abs(s.z1-b.z0), dS=Math.abs(s.z0-b.z1);
+if(dW<best){best=dW;rs='W';} if(dE<best){best=dE;rs='E';}
+if(dN<best){best=dN;rs='N';} if(dS<best){best=dS;rs='S';}
+}
+const spanP=(rs==='W'||rs==='E')?b.x1-b.x0:b.z1-b.z0;
+if(spanP<29) continue; // 垂直跨度 <29 (如⑤北 x9.4 / ③北 z15.3 / 莫斯科南中段窄条) 放不下 7×6 棚屋+双侧净距, 跳过
+const x=rs==='W'?b.x1-9.5+wr(-2,2):rs==='E'?b.x0+9.5+wr(-2,2):(b.x0+b.x1)/2+wr(-5,5);
+const z=rs==='N'?b.z1-9.5+wr(-2,2):rs==='S'?b.z0+9.5+wr(-2,2):(b.z0+b.z1)/2+wr(-5,5);
+// 2026-11-15: 街内禁落 (placeAt 之前门 —— placeAt 成功即登记足迹, 后门会留孤儿足迹) —— 广场类 street
+//   rect 会打进街块 (莫斯科教堂广场: 块北缘 z6.5 在广场带 5.6..19.1 之内), "块缘锚 9.5m"对这种块把棚屋
+//   摆进广场/街道 (旧版靠"卡在房子里"的残墙占位恰好挡住; 墙迁走后棚屋落到教堂旗上 1.6m)。
+//   阈值 8.5 = 棚屋出街需 6 (半对角 4.6+余量) + placeAt 抖动 ±2.5。
+if(streetDist(x,z)<8.5) continue;
 const p=placeAt(x,z,wr(0,TAU),7,6,{maxDh:1.2,strict:true});
 if(p) ruinedHouse(p.x,p.z,7,6,p.ry,MAT.brick,0.55);
 }
@@ -1503,35 +1572,40 @@ if(p) ruinedHouse(p.x,p.z,7,6,p.ry,MAT.brick,0.55);
 //   城缘带 x≈118 反坦克壕+龙牙+机枪堡 (公路缺口 z -16..16 是唯一装甲走廊)
 function layoutMoscow(){
 // ── 手摆地标先行登记足迹 (cityBlockRows/街墙自动避让) ──
-// 厂区地标 (红十月型厂房, 院区 yard 82×70): 厂房旗在北院, factorySpawn 西停车场 (00-config)
-redOctober(-60,-170,0);
+// 厂区地标 (红十月型厂房, 固定尺寸围墙群): 厂房旗在北院, factorySpawn 西停车场 (00-config)
+// 2026-11-14 缩图批 640→360: 围墙群 (含防护夹墙) 外接 85.1×81.6m 固定不变, 缩后 V2..V4 之间可用宽仅 79m 放不下;
+//   唯一无街矩形相交的放法=整体置于 H2 街以南 —— 纯缩锚 z=-95.6 会令围墙横穿 H2/V4, 故锚点南移 21.9m
+//   (超出 ≤10m 微移上限, 特此注明; 旧版关系"围墙南脸距 H2 南缘 3.7m"保持不变: -71.2 vs -67.5)。
+//   配套: yard 外扩 (00-config)、工厂旗/工厂Spawn/厂区北门道路/厂区北前战壕均随锚点重算。
+redOctober(-43,-117.5,0); // 2026-11-15 用户实机"坦克厂离苏军主基地太远": 锚点西移 9.2m (yard 随迁, V2 东缘+1.4m 为可滑极限), 旗距苏基 186→132m
 // 教堂 (纵深旗地标): 广场 street rect 北侧, 塔楼朝广场 —— placeAt 首试精确落位 (占用才抖动)
-{ const p=placeAt(-215,50,0,11.5,21.6,{oz:-2.55,maxDh:1.6}); if(p) buildChurch(p.x,p.z,p.ry); } // 复合体足迹 (P2-15)
-stoneWall(-232,46,-200,46); // 广场北缘残墙 (教堂围垣)
-// 东郊两村 (攻方出发阵地): 木屋群+仓房
-for(let i=0;i<4;i++){ const p=placeBuild(190,110,11,6,5); if(p) logCabin(p.x,p.z,p.ry); }
-{ const p=placeBuild(214,132,10,9,13); if(p) buildBarn(p.x,p.z,p.ry); }
-for(let i=0;i<4;i++){ const p=placeBuild(190,-100,11,6,5); if(p) logCabin(p.x,p.z,p.ry); }
-{ const p=placeBuild(214,-126,10,9,13); if(p) buildBarn(p.x,p.z,p.ry); }
-// ── 城网成排布楼 (640 大图间距 24m) ──
-cityBlockRows(true,24);
-// ── 编组站 (北线旗): 调车线×2 横贯货场 + 平板车 + 货栈 + 烧毁坦克 (轨穿旗心=道口语义, 同斯大林格勒铁道口) ──
-railLine(-10,158,90,158);
-railLine(-10,174,90,174);
-railFlatcar(14,158,HPI+0.02); railFlatcar(56,174,HPI-0.03); railFlatcar(-2,166,HPI+0.05);
-{ const p=placeAt(60,210,0.1,9.5,13.5,{maxDh:1.2}); if(p) buildBarn(p.x,p.z,p.ry); }
-tankWreck(78,140,0.4);
-ingotStack(56,198,0.3); crate(40,166,1.2,0.5); barrel(18,198);
-sandbagWall(12,146,4,0);
+{ const p=placeAt(-120.9,33.5,0,11.5,21.6,{oz:-2.55,maxDh:1.6}); if(p) buildChurch(p.x,p.z,p.ry); } // 复合体足迹 (P2-15) —— 2026-11-14 缩图批 z+5.4 (钟塔南脸清广场北缘 19.1 +1m, 尺寸不变)
+stoneWall(-130.5,20.5,-112.5,20.5); // 广场北缘残墙 (教堂围垣) —— 2026-11-15 用户实机"墙卡在房子里": 移到教堂足迹 (z≥22.7) 与广场铺装 (z≤19.1) 之间的空档, 不再穿大殿; 段落足迹已由 05b stoneWall 登记 ⇒ cityBlockRows 民房自动避让
+// 东郊两村 (攻方出发阵地): 木屋群+仓房 (锚点 ×0.5625, 散布半径不缩)
+for(let i=0;i<4;i++){ const p=placeBuild(106.9,61.9,11,6,5); if(p) logCabin(p.x,p.z,p.ry); }
+{ const p=placeBuild(120.4,74.3,10,9,13); if(p) buildBarn(p.x,p.z,p.ry); }
+for(let i=0;i<4;i++){ const p=placeBuild(106.9,-56.3,11,6,5); if(p) logCabin(p.x,p.z,p.ry); }
+{ const p=placeBuild(120.4,-70.9,10,9,13); if(p) buildBarn(p.x,p.z,p.ry); }
+// ── 城网成排布楼 (2026-11-14 缩图批: 恢复默认间距 16, 与缩后街块抵消, 每街块落屋数不变) ──
+cityBlockRows(true);
+// ── 编组站 (北线旗): 调车线×2 横贯货场 + 平板车 + 货栈 + 烧毁坦克 (轨贴旗心=道口语义, 同斯大林格勒铁道口) ──
+railLine(-5.6,88.9,50.6,88.9); // 2026-11-14 缩图批 ×0.5625
+railLine(-5.6,97.9,50.6,97.9);
+railFlatcar(7.9,88.9,HPI+0.02); railFlatcar(31.5,97.9,HPI-0.03); railFlatcar(-1.1,93.4,HPI+0.05);
+{ const p=placeAt(33.8,118.1,0.1,9.5,13.5,{maxDh:1.2}); if(p) buildBarn(p.x,p.z,p.ry); } // 编组站货栈 (锚点缩放, 尺寸不变; 旗距 23.8≤30)
+tankWreck(43.9,78.8,0.4);
+ingotStack(31.5,106.1,0.3); // 2026-11-14 缩图批: 纯缩值 (31.5,111.4) 落进货栈固定足迹 (footRect z0=110.35±2.5 抖动) —— 旧版"锚点北 12m"净距是固定尺寸关系, 不随缩 (旧 198 vs foot 202.25)
+crate(22.5,93.4,1.2,0.5); barrel(10.1,111.4);
+sandbagWall(6.8,82.1,4,0);
 // ── 主街家具: 电车轨全线 + 两节可进残骸 + 街灯 + 瓦砾带 ──
-tramRails(-254,92,0);
-tramWreck(-120,4.6,HPI+0.05);
-tramWreck(36,-4.6,HPI-0.04);
-for(let x=-250;x<=90;x+=34){
+tramRails(-142.9,51.8,0);
+tramWreck(-67.5,2.6,HPI+0.05);
+tramWreck(20.3,-2.6,HPI-0.04);
+for(let x=-140.6;x<=50.6;x+=19.1){ // 2026-11-14 缩图批: 区间/步距 ×0.5625, 灯侧摆 ±7.2 相对偏移不缩
 lampPost(x,7.2,HPI); lampPost(x+17,-7.2,-HPI);
 }
-debrisLine(-250,10.8,88,10.8,15);
-debrisLine(-250,-10.8,88,-10.8,15);
+debrisLine(-140.6,6.1,49.5,6.1,8.4);
+debrisLine(-140.6,-6.1,49.5,-6.1,8.4);
 // ── 街垒区 (中线旗): 主街三层钢轨街垒纵深 + 坦克残骸 + 铁丝网 (同柏林街垒区格局) ──
 const barricadeLine=(x0,z0,x1,z1,step)=>{
 const len=Math.hypot(x1-x0,z1-z0), ry=Math.atan2(x1-x0,z1-z0)+HPI;
@@ -1541,36 +1615,37 @@ const t=(i+0.5)/n;
 railBarricade(x0+(x1-x0)*t+wr(-0.8,0.8), z0+(z1-z0)*t+wr(-0.8,0.8), ry+wr(-0.12,0.12));
 }
 };
-barricadeLine(-30,5.5,30,5.5,9);
-barricadeLine(-30,-5.5,30,-5.5,9);
-barricadeLine(-14,14,14,14,9);
-tankWreck(-44,9,1.1); tankWreck(42,-10,-0.6);
-if(propFree(-8,18,1.5)) barbedWire(-8,18,0,4.2);   // 铁丝网封 V4 街 (旗圈外, 街内净位预检)
-if(propFree(-8,-18,1.5)) barbedWire(-8,-18,0,4.2);
-if(freeSpot(-36,12,1.5)) hedgehog(-36,12);
-if(freeSpot(34,12,1.5)) hedgehog(34,12);
-// ── 城缘反坦克防线 (x≈118 带, 公路缺口 z -16..16): 龙牙双排交错+机枪堡+沙袋段 —— 坦克只能走缺口 ──
+barricadeLine(-16.9,3.1,16.9,3.1,5.1); // 2026-11-14 缩图批 ×0.5625 (step 同缩保根数)
+barricadeLine(-16.9,-3.1,16.9,-3.1,5.1);
+barricadeLine(-7.9,7.9,7.9,7.9,5.1);
+tankWreck(-24.8,5.1,1.1); tankWreck(23.6,-5.6,-0.6);
+if(propFree(-4.5,10.1,1.5)) barbedWire(-4.5,10.1,0,4.2);   // 铁丝网封 V4 街 (旗圈外, 街内净位预检) —— 2026-11-14 缩图批 ×0.5625
+if(propFree(-4.5,-10.1,1.5)) barbedWire(-4.5,-10.1,0,4.2);
+if(freeSpot(-20.3,6.8,1.5)) hedgehog(-20.3,6.8);
+if(freeSpot(19.1,6.8,1.5)) hedgehog(19.1,6.8);
+// ── 城缘反坦克防线 (x≈66.4 带, 公路缺口 z -9..9): 龙牙双排交错+机枪堡+沙袋段 —— 坦克只能走缺口 ──
+// 2026-11-14 缩图批: 防线带 x/z ×0.5625, 龙牙间距 (step 6→3.375 / 12→6.75) 同缩 → 颗数不变; 龙牙/堡单件尺寸不变
 // ★2026-09-26 修 (穿模): 两座机枪堡的落位 (118,∓45)/(118,57) 就在龙牙线上, 而龙牙先落位、碉堡后建
 //   (bunker 不做占位预检) —— 实测每座堡足迹内嵌着 2 颗龙牙 (118,-46 / 118,54 / 118,60 / 121,60),
 //   炮堡里戳出水泥块。按碉堡足迹 (±3.8 × ±3.4) 跳过相邻站位: 堡体自己就是那一小段的封堵,
-//   龙牙线在视觉与"挡坦克"的语义上都不断。
-const nearBunker=(z)=>Math.abs(z+45)<6.5||Math.abs(z-57)<6.5;
-for(let z=-70;z<=-16;z+=6){ if(nearBunker(z)) continue; if(freeSpot(118,z,1.8)) dragonTooth(118,z,0); }
-for(let z=30;z<=84;z+=6){ if(nearBunker(z)) continue; if(freeSpot(118,z,1.8)) dragonTooth(118,z,0); }
-for(let z=-64;z<=-22;z+=12){ if(nearBunker(z)) continue; if(freeSpot(121,z,1.8)) dragonTooth(121,z,0); } // 第二排交错
-for(let z=36;z<=78;z+=12){ if(nearBunker(z)) continue; if(freeSpot(121,z,1.8)) dragonTooth(121,z,0); }
-bunker(118,-45,HPI); // 机枪堡面东 (封锁北段缺口侧翼)
-bunker(118,57,HPI);  // 南段
-sandbagWall(112,-28,4,HPI); sandbagWall(112,44,4,HPI); sandbagWall(112,72,4,HPI);
-crater(110,-10,2.2); crater(112,20,2.0); crater(126,-40,2.1); crater(124,64,2.0);
+//   龙牙线在视觉与"挡坦克"的语义上都不断。缩图后堡位 (66.4,∓25.3)/(66.4,32.1), skip 窗 6.5 不缩 (堡足迹固定)。
+const nearBunker=(z)=>Math.abs(z+25.3)<6.5||Math.abs(z-32.1)<6.5;
+for(let z=-39.375;z<=-9;z+=3.375){ if(nearBunker(z)) continue; if(freeSpot(66.4,z,1.8)) dragonTooth(66.4,z,0); }
+for(let z=16.875;z<=47.25;z+=3.375){ if(nearBunker(z)) continue; if(freeSpot(66.4,z,1.8)) dragonTooth(66.4,z,0); }
+for(let z=-36;z<=-12.4;z+=6.75){ if(nearBunker(z)) continue; if(freeSpot(68.1,z,1.8)) dragonTooth(68.1,z,0); } // 第二排交错
+for(let z=20.25;z<=43.875;z+=6.75){ if(nearBunker(z)) continue; if(freeSpot(68.1,z,1.8)) dragonTooth(68.1,z,0); }
+bunker(66.4,-25.3,HPI); // 机枪堡面东 (封锁北段缺口侧翼)
+bunker(66.4,32.1,HPI);  // 南段
+sandbagWall(63,-15.8,4,HPI); sandbagWall(63,24.8,4,HPI); sandbagWall(63,40.5,4,HPI); // 2026-11-14 缩图批 ×0.5625
+crater(61.9,-5.6,2.2); crater(63,11.3,2.0); crater(70.9,-22.5,2.1); crater(69.8,36,2.0);
 // ── 街块围合 + 庭院填充 (城网加密) ──
 moscowBlockWalls();
 moscowCourtyards();
 // ── 城市街景 + 守方(苏军)工事模板 ──
-cityDressing(true,{x0:-300,z0:-230,x1:100,z1:230});
+cityDressing(true,{x0:-168.8,z0:-129.4,x1:56.3,z1:129.4}); // 2026-11-14 缩图批 ×0.5625
 defWorks(); // 守方=苏军 (campaign.defSide=0, 00-config 单源)
-// ── 东郊野带 (城网之外): 枯树/弹坑/雪原散布 —— 主干道两侧的德军进攻轴 ──
-for(const [ox,oz] of [[246,140],[246,-160],[150,210],[140,-190],[260,40],[260,-40],[120,120],[120,-60]]){
+// ── 东郊野带 (城网之外): 枯树/弹坑/雪原散布 —— 主干道两侧的德军进攻轴 (2026-11-14 锚点 ×0.5625, 抖动 ±9 不缩) ──
+for(const [ox,oz] of [[138.4,78.8],[138.4,-90],[84.4,118.1],[78.8,-106.9],[146.3,22.5],[146.3,-22.5],[67.5,67.5],[67.5,-33.8]]){
 for(let i=0;i<4;i++){
 const x=ox+wr(-9,9), z=oz+wr(-9,9);
 if(roadDist(x,z)<7||cityUrban(x,z)||!freeSpot(x,z,1.2)) continue;
@@ -1579,11 +1654,11 @@ if(k<0.5) deadTree(x,z); else if(k<0.75) crater(x,z,wr(1.8,2.6)); else rubblePil
 }
 }
 // 东郊战斗遗留: 烧毁坦克/拒马 (公路缺口两侧)
-tankWreck(238,70,0.4); tankWreck(166,-58,-0.5);
-if(freeSpot(232,52,1.5)) hedgehog(232,52);
-if(freeSpot(150,-96,1.5)) hedgehog(150,-96);
+tankWreck(133.9,39.4,0.4); tankWreck(93.4,-32.6,-0.5);
+if(freeSpot(130.5,29.3,1.5)) hedgehog(130.5,29.3);
+if(freeSpot(84.4,-54,1.5)) hedgehog(84.4,-54);
 // 西缘带 (城网与苏军主基之间): 稀疏枯树+瓦砾
-for(const [ox,oz] of [[-282,60],[-284,-70],[-286,140],[-282,-150]]){
+for(const [ox,oz] of [[-158.6,33.8],[-159.8,-39.4],[-160.9,78.8],[-158.6,-84.4]]){
 for(let i=0;i<3;i++){
 const x=ox+wr(-8,8), z=oz+wr(-8,8);
 if(roadDist(x,z)<7||cityUrban(x,z)||!freeSpot(x,z,1.2)) continue;
@@ -2439,7 +2514,7 @@ const off=w+1.5;
 const bank=Math.min(heightAt(s.x+s.nx*off,s.z+s.nz*off,true),heightAt(s.x-s.nx*off,s.z-s.nz*off,true));
 const bed=heightAt(s.x,s.z,true);
 let wy;
-if(ice){ wy=bed+0.12; }else{ wy=bank-(d>6?d*0.55:(d>2?1.1:0.4)); } // 2026-09-12 巨桥改版: 深谷 (d>6) 水面随深度下沉 (d=14 → 岸下 7.7m, 巨桥凌空), 中深河保持 1.1; ford 滩心由 bed 抬升自动变浅 (clamp 到 bed+0.15)
+if(ice){ wy=bed+0.12; }else{ wy=bank-(d>6?d*0.44:(d>2?1.1:0.4)); } // 2026-09-12 巨桥改版: 深谷 (d>6) 水面随深度下沉, 中深河保持 1.1; ford 滩心由 bed 抬升自动变浅 (clamp 到 bed+0.15) —— 2026-11-15 用户实机"水位略低": 系数 0.55→0.44 (d=14 岸下 7.7→6.16m, 抬 1.5m; d>6 档全库仅胡康一家, 不波及他图)
 wy=clamp(wy,bed+0.15,bank-0.08);
 s.bank=bank; s.wy=wy;
 }

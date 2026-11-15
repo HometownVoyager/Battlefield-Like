@@ -33,6 +33,23 @@ function wxFireDmg(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.fireDmgMul!==u
 function wxBurnRate(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.burnRateMul!==undefined)?WX_CFG.burnRateMul:1.0; }
 function wxStormExt(){ return (typeof WX_CFG!=='undefined'&&WX_CFG.stormExtinguish)?WX_CFG.stormExtinguish:0; }
 
+// ═══ 2026-11-13 性能批 A: 火焰视觉粒子全局预算门 ═══
+// 结构事实 (读码确认): 树木 (updateBurningTrees)/生物 (updateCreaturesBurning)/持续火源 (FIRE_SOURCES)/
+// 燃烧格 (FIRE_ACTIVE) 的火粒子**全部**走 08-effects 的统一 spawnP 池 (PARTICLE_MAX 帽 + 挤旧回收),
+// 没有绕池的独立火焰链; 但"池帽"只限并发数 —— 火源多时火粒子以每帧几十发的速率挤占池子, 把非火特效
+// (弹着尘/血雾/水花) 挤出池, 且每可见 Sprite = 1 个透明 draw call。本门 = **每帧全局火粒子 spawn 预算**
+// (档位随 2026-11-08 applyFxQuality 同一旋钮 fxMaxIdx: 标准 26 / 精简 14 / 增强 44), 只拦视觉 spawnP 调用;
+// 火种伤害账 (fireDamageTick/燃烧DOT)、蔓延判定 (igniteCell/igniteArea/FHEAT)、灯池火源登记
+// (FIRE_SOURCES/FIRE_ACTIVE/SMOKES —— 08-effects updateFireLights 的候选来源) 一概不动。
+const FIRE_FX_BUDGET_STEPS=[26,14,44];
+let _fireFxN=0;   // 本帧已用预算 (updateFires 顶部清零; 24-main 每帧恰调一次 updateFires)
+function fireFxOK(){
+if(typeof window!=='undefined'&&window.FIRE_FX_UNLIMITED) return true;   // 回退旗 (A): 置真=关预算门, 火粒子回到无上限旧口径 (typeof 守卫: verify-fire 直调 04b 无 window)
+if(_fireFxN>=(FIRE_FX_BUDGET_STEPS[SETTINGS.fxMaxIdx]||26)) return false;
+_fireFxN++;
+return true;
+}
+
 // ===== 生物附着燃烧系统 (Ignite / Burning DOT) =====
 // ★2026-11-04b 免着火批 (用户实报: 调试模式/自由观战模式下玩家"不会被着火"):
 //   player.damage() 早对 spectator 免伤, 但燃烧链是另一套 —— igniteCreature 照样写 burnTimer,
@@ -58,13 +75,23 @@ function igniteCreature(s, attacker){
 }
 if(typeof window!=='undefined') window.igniteCreature=igniteCreature;
 
+let _burnFrame=0;
 function updateCreaturesBurning(dt){
   const dmgMul=wxFireDmg();
   if(typeof combatants==='undefined'||!combatants) return;
-  for(const s of combatants){
+  // ★2026-11-13 性能批 E: 生物燃烧账**隔帧交错**推进 —— 每个燃烧生物只在奇/偶帧之一真实结算, 两帧 dt 在
+  //   s._burnAcc 累积后一并推进 ⇒ burnTimer 烧减/burnTickT 0.4s 伤害跳/DPS 总量逐位不变 (dt 累积钟, 不用
+  //   setTimeout —— 沙箱 _bootstub 的 setTimeout 是 no-op), 节流的只是采样频率: 水面灭火判据与火焰粒子
+  //   spawn 的每生物频次减半 (粒子再过 A 的全局预算门)。按下标交错, 避免全体生物同帧结算的尖峰。
+  _burnFrame^=1;
+  for(let si=0;si<combatants.length;si++){
+    const s=combatants[si];
     // 观战者不着火 (2026-11-04b): 免疫期间顺手清掉残留账 (从活人切成观战的那条路径), 解冻/关闭调试后不带火
     if(s&&s.spectator&&(s.burnTimer||s.burnTickT)){ s.burnTimer=0; s.burnTickT=0; s.burnAttacker=null; }
     if(!creatureIgnitable(s)||!s.burnTimer||s.burnTimer<=0) continue;
+    s._burnAcc=(s._burnAcc||0)+dt;
+    if(!(typeof window!=='undefined'&&window.BURN_NO_STAGGER)&&((si+_burnFrame)&1)===0) continue;   // E: 本生物本帧跳过 (账已入 _burnAcc, 下帧一并推进); 回退旗 BURN_NO_STAGGER=旧每帧结算 (d2 仍走 _burnAcc 累积, DPS 等价)
+    const d2=s._burnAcc; s._burnAcc=0;
     if(typeof waterYAt==='function'){
       const wy=waterYAt(s.pos.x,s.pos.z);
       if(wy>-1e8&&(s.pos.y||0)<wy+0.3){
@@ -72,18 +99,18 @@ function updateCreaturesBurning(dt){
         continue;
       }
     }
-    s.burnTimer-=dt;
-    s.burnTickT=(s.burnTickT||0.4)-dt;
+    s.burnTimer-=d2;
+    s.burnTickT=(s.burnTickT||0.4)-d2;
     if(s.burnTickT<=0){
       s.burnTickT=0.4;
       const dmg=3.2*dmgMul;
       s.damage(dmg, s.burnAttacker||null, false);
       if(s.isPlayer&&typeof addTrauma==='function') addTrauma(0.08);
     }
-    if(typeof camera!=='undefined'&&camera&&Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<70&&Math.random()<0.55){
+    if(typeof camera!=='undefined'&&camera&&Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<70&&Math.random()<0.55&&fireFxOK()){
       const gy=s.pos.y||(typeof heightAt==='function'?heightAt(s.pos.x,s.pos.z):0);
       spawnP(PT.flash,s.pos.x+rand(-0.2,0.2),gy+rand(0.4,1.2),s.pos.z+rand(-0.2,0.2),rand(-0.15,0.15),rand(1.0,1.8),rand(-0.15,0.15),rand(0.3,0.5),1.0,rand(0.2,0.35),0.85,-1,true);
-      if(Math.random()<0.25) spawnP(PT.dark,s.pos.x,gy+rand(0.8,1.4),s.pos.z,rand(-0.1,0.1),rand(0.8,1.4),rand(-0.1,0.1),0.6,1.2,rand(0.8,1.3),0.4,0.08);
+      if(Math.random()<0.25&&fireFxOK()) spawnP(PT.dark,s.pos.x,gy+rand(0.8,1.4),s.pos.z,rand(-0.1,0.1),rand(0.8,1.4),rand(-0.1,0.1),0.6,1.2,rand(0.8,1.3),0.4,0.08);
     }
   }
 }
@@ -134,10 +161,14 @@ if(dx*dx+dz*dz<=(r+1.4)*(r+1.4)) igniteCell(ci,attacker,lifeCap);
 //   载具没了 (复位/移除) 则当场掐火。大舰子系统 (15h, 原 capAnchorWorld 定义处) 已于 2026-11-10
 //   随纯海战图下架归档, 本函数自那起**落籍本文件** (坦克/卡车/小艇燃烧 follow 仍在用)。
 // 锚点世界坐标 (烟囱口等局部锚): 用载具位姿手算 —— 不依赖 grp 的 matrixWorld (沙箱里 updateMatrixWorld 是桩)
+let _cawP=null; // capAnchorWorld 复用槽 (2026-11-11 性能批): 唯一调用点 updateFires 的 follow 重投影
+// 每帧每燃烧载具 1 次, 消费即时 (s.x/s.y/s.z 读后即弃)。懒建 V3 —— 顶层禁 new THREE (库纪律)。
 function capAnchorWorld(s,an){
+if(!_cawP) _cawP=V3();
 const c=Math.cos(s.yaw), n=Math.sin(s.yaw);
 const ax=an.position.x, az=an.position.z;
-return V3(s.pos.x+ax*c+az*n, s.pos.y+an.position.y, s.pos.z-ax*n+az*c);
+_cawP.set(s.pos.x+ax*c+az*n, s.pos.y+an.position.y, s.pos.z-ax*n+az*c);
+return _cawP;
 }
 function addFireSource(x,z,y,r,ttl,dps,attacker,follow){
 const s={x,z,y,r,ttl,dps,attacker:attacker||null,acc:0,smk:0,igniteT:0,follow:follow||null};
@@ -511,6 +542,23 @@ tr.fT=0; tr.iT=0;
 BURNING_TREES.push(tr);
 }
 }
+// ═══ 2026-11-13 性能批 D: 树批实例矩阵局部上传 (GPU 侧) ═══
+// 倒伏/沉入每帧写实例矩阵后整批 needsUpdate ⇒ 全量重传 (TREE_IM 数千实例 × 64B × 每树每帧, 多树并发
+// 燃烧期 = 每帧 K 次全量)。改按"本帧脏段"标脏: BufferAttribute.updateRange {offset,count} (r152 语义;
+// vendor lib/three.min.js 实证: 部分上传后 count 自动复位 -1 ⇒ 23b 世界还原/05b 建图的全量写回不残留
+// 旧区间, 正确性安全)。同帧多树写合并成外接区间 (区间外实例的数组数据本就正确, 顺带多传无害, 正确性优先),
+// 下一帧首写自动重置。帧戳 _imFr 在 updateFires 顶部自增 (24-main 每帧恰调一次, 树写全部发生在本帧其后;
+// dev/verify-fire 的直调顺序 updateBurningTrees→updateFires 同样成立: 窗口=相邻两次 updateFires 之间)。
+let _imFr=0;
+function fireImDirty(a,i0,n){
+if(typeof window!=='undefined'&&window.IM_FULL_UPLOAD){ a.needsUpdate=true; if(a.updateRange) a.updateRange.count=-1; return; }   // 回退旗 (D): 整批全量上传旧口径 (typeof 守卫同上)
+a.needsUpdate=true;
+if(a._upFr!==_imFr){ a._upFr=_imFr; a._upMin=i0; a._upMax=i0+n-1; }
+else{ if(i0<a._upMin)a._upMin=i0; if(i0+n-1>a._upMax)a._upMax=i0+n-1; }
+if(!a.updateRange) a.updateRange={offset:0,count:-1};
+a.updateRange.offset=a._upMin*16;
+a.updateRange.count=(a._upMax-a._upMin+1)*16;
+}
 function treeInstanceMatrices(tr,th,dy=0){
 fireTmp();
 // 绕根部水平轴旋转: 轴=(dz,0,-dx) —— 树冠倒向 (dx,dz); dy=整体垂直偏移 (残骸沉入地下用)
@@ -542,8 +590,8 @@ _fq2.premultiply(_fq);
 _fm.compose(_fp,_fq2,_fs.setScalar(tr.lf[i][2]));
 lm.setMatrixAt(tr.li+i,_fm);
 }
-im.instanceMatrix.needsUpdate=true;
-lm.instanceMatrix.needsUpdate=true;
+fireImDirty(im.instanceMatrix,tr.ti,1);
+if(!tr.charred) fireImDirty(lm.instanceMatrix,tr.li,3);
 // 燃烧树冠世界坐标 (火焰跟随)
 rot(0,3.6*tr.s,0,_fc); _fc.y+=dy;
 tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
@@ -584,9 +632,9 @@ im.setMatrixAt(ii,_fm);
 put(imT,tr.wi,tr.wt);
 for(let k=0;k<3;k++) put(imB,tr.wi*3+k,tr.wb[k]);
 if(!tr.charred) for(let k=0;k<19;k++) put(imL,tr.wi*19+k,tr.wl[k]);
-imT.instanceMatrix.needsUpdate=true;
-imB.instanceMatrix.needsUpdate=true;
-imL.instanceMatrix.needsUpdate=true;
+fireImDirty(imT.instanceMatrix,tr.wi,1);
+fireImDirty(imB.instanceMatrix,tr.wi*3,3);
+if(!tr.charred) fireImDirty(imL.instanceMatrix,tr.wi*19,19);
 // 燃烧树冠世界坐标 (火焰跟随): 冠带中点 (0,3.5,0) 绕根旋转 —— 与 treeInstanceMatrices 尾段同义
 const kc=axz*3.5*(1-cs);
 _fc.set(px-axz*3.5*sn+axx*kc, py+3.5*cs+dy, pz+axx*3.5*sn+axz*kc);
@@ -694,9 +742,9 @@ if(s.tr.kind==='willow'){
 WLOW_IM.trunks.setMatrixAt(s.tr.wi,_fm);
 for(let k2=0;k2<3;k2++) WLOW_IM.branches.setMatrixAt(s.tr.wi*3+k2,_fm);
 for(let k2=0;k2<19;k2++) WLOW_IM.leaves.setMatrixAt(s.tr.wi*19+k2,_fm);
-WLOW_IM.trunks.instanceMatrix.needsUpdate=true;
-WLOW_IM.branches.instanceMatrix.needsUpdate=true;
-WLOW_IM.leaves.instanceMatrix.needsUpdate=true;
+fireImDirty(WLOW_IM.trunks.instanceMatrix,s.tr.wi,1);
+fireImDirty(WLOW_IM.branches.instanceMatrix,s.tr.wi*3,3);
+fireImDirty(WLOW_IM.leaves.instanceMatrix,s.tr.wi*19,19);
 s.tr.dead=true;
 TREE_SINKS.splice(i,1);
 continue;
@@ -704,8 +752,8 @@ continue;
 TREE_IM.trunks.setMatrixAt(s.tr.ti,_fm);
 const lm=TREE_IM.leaves;
 for(let k2=0;k2<3;k2++) lm.setMatrixAt(s.tr.li+k2,_fm);
-TREE_IM.trunks.instanceMatrix.needsUpdate=true;
-lm.instanceMatrix.needsUpdate=true;
+fireImDirty(TREE_IM.trunks.instanceMatrix,s.tr.ti,1);
+fireImDirty(lm.instanceMatrix,s.tr.li,3);
 s.tr.dead=true;
 TREE_SINKS.splice(i,1);
 }
@@ -729,10 +777,10 @@ const crown=(tr.restCrown||(tr.fall?{x:tr.cx||tr.x,y:tr.cy||tr.g0+2,z:tr.cz||tr.
 tr.fT-=dt;
 if(tr.fT<=0){
 tr.fT=rand(0.1,0.2);
-if(crown.y!==undefined&&Math.hypot(crown.x-camera.position.x,crown.z-camera.position.z)<110){
+if(crown.y!==undefined&&Math.hypot(crown.x-camera.position.x,crown.z-camera.position.z)<110&&fireFxOK()){
 // 树冠火同样加大火头 (与地面植被火焰观感一致)
 spawnP(PT.flash,crown.x+rand(-0.8,0.8)*tr.s,crown.y+rand(-0.4,0.6),crown.z+rand(-0.8,0.8)*tr.s,rand(-0.4,0.4),rand(1.2,2.4),rand(-0.4,0.4),rand(1.0,1.7),1.7,rand(0.3,0.55),0.85,-1,true);
-if(Math.random()<0.4) spawnP(PT.dark,crown.x,crown.y+1,crown.z,rand(-0.4,0.4),rand(1,2),rand(-0.4,0.4),1.0,1.7,rand(1.2,2),0.5,0.1);
+if(Math.random()<0.4&&fireFxOK()) spawnP(PT.dark,crown.x,crown.y+1,crown.z,rand(-0.4,0.4),rand(1,2),rand(-0.4,0.4),1.0,1.7,rand(1.2,2),0.5,0.1);
 }
 }
 tr.iT-=dt;
@@ -751,7 +799,7 @@ treeFall(tr,Math.sin(a),Math.cos(a));
 	_fm.makeScale(0,0,0);
 	const lm2=WLOW_IM.leaves;
 	for(let k2=0;k2<19;k2++) lm2.setMatrixAt(tr.wi*19+k2,_fm);
-	lm2.instanceMatrix.needsUpdate=true;
+	fireImDirty(lm2.instanceMatrix,tr.wi*19,19);
 	WLOW_IM.trunks.setColorAt(tr.wi,_charCol);
 	WLOW_IM.branches.setColorAt(tr.wi*3,_charCol);
 	WLOW_IM.branches.setColorAt(tr.wi*3+1,_charCol);
@@ -761,7 +809,7 @@ treeFall(tr,Math.sin(a),Math.cos(a));
 	}else{
 	const lm=TREE_IM.leaves;
 	for(let k2=0;k2<3;k2++){ _fm.makeScale(0,0,0); lm.setMatrixAt(tr.li+k2,_fm); }
-	lm.instanceMatrix.needsUpdate=true;
+	fireImDirty(lm.instanceMatrix,tr.li,3);
 	TREE_IM.trunks.setColorAt(tr.ti,_charCol);
 	TREE_IM.trunks.instanceColor.needsUpdate=true;
 	}
@@ -856,6 +904,8 @@ const FFX=new Float32Array(FN*FN); // 每格火苗喷发计时
 let fireDmgT=0, fireFlameN=0;
 function updateFires(dt){
 fireFlameN=0;
+_fireFxN=0;          // A: 每帧火粒子预算重置
+_imFr++;             // D: 实例矩阵局部上传的帧戳 (树写全部发生在本帧其后)
 updateCreaturesBurning(dt); // 生物附着燃烧推进 (每帧)
 // ── 持续火源 ──
 for(let i=FIRE_SOURCES.length-1;i>=0;i--){
@@ -872,10 +922,10 @@ s.acc-=dt;
 if(s.acc<=0){
 s.acc=rand(0.08,0.16);
 const dCam=Math.hypot(s.x-camera.position.x,s.z-camera.position.z);
-if(dCam<130){
+if(dCam<130&&fireFxOK()){
 spawnP(PT.flash,s.x+rand(-0.8,0.8),s.y+rand(0,0.6),s.z+rand(-0.8,0.8),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1,true);
-if(Math.random()<0.5) spawnP(PT.dark,s.x+rand(-0.7,0.7),s.y+0.8,s.z+rand(-0.7,0.7),rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),0.9,1.7,rand(1.2,2.2),0.55,0.1);
-if(SETTINGS.quality>=1&&Math.random()<0.5) spawnP(PT.spark,s.x,s.y+0.4,s.z,rand(-2,2),rand(2,5),rand(-2,2),0.1,-0.03,rand(0.3,0.7),1,4,true);
+if(Math.random()<0.5&&fireFxOK()) spawnP(PT.dark,s.x+rand(-0.7,0.7),s.y+0.8,s.z+rand(-0.7,0.7),rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),0.9,1.7,rand(1.2,2.2),0.55,0.1);
+if(SETTINGS.quality>=1&&Math.random()<0.5&&fireFxOK()) spawnP(PT.spark,s.x,s.y+0.4,s.z,rand(-2,2),rand(2,5),rand(-2,2),0.1,-0.03,rand(0.3,0.7),1,4,true);
 }
 }
 s.igniteT-=dt;
@@ -930,9 +980,9 @@ fireFlameN++;
 const gy=heightAt(cx,cz);
 const inten=clamp(FUEL[ci],0.25,1);
 // 2026-09-02 植被火焰加大: 火头体积/蹿升速度/滞空提升, 燃烧观感更醒目 (与燃烧弹缩短存在时间配合)
-spawnP(PT.flash,cx+rand(-1.1,1.1),gy+rand(0.15,0.8),cz+rand(-1.1,1.1),rand(-0.3,0.3),rand(1.2,2.6)*inten+0.6,rand(-0.3,0.3),rand(0.8,1.3)*inten+0.4,1.6,rand(0.32,0.55),0.85,-1.4,true);
-if(Math.random()<0.3) spawnP(PT.dark,cx,gy+0.8,cz+rand(-0.5,0.5),rand(-0.3,0.3),rand(0.8,1.6),rand(-0.3,0.3),0.95,1.7,rand(1,1.8),0.45,0.1);
-else if(SETTINGS.quality>=1&&Math.random()<0.35) spawnP(PT.spark,cx,gy+0.4,cz,rand(-1.5,1.5),rand(1.5,4),rand(-1.5,1.5),0.09,-0.03,rand(0.25,0.55),1,3,true);
+if(fireFxOK()) spawnP(PT.flash,cx+rand(-1.1,1.1),gy+rand(0.15,0.8),cz+rand(-1.1,1.1),rand(-0.3,0.3),rand(1.2,2.6)*inten+0.6,rand(-0.3,0.3),rand(0.8,1.3)*inten+0.4,1.6,rand(0.32,0.55),0.85,-1.4,true);
+if(Math.random()<0.3&&fireFxOK()) spawnP(PT.dark,cx,gy+0.8,cz+rand(-0.5,0.5),rand(-0.3,0.3),rand(0.8,1.6),rand(-0.3,0.3),0.95,1.7,rand(1,1.8),0.45,0.1);
+else if(SETTINGS.quality>=1&&Math.random()<0.35&&fireFxOK()) spawnP(PT.spark,cx,gy+0.4,cz,rand(-1.5,1.5),rand(1.5,4),rand(-1.5,1.5),0.09,-0.03,rand(0.25,0.55),1,3,true);
 }
 }
 // 烧尽 (情况 B): 清格 + 该格植被视觉变为焦黑色并沉入 (草丛/庄稼/灌木/枯树等)
@@ -1032,7 +1082,7 @@ if(!fireDmg) continue;
 s.damage(fireDmg,att,false);
 igniteCreature(s,att);
 if(s.isPlayer){ addTrauma(0.12); }
-if(Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<80){
+if(Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<80&&fireFxOK()){
 const gy=s.pos.y||heightAt(s.pos.x,s.pos.z);
 spawnP(PT.flash,s.pos.x+rand(-0.25,0.25),gy+rand(0.5,1.3),s.pos.z+rand(-0.25,0.25),rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),rand(0.4,0.7),1.2,rand(0.25,0.4),0.9,-1,true);
 }

@@ -543,6 +543,7 @@ if(tickets[player.team]>0) return;               // 还有票 ⇒ 只能走正�
 if(player.specWant===true) return;               // 调试观战待生效 ⇒ 那条路走部署入场, 不进视模式
 player.specWant=null;
 player.spectator=true; player.specView=true;
+killcamEnd(); // killcam 随自由观战收账 (2026-11-12 死亡视角批: specView 相机分支优先, 滤镜/角标不能残留)
 player.specViewHost=null; player.specViewSpd=14;
 player.vel.set(0,0,0); player.flying=false; player.flyAero=false; player.onGround=false; player.chute=false;
 // 相机种子位 = 当前机位 (死亡航拍镜头), 朝向从相机前向反推 —— 进场不跳变。
@@ -638,6 +639,12 @@ showScorePop(t('附身视角 · {0}',b.name?t(b.name):'Bot'));
 // (脱离时还原), **视角武器模型换成宿主的主武器** (updateViewModel 由 24-main 独立驱动, 不吃本体
 // 冻结门 ⇒ 附身中照常待机晃动; 只读不开火), 再次 Q = 直接换目标 (原观察位保留)。
 function dbgSpecPossess(b){
+// ★2026-11-13 批: 座位/巡飞弹态禁附身 (第二道门; 键位侧 19-input 已加同款负条件, 这里兜直调路径) ——
+// specViewPossess 会把 VM.root 翻回可见 + specViewTick 把本体钉到宿主, 与座位相机/巡飞弹 TV 相机同帧叠加。
+if(player.onVehicle||player.onNaval||player.loiter){
+if(typeof showScorePop==='function') showScorePop(t2('驾驶/巡飞弹中无法附身'));
+return;
+}
 if(!player.specViewHost){
 player._svSaved={x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch,tp:!!player.thirdPerson,pr:!!player.prone,cr:!!player.crouch,vmKey:VM.key};
 player.thirdPerson=false;
@@ -1069,7 +1076,7 @@ if(p.streakBuff) speed*=p.streakBuff.speedMul; // 连杀增益: 步兵移速提�
 // ★2026-09-26E (审计 27): 游泳态**不吃这 0.38 的减速** —— 旧版游泳也吃 ⇒ 泳速 2.0×0.38=0.76 <
 //   冲移 1.5 m/s ⇒ 落水后逆流游不动 = "落水必死、无自救手段"。现在激流的代价落在持续伤害上
 //   (RAPIDS_DMG 8/s, 12.5s 致死 ⇒ 想横渡照样死), 而游速 2.0 > 冲移 1.5 ⇒ 掉进河里能游回岸。
-if(inRiverChannel(p.pos.x,p.pos.z)&&!swimming) speed*=0.38;
+if(inRiverWater(p.pos.x,p.pos.z)&&!swimming) speed*=0.38; // 2026-11-15 水态门: 干岸坡(脚在水面之上)不再吃激流减速
 // (旧版此处还有 `else if(inShallowChannel) speed*=0.55` 的浅水减速 —— 2026-09-26E 起由水态三档
 //  统一承担 (wade ×0.55 / wet ×0.9), 不再叠加: 旧版在冰河/湿沙上叠出 ×0.55×0.9 的双罚,
 //  且站在河心线附近的**干岸**上也吃 ×0.55 —— 那是 2026-09-18 水态机之前的口径残留)
@@ -1098,7 +1105,7 @@ p.vel.y=0;
 p.pos.y=dampF(p.pos.y,targetY,7,dt);
 p.onGround=false;
 }else{
-if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }   // cmdLock: 指挥地图定身不跳 (2026-10-26); !p._ltSpace: 巡飞弹操控退场吞边沿 —— 按住空格进操控再退场, 松开前不起跳 (2026-11-07 实机反馈批 "在地上不停跳跃")
+if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }   // cmdLock: 指挥地图定身不跳 (2026-10-26); !p._ltSpace: 巡飞弹操控退场吞边沿 —— 按住空格进操控再退场, 松开前不起跳 (2026-11-07 实机反馈批 "在地上不停跳跃"); !headGrazeBlocked: 头顶贴天花板禁跳 (2026-11-13b 批③ "护栏站上再跳穿墙出去" —— 起跳第一帧冲出 HEAD_GRAZE 擦碰带后楼板横推弹射穿墙, 与 04-collision 天花板态兜底双保险)
 p.vel.y-=13*dt;
 }
 if(p.chute){
@@ -1161,8 +1168,9 @@ p.oxy=Math.min(1,(p.oxy===undefined?1:p.oxy)+dt/OXY_REFILL);
 p._drownAcc=0;
 }
 }
-// 激流: 持续受创并被冲向下游 (桥面不受影响)
-if(inRiverChannel(p.pos.x,p.pos.z)){
+// 激流: 持续受创并被冲向下游 (桥面不受影响; 2026-11-15 水态门: inRiverChannel 是纯平面判据,
+// 岸坡高出水面数米也在带内 ⇒ "没下水也吃激流伤+警告"实机反馈 —— 只对真被水淹没的点生效)
+if(inRiverWater(p.pos.x,p.pos.z)){
 p.damage(RAPIDS_DMG*dt,null,false);
 const rd=riverDirAt(p.pos.x,p.pos.z);
 if(rd){ p.pos.x+=rd[0]*1.5*dt; p.pos.z+=rd[1]*1.5*dt; }
@@ -1255,7 +1263,7 @@ v.y=Math.max(v.y+9,13);
 v.addScaledVector(p.vel,0.3);
 const m=new THREE.Mesh(nadeGeoAT,vmMats.gun);
 m.castShadow=true; m.position.copy(oS); scene.add(m);
-nades.push({m,pos:oS.clone().addScaledVector(dir,0.7),vel:v,fuse:9,thrower:p,team:p.team,spin:V3(4,0,1),bounces:0,mortar:true,src:'迫击炮'}); // src: 弹体自带标签 (本分支与火箭筒同样提前 return 走不到 _src 行, 2026-09-29)
+nades.push({m,pos:oS.clone().addScaledVector(dir,0.7),vel:v,fuse:9,thrower:p,team:(p.spectator?-1:p.team),spin:V3(4,0,1),bounces:0,mortar:true,src:'迫击炮'}); // src: 弹体自带标签 (本分支与火箭筒同样提前 return 走不到 _src 行, 2026-09-29); ★2026-11-13 观战出手即中立 (team=-1, 与 throwNade 同规)
 spawnP(PT.dark,oS.x+dir.x,oS.y+dir.y,oS.z+dir.z,dir.x,1.5,dir.z,0.6,2,0.7,0.6,0.3);
 return;
 }
@@ -1832,11 +1840,14 @@ av.legR.knee.rotation.x=dampF(av.legR.knee.rotation.x,1.05*dip,12,dt);
 }else if(prone){
 // ★ 2026-09-26 A2: 与 Bot **同式**的脚落地面反解 (旧版是 -0.04/0.08 那套写死角, 实测鞋底悬空 +0.05/+0.07m,
 // 爬行时一腿抬到 +0.19m; Bot 侧早在 A#10 审计② 就改成反解了, 玩家这条路径当时漏跟 → 两套数值长期漂移)。
-// 高度基准取**当前**骨盆高 (仍在 dampF 过渡中), 脚关节目标 ~0.11m, 爬行时前后交替 ±0.16m, kneeUp=true。
+// 高度基准取**当前**骨盆高 (仍在 dampF 过渡中), 脚关节目标 ~0.11m, 爬行时前后交替 ±0.16m。
+// ★2026-11-13b 批⑤: kneeUp true→false —— 旧档 (膝峰朝上) 把膝顶到髋线之上、小腿向脚尖方向折 = 反关节
+// 超伸, 用户实报"趴下移动膝盖向上弯曲, 和正常人类相反"; pole 翻下后膝落回贴地段 (0.09 级, 交替极值
+// 贴地 0.007 不入地), 膝弯转成人类屈曲方向 (脚跟朝臀), 数学对账见 dev/verify-proneknee-20261113.js。
 const hpNow=av.pelvis.position.y;
 const cr=clamp(sp/1.2,0,1)*0.35;
-const LL=legIKPose(hpNow,0.11+Math.max(0,S)*0.13*cr,-0.92+S*0.16*cr,true);
-const RR=legIKPose(hpNow,0.11+Math.max(0,-S)*0.13*cr,-0.92-S*0.16*cr,true);
+const LL=legIKPose(hpNow,0.11+Math.max(0,S)*0.13*cr,-0.92+S*0.16*cr,false);
+const RR=legIKPose(hpNow,0.11+Math.max(0,-S)*0.13*cr,-0.92-S*0.16*cr,false);
 av.legL.hip.rotation.x=dampF(av.legL.hip.rotation.x,LL.hip-pp,10,dt);
 av.legR.hip.rotation.x=dampF(av.legR.hip.rotation.x,RR.hip-pp,10,dt);
 av.legL.knee.rotation.x=dampF(av.legL.knee.rotation.x,LL.knee,10,dt);
@@ -2133,6 +2144,13 @@ const out=V3(c.pos.x+sn*ringZ, (c.pos.y||0)+deckY+h, c.pos.z+cs*ringZ);
 out.src=src;
 return out;
 }
+// killcam 收账单源 (2026-11-12 死亡视角批): 清 player.killcam 账 + 还原画布滤镜 (2026-11-11 性能批口径: 平时恒 'none') + 藏 #kcInd 角标。
+// 消费点: showDeploy (死亡进部署页) / endMatch (结算) / enterSpecView (自由观战) / killcam 分支目标失效自愈。
+function killcamEnd(){
+if(typeof player!=='undefined'&&player) player.killcam=null;
+try{ renderer.domElement.style.filter='none'; }catch(e){}
+const kci=document.getElementById('kcInd'); if(kci) kci.classList.add('hidden');
+}
 function updateCamera(dt){
 const p=player;
 // 玩家本体 (第三人称) 每帧先藏起来, 只有下面的第三人称分支会重新显示 ——
@@ -2193,6 +2211,37 @@ camera.position.copy(p.pos);
 camera.fov=dampF(camera.fov,74,10,dt);
 camera.updateProjectionMatrix();
 return;
+}
+// 死亡时视角=击杀者 (2026-11-12 批 killcam, sf_deathcam): specView 让位之后、死亡环绕之前。
+// 目标账由 18-game die() 解析 (player.killcam={src,t})。前 0.5s 落回原死亡环绕 (保持"现状视角"),
+// 到点**剪切**到击杀者背后追尾机位 (首帧直摆, 之后 dampF 跟随), 画布滤镜只在窗口内临时挂
+// (平时恒 'none' 的 2026-11-11 性能批口径不破坏, killcamEnd 单源还原) + #kcInd 角标。
+// 目标失效/结算 ⇒ 就地收账回退原镜头。纯观察: 不写 player 姿态字段, 不附身 (与 U 键第三人称/specView/specRide 皆不同)。
+if(p.killcam){
+p.killcam.t=(p.killcam.t||0)+dt;
+const kcb=p.killcam.src;
+if(!kcb||!kcb.pos||matchOver){ killcamEnd(); }
+else if(p.killcam.t>=0.5){
+// 击杀者注视点: 活体=眼位 (姿态同 14-bots eyePos 口径); 阵亡=ragdoll 骨盆 (9s 内 killcam 窗口必在); 兜底=原地
+const kpos=kcb.alive?V3(kcb.pos.x,kcb.pos.y+(kcb.prone?0.5:kcb.crouch?1.15:1.62),kcb.pos.z):((kcb.ragdolled&&kcb.ragdolled.parts&&kcb.ragdolled.parts[0])?V3(kcb.ragdolled.parts[0].body.position.x,kcb.ragdolled.parts[0].body.position.y+0.8,kcb.ragdolled.parts[0].body.position.z):V3(kcb.pos.x,kcb.pos.y+0.9,kcb.pos.z));
+const kdir=V3(-Math.sin(kcb.yaw||0),0.5,-Math.cos(kcb.yaw||0)).normalize(); // 机位=击杀者背后 (Bot 前向=(sin,cos) 与载具同系, 相机取反向 = 系差 π, 同 20-player:752 注)
+const khit=raycastWorld(V3(kpos.x,kpos.y+0.4,kpos.z),kdir,6.0);
+const kdd=khit?Math.max(1.5,khit.dist-0.4):6.0; // 背后遮挡收近 (同死亡环绕 2205 口径)
+let kx=kpos.x+kdir.x*kdd, ky=kpos.y+0.4+kdir.y*kdd, kz=kpos.z+kdir.z*kdd;
+const kgh=heightAt(kx,kz);
+const kwy=(typeof waterYAt==='function')?waterYAt(kx,kz):-1e9;
+const kgmin=Math.max(kgh,(kwy>-1e8)?kwy:-1e9)+0.35; // 地面/水面下限 (同死亡环绕 2210 海战审计口径)
+if(ky<kgmin) ky=kgmin;
+if(!p.killcam.init){ camera.position.set(kx,ky,kz); p.killcam.init=true; } // 剪切进 killcam (CoD 式硬切)
+else { camera.position.x=dampF(camera.position.x,kx,7,dt); camera.position.y=dampF(camera.position.y,ky,7,dt); camera.position.z=dampF(camera.position.z,kz,7,dt); }
+camera.lookAt(kpos.x,kpos.y+0.25,kpos.z);
+camera.fov=dampF(camera.fov,60,5,dt);
+camera.updateProjectionMatrix();
+if(renderer.domElement.style.filter!=='grayscale(0.62) contrast(1.05) brightness(0.92)') renderer.domElement.style.filter='grayscale(0.62) contrast(1.05) brightness(0.92)'; // killcam 滤镜: 部分去饱和 (全灰过苛), 窗口结束由 killcamEnd 还原 'none' —— 2026-11-13 卡顿批: 恒定串改判等单次写 (旧版每帧重写 style.filter = 死亡期卡顿病灶)
+const kci=document.getElementById('kcInd'); if(kci&&kci.classList.contains('hidden')) kci.classList.remove('hidden');   // 2026-11-13 卡顿批: 幂等守卫(已有 hidden 类才需要 remove)
+return;
+}
+// t<0.5: 保持现状视角 —— 落回下方死亡环绕/航拍
 }
 // 死亡镜头: 环绕注视布娃娃尸体约2秒
 if(p.deathCamT>0){

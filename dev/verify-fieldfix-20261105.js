@@ -327,11 +327,11 @@ assert('T5 顺序钉: loiter 分支内 (hide 之后 / chute 之前) 有 updatePl
 const htmlScripts=(html.match(/<script src="js\/[^"?]*\?v=[^"]*"/g)||[]).map(x=>x.replace(/<script src="/,'').replace(/"$/,'').split('?')[0]);
 assert('T5 载入清单 = index.html 实载脚本逐条同序 ('+FILES.length+' 个)',JSON.stringify(htmlScripts)===JSON.stringify(FILES));
 // 版本戳
-const stamps=[...html.matchAll(/20261111a/g)];
+const stamps=[...html.matchAll(/20261115b/g)];
 const stampSet=[...new Set(stamps.map(m=>m[0]))];
-assert('T5 版本戳 20261111a 全量唯一 (2026-11-10 海战移除批判据跟码)',stamps.length>40&&stampSet.length===1&&html.includes("window.__sfStyleVer='20261111a';"),'×'+stamps.length);
+assert('T5 版本戳 20261115b 全量唯一 (2026-11-10 海战移除批判据跟码)',stamps.length>40&&stampSet.length===1&&html.includes("window.__sfStyleVer='20261115b';"),'×'+stamps.length);
 const gf=fs.readFileSync(path.join(root,'dev/_game_files.txt'),'utf8');
-assert('T5 dev/_game_files.txt 同步升戳',gf.includes('v=20261111a')&&!gf.includes('20261105a'));
+assert('T5 dev/_game_files.txt 同步升戳',gf.includes('v=20261115b')&&!gf.includes('20261105a'));
 }
 
 t1(); t2(); t3(); t5();

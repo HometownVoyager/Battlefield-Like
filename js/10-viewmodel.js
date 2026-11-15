@@ -121,7 +121,18 @@ return g;
 // 默认握位单源 (2026-10-05 五裁定): 换弹收尾要把手**精确**放回默认握位 (否则松 override 那一帧手弹跳),
 //   因此默认握位不能再只存在于 positionHands 的字面量里 —— 这里出数据, positionHands 只做应用。
 //   side: 0=右手 1=左手。
+// C (2026-11-13): 默认握位缓存 —— positionHands 每帧两次调用, 旧版每次新建 {pos:V3,rot:V3}。
+// 返回值全库只读 (position.copy/.set 与 vmPalmOf 读字段, 无写入者), 按 key+side 缓存单例 ⇒ 常态每帧 -6 个分配。
+const _vmHandCache={};
 function vmHandDefault(key,side){
+const ck=key+(side?'|L':'|R');
+let c=_vmHandCache[ck];
+if(c) return c;
+c=vmHandDefaultBuild(key,side);
+_vmHandCache[ck]=c;
+return c;
+}
+function vmHandDefaultBuild(key,side){
 const d=WPN_DEFS[key]||{};
 if(d.rocket) return side? {pos:V3(-0.089,-0.099,-0.16),rot:V3(0.5,-0.95,0)} : {pos:V3(0.01,-0.09,0.16),rot:V3(0.35,0,0)};
 if(d.pistol) return side? {pos:V3(-0.103,-0.09,0.082),rot:V3(0.5,-0.6,0)} : {pos:V3(0.015,-0.06,0.13),rot:V3(0.25,0,0)};
@@ -157,24 +168,27 @@ return m;
 function pulse(t,a,b,c){ return t<b? ss(t,a,b) : 1-ss(t,b,c); }
 // 关键帧插值 (2026-10-05 四裁定): 换弹的夹/手路径改锚点表驱动 —— [k,x,y,z,rz] 五元组, 段内
 // smoothstep, 终点后保持末锚。多层嵌套 lerp (首版) 已证明写不干净, 废。
+// C (2026-11-13): 结果写 _vmKf 槽 —— 同帧至多一个换弹分支在跑, c 在当帧被匣位 set 与 vmHandGun 消费完。
 function kfPose(kf,k){
-if(k<=kf[0][0]){ const a=kf[0]; return {x:a[1],y:a[2],z:a[3],rz:a[4]}; }
+if(k<=kf[0][0]){ const a=kf[0]; _vmKf.x=a[1]; _vmKf.y=a[2]; _vmKf.z=a[3]; _vmKf.rz=a[4]; return _vmKf; }
 for(let i=0;i<kf.length-1;i++){ const a=kf[i],b=kf[i+1];
 if(k<=b[0]){ const t=ss(k,a[0],b[0]);
-return {x:lerp(a[1],b[1],t),y:lerp(a[2],b[2],t),z:lerp(a[3],b[3],t),rz:lerp(a[4],b[4],t)}; } }
-const a=kf[kf.length-1]; return {x:a[1],y:a[2],z:a[3],rz:a[4]};
+_vmKf.x=lerp(a[1],b[1],t); _vmKf.y=lerp(a[2],b[2],t); _vmKf.z=lerp(a[3],b[3],t); _vmKf.rz=lerp(a[4],b[4],t); return _vmKf; } }
+const a=kf[kf.length-1]; _vmKf.x=a[1]; _vmKf.y=a[2]; _vmKf.z=a[3]; _vmKf.rz=a[4]; return _vmKf;
 }
 // 换弹手部姿态 (2026-10-05 五裁定): 掌位 (cam = 道具位 + 抓握偏移) → 中途位 (mid) → 默认握位的两段收束,
 //   腕位一律由掌位反解 —— **换弹里手的位置不再手调**。两段收束是必须的: 受弹口 (机匣正上方) 与默认握位
 //   (枪托握把) 之间直线回程会犁过枪托跟实拍 (旧版实测 2.1cm 穿模)。
 //   b0=出手段 (默认握位→抓握位), b1/b2=收手段 (→mid→默认)。
-function vmHoldPose(cam,mid,rotA,rotM,b0,b1,b2,key,side){
+function vmHoldPose(camx,camy,camz,mid,rAx,rAy,rAz,rotM,b0,b1,b2,key,side){
 const def=vmHandDefault(key,side), dp=vmPalmOf(def.pos,def.rot);
-const px=lerp(lerp(cam.x,mid.x,b1),dp.x,b2), py=lerp(lerp(cam.y,mid.y,b1),dp.y,b2), pz=lerp(lerp(cam.z,mid.z,b1),dp.z,b2);
-const rx=lerp(lerp(rotA.x,rotM.x,b1),def.rot.x,b2), ry=lerp(lerp(rotA.y,rotM.y,b1),def.rot.y,b2), rz=lerp(lerp(rotA.z,rotM.z,b1),def.rot.z,b2);
+const px=lerp(lerp(camx,mid.x,b1),dp.x,b2), py=lerp(lerp(camy,mid.y,b1),dp.y,b2), pz=lerp(lerp(camz,mid.z,b1),dp.z,b2);
+const rx=lerp(lerp(rAx,rotM.x,b1),def.rot.x,b2), ry=lerp(lerp(rAy,rotM.y,b1),def.rot.y,b2), rz=lerp(lerp(rAz,rotM.z,b1),def.rot.z,b2);
 const qx=lerp(dp.x,px,b0), qy=lerp(dp.y,py,b0), qz=lerp(dp.z,pz,b0);
 const sx=lerp(def.rot.x,rx,b0), sy=lerp(def.rot.y,ry,b0), sz=lerp(def.rot.z,rz,b0);
-return {pos:vmWristFor(qx,qy,qz,sx,sy,sz), rot:V3(sx,sy,sz)};
+_ovR.pos.copy(vmWristFor(qx,qy,qz,sx,sy,sz));
+_ovR.rot.set(sx,sy,sz);
+return _ovR;
 }
 let vmSndFlags={};
 function vmResetSndFlags(){ vmSndFlags={}; } // owner 接口 (2026-09-06 B7b/P2-14: 06-engineering 跨文件写改经此)
@@ -195,19 +209,32 @@ function vmPlayOnce(id,fn){ if(!vmSndFlags[id]){ vmSndFlags[id]=true; fn(); } }
 // 在枪上方 18cm 处原地隐、下置弹匣在枪内隐) —— 换匣的"旧匣拿走/新匣拿来"由这条撑起。
 const VM_PALM_L=0.09;                 // 掌心点里程 (buildArms 皮肤段中心 local (0,0,-0.09)); 改手模必同步
 const VM_BAG=[V3(0.205,-0.150,0.20), V3(-0.235,-0.135,0.16)]; // 携行位 [右手侧, 左手侧] (画面外, 弹袋向)
+// ── 2026-11-13 性能批 C: updateViewModel 逐帧分配槽位化 ──
+// 动作分支 (换弹/举雷/包扎/近战/锤击/取件) 与 positionHands 每帧新建 override {pos:V3,rot:V3}×2 与
+// 关键帧/掌位/腕位对象 —— 全部当帧即时消费 (position.copy / .set 只读字段), 换模块级槽位零分配。
+// 跨帧持有者 (g.mag.userData.p0/r0 造型位、VM.ads) 仍走 clone/新建, 不换槽。槽位入参快照纪律:
+// 槽写入前先把入参读完 (set/copy 的实参求值先于写回), 同帧多槽共存按消费序分离 (_ovL/_ovR 不互踩)。
+const _ovL={pos:V3(0,0,0),rot:V3(0,0,0)};   // 左手 override 槽 (vmHandLFix/vmHandLSnap 左手路径写)
+const _ovR={pos:V3(0,0,0),rot:V3(0,0,0)};   // 右手 override 槽 (vmHoldPose/各动作分支写)
+const _vmRot={x:0,y:0,z:0};                 // vmRotXyzV 结果槽 (返回即读)
+const _vmPalm={x:0,y:0,z:0};                // vmPalmOf 结果槽 (vmHoldPose 的 dp / 包扎 rPalm)
+const _vmWr=V3(0,0,0);                      // vmWristFor 结果槽 (返回即读)
+const _vmKf={x:0,y:0,z:0,rz:0};             // kfPose 关键帧槽 (当帧消费: 匣位 set + vmHandGun 跟随)
 function vmRotXyzV(x,y,z,rx,ry,rz){   // three 默认 XYZ 欧拉序: R = Rx·Ry·Rz
 const cx=Math.cos(rx),sx=Math.sin(rx),cy=Math.cos(ry),sy=Math.sin(ry),cz=Math.cos(rz),sz=Math.sin(rz);
 const ax=x*cz-y*sz, ay=x*sz+y*cz, az=z;
 const bx=ax*cy+az*sy, bz=-ax*sy+az*cy;
-return {x:bx, y:ay*cx-bz*sx, z:ay*sx+bz*cx};
+_vmRot.x=bx; _vmRot.y=ay*cx-bz*sx; _vmRot.z=ay*sx+bz*cx;
+return _vmRot;
 }
 function vmWristFor(px,py,pz,rx,ry,rz){  // 腕位 = 掌位 - R·(0,0,-VM_PALM_L)  (掌位 → 腕位反解)
 const o=vmRotXyzV(0,0,-VM_PALM_L,rx,ry,rz);
-return V3(px-o.x,py-o.y,pz-o.z);
+return _vmWr.set(px-o.x,py-o.y,pz-o.z);
 }
 function vmPalmOf(pos,rot){              // 腕位 → 掌位 (默认握位的掌点, 供收尾融回)
 const o=vmRotXyzV(0,0,-VM_PALM_L,rot.x,rot.y,rot.z);
-return {x:pos.x+o.x, y:pos.y+o.y, z:pos.z+o.z};
+_vmPalm.x=pos.x+o.x; _vmPalm.y=pos.y+o.y; _vmPalm.z=pos.z+o.z;
+return _vmPalm;
 }
 // ── 左臂位姿单源 (2026-10-12 用户实报"很多动作左臂仍太靠右, 看起来像长在右肩上") ───────────────
 // 病根: buildArms (09-weapons) 的臂组**枢轴在手腕**, 袖管沿手局部 +z (镜头方向) 后延 0.25m。
@@ -228,13 +255,14 @@ const VM_LARM_Y=-0.95;   // 左臂袖管朝向基准 (负 = 画面左下); 单�
 function vmHandLSnap(pose){
 const r=pose.rot;
 if(r.y<=-0.6&&r.y>=-1.05) return pose;                // 已在带内: 原样返回 (默认握位/端点零漂移)
-const palm=vmPalmOf(pose.pos,V3(r.x,r.y||0,r.z||0));
-const nr=V3(r.x,VM_LARM_Y,r.z||0);
-return {pos:vmWristFor(palm.x,palm.y,palm.z,nr.x,nr.y,nr.z), rot:nr};
+const palm=vmPalmOf(pose.pos,r);                      // C: vmPalmOf 只读字段, rot 直传免 V3 (槽 _vmPalm)
+const nr=_ovL.rot; nr.set(r.x,VM_LARM_Y,r.z||0);      // C: 归位角写 _ovL.rot (pose 可能即 _ovL, 实参已先读完)
+_ovL.pos.copy(vmWristFor(palm.x,palm.y,palm.z,nr.x,nr.y,nr.z));
+return _ovL;
 }
-function vmHandLFix(pos,rot){                 // 旧版字面量 (腕位 + 旧姿态角) → 修正位姿
-const r0=rot||V3(0,0,0);
-return vmHandLSnap({pos:pos, rot:V3(r0.x,r0.y||0,r0.z||0)});   // 非法带 (含 0/正角) 由单源拉回基准
+function vmHandLFix(px,py,pz,rx,ry,rz){       // 旧版字面量 (腕位 + 旧姿态角) → 修正位姿 (C: 标量入参+槽)
+_ovL.pos.set(px,py,pz); _ovL.rot.set(rx,ry||0,rz||0);
+return vmHandLSnap(_ovL);                     // 非法带 (含 0/正角) 由单源拉回基准 (带内原样返回 _ovL)
 }
 // ── 动作态终结单源 (2026-10-12 用户实报"读条被打断后模型滞留") ───────────────────────────────
 // 病根: 外部 (20-player 的 F 交互/19-input 的按键) 直接改 VM.state 就把当前动作**丢掉**了, 而手上件与
@@ -439,7 +467,7 @@ VM.knifeM.visible=true; g.gun.visible=false;
 VM.arms.L.visible=false;
 VM.knifeM.position.set(0.1-k*0.22,-0.12+k*0.06,-0.25-k*0.28);
 VM.knifeM.rotation.set(-k*1.1,0.3-k*0.5,k*0.4);
-handROverride={pos:V3(0.1-k*0.2,-0.16+k*0.05,-0.1-k*0.2),rot:V3(0.4-k*1.0,0,0)};
+handROverride=_ovR, handROverride.pos.set(0.1-k*0.2,-0.16+k*0.05,-0.1-k*0.2), handROverride.rot.set(0.4-k*1.0,0,0);
 if(nt>0.3) vmPlayOnce('meleeHit',()=>player.doMeleeHit());
 if(nt>=1){ VM.state='idle'; VM.knifeM.visible=false; g.gun.visible=true; VM.arms.L.visible=true; vmSndFlags={}; }
 }
@@ -461,14 +489,14 @@ else if(player.nadeHeld){
 const k=ss(Math.min(t,0.3),0,0.3);
 shown.position.set(0.14,-0.12+k*0.04,-0.3+k*0.05);
 shown.rotation.set(0,0,0);
-handROverride={pos:V3(0.13,-0.15,-0.22),rot:V3(0.5,0,0)};
-handLOverride=vmHandLFix(V3(-0.1,-0.2,-0.2),V3(0.3,0,0));
+handROverride=_ovR, handROverride.pos.set(0.13,-0.15,-0.22), handROverride.rot.set(0.5,0,0);
+handLOverride=vmHandLFix(-0.1,-0.2,-0.2,0.3,0,0);
 } else {
 const k=nt;
 const back=pulse(k,0,0.3,0.55), fwd=ss(k,0.35,0.6);
 shown.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.55);
 shown.visible=k<0.55;
-handROverride={pos:V3(0.13+back*0.08,-0.12+back*0.14-fwd*0.18,-0.18+back*0.2-fwd*0.35),rot:V3(0.5+back*1.2-fwd*2.2,0,0)};
+handROverride=_ovR, handROverride.pos.set(0.13+back*0.08,-0.12+back*0.14-fwd*0.18,-0.18+back*0.2-fwd*0.35), handROverride.rot.set(0.5+back*1.2-fwd*2.2,0,0);
 if(k>0.5&&!VM.mirrorHost) vmPlayOnce('nadeThrow',()=>player.releaseNade());   // ★2026-11-03: 镜像态不出真雷 (真附身举雷镜像只走哨兵段, 本行是兜底保险)
 if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; }
 }
@@ -497,12 +525,12 @@ if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags=
       if(k>0.46) vmPlayOnce('rrk2',()=>AudioSys.metalSlide(0.18,0.16,600,1200));
       if(k>0.66) vmPlayOnce('rrk3',()=>AudioSys.click(1100,0.3,0.05));
       if(k>0.78) vmPlayOnce('rrk4',()=>AudioSys.metalSlide(0.2,0.08,1400,700));
-      handLOverride=vmHandLFix(V3(-0.04,-0.09,-0.24),V3(0.42,0,0));
+      handLOverride=vmHandLFix(-0.04,-0.09,-0.24,0.42,0,0);
       if(k<0.74&&rr){
-        handROverride={pos:V3(rr.position.x+0.015,rr.position.y-0.05,rr.position.z+0.13),rot:V3(-0.5+fetch*0.15-insert*0.25,0,0)};
+        handROverride=_ovR, handROverride.pos.set(rr.position.x+0.015,rr.position.y-0.05,rr.position.z+0.13), handROverride.rot.set(-0.5+fetch*0.15-insert*0.25,0,0);
       } else {
         const pat=Math.max(0,Math.sin((k-0.74)*24))*ss(k,0.74,0.78)*(1-ss(k,0.88,0.96));
-        handROverride={pos:V3(0.05,-0.04-pat*0.05,-0.1),rot:V3(-0.2-pat*0.5,0,0)};
+        handROverride=_ovR, handROverride.pos.set(0.05,-0.04-pat*0.05,-0.1), handROverride.rot.set(-0.2-pat*0.5,0,0);
       }
     } else if(d.enbloc){
 // ── M1 加兰德漏夹 (2026-10-05 六裁定 = 拳位改下后方 + 真受弹口) ──────────────────
@@ -645,8 +673,8 @@ if(g.mag&&p0){
 g.mag.position.set(p0.x, p0.y-out*0.18-(1-inn)*(k>0.36?0.18:0), p0.z+out*0.03);
 g.mag.visible=!(k>0.34&&k<0.4);
 }
-if(k>0.06&&k<0.7) handLOverride=vmHandLFix(V3(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13),V3(0.5,0,0));
-else if(k>=0.7&&k<0.97) handLOverride=vmHandLFix(V3(0.02,-0.02,-0.05),V3(0.3,0,0));
+if(k>0.06&&k<0.7) handLOverride=vmHandLFix(-0.01,-0.1-out*0.15-(1-inn)*(k>0.36?0.15:0),-0.13,0.5,0,0);
+else if(k>=0.7&&k<0.97) handLOverride=vmHandLFix(0.02,-0.02,-0.05,0.3,0,0);
 } else if(g.mag&&mp0){
 // 机枪/反坦克枪/弹盘/漏斗/BAR (非 vmLegacy): 走 vmMagCarry 搬运单源 —— 提/抽出榫 → 带到携行位
 // (画面外, 到此隐) → 新匣自携行位返场 → 送到匣口外 → 推入入榫。旧版把"显/隐"做在枪身上
@@ -683,7 +711,7 @@ rx+=pulse(k,0,0.3,1)*0.14; ry+=pulse(k,0,0.3,1)*0.1;
 oy-=pulse(k,0,0.3,1)*0.02;
 if(g.boltHandle) g.boltHandle.rotation.z=pulse(k,0.02,0.2,0.85)*-1.1;
 if(g.bolt) g.bolt.position.z=(g.bolt.userData.z0??0.05)+pulse(k,0.18,0.4,0.72)*0.09;
-handROverride={pos:V3(0.05,-0.01+pulse(k,0.02,0.25,0.9)*0.05,0.08),rot:V3(-0.3,0,0)};
+handROverride=_ovR, handROverride.pos.set(0.05,-0.01+pulse(k,0.02,0.25,0.9)*0.05,0.08), handROverride.rot.set(-0.3,0,0);
 if(k>0.05) vmPlayOnce('b1',()=>AudioSys.click(1100,0.2,0.03));
 if(k>0.3) vmPlayOnce('b2',()=>{
 AudioSys.metalSlide(0.22,0.08,900,1600);
@@ -703,7 +731,7 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       // 左前臂横抬在胸前, 右手持绷带卷绕臂缠绕
       // ★2026-10-12 阶段一修左臂朝向: vmHandLFix 把左袖管甩向画面左下 (肩端 x=-0.267, 掌心逐位反解);
       //   整体位姿微调中置 (x: -0.125 → -0.08), 让双手互动处于准星中下方黄金分割区。
-      const armL=vmHandLFix(V3(-0.08,-0.035,-0.05),V3(0.12,1.2,0.08));
+      const armL=vmHandLFix(-0.08,-0.035,-0.05,0.12,1.2,0.08);
       const armPos=armL.pos, armRotY=armL.rot.y;
       handLOverride=armL;
       // 前臂轴向与缠绕平面
@@ -736,9 +764,9 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       //   后延导致肩端落点在 x=-0.082 (甚至比手腕更偏左), 右臂立在视野中左侧。
       //   修法 = 右臂袖管指向右下 (rotY 动态保持在 +0.66~+0.82 正角带, 袖管向画面右下延伸, 肩端
       //   世界 x=+0.16~+0.28m 稳居右下角); 掌心严格贴合绷带卷反解腕位 (vmWristFor), 保证手不滑脱。
-      const rRot=V3(0.28+Math.cos(phi)*0.20, 0.74+Math.sin(phi)*0.08, -0.06);
-      const rPalm=V3(VM.bandageM.position.x+0.016, VM.bandageM.position.y-0.015, VM.bandageM.position.z+0.010);
-      handROverride={pos:vmWristFor(rPalm.x,rPalm.y,rPalm.z,rRot.x,rRot.y,rRot.z), rot:rRot};
+      const rRot=_ovR.rot; rRot.set(0.28+Math.cos(phi)*0.20, 0.74+Math.sin(phi)*0.08, -0.06);
+      const rPalm=_vmPalm; rPalm.x=VM.bandageM.position.x+0.016; rPalm.y=VM.bandageM.position.y-0.015; rPalm.z=VM.bandageM.position.z+0.010;
+      handROverride=_ovR; _ovR.pos.copy(vmWristFor(rPalm.x,rPalm.y,rPalm.z,rRot.x,rRot.y,rRot.z));
       if(bk>0.12) vmPlayOnce('bd1',()=>AudioSys.metalSlide(0.07,0.14,320,520));
       if(bk>0.4) vmPlayOnce('bd2',()=>AudioSys.metalSlide(0.06,0.13,300,480));
       if(bk>0.66) vmPlayOnce('bd3',()=>AudioSys.metalSlide(0.06,0.13,340,500));
@@ -759,9 +787,9 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       const reach=pulse(gk,0,0.3,0.55), back=ss(gk,0.35,0.6);
       VM.grabitemM.position.set(0.02,-0.02-reach*0.15+back*0.05,-0.14-reach*0.25+back*0.15);
       VM.grabitemM.rotation.set(0,gk*1.6,0);
-      handROverride={pos:V3(0.1+reach*0.1,-0.06-reach*0.14,-0.1-reach*0.28+back*0.2),rot:V3(0.3+reach*0.8,0,0)};
+      handROverride=_ovR, handROverride.pos.set(0.1+reach*0.1,-0.06-reach*0.14,-0.1-reach*0.28+back*0.2), handROverride.rot.set(0.3+reach*0.8,0,0);
       // 左手扶箱沿 (补给箱取弹药/从运输车补给/取绷带同一条 grab 分支): 掌位与旧字面量逐位相同, 只把袖管摆到左下
-      handLOverride=vmHandLFix(V3(-0.04,-0.08,-0.22),V3(0.4,0,0));
+      handLOverride=vmHandLFix(-0.04,-0.08,-0.22,0.4,0,0);
       if(gk>0.45) vmPlayOnce('grab',()=>player.doGrabResolve());
       if(nt>=1){ VM.state='idle'; g.gun.visible=true; VM.grabitemM.visible=false; vmSndFlags={}; }
     }
@@ -779,8 +807,8 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       const th=-0.2-swing*0.6;
       VM.hammerM.position.set(0.09,-0.16+swing*0.2,-0.22);
       VM.hammerM.rotation.set(-0.35-swing*1.25,0.3,0.15);
-      handROverride={pos:V3(0.09,-0.17+0.25*(Math.sin(th)-Math.sin(-0.2)),-0.14-0.25*(Math.cos(th)-Math.cos(-0.2))),rot:V3(th,0.15,0)};
-      handLOverride=vmHandLFix(V3(-0.06,-0.13,-0.2),V3(0.35,0,0));
+      handROverride=_ovR, handROverride.pos.set(0.09,-0.17+0.25*(Math.sin(th)-Math.sin(-0.2)),-0.14-0.25*(Math.cos(th)-Math.cos(-0.2))), handROverride.rot.set(th,0.15,0);
+      handLOverride=vmHandLFix(-0.06,-0.13,-0.2,0.35,0,0);
       rx+=0.12; oy-=0.02;
       const ki=Math.floor(VM.stateT*2.6);
       if(cyc>0.72) vmPlayOnce('bk'+ki,()=>{
@@ -820,8 +848,8 @@ VM.root.rotation.set(rx,ry,rz);
 //   在 inner 里没有自身变换, 枪局部 = 手部覆盖的同一坐标系, 别再叠根位移)。
 if(vmHandGun){
 const hg=vmHandGun; vmHandGun=null;
-const hp=vmHoldPose({x:hg.c.x+hg.off[0], y:hg.c.y+hg.off[1], z:hg.c.z+hg.off[2]},
-hg.mid, V3(rx+hg.grip[0], ry+hg.grip[1], rz+hg.grip[2]), hg.midRot, hg.b0,hg.b1,hg.b2, VM.key, hg.side);
+const hp=vmHoldPose(hg.c.x+hg.off[0], hg.c.y+hg.off[1], hg.c.z+hg.off[2],
+hg.mid, rx+hg.grip[0], ry+hg.grip[1], rz+hg.grip[2], hg.midRot, hg.b0,hg.b1,hg.b2, VM.key, hg.side);
 if(hg.side) handLOverride=vmHandLSnap(hp); else handROverride=hp;   // 左手持匣也过袖管归位 (BAR/百式实测同款)
 }
 positionHands(VM.key);

@@ -21,6 +21,7 @@ const ACH_DEFS=[
  {id:'better_yiling',name:'比夷陵之火还要好', desc:'在一局游戏中破坏掉全部可以破坏掉的东西（包括可燃物）', kind:'destroy_all'},
  {id:'seppuku',      name:'自刎归天',        desc:'自己被自己的手雷炸死一次', kind:'self_nade'},
  {id:'bear_king',    name:'狗熊岭之王',      desc:'在一局游戏中令全部的树倒下', kind:'fell_all'},
+ {id:'likud_pilot',  name:'利库德集团最好的飞行员', desc:'驾驶飞机撞上建筑而死亡一次', kind:'plane_bld'},   // 2026-11-14 用户令: 事件制成就 (同自刎归天族), 判据见 achEvaluate 死亡边沿块
 ];
 
 // ── 存档 (R6): localStorage['sf_ach'] = {id: 时间戳ms}, recLoad 范式 (损坏视为空) ──
@@ -71,6 +72,7 @@ function achBuildCensus(){
  }catch(e){ ACH_CENSUS=null; return; }
  ACH_CENSUS={cells:cells,trees:trees,flora:flora,structs:structs,props:props,barrels:barrels,wires:wireList};
  _achLastDeaths=(typeof player!=='undefined'&&player)?(player.deaths||0):-1;
+ if(typeof player!=='undefined'&&player) player._achPilotBld=false;   // 撞楼普查字段不跨局携带 (与 deaths 基线同步重建, 2026-11-14)
 }
 
 // ── 解锁 (R6): 永久落盘 + 弹框。双保险防"不停跳出来" (2026-11-11 实机反馈批):
@@ -146,6 +148,11 @@ function achEvaluate(){
  if(typeof player!=='undefined'&&player&&(player.deaths||0)!==_achLastDeaths){
   _achLastDeaths=(player.deaths||0);
   if(player.alive===false&&player.killerName==='你'&&player.killerSrc==='手雷') achUnlock('seppuku');
+  // 利库德集团最好的飞行员 (2026-11-14 用户令): 驾机撞楼而亡 —— 与自刎归天同族的事件制成就,
+  // 轮询账摸不到"楼面撞击"这个瞬间事件, 由 16-aircraft die() 撞楼档在玩家死亡链上盖 _achPilotBld
+  // 普查字段 (同一同步链: 字段与 deaths++ 同帧), 死亡边沿读到即解锁。读后即清: 陈旧字段不得让
+  // 之后任何一次普通死亡误触发; startMatch 建账时同步清 (不跨局携带)。
+  if(player._achPilotBld){ player._achPilotBld=false; achUnlock('likud_pilot'); }
  }
  // 可燃格烧尽: FUEL<=0.05 (与蔓延门的"无燃料"判据同阈值; 燃烧弹 FEXPIRE 强制清零路径同样命中)
  let burnCells=0;

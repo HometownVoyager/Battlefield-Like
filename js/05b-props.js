@@ -289,7 +289,21 @@ world.add(trunks); world.add(branches); world.add(leaves);
 WLOW_IM={trunks,branches,leaves};
 WILL_BATCH.length=0;
 }
-const craterGeo=new THREE.CircleGeometry(1,20);
+// 自适应贴地弹坑 (★2026-11-15 弹坑批重写; 二轮修用户实报"只露几条黑弧"): 旧版是"共享单位圆盘 +
+//   按中心法线整体倾斜" —— 平地没问题, 坡地上盘面只在中点与坡面相切, 凸处边缘悬空、凹处边缘插土。
+//   一轮修改成"每顶点采 heightAt"后仍有病: **渲染地形不是 heightAt** —— 是 terrainRenderY 在节点格
+//   上的线性三角化弦面, 曲率段上比解析值高出 0.3~1.2m (地基裙摆 ramp/壕沟/道路下切), 弹坑整片沉在
+//   渲染面之下只剩唇缘露出来。二轮修: 顶点改采 **terrainSurfaceY (03-terrain 单源: 与渲染网格同格
+//   同对角的弦面高度)** —— 与 GPU 画出来的地面逐点重合, 任何位置都完整可见。
+// 绕向: 索引序 (a,a+1,b)/(a+1,b+1,b) 保证法线朝上 (一轮修的 (a,b,a+1) 是朝下的, 从上看全被背面
+//   剔除 —— 交叉积 (B−A)×(C−A) 手算可证)。
+// 剖面说明 (为什么只抬唇缘、不做真凹陷): 弹坑是透明不写深度的贴花, 而地形不透明先画 —— 同一
+//   (x,z) 列上任何低于渲染面的顶点都会被更近的地面像素 depth-test 掉, polygonOffset 的几个 LSB
+//   补不了 0.1m 级几何差。所以几何侧只做**抬升唇缘脊** (0.8r 处 +0.13r, 外沿 1.18r 熔回地面) 提供
+//   真实浮雕感, "坑"的凹陷感由焦土径向贴图 (TEX.crater) 承担。
+// 贴花契约不动: craterMat + surfaceLane(m,'decal') (verify-surf ② 钉 polygonOffset/units/renderOrder/
+//   depthWrite/transparent), runtimeCraters 36 上限 shift 账不动 (verify-worldrestore);
+//   explosionFX 的 crater(...) 调用点原样 (verify-airfix 钉 verbatim)。
 const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false,map:TEX.crater}); // 2026-09-06 B8/P3-12: 焦土径向贴图取代纯色
 const runtimeCraters=[];
 function crater(x,z,r,runtime=false){
@@ -297,8 +311,30 @@ if(!runtime){
 if(!propFree(x,z,r*0.5+0.6)) return;
 propTake(x,z,r*0.5+0.6);
 }
-const m=mesh(craterGeo,craterMat,x,heightAt(x,z)+0.03,z,0,false,true);
-m.quaternion.setFromUnitVectors(_FWD,terrNormal(x,z)); m.scale.setScalar(r);
+const surfY=(typeof terrainSurfaceY==='function')?terrainSurfaceY:heightAt;
+const SEG=24,RINGS=4,R2=r*1.18;   // 网格外沿 1.18r: 唇缘峰在 0.8r, 外沿熔回地形
+const verts=[],uvs=[],idx=[];
+for(let ri=0;ri<=RINGS;ri++){
+const rr=ri/RINGS*R2;
+for(let si=0;si<=SEG;si++){
+const a=si/SEG*TAU;
+const wx=x+Math.cos(a)*rr, wz=z+Math.sin(a)*rr;
+const dd=Math.hypot(wx-x,wz-z)/r;                       // 0..1.18
+const edgeFade=clamp((R2/r-dd)/(R2/r-1),0,1);           // 1.0→1.18r 线性熔回 0
+const lip=0.13*r*Math.exp(-Math.pow((dd-0.8)*3.0,2));   // 唇缘脊 (峰 0.8r 处 +0.13r)
+verts.push(wx-x, surfY(wx,wz)+0.05+lip*edgeFade, wz-z);
+uvs.push(0.5+0.5*Math.cos(a)*(rr/R2), 0.5+0.5*Math.sin(a)*(rr/R2));
+}
+}
+for(let ri=0;ri<RINGS;ri++)for(let si=0;si<SEG;si++){
+const a=ri*(SEG+1)+si,b=a+SEG+1;
+idx.push(a,a+1,b,a+1,b+1,b);   // 法线朝上绕向 (二轮修)
+}
+const geo=new THREE.BufferGeometry();
+geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+geo.setIndex(idx); geo.computeVertexNormals();
+const m=mesh(geo,craterMat,x,0,z);
 // 贴花登记 (2026-09-27 深度分层): 弹坑是**贴**在地形面上的图 —— 走 decal 档 (深度偏移 + renderOrder 同源)。
 // 为什么必须登记: 地形网格局部起伏 ±2cm, 100m 处 1 LSB≈7.5mm ⇒ 弹坑与地形面的深度差只剩 1~3 LSB,
 // 远景弹坑会随相机闪 (旧版这里的裸 renderOrder=1 只管透明件之间的顺序, 管不了深度测试)。
@@ -308,8 +344,6 @@ runtimeCraters.push(m);
 if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); world.remove(old); }
 return;
 }
-const rim=mesh(new THREE.TorusGeometry(r*0.8,r*0.14,6,14),MAT_CRATER_RIM,x,heightAt(x,z)+0.05,z);
-rim.quaternion.setFromUnitVectors(_FWD,terrNormal(x,z));
 }
 function crate(x,z,s=1,ry=0){
 if(!propFree(x,z,1.05*s)) return;
@@ -341,6 +375,7 @@ propTake(x,z,1.6);
 const fit=groundFit(x,z,ry,len/steps/2+0.05,0.3);
 const m=solidBox(MAT.stone,Math.min(4.2,len/steps+0.16),h,0.55,x,fit.y+h/2,z,ry,null,true); // crush: 坦克可碾
 applyFit(m,ry,fit);
+B_FOOT.push(Object.assign(footRect(x,z,ry,Math.min(4.2,len/steps+0.16),0.55,0.4),{sw:1})); // 2026-11-15: 段落登记建筑足迹 (sw=1: 残墙可有意横街 —— 柏林街6十字墙为 11-14 批既定口径, 布局探针街侵断言豁免 sw 足迹) —— 旧版只 propTake (道具互斥), 后落位的 cityBlockRows/庭院民房会骑墙 (莫斯科实机"墙卡在房子里"根因)
 }
 coverPoints.push({x:(x1+x2)/2+dz/len*1.4,z:(z1+z2)/2-dx/len*1.4});
 coverPoints.push({x:(x1+x2)/2-dz/len*1.4,z:(z1+z2)/2+dx/len*1.4});

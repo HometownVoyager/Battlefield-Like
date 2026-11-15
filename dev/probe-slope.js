@@ -157,12 +157,13 @@ return ctx;
 //         ⑤步兵走坡道 → 可下到沟底; ⑥NAV 塬面↔西川基地 寻路存在且不穿沟壁带 (只走坡道/沟底);
 //         ⑦斜向抵崖 (非正对) → 沿等高线滑移不卡死。
 // ─────────────────────────────────────────────
-// 西沟 z=0 断面中线 x (折线段 (-181,20)→(-173,-90) 线性内插) 与坡道 R1
+// 西沟 z=0 断面中线 x (折线段线性内插) 与坡道 R1
+// 锚已随 2026-11-14 缩图批更新 (640→360 ×0.5625) + 语义不变: 顶点取缩后 LOESS.gullies 西沟段 (-101.8,11.3)→(-97.3,-50.6)
 const GEOFN=`(()=>{
 const segD=(px,pz,ax,az,bx,bz)=>{const abx=bx-ax,abz=bz-az;const t=Math.max(0,Math.min(1,((px-ax)*abx+(pz-az)*abz)/(abx*abx+abz*abz||1)));return Math.hypot(px-(ax+abx*t),pz-(az+abz*t));};
 const R1=LOESS.ramps[0];
 return {
-  cl:(-181)+((0-20)/(-90-20))*((-173)-(-181)),
+  cl:(-101.8)+((10-11.3)/(-50.6-11.3))*((-97.3)-(-101.8)),
   rampDist:(x,z)=>segD(x,z,R1.x0,R1.z0,R1.x1,R1.z1),
   R1, W:LOESS.w, GB:LOESS.bottom, TE:LOESS.talus, D:LOESS.d
 };
@@ -221,8 +222,9 @@ return {climb:+(heightAt(pos.x,pos.z)-h0).toFixed(1), drop6:(heightAt(pos.x,pos.
 function probeNav(ctx){
 return vm.runInContext(`(()=>{
 const G=${GEOFN};
-// 塬面(-120,40) → 西川基地(-250,10): 应存在路径, 且途经点只在 坡道走廊/沟底/带外, 不穿沟壁带
-const p=NAV.findPath(-120,40,-250,10);
+// 塬面(-67.5,22.5) → 西川基地(-140.6,5.6): 应存在路径, 且途经点只在 坡道走廊/沟底/带外, 不穿沟壁带
+// (2026-11-14 缩图批: 旧锚 (-120,40)→(-250,10) ×0.5625; 语义不变)
+const p=NAV.findPath(-67.5,22.5,-140.6,5.6);
 if(!p||!p.length) return {path:false};
 let bad=0, worst=null;
 for(const [x,z] of p){
@@ -243,17 +245,17 @@ if(camp!=='baituan') return {camp, skip:true};
 vm.runInContext('globalThis.__G='+GEOFN,ctx);
 const res={camp, bad:0, lines:[]};
 const W=vm.runInContext('LOESS.w',ctx), GB=vm.runInContext('LOESS.bottom',ctx);
-const CL=-179.6, WB=CL+W+2; // 西沟 z=0 断面中线 / 带外边界
-// ① 坦克塬顶冲崖: 下崖=单向慢爬 (减速带兜底), 25s 内应下到沟底 (minGd<GB); 登不上对岸塬面
-const t1=probeTank(ctx, CL-17, 0, Math.PI/2, 1500);
+const CL=-101.7, WB=CL+W+2; // 西沟 z=+10 断面中线 (2026-11-14 缩图批: 旧 z=0/-179.6 断面随图缩至 -101.0, 但缩后渡台裙坡(台缘12m 缓坡=渡口语义)北缘达 z≈+4.6, z=0 断面被软化 → 断面北移 z=+10 保'裸崖'语义; 坡度物理口径本身不变)
+// ① 坦克塬顶冲崖: 下崖=单向慢爬 (减速带兜底), 25s 内应下到沟底 (minGd<GB); 登不上对岸塬面 (断面 z=+10)
+const t1=probeTank(ctx, CL-17, 10, Math.PI/2, 1500);
 if(t1.minGd>GB+1){ res.bad++; res.lines.push(`①塬顶冲崖下沟 ✗ 未下到沟底 ${JSON.stringify(t1)}`); }
 else res.lines.push(`①塬顶冲崖 ✓ 慢爬下沟 (minGd=${t1.minGd}, 终点 x=${t1.x}), 且攀不上对岸 (maxX=${t1.maxX} < ${WB})`);
 // ①b 下到沟底后原地倒车仰攻: 登不上西侧塬面 (单向性)
-const t1b=probeTank(ctx, CL+8, 0, Math.PI/2, 420); // 沟内偏东, 朝东=仰攻东壁
+const t1b=probeTank(ctx, CL+8, 10, Math.PI/2, 420); // 沟内偏东, 朝东=仰攻东壁
 if(t1b.maxX>WB){ res.bad++; res.lines.push(`①b沟内仰攻 ✗ 竟登上塬 ${JSON.stringify(t1b)}`); }
 else res.lines.push(`①b沟内仰攻 ✓ 攀至maxGd=${t1b.maxGd} 被陡崖挡住`);
 // ② 坦克沟底仰攻后倒车脱困: 下坡阀保证可退回沟底 (minGd<GB)
-const t2=probeTank(ctx, CL, 0, Math.PI/2, 420);
+const t2=probeTank(ctx, CL, 10, Math.PI/2, 420);
 if(t2.maxX>WB||t2.minGd>GB){ res.bad++; res.lines.push(`②沟底仰攻/脱困 ✗ ${JSON.stringify(t2)}`); }
 else res.lines.push(`②沟底仰攻 ✓ 攀至maxGd=${t2.maxGd} 被挡, 倒车退回沟底 (minGd=${t2.minGd}) ✓`);
 // ③ 坦克走坡道 R1: 全速过沟 (8s 内越过东坡道口)
@@ -263,7 +265,7 @@ const t3=probeTank(ctx, R1.x0-rx*8, R1.z0-rz*8, Math.atan2(rx,rz), 1100);
 if(t3.maxX<=R1.x1){ res.bad++; res.lines.push(`③坡道过沟 ✗ ${JSON.stringify(t3)}`); }
 else res.lines.push(`③坡道过沟 ✓ R1 全速通过 (抵达 x=${t3.maxX} > 东口 ${R1.x1})`);
 // ④ 步兵沟底仰攻陡崖: 登不上塬 (maxX<带外; 65°封攀+等高线滑移)
-const f4=probeFoot(ctx, CL, 0, 1, 0, 600);
+const f4=probeFoot(ctx, CL, 10, 1, 0, 600);
 if(f4.crossed||f4.nan){ res.bad++; res.lines.push(`④步兵仰攻 ✗ ${JSON.stringify(f4)}`); }
 else res.lines.push(`④步兵仰攻 ✓ 爬升=${f4.climb}m (maxX=${f4.maxX}) 被陡崖挡住`);
 // ⑤ 步兵走坡道下沟: 可达沟底 (净下降>6m=进入沟底, 或跨过中线) —— 步距0.1m×900=90m 覆盖全坡道
@@ -276,8 +278,8 @@ else res.lines.push(`⑤步兵坡道下沟 ✓ 净下降=${f5drop.toFixed(1)}m (
 const n6=probeNav(ctx);
 if(!n6.path||n6.bad>0){ res.bad++; res.lines.push(`⑥NAV ✗ ${JSON.stringify(n6)}`); }
 else res.lines.push(`⑥NAV 塬面→西基地 ✓ ${n6.n} 节点, 0 处穿沟壁`);
-// ⑦ 斜向抵崖: 沿等高线滑移不卡死 (位移持续, 无 NaN)
-const f7=probeFoot(ctx, -179.6-6, -6, 0.06, 0.08, 200);
+// ⑦ 斜向抵崖: 沿等高线滑移不卡死 (位移持续, 无 NaN) —— 起点 2026-11-14 缩图批 ×0.5625 (旧 (-185.6,-6))
+const f7=probeFoot(ctx, -107.7, 10, 0.06, 0.08, 200);
 if(f7.nan){ res.bad++; res.lines.push(`⑦斜向滑移 ✗ NaN`); }
 else res.lines.push(`⑦斜向滑移 ✓ 终点(${f7.x}) 无 NaN`);
 return res;

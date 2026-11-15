@@ -90,6 +90,7 @@ const cw=el('cw'+i); if(cw) cw.textContent=classCardWeaponText(i);
 }
 }
 function showDeploy(isDead){
+if(typeof killcamEnd==='function') killcamEnd(); // 死亡时视角=击杀者: killcam 随部署页一次收账 (2026-11-12 批, 相机账/画布滤镜/角标) —— 部署页本身不受该设置影响
 // ★2026-11-04b 部署记忆批: 每次打开页面先按**当前状态**单源重刷卡面 —— 上一局残留的 .sel 高亮 /
 //   调试卡金边「调试中」后缀 / 武器行文本都是开局建一次就再也不对账的 DOM, 会一直留到下一局部署页。
 //   状态变量 (player.cls/selectedSpawn) 只在**新对局**由 22-hud resetPlayerForNewMatch 清回默认 ——
@@ -214,23 +215,10 @@ if(typeof player!=='undefined'&&player&&player.deployed) return false;
 //     player.alive&&player.deployed 上限, 这里显式传 false 只是把「选兵阶段不锁指针」写成明账)。
 if(typeof cmdMapClose==='function'){ cmdMapClose(false); }
 if(typeof CMD!=='undefined'){ CMD.mapDeploy=false; }   // close 已清 (兼容只加载子集脚本的沙箱: 缺 26 时至少把本地标志归位)
-// ── ② 兵种配比复位成「按当前实际 cls 统计」──
-// 撤销的语义是「玩家这次调整的期望配比作废」, 而布势里每点一次 ＋/− 都经 cmdRatioApply 真调 setClass 改过
-// 组员的 cls (见 26-commander cmdRatioApply) —— 所以「当前实际分布」就是**被撤销的那份期望值**, 直接
-// 清空 s.ratio 并不能回到布势前的样子, 只会让下一次 cmdRatioOf 用被改过的分布重建期望值。
-// 正确口径: 把配比按撤销后的真实分布重算一份 (cmdRatioOf 的「按实际 cls 统计」分支), 让
-// 「期望分布 == 实际分布」重新成立 —— 玩家重新进布势时看到的就是当前战场的真实兵种构成, 从这里再调。
-// 注意不做「把 cls 改回布势前」的逆向回放: 撤销的边界是**布局**, 不是「把已经生成好的兵种再掷一次骰子」
-// (布势前那份分布本来就只是开局随机池的产物, 没有保存价值, 也没有任何地方记过它)。
-if(typeof CMD!=='undefined'&&CMD&&CMD.orbat&&typeof cmdRatioOf==='function'){
-try{
-for(const s of (CMD.orbat.squads||[])){
-if(!s) continue;
-s.ratio=null;                     // 清掉缓存 ⇒ cmdRatioOf 下一次按成员当前 cls 重建 (单源统计在 26-commander)
-cmdRatioOf(s);                    // 立即重算并写回 s.ratio (面板 2Hz 重建时读的就是这份)
-}
-}catch(e){}
-}
+// ── ② 兵种配比复位成「按当前实际 cls 统计」 ⇒ 本块已整体移到 ④c 私人小队还原之后 (2026-11-14 缩图批集成):
+//   cmdSquadRestore 会把收编进编制的私人小队成员还原出去 —— 成员集在 ④c 前后不同, 配比重算必须读
+//   **还原后**的成员集, 否则面板配比停在收编前口径 (verify-deployundo ③ 实锤: 重算发生在 5 人口径,
+//   还原后 4 人, 缓存与实际脱钩)。完整口径注释随块一起搬走, 见下方 ④c 之后。
 // ── ③ 回到「选兵种」状态: 玩家未落地 ──
 // deployed=false 是部署页显示「部 署」按钮的判据 (showDeploy 的 isAliveDeployed), 也是
 // cmdMapCanOpen / cmdMapMustClose / 兵种卡重进布势门 (player.cls===5&&!player.deployed) 的共同判据。
@@ -262,6 +250,24 @@ if(typeof cmdOrbatClearOrders==='function'){ try{ cmdOrbatClearOrders(); }catch(
 //   私人小队 (cmdDeployOpen 的 cmdDisbandPlayerSquad 收编链, 单源见 26-commander), 这里原样还编:
 //   出编制、回 SQUAD.members。之后再选其他兵种时 'out' 盖章路径的还原是幂等的 (SQUAD 已有人=零操作)。
 if(typeof cmdSquadRestore==='function'){ try{ cmdSquadRestore(); }catch(e){} }
+// ── ② 兵种配比复位成「按当前实际 cls 统计」 (2026-11-14 缩图批集成: 自 ④c 之前移到此处 —— 还原会改
+//   编制成员集, 配比重算必须读还原后的成员集, 否则面板读数停在收编前口径; verify-deployundo ③ 实锤) ──
+// 撤销的语义是「玩家这次调整的期望配比作废」, 而布势里每点一次 ＋/− 都经 cmdRatioApply 真调 setClass 改过
+// 组员的 cls (见 26-commander cmdRatioApply) —— 所以「当前实际分布」就是**被撤销的那份期望值**, 直接
+// 清空 s.ratio 并不能回到布势前的样子, 只会让下一次 cmdRatioOf 用被改过的分布重建期望值。
+// 正确口径: 把配比按撤销后的真实分布重算一份 (cmdRatioOf 的「按实际 cls 统计」分支), 让
+// 「期望分布 == 实际分布」重新成立 —— 玩家重新进布势时看到的就是当前战场的真实兵种构成, 从这里再调。
+// 注意不做「把 cls 改回布势前」的逆向回放: 撤销的边界是**布局**, 不是「把已经生成好的兵种再掷一次骰子」
+// (布势前那份分布本来就只是开局随机池的产物, 没有保存价值, 也没有任何地方记过它)。
+if(typeof CMD!=='undefined'&&CMD&&CMD.orbat&&typeof cmdRatioOf==='function'){
+try{
+for(const s of (CMD.orbat.squads||[])){
+if(!s) continue;
+s.ratio=null;                     // 清掉缓存 ⇒ cmdRatioOf 下一次按成员当前 cls 重建 (单源统计在 26-commander)
+cmdRatioOf(s);                    // 立即重算并写回 s.ratio (面板 2Hz 重建时读的就是这份)
+}
+}catch(e){}
+}
 // ── ⑤ 部署页叫回来 + 兵种卡重新可选 ──
 // 直接走 showDeploy(false) 单源: 它是「部署界面显示」的唯一入口 (摘 #deploy 的 hidden / 重建出生列表 /
 // 画部署图 / 过 cmdClassCardGate 重刷每张卡的 locked 样式 / 挂 inDeploy)。手写 DOM 会漏掉后四项 ——
@@ -549,7 +555,7 @@ c.restore();
 for(const s of soldiers){
 if(!s.alive||s.onVehicle) continue;
 const [px,py]=toM(s.pos.x,s.pos.z);
-c.fillStyle=(s.zombie||s.team===2)?'#9ecfa0':(s.inSquad?'#ffffff':(s.team===player.team?'#5a9eff':'#ff5040'));
+c.fillStyle=(typeof solMapDotColor==='function')?solMapDotColor(s):((s.zombie||s.team===2)?'#9ecfa0':(s.inSquad?'#ffffff':(s.team===player.team?'#5a9eff':'#ff5040'))); // 着色单源 (2026-11-13 观战中立批; typeof 守卫同 sfNavalMapSymbols 惯例)
 c.beginPath(); c.arc(px,py,2,0,TAU); c.fill();
 }
 // 海战载具 (2026-09-20N 海战批): 部署图用与陆上坦克不同的艏向三角符号 —— 画法与
@@ -934,7 +940,7 @@ s.mesh.tag.material.color.set(0xffffff);
 const ang=(SQUAD.members.length-1)/3*TAU+rand(-0.3,0.3);
 const rr=rand(6,9);
 const wx=player.pos.x+Math.cos(ang)*rr, wz=player.pos.z+Math.sin(ang)*rr;
-if(!occBlocked(wx,wz)&&(typeof freeSpot!=='function'||freeSpot(wx,wz,0.6))){
+if(!occBlocked(wx,wz)&&(typeof freeSpot!=='function'||freeSpot(wx,wz,0.6))&&(typeof spawnEdgeOk!=='function'||spawnEdgeOk(wx,wz))){   // 出生离边门 (2026-11-13): 小队铺开也不进边带
 // 死袋闸 (2026-09-26 补): 小队这 3 人走的是**独立落点** (不经 pickSpawnPoint), 旧版只查站得住 ——
 // 实测他们会落进 1 格死袋/封锁格 (诺曼底/塔拉瓦各抓到), 而那是最显眼的三个"站在玩家身边的木头人"。
 // 与出生筛选同源: NAV.spawnSpot 把落点就近搬到"走得出去"的位置 (最多 12m, 小队仍在玩家视野内)。

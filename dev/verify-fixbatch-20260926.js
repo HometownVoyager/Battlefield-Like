@@ -56,7 +56,8 @@ assert('17: fallback 走 NAV.spawnSpot 搬迁', has(emp,'NAV.spawnSpot(fb[0],fb[
 
 const cfg=SRC('js/00-config.js');
 assert('config: sf_diff 用 null 判读法 (0 不再被 ||1 吃掉)', has(cfg,"const _d=localStorage.getItem('sf_diff')")&&!has(cfg,"localStorage.getItem('sf_diff')||'1')||1"));
-assert('config: 南进攻营已搬到主塬 (z:-120)', has(cfg,"{x:-262,z:-120,name:'南进攻营',team:0}"));
+// 锚已随 2026-11-14 缩图批更新+语义不变: 南进攻营 640→360 缩值 (−147.4,−67.5) 距南沟壁带净空 3.7m<14 → 北移 z=−57 (净空 14.2m, 同 2026-09-26 "避开沟壑带"规则)
+assert('config: 南进攻营已搬到主塬 (缩图批 z:-57, 净空≥14m)', has(cfg,"{x:-147.4,z:-57,name:'南进攻营',team:0}"));
 
 const air=SRC('js/16-aircraft.js');
 // 2026-09-26D: 累加单位由「帧」改为「秒」——旧写法 `+=3` (注释里仍留着作对照) 是帧单位的硬编码,
@@ -75,7 +76,7 @@ assert('16: 生还飞行员走 enterVehicle (松炮位认领)', has(air,'pb.ente
 const cbt=SRC('js/13-combat.js');
 assert('13: 艇体挡弹在步兵裁决之前 (navalRayQuery 收窄 wallD)', has(cbt,'navalRayQuery(origin,dir,wallD,shooter)'));
 assert('13: 弹道终点不得越过艇体', has(cbt,'if(hitNaval&&navalD<endD) endD=navalD;'));
-assert('13: splashDamage 掩体遮挡与 explodeAt 同式', has(cbt,'const block=raycastWorld(V3(p.x,p.y+0.25,p.z),dir,d);')&&has(cbt,'if(block&&block.dist<d-0.5) dmg*=0.25;'));
+assert('13: splashDamage 掩体遮挡与 explodeAt 同式', has(cbt,'const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,d);')&&has(cbt,'if(block&&block.dist<d-0.5) dmg*=0.25;'));
 assert('13: 海战命中分支已进裁决链', has(cbt,'} else if(hitNaval&&navalD<=Math.min(tankD,truckD,planeD)){')); // 7c 空对地平衡收口: 近距裁决面收 planeD (2026-09-30)
 
 const veh=SRC('js/15-vehicles.js');
@@ -198,7 +199,7 @@ section('②-d 07-nav 纯函数 + 无假失败 + 弹出==落定 (胡康河谷)')
 const H=boot(7);
 const r=N(H.ctx,`(()=>{
 const D0=NAV.dbg;
-const q=[[-285,0,46,-6],[BASES[0].x,BASES[0].z,0,0],[BASES[1].x,BASES[1].z,0,0]];
+const q=[[BASES[0].x,BASES[0].z,46,-6],[BASES[0].x,BASES[0].z,0,0],[BASES[1].x,BASES[1].z,0,0]]; // 2026-11-14 缩图批: 起点 (−285,0)→缩后基地 (−169.2,0) 读表; 终点 (46,−6) 属巨桥集群保持原坐标
 let impure=0,falseNull=0,dupPop=0,maxPops=0,minPops=1e9,tot=0,n=0;
 for(const qq of q){
 const runs=[];
@@ -412,12 +413,13 @@ section('②-m 莫斯科: 龙牙不得落进机枪堡足迹');
 {
 const M=boot(6);
 const r=N(M.ctx,`(()=>{
-// 两座堡的落位 (118,∓45) 与 (118,57): 统计足迹内属于"龙牙碰撞盒"(1.1×1.05×1.1 AABB) 的盒数
+// 两座堡的落位 (66.4,-25.3) 与 (66.4,32.1) —— 锚已随 2026-11-14 缩图批更新+语义不变 (旧 640 图: (118,∓45)/(118,57)):
+// 统计足迹内属于"龙牙碰撞盒"(1.1×1.05×1.1 AABB) 的盒数
 // BOXES 记录形态: {minX,minY,minZ,maxX,maxY,maxZ,gh} (03-terrain addBoxCollider)
 const isTooth=b=>Math.abs((b.maxX-b.minX)-1.1)<0.02&&Math.abs((b.maxY-b.minY)-1.05)<0.02&&Math.abs((b.maxZ-b.minZ)-1.1)<0.02;
 let hits=0, list=[], teeth=0;
 for(const b of BOXES) if(isTooth(b)) teeth++;
-for(const [bx,bz] of [[118,-45],[118,57]]){
+for(const [bx,bz] of [[66.4,-25.3],[66.4,32.1]]){
 for(const b of BOXES){
 if(!isTooth(b)) continue;
 const cx=(b.minX+b.maxX)/2, cz=(b.minZ+b.maxZ)/2;

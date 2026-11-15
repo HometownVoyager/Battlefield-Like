@@ -122,8 +122,8 @@ assert('10 栓 z0 改无条件下捕获 + slide 静止位 z0 捕获 (三把手�
 const s19=srcOf('js/19-input.js');
 assert('19 举雷引信全长走 NADE_FUSE_T 单源 (3.8 字面量已收)',
  s19.includes('player.nadeFuse=NADE_FUSE_T;')&&!s19.includes('player.nadeFuse=3.8;'));
-assert('19 左键取消**举雷除外** (收雷只有 X/✕ 两条有意路径)',
- s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)){"));
+assert('19 左键取消**举雷除外** (收雷只有 X/✕ 两条有意路径; ★2026-11-13 批跟码: 换弹(reload)也豁免——换弹中左键不再取消, 举雷例外保留)',
+ s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){"));
 assert('19 tryReload 带 viaKey 抢占 (读条中 R=打断再装填, 系统自动换弹不带; ★2026-10-30 判据跟走: 打断=双击确认 + 同键重按=极少加快)',
  s19.includes('function tryReload(viaKey){')
  &&s19.includes('if(!viaKey) return;')

@@ -278,6 +278,15 @@ this.deathCamT=this.deathRag?2.2:0.8;
 this.deathCamYaw=this.yaw+Math.PI;
 this.deathPos=this.pos.clone();
 this.deathPos.y+=0.4;
+// 死亡时视角=击杀者 (2026-11-12 批, sf_deathcam 默认自己): 目标解析只认"持枪 Bot 士兵" (slots) 与
+// 载具真人驾驶员 (crewBot); 自杀 (attacker===this)/环境死 (null)/丧尸等无 slots 对象一律回退原死亡
+// 镜头。纯观察账: 相机消费在 20-player updateCamera 死亡分支 (specView 之后, 0.5s 原镜头 → killcam
+// 直到 showDeploy), 收账单源 killcamEnd (showDeploy/endMatch/enterSpecView 三点接线)。
+this.killcam=null;
+if(DEATHCAM_KILLER&&attacker&&attacker!==this){
+const kb=(attacker.slots&&attacker.pos)?attacker:((attacker.crewBot&&attacker.crewBot.slots&&attacker.crewBot.pos)?attacker.crewBot:null);
+if(kb) this.killcam={src:kb,t:0};
+}
 setRespawnCd(8); // 经 22-hud owner 接口 (2026-09-06 B7b/P2-14)
 const dly=this.deathRag?2100:900;
 addMatchTimeout(()=>{ if(!this.alive){ const bo=document.getElementById('blackOv'); if(bo) bo.style.opacity=0.75; } },dly);
