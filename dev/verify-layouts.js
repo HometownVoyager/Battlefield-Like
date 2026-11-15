@@ -133,45 +133,6 @@ const cm=seaChannelMask(x,z);
 if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
 return dep;
 }// 03-terrain 副本 (2026-11-15): 厅坑压平 + 隧道带桥式抬升 —— 与 03-terrain 同源 (旗标期采样, 广场碟保留、明坑/street 矩形短路)。
-// 本体改 metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY 必同步本副本 (与 RIVER 五处副本同一条纪律)。
-let _mNoDep=false;
-function metroFlatRect(x,z){
-if(!METRO||_mNoDep) return null;
-for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-return null;
-}
-function metroFlatY(s){
-if(s._fy!==undefined) return s._fy;
-_mNoDep=true;
-const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
-_mNoDep=false;
-s._fy=base-(s.d||METRO.d);
-return s._fy;
-}
-function metroLiftNodes(s){
-if(s._ln) return s._ln;
-const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
-const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
-const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
-const segL=span/nS;
-_mNoDep=true;
-const ns=[];
-for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
-if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
-_mNoDep=false;
-s._ln={n:nS,segL,ns,alongZ};
-return s._ln;
-}
-function metroLiftY(s,x,z){
-const L=metroLiftNodes(s);
-const t=L.alongZ?(z-s.z0):(x-s.x0);
-const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
-const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
-const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
-const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
-return lo+(hi-lo)*u;
-}
 
 function seaDepthAt(x,z){
 if(!SEA) return 0;
@@ -355,34 +316,14 @@ if(b.deckY!==undefined) return b.deckY; // 栈桥 (kind='pier', 2026-09-18): 绝
 if(!_deckMap.has(b)){ const dx=Math.sin(b.yaw),dz=Math.cos(b.yaw); const e=b.len/2+3; _deckMap.set(b,Math.max(heightAt(b.x-dx*e,b.z-dz*e),heightAt(b.x+dx*e,b.z+dz*e))); }
 return _deckMap.get(b);
 }
-// 03-terrain 副本: 柏林地铁下沉 (2026-09-09 站厅 halls[]/隧道矩形 + 广场圆, 深度取 max)
-const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
-const METRO_FALL=0.4;
-const METRO_RECTS=[]; // 03-terrain 副本: 站厅表 + 隧道 (共读 config.metro)
-if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
-function metroDep(x,z){
-if(!METRO) return 0;
-let dep=0;
-const d0=Math.hypot(x-METRO.x,z-METRO.z);
-if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
-for(const s of METRO_RECTS){
-if(!s||s.street) continue; // 2026-11-15: street 矩形 (隧道带) 不下沉 —— 地形由 metroLiftY 抬到街面 (桥式), 明坑只在洞内建造件
-const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
-const dd=Math.hypot(dx,dz);
-if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
-}
-return dep;
-}
 function heightAt(x,z,noBridge){
 let h=rawH(x,z);
 for(const f of FLATS){ const d=Math.hypot(x-f.x,z-f.z); if(d<f.r){ const s1=1-d/f.r; const s=s1*s1*(3-2*s1); h+=(f.h-h)*s; } }
-if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁站厅/通道下沉 (2026-09-09)
 // 03-terrain 副本: 诺曼底博卡日下沉土路 (田块表存在即启用)
 if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } } // !CITY 门控同 03-terrain 本体 (2026-09-06)
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
-if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -405,9 +346,6 @@ const CT=CAMPAIGN.city;
 if(!CT) return false;
 if(CT.blocks) for(const s of CT.blocks){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true; }
 if(CT.yard&&x>=CT.yard.x0&&x<=CT.yard.x1&&z>=CT.yard.z0&&z<=CT.yard.z1) return true;
-// 2026-09-09 修复: 补地铁区建成判定 (与 03-terrain 同源) —— 漏这段会让沙箱植被让位与实机不同, 布局整体错位
-if(CT.metro){ if(Math.hypot(x-CT.metro.x,z-CT.metro.z)<CT.metro.r) return true;
-for(const s2 of METRO_RECTS) if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; }
 return false;
 }
 function onBridge(x,z,m=0){
@@ -454,7 +392,7 @@ function inWaterBody(x,z){
 const wy=waterYAt(x,z);
 return wy>-1e8&&heightAt(x,z,true)<wy-0.05;
 }
-return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
+return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
 }
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
@@ -493,7 +431,6 @@ const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
 ctx.fordAt=terr.fordAt; // 胡康徒涉滩强度场 (2026-09-12, 断言环带检验用)
-ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入, 与本体同步)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
 ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
@@ -511,8 +448,6 @@ ctx.BRIDGES=CAMP.bridges||(CAMP.bridge?[CAMP.bridge]:[]);
 ctx.BRIDGE=ctx.BRIDGES[0]||null;
 // 03-terrain 的城市语义全局 (沙箱未加载本体, 同构注入): CITY 常量供 05c/05a 使用
 ctx.CITY=CAMP.city||null;
-ctx.METRO=(CAMP.city&&CAMP.city.metro)||null;
-ctx.METRO_RECTS=(()=>{ const M2=CAMP.city&&CAMP.city.metro, a=[]; if(M2){ for(const h of (M2.halls||[])) a.push(h); if(M2.tunnel) a.push(M2.tunnel); } return a; })(); // 2026-09-09 修复: 沙箱漏注入 → freeSpot 地铁让位在沙箱里失效
 // 03-terrain 的农田系统全局 (沙箱未加载本体, 同公式注入): 田块表+查田块
 ctx.RURAL_FIELDS=CAMP.fields||[];
 ctx.fieldAt=(x,z)=>{ for(const f of ctx.RURAL_FIELDS){ if(x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1) return f; } return null; };
@@ -629,7 +564,7 @@ if(Math.hypot(h.x-f.x,h.z-f.z)<f.r+6) errs.push(`围田树篱 (${h.x.toFixed(1)}
 }
 }
 // 12) 城市组断言 (2026-09-05 城市组·斯大林格勒/柏林):
-//     建筑足迹不侵占街道矩形 / 多层可上楼(楼梯数) / 地标存在 / 地铁下沉量 / 电车残骸
+//     建筑足迹不侵占街道矩形 / 多层可上楼(楼梯数) / 地标存在 / 电车残骸
 const CT=CAMPAIGN.city;
 if(CT){
 const SD=1.0; // 街缘容差 (B_FOOT 已含 1.0 余量, 合计≥2m 净距)
@@ -649,15 +584,8 @@ if(!types.includes('factory')) errs.push('斯大林格勒: 缺少红十月工厂
 if(types.filter(t=>t==='tramWreck').length<2) errs.push('斯大林格勒: 电车残骸不足 2 节');
 }
 if(CAMPAIGN.id==='berlin'){
-if(!types.includes('metro')) errs.push('柏林: 缺少地铁入口亭 (BUILD_REG type=metro)');
-const M=CT.metro;
-if(M){
-const hc=ctx.heightAt(M.x,M.z), he=ctx.heightAt(M.x+M.r+3,M.z); // 2026-11-14 缩图批: 外缘采样改东侧 (+12,0) —— 北缘 +12 落进北站厅、南缘 -12 落进隧道带 (隧道固定宽 6 随厅西对齐, 纵贯广场两侧); 语义=广场浅坑 vs 厅外自然地面, 不变
-if(hc>he-0.5) errs.push(`柏林: 地铁下沉不足 (中心 ${hc.toFixed(2)} vs 外缘 ${he.toFixed(2)})`);
-}
 if(types.filter(t=>t==='block').length<4) errs.push(`柏林: 沿街多层公寓不足 (${types.filter(t=>t==='block').length} < 4)`);
 // ── 2026-09-09 柏林点位改版断言 (用户实机反馈"点位一条线 + 地图太小 + 没有地标") ──
-if(!types.includes('metroStation')) errs.push('柏林: 缺少地铁站厅 (BUILD_REG type=metroStation)');
 if(!types.includes('reichstag')) errs.push('柏林: 缺少国会大厦地标 (BUILD_REG type=reichstag)');
 if(!types.includes('flaktower')) errs.push('柏林: 缺少防空塔地标 (BUILD_REG type=flaktower)');
 const zs=flags.map(f=>f.z), xs=flags.map(f=>f.x);
@@ -669,58 +597,6 @@ if(xSpan<162) errs.push(`柏林: 旗点东西跨度 ${xSpan.toFixed(0)}<162`);
 let minFD=1e9;
 for(let i=0;i<flags.length;i++)for(let j=i+1;j<flags.length;j++) minFD=Math.min(minFD,Math.hypot(flags[i].x-flags[j].x,flags[i].z-flags[j].z));
 if(minFD<68) errs.push(`柏林: 最近两旗间距 ${minFD.toFixed(0)}<68 (点位过密)`);
-if(M&&M.halls){
-// 两站一区间 (2026-09-09 用户定案): 每站下沉≥2.0 + 相邻站间距 (中间有空间) +
-// 隧道全程下沉 + 顶板存在 (主街段/中段 —— 坦克/步兵照常过街, 全程不塌陷)
-// 2026-11-14 缩图批: 站间距阈值按实测 56.3×0.85=47 重写; 广场下沉外缘采样由 M.z+M.r+3 (北侧)
-//   改 M.z-M.r-3 (南侧) —— 北站厅缩图后北移 (z0=5.5), +12 采样点落进厅内会假红; 南侧 (-12) 是厅外净地。语义不变。
-const HS=M.halls, T=M.tunnel;
-if(HS.length<2) errs.push(`柏林: 地铁站 ${HS.length}<2 —— 用户要求"起码两个地铁站"`);
-for(let i=0;i<HS.length;i++){
-const A=HS[i], hcx=(A.x0+A.x1)/2, hcz=(A.z0+A.z1)/2;
-const cIn=ctx.heightAt(hcx,hcz), cOut=ctx.heightAt(A.x0-4,hcz);
-if(cOut-cIn<2.0) errs.push(`柏林: 站厅${i+1}下沉不足 (庭内 ${cIn.toFixed(2)} vs 庭外 ${cOut.toFixed(2)})`);
-if(i){ const B=HS[i-1], gap=Math.hypot(hcx-(B.x0+B.x1)/2,hcz-(B.z0+B.z1)/2); if(gap<47) errs.push(`柏林: 相邻地铁站间距 ${gap.toFixed(0)}<47 (两站挤在一起)`); }
-}
-if(T){
-const tunX=(T.x0+T.x1)/2;
-const boxes=vm.runInContext('BOXES',ctx);
-// 街面自然地面基准 —— 2026-11-14 缩图批: 由单点 x0-8 改为隧道两壁外 1.2m 的 4 点取最大
-//   (取最大=选最不沉的邻点; 4 点均在厅矩形 x 跨外, 近广场端浅碟/厅坑影响被 max 掩掉)
-const gNat=z=>Math.max(ctx.heightAt(T.x0-1.2,z),ctx.heightAt(T.x1+1.2,z),ctx.heightAt(T.x0-1.2,z-3),ctx.heightAt(T.x1+1.2,z+3));
-// 洞口必须真的通 (2026-09-09 自检发现: 旧洞口判定按"与站厅等宽"写, 6m 隧道对 26m 站厅判不出洞 → 两站被墙封死)
-// 2026-11-15 桥式抬升批重锚: 隧道带 heightAt 已抬到街面 (载具碾顶通行) ⇒ 旧判据 gy=带内 heightAt 的
-//   [gy+0.2,gy+1.6] 变成街面上方空气带, 顶板/过梁必假红。通道带改锚洞内底板实测顶面 [floor+0.2,+1.6]。
-for(const A of HS){
-const wallZ=Math.abs(T.z0-A.z1)<0.01?A.z1:(Math.abs(T.z1-A.z0)<0.01?A.z0:null);
-if(wallZ===null) continue;
-const gy=ctx.heightAt(tunX,wallZ);
-const fl=boxes.find(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.maxY<gy-1.5&&b.maxY>gy-4);
-const fTop=fl?fl.maxY:gy-2.6;
-const jam=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&wallZ>b.minZ&&wallZ<b.maxZ&&b.minY<fTop+1.6&&b.maxY>fTop+0.2);
-if(jam) errs.push(`柏林: 站厅(z ${A.z0}..${A.z1}) 隧道洞口被封死 @(${tunX.toFixed(0)},${wallZ.toFixed(0)})`);
-}
-for(const z of [T.z0+3,(T.z0+T.z1)/2,T.z1-3]){
-// 隧道带=街面桥 (2026-11-15, 旧"隧道全程下沉≥2"作废): 带内 heightAt 抬到街面节点 —— 坦克如过桥面
-//   碾过 (旧 −2.6 明坑高度场才是"齐平也过不去"的根因)。允差下限 1.4=广场浅碟 (带在 z≈0 穿碟心, 带
-//   内可比邻侧低 ~1.1m 且平滑连续), 上限 0.6=不得隆起成脊 (顶板冒头剐蹭 hull 同族病)。
-const tIn=ctx.heightAt(tunX,z), tOut=gNat(z);
-if(tIn<tOut-1.4) errs.push(`柏林: 隧道带街面未抬升 @z=${z.toFixed(0)} (带内 ${tIn.toFixed(2)} vs 邻侧 ${tOut.toFixed(2)} — 坦克过不去)`);
-if(tIn>tOut+0.6) errs.push(`柏林: 隧道带街面隆起 @z=${z.toFixed(0)} (${tIn.toFixed(2)} vs ${tOut.toFixed(2)})`);
-// 地下通道语义保留: 洞内底板必须存在且比街面低 ≥1.5 (厅间步行通道, 顶板承载街面)
-const fl=boxes.find(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY<tOut-1.5&&b.maxY>tOut-4);
-if(!fl) errs.push(`柏林: 隧道底板缺失/未下沉 @z=${z.toFixed(0)} (应比街面低 ≥2m)`);
-}
-for(const z of [0,(T.z0+T.z1)/2]){ // 顶板 (主街段 + 中段)
-// 2026-11-15 桥式抬升批: 顶面基准由"邻侧自然地面+0.15"改为**带内本地街面** —— 隧道带在 z≈0 穿广场
-//   碟心, 带内街面可比邻侧低 ~1.1m, 邻侧基准的 ±0.9 窗必然假红。语义: 顶面 ≤ 本地街面 (不冒头剐蹭)
-//   且不深于街面下 1.0 (顶板贴街剖面, 不做"厚土层")。
-const tIn=ctx.heightAt(tunX,z);
-const roofOK=boxes.some(b=>!b.dead&&tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY>tIn-1.0&&b.maxY<tIn+0.05);
-if(!roofOK) errs.push(`柏林: 隧道顶板缺失/冒头 @z=${z.toFixed(0)} (带内街面 ${tIn.toFixed(2)}, 无贴街顶板)`);
-}
-}
-}
 // 防空塔顶高炮平台登记 (05a flakTower → 17-emplacements aaGun yDeck)
 const fd=vm.runInContext('FLAK_DECKS',ctx);
 if(!fd.length) errs.push('柏林: 防空塔顶平台未登记 (FLAK_DECKS 空)');
@@ -743,16 +619,6 @@ const cs=Math.abs(Math.cos(R.ry)),sn=Math.abs(Math.sin(R.ry));
 const ex=(R.w*cs+R.d*sn)/2+0.5, ez=(R.w*sn+R.d*cs)/2+0.5;
 const near=DES.filter(g=>!g.dead&&g.cx>R.x-ex&&g.cx<R.x+ex&&g.cz>R.z-ez&&g.cz<R.z+ez);
 if(near.length) errs.push(`柏林: 国会大厦不可破坏断言失败 —— 足迹内有 ${near.length} 个可毁组 (全塌后残穹壳会浮空)`);
-}
-}
-}
-// 新建建筑不得落在地铁站厅/隧道上方 (placeAt 走 metroBlocked; 站厅本体除外)
-{
-const MR=vm.runInContext('METRO_RECTS',ctx);
-for(const r of reg){
-if(['metro','metroStation'].includes(r.type)) continue;
-for(const s of MR){
-if(r.x>s.x0&&r.x<s.x1&&r.z>s.z0&&r.z<s.z1){ errs.push(`柏林: 建筑 ${r.type}@(${r.x.toFixed(0)},${r.z.toFixed(0)}) 落在地铁下沉区上方`); break; }
 }
 }
 }

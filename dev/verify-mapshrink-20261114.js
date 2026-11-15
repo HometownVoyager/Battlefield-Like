@@ -8,7 +8,7 @@
 //   2. 全部 BOXES/CYLS/B_FOOT/旗/基/CAMPAIGN.spawns 落 ±(mapSize/2−2) 界内, 打印每图极值
 //   3. 任两面旗 (草原=7 强点) 间距 ≥45m
 //   4. findPath 基地↔每面旗 (草原: 7 强点↔两基地) 全通
-//   5. 地标存在性抽查: 柏林 国会大厦/防空塔/两座地铁厅 (halls=2 且 26×18 不变);
+//   5. 地标存在性抽查: 柏林 国会大厦/防空塔;
 //      莫斯科 factoryFlag='工厂' 存在且 factorySpawn 在 yard 矩形内; 百团 loess.caveVillages=4 且
 //      bridges 有木铁路桥、ramps=10; 胡康 BRIDGES[0].len===76 且 onBridge(桥心) 真值、RIVER.ford
 //      滩心 waterDepthAt<0.4; 草原 STEPPE.belt/mines/wrecks 齐且 7 强点; 雾林 WOOD.ravine.ramps=3 且 WOOD.belt
@@ -216,10 +216,6 @@ if(cid==='berlin'){
 const RS=reg.find(b=>b.type==='reichstag'), FT=reg.find(b=>b.type==='flaktower');
 A('5b. 国会大厦 (reichstag) 已布景',!!RS,RS?`@(${RS.x.toFixed(1)},${RS.z.toFixed(1)}) w=${RS.w} d=${RS.d}`:'BUILD_REG 无 reichstag');
 A('5c. 防空塔 (flaktower) 已布景',!!FT,FT?`@(${FT.x.toFixed(1)},${FT.z.toFixed(1)}) w=${FT.w} d=${FT.d}`:'BUILD_REG 无 flaktower');
-const M=CAMPAIGN.city&&CAMPAIGN.city.metro;
-const halls=(M&&M.halls)||[];
-const dims=halls.map(h=>({w:+(h.x1-h.x0).toFixed(4),d:+(h.z1-h.z0).toFixed(4)}));
-A('5d. 地铁厅 halls=2 且 26×18 不变 (读 CAMPAIGN.city.metro 配置)',halls.length===2&&dims.every(x=>x.w===26&&x.d===18),`halls=${halls.length}, 尺寸 ${dims.map(x=>x.w+'×'+x.d).join('/')}`);
 }else if(cid==='moscow'){
 const hasFlag=CAMPAIGN.factoryFlag==='工厂'&&CAMPAIGN.flags.some(f=>f.id==='工厂');
 const ff=CAMPAIGN.flags.find(f=>f.id==='工厂');

@@ -363,6 +363,15 @@
    单具身体；④宿主阵亡/登车自动脱离且不还尸体模型；⑤👁 徽标条在罗盘条下方不重叠；⑥夜图每台开灯载具左右各一道光锥、
    照明范围明显变远；⑦观战局终局横幅「胜方 X」中性；⑧调试模式 Q/E 附身脱离、幽灵坦克面向玩家。
 
+## 一.112 竹子机制批 × 柏林地铁站整体删除 × 国会一楼地板 × 莫斯科建筑固化 × 天气×地图雾叠加 × 撞机 CCD (2026-11-15, 待实机验收)
+**竹子**：05b bambooClump 升级为树同款记录 (kind:'bamboo', burnT/fall/charred/dead 全链字段)+WLOW_IM 同款 BAMBOO_IM/BAMBOO_BATCH 实例批 (instColorInit 白初始化)+flushBamboos 并入 buildWorld；04b 九处接线 (bambooInstanceMatrices 倒伏/焦黑染黑/沉入同沉/全沉零缩放 dead=true/火格跳烧/引燃回调/explosionFlora 近倒远累计/floraCrushTank 倒向行进向)+fuelAdd+CYLS foliage；05c 淞沪 layoutDelta **尾部** ⑨ 江南竹丛带 (主河两岸+支汊+村环+丝厂——排序在最后 ⇒ 柳树金序列 will=75 逐位不动)+胡康竹丛 146 丛沿用新链；23b 快照 BAMBOO_IM。判据：新 dev/verify-bamboo-20261115.js (**23/0**+NEG 摘碾压亲见转红+柳 75/胡康树 680 金序列守卫)。
+**柏林地铁站整体删除** (用户令「彻底删除，并在文档内也完成移除」)：00-config metro 对象删+两处让位街块复位统一网格；03-terrain METRO/metroDep/metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY/metroClear 全删+heightAt/padHeight/hgridClear×2/cityUrban 四触点摘除；05a metroPavilion+地铁网整节 (solidStair/metroHall/metroTunnel/metroStation ~270 行) 删；05-world metroBlocked+freeSpot METRO_RECTS 块+两调用点删；05c metroStation() 调用删+注释更新；22a menuart 地铁画块删。探针：五处 terrain 副本 (fire/buildings/layouts/rooffall/_structbase) metro 函数族+ctx 注入+柏林地铁断言全摘 (rooffall 桩补 AudioSys.panOf——20261115c 音效批预存红对认)，verify-mapshrink 5d 摘，verify-mapfix diagBerlin+旧 NEG1/NEG2 摘 (NEG3/NEG4 编号留空)，run-all 描述跟改；专档台账删除，README/纲领/批档 metro 活段摘除 (历史行注记保留)。
+**国会大厦一楼地板** (用户实机「一楼是草地还能长树」)：室内整片 MAT.woodDark 木地板 33.6×23.6 (厚 0.31，顶面=楼面+0.09——用户追令「稍微高出地面一些」；<gh+0.5 ⇒ OCC 自动豁免不挡寻路)+补 B_FOOT 足迹登记 (旧版漏登=植被长进室内根因)。
+**莫斯科建筑固化** (用户裁定「全部建筑变不可破坏，与柏林区分同质化」)：config moscow **solidStructs:true** 单源，05-world damageStructureBy/roofDamage 双口早退——爆炸/撞塌/油桶/坍塌链/塌顶全部零作用 (与柏林国会 indestr 同语义；不改建筑形制)。
+**天气×地图雾叠加** (雾林守线 1944 用户报「天气与地图迷雾冲突」)：根因=Bot 索敌 viewD 与坦克目视 vis 是独立常数不吃地图主题雾 (14-bots 旧注释自证「索敌与雾距不硬联动」)→两处乘 THEME.fogMul 纳入单链 (woods 0.42 ⇒ 雾林 Bot 索敌 95→40m 档)，天气 WX_CFG.viewDMul 在其后继续**叠加**；场景雾 dryFogFar 本就 fogFarMul×fogMul 相乘不动；clear 图 ×1 逐位不变。
+**撞机 CCD** (用户令「用算法优化飞机相撞」)：updatePlaneCollisions 离散距离判改**匀速直线扫掠** (最近接近点 t*=(rel·d0)/|rel|² 截 [0,dt] 判 rr 内——240m/s 对头每帧掠过超窗不再漏判)+广相门 (帧内可达距离=rr+(|va|+|vb|)·dt 免算 fwdDir)；单元测试：18m/帧对头 (离散漏判档) CCD 必抓、并行同速对收拢门照旧豁免。
+**升戳 20261115c→d** (index.html 49 处+_game_files.txt 45 处+verify-hudfix/verify-perf 戳钉)。**判据面**：bamboo 23/0+NEG·mapfix 13/0·mapshrink 55/0·fire/buildings/layouts/rooffall 全绿 (buildings 草原 windmill 1 红=预存在案)。实机关注：①淞沪河岸竹丛燃烧/炸倒/碾压；②柏林无地铁痕迹+街块复位；③国会一楼木地板微高出+室内无草树；④莫斯科炮轰建筑不倒；⑤雾林雨天能见度进一步压低+Bot 同步变近视；⑥飞机对头相撞判定。
+
 ## 一.111 音效系统完全推倒重写: 每枪独立音色 × 坦克引擎三档 × 炮/爆/机枪全谱系细分 (2026-11-15c, 待实机验收)
 
 **用户令**: 「我希望将游戏内的音效完全推倒并重新设计和制造一套，现在用的基本是从初版Demo继承下来的，太过简陋。不同枪械的音效，轻（此处特指全部尺寸的日本坦克）、大、小三种坦克的三种引擎音效……总之就是要足够细分，不要吝惜。」技术路线用户裁定 = **程序合成推倒重写**（零音频资产，沙箱/闸门/冻结账全兼容）。

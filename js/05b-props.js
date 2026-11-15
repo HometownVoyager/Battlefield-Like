@@ -454,25 +454,62 @@ if(freeSpot(t.x1-dx*2+px*1.2,t.z1-dz*2+pz*1.2,1)) crate(t.x1-dx*2+px*1.2,t.z1-dz
 if(freeSpot(t.x2+dx*2-px*1.2,t.z2+dz*2-pz*1.2,1)) barrel(t.x2+dx*2-px*1.2,t.z2+dz*2-pz*1.2);
 }
 }
-// 植被: 竹丛/蕨类 (胡康河谷布局用, 原布局段移入) —— 均登记可燃 (烧尽后整丛消失)
+// 植被: 竹丛/蕨类 (胡康河谷布局用, 原布局段移入) —— 均登记可燃
+// 竹丛 (2026-11-15 竹子批重写): 旧版只入燃料格账 (格子火烧尽=原地消失) + 碾压/爆炸走"炸没/碾没"分支,
+//   与树的"燃烧→倒伏→焦黑→沉入"不同款。现升级为树同款 (kind:'bamboo' 入 TREE_LIVE 走 04b 乔木同一
+//   套链): 格子火→treeIgnitePass 认领→燃烧→倒伏 (04b bambooInstanceMatrices)→焦黑→沉入;
+//   explosionFlora 掀倒 / floraCrushTank 撞倒同规。实例批化: 旧版每丛 3~5 根独立 mesh (胡康 ~150 丛
+//   ≈600 draw call), 现登记 BAMBOO_BATCH, buildWorld 末尾 flushBamboos() 合并为 1 张 InstancedMesh
+//   (与 tree()/willow 同规)。实例索引: 丛=bi, 杆=bi+k (bn 根, 逐丛连续段)。
+// ★布局随机流不漂移: 每丛 wr 消耗与旧逐件实现完全一致 (n=wri(3,5) 1 次 + 每杆 ox/oz/h/倾角 4 次,
+//   顺序逐位保持) —— 胡康下游布局 (蕨/倒木) 随机序列不变; 淞沪新竹全部在布局末尾追加 (柳位 golden 不受扰)。
+const BAMBOO_BATCH=[];    // 竹丛建模批 (flushBamboos 一次性并入实例批)
+let BAMBOO_IM=null;       // {stalks} —— 04b 倒伏/焦黑/沉入按记录 bi/bn 索引改写
 function bambooClump(x,z){
 if(!propFree(x,z,1.15)) return;
 propTake(x,z,1.15);
 const g0=heightAt(x,z)-0.2;
 const n=wri(3,5);
 // 竹=细长绿杆, 不挂树木那种大叶子贴图; 碰撞半径压到0.3(坦克压过≠隐形墙)
-const meshes=[];
+const bst=[];
 for(let i=0;i<n;i++){
 const ox=wr(-0.5,0.5), oz=wr(-0.5,0.5);
 const h=wr(4.5,7);
-const c=mesh(new THREE.CylinderGeometry(0.03,0.045,h,5),MAT_BAMBOO,x+ox,g0+h/2,z+oz);
-c.rotation.z=wr(-0.08,0.08);
-meshes.push(c);
+const tz=wr(-0.08,0.08); // 杆微倾 (旧 rotation.z 同分布, 手算四元数喂实例批)
+bst.push({ox,oy:h/2,oz,q:[0,0,Math.sin(tz/2),Math.cos(tz/2)],sx:1,sy:h,sz:1});
 }
-const cyl={x,z,r:0.3,y0:g0,y1:g0+5.5,foliage:true}; // 竹丛: foliage=空中撞楼豁免 (三虫批①)
-CYLS.push(cyl);
-fuelAdd(x,z,1.0);
-floraHashAdd({kind:'bamboo',x,z,g0,meshes,cyl,alive:true,dead:false});
+const rec={kind:'bamboo',x,z,s:1,g0,bst,bi:BAMBOO_BATCH.length,bn:n,cyl:null,alive:true,dead:false,burnT:-1,burnDur:0,dmg:0,fall:null,igniter:null,fT:0,iT:0,cx:x,cy:g0+3.2,cz:z,restCrown:null};
+rec.cyl={x,z,r:0.3,y0:g0,y1:g0+5.5,foliage:true}; // 竹丛: foliage=空中撞楼豁免 (三虫批①)
+CYLS.push(rec.cyl);
+fuelAdd(x,z,1.0);   // 竹下格可燃: 燃烧弹/地面火烧进竹下 → 格子起燃, treeIgnitePass 0.4s 内点燃竹丛
+TREE_LIVE.push(rec);
+floraHashAdd(rec);
+BAMBOO_BATCH.push(rec);
+}
+// 竹丛实例批合并 (buildWorld 末尾调用, 紧跟 flushWillows): 杆 1 张 InstancedMesh。
+// 单位杆几何 (顶 r0.03 / 底 r0.045 / 高 1) × 每杆 sy=h —— 与旧逐件 CylinderGeometry(0.03,0.045,h,5) 逐杆同形。
+const bamStalkGeo=new THREE.CylinderGeometry(0.03,0.045,1,5);
+function flushBamboos(){
+if(!BAMBOO_BATCH.length) return;
+let total=0; for(const rec of BAMBOO_BATCH) total+=rec.bn;
+const stalks=new THREE.InstancedMesh(bamStalkGeo,MAT_BAMBOO,total);
+stalks.castShadow=false; stalks.receiveShadow=true;     // 与旧逐件 mesh() 默认一致 (cast=false,recv=true)
+stalks.frustumCulled=false;
+instColorInit(stalks);                                  // 烧毁焦黑染色的前置 (04b 同口径: 建模期白初始化)
+const _m=new THREE.Matrix4(), _p=new THREE.Vector3(), _s=new THREE.Vector3(), _q=new THREE.Quaternion(); // 真实例: vendor compose 读 ._x 私有字段, 普通对象=旋转全 NaN (柳树批 2026-11-11 实机回归同坑; 分量赋值走 setter 落 _x)
+BAMBOO_BATCH.forEach(rec=>{
+for(let k=0;k<rec.bn;k++){
+const p=rec.bst[k];
+_p.set(rec.x+p.ox, rec.g0+p.oy, rec.z+p.oz);
+_q.x=p.q[0]; _q.y=p.q[1]; _q.z=p.q[2]; _q.w=p.q[3];
+_s.set(p.sx,p.sy,p.sz);
+_m.compose(_p,_q,_s);
+stalks.setMatrixAt(rec.bi+k,_m);
+}
+});
+world.add(stalks);
+BAMBOO_IM={stalks};
+BAMBOO_BATCH.length=0;
 }
 function fernClump(x,z){
 if(!propFree(x,z,0.55)) return;
@@ -844,7 +881,7 @@ prevArm={x,g:g0};
 // ═══════════ 柏林街道家具 (2026-09-09 加密批次: 用户实机反馈"城内太过于空荡") ═══════════
 // 烧毁轿车残骸: 车体+车厢+四轮 —— 可碾轻掩体 (crush), 城市街道的密度骨架
 function carWreck(x,z,ry){
-if(!propFree(x,z,2.2)||!freeSpot(x,z,2.1)) return; // freeSpot: 避开建筑足迹/地铁下沉区
+if(!propFree(x,z,2.2)||!freeSpot(x,z,2.1)) return; // freeSpot: 避开建筑足迹
 propTake(x,z,2.2);
 const fit=groundFit(x,z,ry,1.9,1.0);
 const dark=new THREE.MeshLambertMaterial({color:0x3a3229,map:TEX.grime});

@@ -1268,6 +1268,7 @@ if(ref.dmg===undefined) ref.dmg=0;
 return ref;
 }
 function roofDamage(ref,amt,attacker){
+if(CAMPAIGN&&CAMPAIGN.solidStructs) return; // 莫斯科1941 屋顶固化 (2026-11-15): 不坍塌
 if(!ref||ref.done||!ref.hp||!(amt>0)) return;
 ref.dmg=(ref.dmg||0)+amt;
 if(ref.dmg>=ref.hp) collapseRoof(ref,false,attacker);
@@ -1344,6 +1345,7 @@ t.takeDmg(dv,attacker);
 // 为什么要有它: 旧版撞塌 (15-vehicles) 绕开 hp 直调 destroyStructure ⇒ 同一个结果两种报酬, 且不计分 (B4)。
 function damageStructureBy(g,amt,attacker,at){
 if(!g||g.dead||!(amt>0)) return 0;
+if(CAMPAIGN&&CAMPAIGN.solidStructs) return 0; // 莫斯科1941 建筑全固化 (2026-11-15 用户裁定): 爆炸/撞塌/油桶/坍塌链全部零作用, 与柏林国会 indestr 同语义
 if(typeof structBatchBegin==='function') structBatchBegin();
 if(g.hp0===undefined||g.hp>g.hp0) g.hp0=g.hp;
 g.hp-=amt;
@@ -1706,7 +1708,6 @@ return mx-mn;
 function spotBlockedBuild(x,z,ry,w,d){
 for(const f of CAMPAIGN.flags){ if(Math.hypot(x-f.x,z-f.z)<w*0.5+2.5) return true; }
 if(roadDist(x,z)<5) return true;
-if(metroBlocked(x,z,w,d)) return true;
 if(RIVER&&inRiverChannel(x,z)) return true;
 	if(BRIDGE&&onBridge(x,z,6)) return true;
 	// 2026-09-19 四面环海: 建筑/瞭望塔一律不得落水或贴水线 (离岸 ≥6m 干陆) ——
@@ -1744,7 +1745,6 @@ const px=x+(t?wr(-2.5,2.5):0), pz=z+(t?wr(-2.5,2.5):0);
 const ox=o.ox||0, oz=o.oz||0;
 const rxx=px+ox*Math.cos(ry)+oz*Math.sin(ry), rzz=pz-ox*Math.sin(ry)+oz*Math.cos(ry);
 if(terrainDelta(px,pz,ry,w,d)>(o.maxDh!==undefined?o.maxDh:1.4)) continue;
-if(metroBlocked(rxx,rzz,w,d)) continue; // 地铁站厅/隧道上方禁建 (2026-09-09)
 if(SEA&&shoreDist(rxx,rzz)>-6) continue; // 2026-09-19 环海图: 手摆建筑同样不得落水/贴水线
 if(o.noWater&&typeof inWaterBody==='function'&&inWaterBody(rxx,rzz)) continue; // 2026-10-07e 算法图水体门
 const rect=footRect(rxx,rzz,ry,w,d,1.0);
@@ -1788,25 +1788,10 @@ B_FOOT.push(rect0); watchtower(px,pz,0); return true;
 watchtower(x,z,ry); B_FOOT.push(rForce);
 return false;
 }
-// 道具落点检查: 避开建筑足迹 + 地铁下沉区 (2026-09-09 柏林: 站厅/隧道上方禁止落位 ——
-// 该处 heightAt 取到坑底, 道具/树/草会沉入地下; 隧道顶板=街面只走人/车, 不摆物件)
+// 道具落点检查: 避开建筑足迹 (freeSpot: B_FOOT)
 function freeSpot(x,z,r){
 if(B_FOOT.some(f=>x>f.x0-r&&x<f.x1+r&&z>f.z0-r&&z<f.z1+r)) return false;
-if(typeof METRO_RECTS!=='undefined'){
-for(const s of METRO_RECTS){
-if(x>s.x0-r&&x<s.x1+r&&z>s.z0-r&&z<s.z1+r) return false;
-}
-}
 return true;
-}
-// 地铁下沉区禁建 (2026-09-09): 站厅/隧道上方落建筑会悬空/埋进坑底 —— freeSpot 只挡道具/植被,
-// 建筑走 placeAt/placeBuild 的另一条校验链, 此处补同一份矩形表
-function metroBlocked(x,z,w,d){
-if(typeof METRO_RECTS==='undefined') return false;
-for(const s of METRO_RECTS){
-if(x>s.x0-w/2&&x<s.x1+w/2&&z>s.z0-d/2&&z<s.z1+d/2) return true;
-}
-return false;
 }
 // 建筑足迹矩形 vs 已放置道具: 任一道具圆与矩形(含道具半径外扩)相交 → 拒绝
 // (粗粒距 check 覆盖不到旋转矩形的最远角, 石墙段/弹坑会漏进房内)

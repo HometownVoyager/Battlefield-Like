@@ -127,45 +127,6 @@ const cm=seaChannelMask(x,z);
 if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
 return dep;
 }// 03-terrain 副本 (2026-11-15): 厅坑压平 + 隧道带桥式抬升 —— 与 03-terrain 同源 (旗标期采样, 广场碟保留、明坑/street 矩形短路)。
-// 本体改 metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY 必同步本副本 (与 RIVER 五处副本同一条纪律)。
-let _mNoDep=false;
-function metroFlatRect(x,z){
-if(!METRO||_mNoDep) return null;
-for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-return null;
-}
-function metroFlatY(s){
-if(s._fy!==undefined) return s._fy;
-_mNoDep=true;
-const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
-_mNoDep=false;
-s._fy=base-(s.d||METRO.d);
-return s._fy;
-}
-function metroLiftNodes(s){
-if(s._ln) return s._ln;
-const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
-const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
-const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
-const segL=span/nS;
-_mNoDep=true;
-const ns=[];
-for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
-if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
-_mNoDep=false;
-s._ln={n:nS,segL,ns,alongZ};
-return s._ln;
-}
-function metroLiftY(s,x,z){
-const L=metroLiftNodes(s);
-const t=L.alongZ?(z-s.z0):(x-s.x0);
-const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
-const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
-const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
-const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
-return lo+(hi-lo)*u;
-}
 
 function seaDepthAt(x,z){
 if(!SEA) return 0;
@@ -340,34 +301,14 @@ if(b.deckY!==undefined) return b.deckY; // 栈桥 (kind='pier', 2026-09-18): 绝
 if(!_deckMap.has(b)){ const dx=Math.sin(b.yaw),dz=Math.cos(b.yaw); const e=b.len/2+3; _deckMap.set(b,Math.max(heightAt(b.x-dx*e,b.z-dz*e),heightAt(b.x+dx*e,b.z+dz*e))); }
 return _deckMap.get(b);
 }
-// 03-terrain 副本: 柏林地铁下沉 (2026-09-09 站厅 halls[]/隧道矩形 + 广场圆, 深度取 max)
-const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
-const METRO_FALL=0.4;
-const METRO_RECTS=[]; // 03-terrain 副本: 站厅表 + 隧道 (共读 config.metro)
-if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
-function metroDep(x,z){
-if(!METRO) return 0;
-let dep=0;
-const d0=Math.hypot(x-METRO.x,z-METRO.z);
-if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
-for(const s of METRO_RECTS){
-if(!s||s.street) continue; // 2026-11-15: street 矩形 (隧道带) 不下沉 —— 地形由 metroLiftY 抬到街面 (桥式), 明坑只在洞内建造件
-const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
-const dd=Math.hypot(dx,dz);
-if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
-}
-return dep;
-}
 function heightAt(x,z,noBridge){
 let h=rawH(x,z);
 for(const f of FLATS){ const d=Math.hypot(x-f.x,z-f.z); if(d<f.r){ const s1=1-d/f.r; const s=s1*s1*(3-2*s1); h+=(f.h-h)*s; } }
-if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁站厅/通道下沉
 // 03-terrain 副本: 诺曼底博卡日下沉土路 (田块表存在即启用)
 if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } } // !CITY 门控同 03-terrain 本体 (2026-09-06)
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20) —— 室内无坑/门槛零落差
-if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -390,7 +331,7 @@ if(DELTA&&DELTA.ponds){ for(const pd of DELTA.ponds){ if(Math.hypot(x-pd.x,z-pd.
 return false;
 }
 function roadDist(x,z){ let d=CAMPAIGN.sineRoad?Math.abs(z-3*Math.sin(x*0.02)):1e9; for(const r of CAMPAIGN.roads) d=Math.min(d,seg(r[0],r[1],r[2],r[3],x,z)); return d; }
-return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
+return {heightAt,roadDist,inRiverChannel,inShallowChannel,onBridge,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,waterSurfReg,inSeaAt,inWaterBody};
 }
 function runCampaign(campIdx){
 const errors=[];
@@ -427,7 +368,6 @@ const CAMP=vm.runInContext('CAMPAIGN',ctx);
 const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02);
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
-ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入, 与本体同步)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
 ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
@@ -446,10 +386,8 @@ ctx.RURAL_FIELDS=CAMP.fields||[];
 ctx.fieldAt=(x,z)=>{ for(const f of ctx.RURAL_FIELDS){ if(x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1) return f; } return null; };
 // 2026-09-05 城市组桩: CITY/streetDist (03-terrain 同构, 供 05c buildWorld 植被让位)
 ctx.CITY=CAMP.city||null;
-ctx.METRO=(CAMP.city&&CAMP.city.metro)||null; // 2026-09-09 柏林地铁下沉区: freeSpot 让位用
-ctx.METRO_RECTS=(()=>{ const M2=CAMP.city&&CAMP.city.metro, a=[]; if(M2){ for(const h of (M2.halls||[])) a.push(h); if(M2.tunnel) a.push(M2.tunnel); } return a; })(); // 2026-09-09 修复: 沙箱漏注入 → freeSpot 地铁让位在沙箱里失效
 ctx.streetDist=(x,z)=>{ const CT=CAMP.city; if(!CT) return 1e9; let bd=1e9; for(const s of CT.streets){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return 0; const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1); const d=Math.hypot(dx,dz); if(d<bd) bd=d; } return bd; };
-ctx.cityUrban=(x,z)=>{ const CT=CAMP.city; if(!CT) return false; if(CT.blocks) for(const s2 of CT.blocks){ if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; } if(CT.yard&&x>=CT.yard.x0&&x<=CT.yard.x1&&z>=CT.yard.z0&&z<=CT.yard.z1) return true; if(CT.metro){ if(Math.hypot(x-CT.metro.x,z-CT.metro.z)<CT.metro.r) return true; for(const s2 of ctx.METRO_RECTS) if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; } return false; };
+ctx.cityUrban=(x,z)=>{ const CT=CAMP.city; if(!CT) return false; if(CT.blocks) for(const s2 of CT.blocks){ if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; } if(CT.yard&&x>=CT.yard.x0&&x<=CT.yard.x1&&z>=CT.yard.z0&&z<=CT.yard.z1) return true; return false; };
 
 // 05-world 已切分: 框架 → 建筑实例 → 道具植被 → 布局/组装 (顺序不可变)
 vm.runInContext(fs.readFileSync(path.join(root,'js/04b-fire.js'),'utf8'),ctx,{filename:'js/04b-fire.js'});
@@ -503,7 +441,7 @@ for(const b of boxes){ if(b.dead||!xz(b,s.x,s.z)) continue; if(b.maxY<=s.topY+0.
 if(Math.abs(sup-s.topY)>0.12) errors.push(`楼梯登顶 @${s.x.toFixed(1)},${s.z.toFixed(1)} 支撑面=${sup.toFixed(2)}≠顶面=${s.topY.toFixed(2)}`);
 for(const b of boxes){ if(b.dead||!xz(b,s.x,s.z)) continue; if(b.maxY<=s.topY+0.15) continue; if(b.minY<s.topY+1.7){ errors.push(`楼梯登顶 @${s.x.toFixed(1)},${s.z.toFixed(1)} 头顶被挡 y=${b.minY.toFixed(2)}..${b.maxY.toFixed(2)}`); break; } }
 }
-// 3b) 梯道全程净高: 沿梯段逐级采样 (带 dir/run/n 的记录 —— 2026-09-09 柏林地铁售票厅顶板压梯道实机前自检发现)
+// 3b) 梯道全程净高: 沿梯段逐级采样 (带 dir/run/n 的记录)
 // 跳过踏步自身 (solidBox 后打 b.stair=1 标记): 顶棚/横墙压梯道才判遮挡
 for(const s of ST){
 if(s.fx===undefined||!s.n) continue;

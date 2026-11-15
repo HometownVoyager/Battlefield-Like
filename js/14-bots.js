@@ -806,9 +806,11 @@ this.repathT=0;
 perceive(){
 const diff=DIFF_TABLE[SETTINGS.diff];
 // 夜档实战档 (R2, 昼夜设计 §3.3): 索敌距离 ×viewDMul; FOV 门/蹲姿门基于 viewD 自动收窄。
-// 索敌与雾距保持独立常数, 不硬联动 (与白天同口径)。照明弹/探照灯补亮系数在循环内逐目标乘 (N2)。
+// ★2026-11-15 用户裁定 (天气×地图雾叠加): 地图主题雾 THEME.fogMul 纳入索敌单链 (雾林守线 woods=0.42
+//   ⇒ 旧版 Bot 隔着浓雾全距索敌 = 与玩家所见冲突; 现在地图雾先乘, 天气乘子在其后继续叠加 ——
+//   fogMul=1 的图逐位不变)。照明弹/探照灯补亮系数在循环内逐目标乘 (N2)。
 // 天气乘子 (天气设计 §5-7/R6): 同语义独立相乘, 晴朗 ×1 逐位不变; nightLitMul/探照灯 searchView 块不动。
-let viewD=95*diff.visMul*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
+let viewD=95*diff.visMul*(THEME.fogMul||1)*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
 let best=null,bestD=1e9;
 const eye=_pvEye.set(this.pos.x,this.pos.y+(this.prone?0.5:this.crouch?1.15:1.62),this.pos.z); // 复用槽 (见文件头注释)
 // 环境暗度只读全局 (2026-11-01 性能批外提): 循环内逐候选重算 getEnvBrightness 是纯重复

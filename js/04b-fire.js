@@ -641,6 +641,44 @@ _fc.set(px-axz*3.5*sn+axx*kc, py+3.5*cs+dy, pz+axx*3.5*sn+axz*kc);
 tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
 }
 
+// 竹丛倒伏姿态 (2026-11-15 竹子批): 与 willowInstanceMatrices 同一套 Rodrigues 整体绕根翻转 (轴=(dz,0,-dx)),
+// 只是竹丛在 05b 的 BAMBOO_IM 单张杆实例批里, 部件表 (bst: 偏移+基础四元数+缩放, bn=杆数) 按
+// 丛连续段 [bi, bi+bn) 改写。竹无叶冠 ⇒ 无"焦黑叶冠零缩放"支路 —— 烧尽=杆实例全染炭色, 倒伏残骸
+// (整丛黑杆) 在沉入期照常写矩阵下沉 (与柳干/枝同义, 与乔叶不同)。
+function bambooInstanceMatrices(tr,th,dy=0){
+fireTmp();
+const f=tr.fall;
+const axx=f.dz, axz=-f.dx;                    // 轴 = (dz,0,-dx), ax.y 恒为 0
+const cs=Math.cos(th), sn=Math.sin(th);
+const hw=Math.sin(th*0.5), cw=Math.cos(th*0.5); // 半角 → R=(axx·hw, 0, axz·hw, cw)
+const rqx=axx*hw, rqz=axz*hw;
+const px=tr.x, py=tr.g0, pz=tr.z;
+const im=BAMBOO_IM.stalks;
+for(let k=0;k<tr.bn;k++){
+const p=tr.bst[k];
+const ox=p.ox, oy=p.oy, oz=p.oz;
+const kk=(axx*ox+axz*oz)*(1-cs);
+_fp.set(
+px+ox*cs-axz*oy*sn+axx*kk,
+py+oy*cs+(axz*ox-axx*oz)*sn+dy,
+pz+oz*cs+axx*oy*sn+axz*kk);
+// R ⊗ q0 (Hamilton 积; R.y=0 的展开) —— 与 willowInstanceMatrices 同式 (沙箱桩 Quaternion 无 set/multiply)
+const q=p.q;
+_wlQ.x=cw*q[0]+rqx*q[3]-rqz*q[1];
+_wlQ.y=cw*q[1]-rqx*q[2]+rqz*q[0];
+_wlQ.z=cw*q[2]+rqx*q[1]+rqz*q[3];
+_wlQ.w=cw*q[3]-rqx*q[0]-rqz*q[2];
+_fs.set(p.sx,p.sy,p.sz);
+_fm.compose(_fp,_wlQ,_fs);
+im.setMatrixAt(tr.bi+k,_fm);
+}
+fireImDirty(im.instanceMatrix,tr.bi,tr.bn);
+// 燃烧竹丛世界坐标 (火焰跟随): 冠带中点 (0,3.2,0) 绕根旋转 —— 与 willowInstanceMatrices 尾段同义
+const kc=axz*3.2*(1-cs);
+_fc.set(px-axz*3.2*sn+axx*kc, py+3.2*cs+dy, pz+axx*3.2*sn+axz*kc);
+tr.cx=_fc.x; tr.cy=_fc.y; tr.cz=_fc.z;
+}
+
 // 对象式植被 (枯树/椰树) 的倒伏姿态: 与 treeInstanceMatrices 同一套 Rodrigues 旋转公式与同一角度曲线,
 // 只是把结果写给各网格的 position/quaternion。四元数按分量手算 (R ⊗ q0) —— 沙箱 THREE 桩没有
 // clone/copy/set, 而这条路径要在 dev/verify-fire 的桩里跑, 所以不依赖任何实例方法。
@@ -700,6 +738,7 @@ th=clamp(1.5-0.09*Math.exp(-3.5*u)*Math.sin(10.5*u),1.32,1.5);
 }
 if(f.obj) floraObjMatrices(tr,th);
 else if(tr.kind==='willow') willowInstanceMatrices(tr,th);   // 柳=实例批 (WLOW_IM), 与乔木同曲线不同批
+else if(tr.kind==='bamboo') bambooInstanceMatrices(tr,th);   // 竹=实例批 (BAMBOO_IM), 与柳同款单张杆批 (2026-11-15)
 else treeInstanceMatrices(tr,th);
 if(f.t>=f.dur+0.7){
 tr.restCrown={x:tr.cx||tr.x,y:tr.cy||tr.g0+3.4*(tr.s||f.s||1),z:tr.cz||tr.z};
@@ -733,6 +772,7 @@ s.t+=dt;
 if(s.t<s.rest) continue;
 const k=Math.min(1,(s.t-s.rest)/s.dur);
 if(s.tr.kind==='willow') willowInstanceMatrices(s.tr,1.5,-3.6*k);   // 柳: 三张实例批同沉 (焦黑叶冠已零缩放, 只写干/枝)
+else if(s.tr.kind==='bamboo') bambooInstanceMatrices(s.tr,1.5,-3.6*k); // 竹: 杆实例批同沉 (2026-11-15)
 else treeInstanceMatrices(s.tr,1.5,-3.6*k);
 if(k>=1){
 // 全沉: 树干/叶面实例零缩放删除, 记录标死 (floraNear 不再返回该树)
@@ -745,6 +785,13 @@ for(let k2=0;k2<19;k2++) WLOW_IM.leaves.setMatrixAt(s.tr.wi*19+k2,_fm);
 fireImDirty(WLOW_IM.trunks.instanceMatrix,s.tr.wi,1);
 fireImDirty(WLOW_IM.branches.instanceMatrix,s.tr.wi*3,3);
 fireImDirty(WLOW_IM.leaves.instanceMatrix,s.tr.wi*19,19);
+s.tr.dead=true;
+TREE_SINKS.splice(i,1);
+continue;
+}
+if(s.tr.kind==='bamboo'){
+for(let k2=0;k2<s.tr.bn;k2++) BAMBOO_IM.stalks.setMatrixAt(s.tr.bi+k2,_fm);
+fireImDirty(BAMBOO_IM.stalks.instanceMatrix,s.tr.bi,s.tr.bn);
 s.tr.dead=true;
 TREE_SINKS.splice(i,1);
 continue;
@@ -806,6 +853,11 @@ treeFall(tr,Math.sin(a),Math.cos(a));
 	WLOW_IM.branches.setColorAt(tr.wi*3+2,_charCol);
 	WLOW_IM.trunks.instanceColor.needsUpdate=true;
 	WLOW_IM.branches.instanceColor.needsUpdate=true;
+	}else if(tr.kind==='bamboo'){
+	// 竹 (2026-11-15 批): 杆实例全部染焦黑 —— 竹无叶冠可隐, 倒伏残骸=整丛黑杆, 沉入期照常 (bambooInstanceMatrices)
+	const bim=BAMBOO_IM.stalks;
+	for(let k2=0;k2<tr.bn;k2++) bim.setColorAt(tr.bi+k2,_charCol);
+	bim.instanceColor.needsUpdate=true;
 	}else{
 	const lm=TREE_IM.leaves;
 	for(let k2=0;k2<3;k2++){ _fm.makeScale(0,0,0); lm.setMatrixAt(tr.li+k2,_fm); }
@@ -820,7 +872,7 @@ treeFall(tr,Math.sin(a),Math.cos(a));
 	}
 }
 }
-// ===== 爆炸对植被: 近处树直接吹倒 (倒向背离爆心), 中距累积伤害, 灌木类直接炸没 =====
+// ===== 爆炸对植被: 近处树/竹直接吹倒 (倒向背离爆心), 中距累积伤害, 灌木类直接炸没 =====
 // 2026-09-26: 枯树/椰树并入"倒伏"口径 —— 旧版这两类与灌木同列 (d<radius*0.85 直接 vanishFlora),
 // 即"被炸到就原地消失", 没有乔木那种立即向**背离爆心**方向翻倒的观感 (用户实机报)。
 // 现在三类同规: 近距 (0.75R+0.9) 即刻倒伏; 中距 (R+2.6) 累积伤害, 第二次爆炸才倒。
@@ -830,9 +882,9 @@ const hits=[];
 floraNear(p.x,p.z,radius+3,rec=>hits.push(rec));
 for(const rec of hits){
 const d=Math.hypot(rec.x-p.x,rec.z-p.z);
-if(rec.kind==='tree'||rec.kind==='dead'||rec.kind==='palm'||rec.kind==='willow'){
+if(rec.kind==='tree'||rec.kind==='dead'||rec.kind==='palm'||rec.kind==='willow'||rec.kind==='bamboo'){
 if(!rec.alive) continue;                         // 已倒伏/已炸没: 不再响应 (倒树残骸由沉入系统收尾)
-const obj=rec.kind!=='tree'&&rec.kind!=='willow'; // 柳与乔木同为实例批 (04b willowInstanceMatrices), 不走对象网格 floraTopple
+const obj=rec.kind!=='tree'&&rec.kind!=='willow'&&rec.kind!=='bamboo'; // 柳/竹与乔木同为实例批 (04b willow/bambooInstanceMatrices), 不走对象网格 floraTopple
 if(d<radius*0.75+0.9){
 const dx=rec.x-p.x+rand(-0.5,0.5), dz=rec.z-p.z+rand(-0.5,0.5);
 if(obj) floraTopple(rec,dx,dz); else treeFall(rec,dx,dz);
@@ -848,7 +900,7 @@ vanishFlora(rec,true);
 }
 }
 }
-// ===== 坦克碾压: 车体碰到树/枯树 → 撞倒/碾碎; 灌木直接碾没 =====
+// ===== 坦克碾压: 车体碰到树/竹/枯树 → 撞倒/碾碎; 灌木直接碾没 =====
 // 距离度量与 15-vehicles 的三圆碰撞模型对齐 (舱段 ±1.95 + 圆半径 1.55):
 // 取"树干中心到车体轴向舱段的垂距"。旧版按坦克中心到树心的距离判定 (阈值~2.2m),
 // 而树干圆柱在车头圆处 (中心距 ~3.5-3.8m) 就把坦克拦停减速 —— 正面冲撞永远够不到
@@ -870,7 +922,7 @@ const d=Math.hypot(rx-sn*aC,rz-cs*aC);
 // 各向异性接触半径: 树在舱段端点之外 (正对车头/车尾) 用鼻端精确半径 1.55 (与三圆碰撞模型一致,
 // 不提前压树); 树在车身侧旁用 1.9 (贴合履带/挡泥板视觉半宽 ~2.0, 旧版侧擦可碾的量级)
 const rad=(Math.abs(aRaw)>1.95?1.55:1.9);
-if(rec.kind==='tree'||rec.kind==='willow'){
+if(rec.kind==='tree'||rec.kind==='willow'||rec.kind==='bamboo'){   // 竹 (2026-11-15): 压倒非碾没 (树同款, 倒向车辆运动方向)
 if(!rec.alive) continue;
 if(d<rad+0.35*rec.s){
 treeFall(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2));
@@ -1009,9 +1061,9 @@ spawnP(PT.dark,cx2,gy2+0.5,cz2,rand(-0.2,0.2),rand(0.8,1.4),rand(-0.2,0.2),1.0,1
 	bi.byCell.delete(ci);
 	}
 	}
-// 格内灌木等对象植被消失 (枯树/椰树若已倒伏则跳过: 残骸已挂在自己的沉入任务上, 见 scheduleFloraObjSink)
+	// 格内灌木等对象植被消失 (枯树/椰树若已倒伏则跳过: 残骸已挂在自己的沉入任务上, 见 scheduleFloraObjSink)
 const arr=FLORA_HASH.get(ci);
-if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree'&&rec.kind!=='willow') vanishFlora(rec,false,true); // 烧尽 ⇒ 染焦黑 (灌木/蕨丛/树篱/枯树; 乔木/柳走自己的树冠-树干链, 柳被格子火点燃由 treeIgnitePass 认领)
+if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree'&&rec.kind!=='willow'&&rec.kind!=='bamboo') vanishFlora(rec,false,true); // 烧尽 ⇒ 染焦黑 (灌木/蕨丛/树篱/枯树; 乔木/柳/竹走自己的树冠-树干链, 柳/竹被格子火点燃由 treeIgnitePass 认领)
 if(fireNavT<=0) fireNavT=5;
 }
 }
@@ -1043,7 +1095,7 @@ if(typeof updateFireLights==='function') updateFireLights(dt);
 const _tiSeen=new Set();
 let _tiCx=0, _tiCz=0, _tiFatt=0;
 function _tiFloraCb(rec){
-if((rec.kind!=='tree'&&rec.kind!=='willow')||_tiSeen.has(rec)) return;
+if((rec.kind!=='tree'&&rec.kind!=='willow'&&rec.kind!=='bamboo')||_tiSeen.has(rec)) return;
 _tiSeen.add(rec);
 const d=Math.hypot(rec.x-_tiCx,rec.z-_tiCz);
 if(d<3.0&&rec.alive&&rec.burnT<0) treeIgnite(rec,_tiFatt);

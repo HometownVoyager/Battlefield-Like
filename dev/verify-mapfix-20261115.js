@@ -2,12 +2,12 @@
 // dev/verify-mapfix-20261115.js —— 2026-11-15 多图修批正式探针
 // 用法: node dev/verify-mapfix-20261115.js [all|berlin|hukawng|steppe|moscow|baituan|neg]  (默认 all)
 // 覆盖 (用户实机问题单 2026-11-15):
-//   柏林地铁 5.1: a) 隧道带桥式抬升 (坦克过顶板) b) 厅底板+坑底压平 c) 顶/墙/洞口封严 (胸墙) d) 侧墙护环 pad
+//   (2026-11-15 地铁站整体删除: 柏林地铁五项断言随子系统移除, 本探针只保留莫/百/胡/草四图)
 //   莫斯科 2.1/2.2: 残墙迁位不压教堂不进房 / 工厂旗西移 (旗距苏基 186→132m)
 //   百团 1.1/1.2: 中路前哨拉开 / R10 堑口南移 (距桥 ≥20m)
 //   胡康 3.1/3.2/3.3: 激流水态门 (干岸不误伤) / 河道过可玩边界 / 水位抬升 (0.55→0.44)
 //   草原 4.1: 四腿水塔腿位收进罐底投影
-// 阴性对照 (neg): 4 组源码变异 —— 摘 street 抬升 / 摘坑底压平 / 摘残墙足迹 / 摘水态门, 对应正向断言必须转红
+// 阴性对照 (neg): 2 组源码变异 —— 摘残墙足迹(NEG3) / 摘水态门(NEG4), 对应正向断言必须转红 (原 NEG1/NEG2 随地铁删除, 编号留空)
 // 装载: dev/_bootstub.js + dev/_bootpatch.js + 全量 js/ 顺序加载 + startBtn.onclick() (同 verify-mapshrink 口径)
 // ─────────────────────────────────────────────
 'use strict';
@@ -55,87 +55,6 @@ const N=(ctx,code,vars)=>{ if(vars) for(const k of Object.keys(vars)) ctx[k]=var
 let pass=0,fail=0;
 const ok=(c,m)=>{ if(c){pass++;console.log('  ✓ '+m);} else {fail++;console.log('  ✗ '+m);} };
 
-// ═══════════ 柏林: 地铁五项 ═══════════
-function diagBerlin(ctx,errs){
-errs.forEach(e=>console.log('  BOOT-ERR '+e));
-const T=N(ctx,'(CITY&&CITY.metro&&CITY.metro.tunnel)||null');
-if(!T){ ok(false,'metro.tunnel 存在 (CITY)'); return; }
-const tunX=(T.x0+T.x1)/2;
-// B1 桥面=街面
-const rows=N(ctx,`(()=>{const T=CITY.metro.tunnel,tunX=(T.x0+T.x1)/2;
-const gNat=z=>Math.max(heightAt(T.x0-1.2,z),heightAt(T.x1+1.2,z),heightAt(T.x0-1.2,z-3),heightAt(T.x1+1.2,z+3));
-return [T.z0+3,(T.z0+T.z1)/2,T.z1-3].map(z=>({z,tIn:heightAt(tunX,z),tOut:gNat(z)}));})()`);
-let b1=true;
-for(const r of rows){ const d=r.tIn-r.tOut; if(!(d>-1.4&&d<0.6)) b1=false; }
-ok(b1,'B1 隧道带=街面桥 (带内 vs 邻侧差 ∈(-1.4,0.6); 旧版 −2.6 明坑)');
-// B2 横穿连续性 (坦克碾过无竖坎; 带两端站坑竖坎=有意, 不扫)
-const cont=N(ctx,`(()=>{const T=CITY.metro.tunnel,tunX=(T.x0+T.x1)/2;let mx=0;
-const scan=(x0,z0,x1,z1)=>{const L=Math.hypot(x1-x0,z1-z0);let prev=null;
-for(let s2=0;s2<=L+0.001;s2+=0.5){const t=Math.min(1,s2/L),h=heightAt(x0+(x1-x0)*t,z0+(z1-z0)*t);
-if(prev!==null)mx=Math.max(mx,Math.abs(h-prev));prev=h;}};
-for(let z=T.z0+1;z<=T.z1-1;z+=2)scan(tunX-8,z,tunX+8,z);
-return mx;})()`);
-ok(cont<=0.35,`B2 横穿连续性 max|Δh|/0.5m=${cont.toFixed(3)} ≤0.35`);
-// B3 顶板贴本地街面 (z=0 碟心 + 中段)
-const roof=N(ctx,`(()=>{const T=CITY.metro.tunnel,boxes=BOXES,tunX=(T.x0+T.x1)/2;const out=[];
-for(const z of [0,(T.z0+T.z1)/2]){const tIn=heightAt(tunX,z);
-let top=null;for(const b of boxes){if(b.dead)continue;if(tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&(top===null||b.maxY>top))top=b.maxY;}
-out.push({z,tIn,top});}return out;})()`);
-let b3=true;
-for(const r of roof){ if(r.top===null||!(r.top>r.tIn-1.0&&r.top<r.tIn+0.05)) b3=false; }
-ok(b3,'B3 顶板贴带内街面 (top ∈ [街面−1.0, 街面+0.05], z=0 碟心含碟剖面)');
-// B4 洞内底板 + 净高
-const fl=N(ctx,`(()=>{const T=CITY.metro.tunnel,boxes=BOXES,tunX=(T.x0+T.x1)/2;const out=[];
-for(const z of [T.z0+3,(T.z0+T.z1)/2,T.z1-3]){const terr=heightAt(tunX,z);
-let roofB=null,floor=null;
-for(const b of boxes){if(b.dead)continue;if(!(tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ))continue;
-if(roofB===null||b.maxY>roofB)roofB=b.maxY;
-if(b.maxY<terr-1.5&&(floor===null||b.maxY>floor))floor=b.maxY;}
-out.push({z,roofB,floor});}return out;})()`);
-let b4=true;
-for(const r of fl){ if(r.floor===null||r.roofB===null||r.roofB-r.floor<1.7) b4=false; }
-ok(b4,'B4 洞内底板存在且净高 ≥1.7 (步兵通道保留)');
-// B5 洞口通道无阻挡 (jam 带锚洞内底板) + 胸墙在位
-const mouth=N(ctx,`(()=>{const T=CITY.metro.tunnel,boxes=BOXES,tunX=(T.x0+T.x1)/2;const out=[];
-for(const wz of [T.z0,T.z1]){const gy=heightAt(tunX,wz);
-let floor=null,parapet=null;
-for(const b of boxes){if(b.dead)continue;if(!(tunX>b.minX&&tunX<b.maxX&&wz>b.minZ&&wz<b.maxZ))continue;
-if(b.maxY<gy-1.5&&b.maxY>gy-4&&(!floor||b.maxY>floor))floor=b.maxY;
-if(b.maxY>gy+0.3&&b.maxY<gy+1.2&&(!parapet||b.maxY>parapet))parapet=b.maxY;}
-const fTop=floor!==null?floor:gy-2.6;
-let jam=false;
-for(const b of boxes){if(b.dead)continue;if(!(tunX>b.minX&&tunX<b.maxX&&wz>b.minZ&&wz<b.maxZ))continue;
-if(b.minY<fTop+1.6&&b.maxY>fTop+0.2){jam=true;break;}}
-out.push({wz,jam,parapet});}return out;})()`);
-for(const m of mouth){
-ok(!m.jam,`B5 洞口 z=${m.wz.toFixed(1)} 通道无阻挡 (jam 带=底板顶+0.2..+1.6)`);
-ok(m.parapet!==null,`B5 洞口 z=${m.wz.toFixed(1)} 胸墙在位 (街面+0.3..+1.2 拦载具, Bot OCC 自动绕行)`);
-}
-// B6 厅坑压平 + 底板平贴
-const halls=N(ctx,'CITY.metro.halls');
-const flats=N(ctx,`(()=>{const HS=CITY.metro.halls;return HS.map(A=>{const cx=(A.x0+A.x1)/2,cz=(A.z0+A.z1)/2;
-let mn=1e9,mx=-1e9;for(const [sx,sz] of [[cx,cz],[A.x0+1,A.z0+1],[A.x1-1,A.z1-1],[A.x0+1,A.z1-1],[A.x1-1,A.z0+1]]){const h=heightAt(sx,sz);if(h<mn)mn=h;if(h>mx)mx=h;}
-let slab=null;for(const b of BOXES){if(b.dead)continue;if(cx>b.minX&&cx<b.maxX&&cz>b.minZ&&cz<b.maxZ&&b.maxY<mx+0.5&&(!slab||b.maxY>slab))slab=b.maxY;}
-return {mn,mx,slab};});})()`);
-halls.forEach((A,i)=>{
-const f=flats[i];
-ok(f.mx-f.mn<0.01,`B6 厅${i+1} 坑底压平 (高差 ${(f.mx-f.mn).toFixed(4)}<0.01)`);
-ok(f.slab!==null&&Math.abs(f.slab-(f.mx+0.06))<0.1,`B6 厅${i+1} 底板平贴坑底 (顶=坑底+0.06)`);
-});
-// B7 护环 pad
-const padN=N(ctx,`(()=>{const HS=CITY.metro.halls,D=3;let n=0;
-for(const p of PADS){for(const A of HS){
-const px=Math.max(A.x0-D,Math.min(p.x,A.x1+D)),pz=Math.max(A.z0-D,Math.min(p.z,A.z1+D));
-if(Math.abs(p.x-px)<0.01&&Math.abs(p.z-pz)<0.01&&Math.min(p.hw,p.hd)<=D/2+0.01){n++;break;}}}
-return n;})()`);
-ok(padN>=8,`B7 护环 pad 登记 ${padN}≥8 (厅矩形外 3m 环带, 杀侧墙沟)`);
-// B8 顶板 OCC 豁免
-const b8=N(ctx,`(()=>{const T=CITY.metro.tunnel,boxes=BOXES,tunX=(T.x0+T.x1)/2;
-const z=(T.z0+T.z1)/2,gh=heightAt(tunX,z);
-for(const b of boxes){if(b.dead)continue;if(tunX>b.minX&&tunX<b.maxX&&z>b.minZ&&z<b.maxZ&&b.maxY>gh-1.0&&b.maxY<gh+0.05)return b.maxY<gh+0.5;}
-return false;})()`);
-ok(b8,'B8 顶板 maxY<gh+0.5 ⇒ OCC 豁免 (不挡寻路/不推车)');
-}
 
 // ═══════════ 胡康: 水面三项 ═══════════
 function diagHukawng(ctx,errs){
@@ -214,24 +133,6 @@ ok(Math.min(ds.d1,ds.d2)>=55,`T2 中路前哨距两基 ${ds.d1.toFixed(0)}/${ds.
 // ═══════════ 阴性对照 (源码变异 → 对应正向必须转红) ═══════════
 function neg(){
 console.log('== NEG (阴性对照) ==');
-// NEG1: 摘 street 抬升 (tunnel 带回到 −2.6 明坑) ⇒ B1 必红
-{
-const {ctx,errs}=boot(IDX.berlin,[{file:'js/03-terrain.js',from:'if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr);',to:'if(mr) h=metroFlatY(mr);'}]);
-errs.forEach(e=>console.log('  BOOT-ERR '+e));
-const d=N(ctx,`(()=>{const T=CITY.metro.tunnel,tunX=(T.x0+T.x1)/2,z=(T.z0+T.z1)/2;
-const gNat=Math.max(heightAt(T.x0-1.2,z),heightAt(T.x1+1.2,z));
-return heightAt(tunX,z)-gNat;})()`);
-ok(d<-1.4,'NEG1 摘 street 抬升 ⇒ 隧道带回深坑 (Δ='+(isFinite(d)?d.toFixed(2):d)+' <−1.4, B1 有牙)');
-}
-// NEG2: 摘坑底压平 (厅矩形压平分支短路) ⇒ B6 必红
-{
-const {ctx,errs}=boot(IDX.berlin,[{file:'js/03-terrain.js',from:'if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr);',to:'if(mr&&!mr.street&&false) h=metroLiftY(mr,x,z);'}]);
-errs.forEach(e=>console.log('  BOOT-ERR '+e));
-const sp=N(ctx,`(()=>{const A=CITY.metro.halls[0],cx=(A.x0+A.x1)/2,cz=(A.z0+A.z1)/2;
-let mn=1e9,mx=-1e9;for(const [sx,sz] of [[cx,cz],[A.x0+1,A.z0+1],[A.x1-1,A.z1-1],[A.x0+1,A.z1-1],[A.x1-1,A.z0+1]]){const h=heightAt(sx,sz);if(h<mn)mn=h;if(h>mx)mx=h;}
-return mx-mn;})()`);
-ok(sp>0.01,'NEG2 摘坑底压平 ⇒ 厅内高差 '+(isFinite(sp)?sp.toFixed(2):sp)+' >0.01 (B6 有牙)');
-}
 // NEG3: 摘残墙足迹登记 ⇒ M1 (房屋骑墙) 必红
 {
 const {ctx,errs}=boot(IDX.moscow,[{file:'js/05b-props.js',from:'B_FOOT.push(Object.assign(footRect(x,z,ry,Math.min(4.2,len/steps+0.16),0.55,0.4),{sw:1}));',to:';'}]);
@@ -250,7 +151,7 @@ ok(dry===true,'NEG4 摘水态门 ⇒ 干岸点被误判水中 (H1 有牙)');
 }
 
 // ═══════════ 驱动 ═══════════
-const RUNNERS={berlin:diagBerlin,hukawng:diagHukawng,steppe:diagSteppe,moscow:diagMoscow,baituan:diagBaituan};
+const RUNNERS={hukawng:diagHukawng,steppe:diagSteppe,moscow:diagMoscow,baituan:diagBaituan};
 if(which==='neg'){ neg(); }
 else if(which==='all'){
 for(const k of Object.keys(RUNNERS)){

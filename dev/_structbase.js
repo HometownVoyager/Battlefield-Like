@@ -135,45 +135,6 @@ const cm=seaChannelMask(x,z);
 if(cm>0){ const ramp=s3f(Math.max(0,Math.min(1,(d-5)/10))); dep=dep+(Math.max(dep,2.45)-dep)*cm*ramp; }
 return dep;
 }// 03-terrain 副本 (2026-11-15): 厅坑压平 + 隧道带桥式抬升 —— 与 03-terrain 同源 (旗标期采样, 广场碟保留、明坑/street 矩形短路)。
-// 本体改 metroFlatRect/metroFlatY/metroLiftNodes/metroLiftY 必同步本副本 (与 RIVER 五处副本同一条纪律)。
-let _mNoDep=false;
-function metroFlatRect(x,z){
-if(!METRO||_mNoDep) return null;
-for(const s of METRO_RECTS){ if(s&&s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-for(const s of METRO_RECTS){ if(s&&!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-return null;
-}
-function metroFlatY(s){
-if(s._fy!==undefined) return s._fy;
-_mNoDep=true;
-const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
-_mNoDep=false;
-s._fy=base-(s.d||METRO.d);
-return s._fy;
-}
-function metroLiftNodes(s){
-if(s._ln) return s._ln;
-const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
-const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
-const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
-const segL=span/nS;
-_mNoDep=true;
-const ns=[];
-for(let i=0;i<=nS;i++){ const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
-if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]); else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]); }
-_mNoDep=false;
-s._ln={n:nS,segL,ns,alongZ};
-return s._ln;
-}
-function metroLiftY(s,x,z){
-const L=metroLiftNodes(s);
-const t=L.alongZ?(z-s.z0):(x-s.x0);
-const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
-const i=Math.floor(fi), f=fi-i, i2=Math.min(L.n,i+1);
-const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
-const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f, hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
-return lo+(hi-lo)*u;
-}
 
 function seaDepthAt(x,z){
 if(!SEA) return 0;
@@ -359,34 +320,14 @@ if(b.deckY!==undefined) return b.deckY; // 栈桥 (kind='pier', 2026-09-18): 绝
 if(!_deckMap.has(b)){ const dx=Math.sin(b.yaw),dz=Math.cos(b.yaw); const e=b.len/2+3; _deckMap.set(b,Math.max(heightAt(b.x-dx*e,b.z-dz*e),heightAt(b.x+dx*e,b.z+dz*e))); }
 return _deckMap.get(b);
 }
-// 03-terrain 副本: 柏林地铁下沉 (2026-09-09 站厅 halls[]/隧道矩形 + 广场圆, 深度取 max)
-const METRO=(CAMPAIGN.city&&CAMPAIGN.city.metro)||null;
-const METRO_FALL=0.4;
-const METRO_RECTS=[]; // 03-terrain 副本: 站厅表 + 隧道 (共读 config.metro)
-if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
-function metroDep(x,z){
-if(!METRO) return 0;
-let dep=0;
-const d0=Math.hypot(x-METRO.x,z-METRO.z);
-if(d0<METRO.r){ const k=1-d0/METRO.r; dep=Math.max(dep,METRO.d*k*k*(3-2*k)); }
-for(const s of METRO_RECTS){
-if(!s||s.street) continue; // 2026-11-15: street 矩形 (隧道带) 不下沉 —— 地形由 metroLiftY 抬到街面 (桥式), 明坑只在洞内建造件
-const dx=Math.max(s.x0-x,0,x-s.x1), dz=Math.max(s.z0-z,0,z-s.z1);
-const dd=Math.hypot(dx,dz);
-if(dd<METRO_FALL){ const k=1-dd/METRO_FALL; dep=Math.max(dep,(s.d||METRO.d)*k*k*(3-2*k)); }
-}
-return dep;
-}
 function heightAt(x,z,noBridge){
 let h=rawH(x,z);
 for(const f of FLATS){ const d=Math.hypot(x-f.x,z-f.z); if(d<f.r){ const s1=1-d/f.r; const s=s1*s1*(3-2*s1); h+=(f.h-h)*s; } }
-if(METRO) h-=metroDep(x,z); // 03-terrain 副本: 地铁站厅/通道下沉 (2026-09-09)
 // 03-terrain 副本: 诺曼底博卡日下沉土路 (田块表存在即启用)
 if((CAMPAIGN.fields||[]).length&&!CAMPAIGN.city){ const rd=roadDist(x,z); if(rd<4){ const k=1-rd/4; h-=0.45*k*k*(3-2*k); } } // !CITY 门控同 03-terrain 本体 (2026-09-06)
 for(const t of TRENCHES){ const d=seg(t.x1,t.z1,t.x2,t.z2,x,z); if(d<2.4){ const k=1-d/2.4; h-=1.3*k*k*(3-2*k); } }
 if(RIVER){ let rd=1e9; const P=RIVER.pts; for(let i=0;i<P.length-1;i++){ const d=seg(P[i][0],P[i][1],P[i+1][0],P[i+1][1],x,z); if(d<rd) rd=d; } if(rd<RIVER.w){ const k=1-rd/RIVER.w; h-=(RIVER.ice?1.2:(RIVER.d||1.9))*k*k*(3-2*k)*(1-0.92*fordAt(x,z)); } } // ford 滩心下切 8% (同 03-terrain 本体)
 h=padHeight(x,z,h); // 03-terrain 副本: 建筑地基平台 (2026-09-20, foundation 登记 → 室内无坑/门槛零落差); 排在壕沟/河道下切之后(同本体)
-if(METRO){ const mr=metroFlatRect(x,z); if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr); } // 03-terrain 副本 (2026-11-15): 矩形权威覆盖在 pad 后行 (同本体)
 if(!noBridge&&BRIDGES.length){ const dy=onBridge(x,z); if(dy!==false&&dy>h) h=dy; }
 return h;
 }
@@ -409,9 +350,6 @@ const CT=CAMPAIGN.city;
 if(!CT) return false;
 if(CT.blocks) for(const s of CT.blocks){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true; }
 if(CT.yard&&x>=CT.yard.x0&&x<=CT.yard.x1&&z>=CT.yard.z0&&z<=CT.yard.z1) return true;
-// 2026-09-09 修复: 补地铁区建成判定 (与 03-terrain 同源) —— 漏这段会让沙箱植被让位与实机不同, 布局整体错位
-if(CT.metro){ if(Math.hypot(x-CT.metro.x,z-CT.metro.z)<CT.metro.r) return true;
-for(const s2 of METRO_RECTS) if(x>=s2.x0&&x<=s2.x1&&z>=s2.z0&&z<=s2.z1) return true; }
 return false;
 }
 function onBridge(x,z,m=0){
@@ -454,7 +392,7 @@ return wy-heightAt(x,z,true);
 function inSea(x,z){ return !!SEA&&shoreDist(x,z)>0; }
 // 通用水体判据 (★2026-09-26 P2-18): 05c 的野树/草丛门会调 03-terrain 的 inWaterBody
 function inWaterBody(x,z){ const wy=waterYAt(x,z); return wy>-1e8&&heightAt(x,z,true)<wy-0.05; }
-return {heightAt,metroFlatRect,metroFlatY,metroLiftNodes,metroLiftY,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
+return {heightAt,roadDist,streetDist,cityUrban,inRiverChannel,inShallowChannel,onBridge,fordAt,FLATS,PADS,addPad,padHeight,bridgeDeckY,woodRavineDist,woodRampMask,shoreZAt,northZAt,coastXAt,coastDist,shoreDist,seaDepthAt,seaChannelMask,seaLandH,rectDist,waterYAt,waterDepthAt,inSea,inWaterBody};
 }
 function runCampaign(campIdx,seedN){
 const THREE=makeThreeStub();
@@ -494,7 +432,6 @@ const terr=makeTerrain(CAMP);
 ctx.heightAt=terr.heightAt; ctx.roadDist=terr.roadDist; ctx.sineRoadZ=(x)=>3*Math.sin(x*0.02); ctx.streetDist=terr.streetDist; ctx.cityUrban=terr.cityUrban;
 ctx.inRiverChannel=terr.inRiverChannel; ctx.onBridge=terr.onBridge; ctx.inShallowChannel=terr.inShallowChannel;
 ctx.fordAt=terr.fordAt; // 胡康徒涉滩强度场 (2026-09-12, 断言环带检验用)
-ctx.metroFlatRect=terr.metroFlatRect; ctx.metroFlatY=terr.metroFlatY; ctx.metroLiftNodes=terr.metroLiftNodes; ctx.metroLiftY=terr.metroLiftY; // 2026-11-15: 05a metroTunnel/metroHall 直调 (沙箱同构注入, 与本体同步)
 ctx.FLATS=terr.FLATS; ctx.bridgeDeckY=terr.bridgeDeckY;
 // 建筑地基平台 (2026-09-20): 03-terrain 副本的 PADS/addPad 注入沙箱 (05-world foundation 调用)
 ctx.PADS=terr.PADS; if(!(typeof process!=='undefined'&&process.env&&process.env.PADS_OFF)) ctx.addPad=terr.addPad; // PADS_OFF=1: negative control (old terrain without building pads)
@@ -512,8 +449,6 @@ ctx.BRIDGES=CAMP.bridges||(CAMP.bridge?[CAMP.bridge]:[]);
 ctx.BRIDGE=ctx.BRIDGES[0]||null;
 // 03-terrain 的城市语义全局 (沙箱未加载本体, 同构注入): CITY 常量供 05c/05a 使用
 ctx.CITY=CAMP.city||null;
-ctx.METRO=(CAMP.city&&CAMP.city.metro)||null;
-ctx.METRO_RECTS=(()=>{ const M2=CAMP.city&&CAMP.city.metro, a=[]; if(M2){ for(const h of (M2.halls||[])) a.push(h); if(M2.tunnel) a.push(M2.tunnel); } return a; })(); // 2026-09-09 修复: 沙箱漏注入 → freeSpot 地铁让位在沙箱里失效
 // 03-terrain 的农田系统全局 (沙箱未加载本体, 同公式注入): 田块表+查田块
 ctx.RURAL_FIELDS=CAMP.fields||[];
 ctx.fieldAt=(x,z)=>{ for(const f of ctx.RURAL_FIELDS){ if(x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1) return f; } return null; };

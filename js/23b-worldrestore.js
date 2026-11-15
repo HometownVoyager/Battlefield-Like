@@ -108,6 +108,7 @@ WSN.inst.push(e);
 };
 if(typeof TREE_IM!=='undefined'&&TREE_IM){ snapIM(TREE_IM.trunks); snapIM(TREE_IM.leaves); }
 if(typeof WLOW_IM!=='undefined'&&WLOW_IM){ snapIM(WLOW_IM.trunks); snapIM(WLOW_IM.branches); snapIM(WLOW_IM.leaves); } // 垂柳三张实例批 (2026-11-10 柳树批: 倒伏/焦黑/沉入态一并还原)
+if(typeof BAMBOO_IM!=='undefined'&&BAMBOO_IM){ snapIM(BAMBOO_IM.stalks); } // 竹丛杆实例批 (2026-11-15 竹子批: 倒伏/焦黑/沉入态一并还原)
 if(typeof BUSH_IM!=='undefined') snapIM(BUSH_IM);
 // ④c 草丛/庄稼实例批的"按格索引表": 烧尽时 delete(格) 且实例零缩放 —— 只还原矩阵的话,
 // 下一局同一格再烧就不会隐藏这批实例 (表里已经没有那一格了), 故连表内容一起存

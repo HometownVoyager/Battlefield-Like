@@ -721,38 +721,6 @@ NAV_CLEARS.push({x:q[0],z:q[1],r:1.5});
 coverPoints.push({x:x+Math.cos(ry)*2.2,z:z-Math.sin(ry)*2.2},{x:x-Math.cos(ry)*2.2,z:z+Math.sin(ry)*2.2});
 BUILD_REG.push({type:'tramWreck',x,z,ry,w:2.6,d:10.5,floor:fit.y,doors:[],roofY:fit.y+H+0.3});
 }
-// 地铁入口亭 (柏林): 下沉广场(03-terrain 地形下沉)中的 U 形亭 —— 石墙平顶半地下掩体,
-// 后墙门洞入, 前面敞口朝街; 亭内长椅+瓦砾 = 巷战经典"地铁口"据点
-function metroPavilion(x,z,ry){
-const f=foundation(x,z,ry,7,5.4);
-const ctx=bctx(x,z,ry,f.floor);
-const t=0.45,H=2.6;
-const wallMat=MAT.stone;
-const wallGs=[];
-// 后墙: 门洞; 侧墙 ×2 敞口前 (+z 不设墙)
-let g=wallSeg(ctx,{along:'x',at:-2.7,from:-2.7,to:2.7,h:H,t,mat:wallMat,destr:true,
-ops:[{c:0,w:1.5,ht:2.1,h:0,type:'door'}]}); if(g)wallGs.push(g);
-for(const at of [2.7,-2.7]){
-g=wallSeg(ctx,{along:'z',at,from:-2.7+t,to:2.7-t,h:H,t,mat:wallMat,destr:true,ops:[]});
-if(g)wallGs.push(g);
-}
-// 平顶 (实心挡弹) —— 手造 roofRef 挂三面墙组: 残余承重墙≤2 (3 墙毁 1) 即整体坍塌
-// (2026-09-06 P1-2: 旧注释"与墙同组可毁"但无任何挂链机制, 墙炸光后石顶悬空 —— 全项目唯一漏网)
-const rp=ctx.L(0,0);
-const rbi=BOXES.length;
-const roofM=solidBox(MAT.stone,7.6,0.34,6.0,rp[0],f.floor+H+0.17,rp[1],ry);
-addSnowCap(roofM);
-const roofRef={m:[roofM],bands:BOXES.slice(rbi),slabs:[],dead:0,done:false,carry:wallGs.filter(w=>w&&!w.dead)};
-for(const g2 of roofRef.carry) g2.roofRef=roofRef;
-roofRefFinalize(roofRef); // B2: 平顶也吃"直接轰屋顶"的伤害 (旧版只有坡顶房有承重链, 平顶打不着)
-// 亭内长椅 + 瓦砾块 (纯视觉, 不进 PROPS —— 足迹内道具会破坏互斥断言)
-let p=ctx.L(1.4,-1.6);
-solidBox(MAT.woodDark,1.8,0.5,0.5,p[0],heightAt(p[0],p[1])+0.25,p[1],ry);
-if(wr(0,1)<0.8){ p=ctx.L(-1.6,0.8); mesh(boxGeo(wr(0.9,1.5),wr(0.45,0.8),wr(0.9,1.5)),MAT.rubble,p[0],f.floor+0.28,p[1],wr(0,3)); }
-coverPoints.push({x:ctx.L(0,0.6)[0],z:ctx.L(0,0.6)[1]},{x:ctx.L(0,-3.6)[0],z:ctx.L(0,-3.6)[1]});
-BUILD_REG.push({type:'metro',x,z,ry,w:7,d:5.4,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+H+0.34});
-for(const b2 of roofRef.bands) b2.building=BUILD_REG[BUILD_REG.length-1]; // 沙箱煎饼断言: 平顶归属标记
-}
 // 补给库 (破袭模式目标, 可被炸毁) —— 箱堆/沙袋/旗杆整体随朝向摆放
 // 足迹已在 buildWorld 布局前预留(B_FOOT), 此处不再重复登记
 function buildDepot(x,z,ry){
@@ -1030,6 +998,15 @@ slab(5.1,0.35,7.1,14.75,RTy,8.75);
 for(const [w,d,lx,lz] of [[35.4,0.35,0,-12.3],[35.4,0.35,0,12.3],[0.35,25.0,-17.3,0],[0.35,25.0,17.3,0]]){
 slab(w,parH,d,lx,f.floor+RT+parH/2,lz);
 }
+// ── 一层地板 (2026-11-15 用户实机"一楼地板是草地, 甚至还能长树"): 室内整片暗木地板 (材质同二层楼板),
+//    抬高 0.09m 微露踢脚线观感 (2026-11-15 用户追令"让木地板稍微高出地面一些"; 0.09<0.55 步高豁免,
+//    门槛小台阶可走); 顶<gh+0.5 ⇒ OCC 自动豁免不挡寻路
+//    + 补 B_FOOT 足迹登记 —— 旧版国会漏登足迹, 植被/杂物选址不知道这里有楼, 草/树直接长进室内
+B_FOOT.push(footRect(...ctx.L(0,0),ry,fw,fd,1.0));
+{
+const f1p=ctx.L(0,0);
+solidBox(MAT.woodDark,33.6,0.31,23.6,f1p[0],f.floor-0.02,f1p[1],ry); // 顶面=f.floor+0.09
+}
 // ── 二层楼板 (留一跑楼梯井 x[12.2,16.2]z[-4.9,-1.6]) ──
 const F2=f.floor+FH;
 const f2slab=(x0,x1,z0,z1)=>{
@@ -1160,244 +1137,6 @@ coverPoints.push({x:ctx.L(0,0)[0],z:ctx.L(0,0)[1]});
 BUILD_REG.push({type:'flaktower',x,z,ry,w:14,d:14,floor:f.floor,doors:ctx.doors.slice(),roofY:f.floor+RT+parH});
 const _kreg=BUILD_REG[BUILD_REG.length-1];
 for(const e of chain) for(const b of (e.b||[])) b.building=_kreg;
-}
-// ═══════════ 柏林地铁网: 两站一区间 (2026-09-09 用户定案) ═══════════
-// 空间逻辑核算 (轴对齐, 坐标只读 CAMPAIGN.city.metro.halls/tunnel —— 严禁另写一套):
-//   站厅 26×18 (x -68..-42) 下沉 2.6m 开口见天 = 站厅庭院; 四周挡土墙 0.6 厚
-//   (墙顶 = 四周 1.2m 外地面最高点 + 0.15 —— 地形起伏时不埋进地面; 墙脚埋过最低坑底);
-//   区间隧道 6×84 (x -68..-62, z -70..14) 下沉 2.6m, 顶板=街面 (穿过主街 z-8..8) —— 坦克/步兵照常过街;
-//   两站相距 ~100m; 每站: 实心踏步梯上地面 (顶面 = 梯口落点实地高度) + 售票厅顶板 (4 柱支承, 让开梯道净空);
-//   净高: 坑底 -2.6 → 顶板底 -0.3 = 净高 2.3 > 人高 1.8; 踏步从坑底砌到踏面 (实心, 无悬空);
-//   全站混凝土永久件 (不入 dGroup): 炮火下存续 = 地下掩体语义
-function solidStair(ctx,o){ // 实心踏步楼梯 (下沉坑道用): 每级从 base 砌到踏面, 无悬空踏步
-const [dx,dz]=o.dir==='z+'?[0,1]:o.dir==='z-'?[0,-1]:o.dir==='x+'?[1,0]:[-1,0];
-const tr=o.tread||0.9;
-let topY=o.topY;
-let n=Math.max(2,Math.ceil((topY-o.base)/(o.maxRise||0.42)));
-if(o.topFromGround){ // 梯口地面随地形 (坑口地形微起伏: 顶面取落点实地高度, 保证登顶支撑面=顶面)
-for(let k=0;k<2;k++){
-const ep=ctx.L(o.lx+dx*(n*tr+0.35),o.lz+dz*(n*tr+0.35));
-topY=heightAt(ep[0],ep[1]);
-n=Math.max(2,Math.ceil((topY-o.base)/(o.maxRise||0.42)));
-}
-}
-const rise=topY-o.base, sr=rise/n;
-for(let i=0;i<n;i++){
-const p=ctx.L(o.lx+dx*((i+0.5)*tr),o.lz+dz*((i+0.5)*tr));
-const top=o.base+sr*(i+1);
-const bw=dx!==0?tr:o.width, bd=dx!==0?o.width:tr;
-const b0=BOXES.length;
-solidBox(o.mat||MAT.stone,bw,top-o.base,bd,p[0],(top+o.base)/2,p[1],ctx.ry);
-for(let k=b0;k<BOXES.length;k++) BOXES[k].stair=1; // 踏步标记: 沙箱梯道净高断言排除自身
-}
-const ep=ctx.L(o.lx+dx*(n*tr+0.35),o.lz+dz*(n*tr+0.35));
-const _fp=ctx.L(o.lx,o.lz), _tp=ctx.L(o.lx+dx*(n-0.5)*tr,o.lz+dz*(n-0.5)*tr);
-STAIRS.push({x:ep[0],z:ep[1],topY,sr,width:o.width,n,fx:_fp[0],fz:_fp[1],tx:_tp[0],tz:_tp[1]});
-return {n,sr,tr};
-}
-function metroHall(A,T,idx){
-const cx=(A.x0+A.x1)/2, cz=(A.z0+A.z1)/2;
-// 地面基准: 四周 1.2m 外采样取最大 (墙顶不埋进地形); 坑底: 中心+四角取最小 (墙脚埋过最低坑底)
-let gMax=-1e9, fMin=1e9;
-for(const [sx,sz] of [[A.x0-1.2,cz],[A.x1+1.2,cz],[cx,A.z0-1.2],[cx,A.z1+1.2],
-[A.x0-1.2,A.z0-1.2],[A.x1+1.2,A.z1+1.2],[A.x0-1.2,A.z1+1.2],[A.x1+1.2,A.z0-1.2]]){
-const g=heightAt(sx,sz); if(g>gMax) gMax=g;
-}
-for(const [sx,sz] of [[cx,cz],[A.x0+1,A.z0+1],[A.x1-1,A.z1-1],[A.x0+1,A.z1-1],[A.x1-1,A.z0+1]]){
-const f=heightAt(sx,sz); if(f<fMin) fMin=f;
-}
-const gY=gMax+0.15, fY=heightAt(cx,cz);
-const WT=0.6, wallBot=fMin-0.8, wallH=gY-wallBot, wallCY=(gY+wallBot)/2;
-// ── 洞口: 隧道接入面 (由两矩形几何推出) + 梯道面 (config.stair) ──
-const SW=3.4;
-const gaps={N:[],S:[],E:[],W:[]};
-if(T){
-if(T.x0>=A.x0-0.01&&T.x1<=A.x1+0.01){ // 隧道 x 跨落在站厅内 → 南/北面接入 (贴边即可, 不必等宽)
-if(Math.abs(T.z1-A.z0)<0.01) gaps.S.push([T.x0,T.x1]);
-if(Math.abs(T.z0-A.z1)<0.01) gaps.N.push([T.x0,T.x1]);
-}
-if(T.z0>=A.z0-0.01&&T.z1<=A.z1+0.01){ // 隧道 z 跨落在站厅内 → 东/西面接入
-if(Math.abs(T.x1-A.x0)<0.01) gaps.W.push([T.z0,T.z1]);
-if(Math.abs(T.x0-A.x1)<0.01) gaps.E.push([T.z0,T.z1]);
-}
-}
-const side=A.stair||'N';
-const at=side==='N'||side==='S'?cx:cz;
-gaps[side].push([at-SW/2,at+SW/2]);
-// ── 挡土墙 (按洞口分段) ──
-const emit=(along,wallAt,from,to)=>{
-if(to-from<0.2) return;
-if(along==='x') solidBox(MAT.stone,to-from,wallH,WT,(from+to)/2,wallCY,wallAt,0);
-else solidBox(MAT.stone,WT,wallH,to-from,wallAt,wallCY,(from+to)/2,0);
-};
-const segs=(along,wallAt,from,to,gs)=>{
-let a=from;
-for(const g of gs.slice().sort((p,q)=>p[0]-q[0])){
-if(g[0]-a>0.2) emit(along,wallAt,a,g[0]);
-if(g[1]>a) a=g[1];
-}
-if(to-a>0.2) emit(along,wallAt,a,to);
-};
-segs('x',A.z1,A.x0,A.x1,gaps.N);
-segs('x',A.z0,A.x0,A.x1,gaps.S);
-segs('z',A.x0,A.z0,A.z1,gaps.W);
-segs('z',A.x1,A.z0,A.z1,gaps.E);
-// ── 站厅底板 (2026-11-15): 坑底原是裸地形压土色, 实机读作"没有地板的下水道" —— 补整片石板
-//   (metroDep+metroFlatY 已把矩形内压平, 板顶=坑底+0.06 平贴; 厚 0.5 埋底; maxY<gh+0.5 ⇒ OCC 自动豁免不挡寻路)
-solidBox(MAT.stone,A.x1-A.x0-0.6,0.5,A.z1-A.z0-0.6,cx,fY-0.19,cz,0);
-// ── 2026-11-15 隧道口胸墙 (只补隧道洞口; 梯道口保持全高开敞 —— 旧版把梯口也封了半人高横梁, 登梯者
-//   在墙线处撞腿): 厅墙洞口全高开到墙顶, 而隧道顶板顶=带内街面−0.02 (低于墙顶 gY) ⇒ 洞口上部留一道
-//   竖缝望穿坑底; 且桥面直通洞口 —— 沿带行驶的坦克会从 6m 洞口一头栽进站坑 (2.6m 深出不来, 洞内净高
-//   2.07 < 车高)。胸墙从顶板顶起 ≥0.8m: 竖缝填死 (底面=顶板顶平接, 不伸进洞内通道) + 街面高拦住载具
-//   (maxY>gh+0.5 ⇒ OCC 记账, Bot 寻路自动绕行); 洞内步兵通道在胸墙下方照常 (桥式抬升后带内街面可用
-//   heightAt 实测, metroTunnel 先行已把节点缓存建好)。
-if(T){
-const tG=[];
-if(T.x0>=A.x0-0.01&&T.x1<=A.x1+0.01){
-if(Math.abs(T.z1-A.z0)<0.01) tG.push([T.x0,T.x1,A.z0,0]);
-if(Math.abs(T.z0-A.z1)<0.01) tG.push([T.x0,T.x1,A.z1,0]);
-}
-if(T.z0>=A.z0-0.01&&T.z1<=A.z1+0.01){
-if(Math.abs(T.x1-A.x0)<0.01) tG.push([T.z0,T.z1,A.x0,1]);
-if(Math.abs(T.x0-A.x1)<0.01) tG.push([T.z0,T.z1,A.x1,1]);
-}
-for(const g of tG){
-const mid=(g[0]+g[1])/2;
-const rt=(g[3]?heightAt(g[2],mid):heightAt(mid,g[2]))-0.02; // 洞口处带内街面 = 顶板顶
-const W=g[1]-g[0]+0.6, ph=Math.max(gY-rt,0.8); // 竖缝填死 + 0.8m 胸墙
-if(ph>0.03){
-if(g[3]) solidBox(MAT.stone,0.6,ph,W,g[2],rt+ph/2,mid,0);
-else solidBox(MAT.stone,W,ph,0.6,mid,rt+ph/2,g[2],0);
-}
-}
-}
-// ── 实心踏步梯: 顶面 = 梯口落点实地高度 (墙外 0.35m), 步数由高度差定 (2 次迭代收敛) ──
-const ex=side==='N'?[at,A.z1+0.35]:side==='S'?[at,A.z0-0.35]:side==='E'?[A.x1+0.35,at]:[A.x0-0.35,at];
-const topY=heightAt(ex[0],ex[1]);
-const dir=side==='N'?'z+':side==='S'?'z-':side==='E'?'x+':'x-';
-let n=Math.max(2,Math.ceil((topY-fY)/0.42)), foot=[cx,cz], base=fY;
-for(let k=0;k<3;k++){
-// 梯整体向坑口外移 0.45: 顶步盖过坑缘 metroDep 渐变带 (0.4m 内下沉 ~2m 的窄沟),
-// 旧顶步止于墙线, 出站跨 0.4m 沟先坠后卡 (2026-09-12 探针抓出)
-const run=n*0.94;
-foot=side==='N'?[at,A.z1-run+0.45]:side==='S'?[at,A.z0+run-0.45]:side==='E'?[A.x1-run+0.45,at]:[A.x0+run-0.45,at];
-base=heightAt(foot[0],foot[1]);
-const n2=Math.max(2,Math.ceil((topY-base)/0.42));
-if(n2===n) break;
-n=n2;
-}
-solidStair(bctx(foot[0],foot[1],0,base),{lx:0,lz:0,dir,width:SW,base,topY,maxRise:0.42,tread:0.94});
-// ── 售票厅顶板 (config.roof 侧, 10×16.4, 4 柱支承; 顶面=墙顶同高) ──
-const RS=A.roof;
-if(RS){
-const RW=10, RL=16.4;
-let rx0,rx1,rz0,rz1;
-if(RS==='E'){ rx1=A.x1-0.3; rx0=rx1-RW; rz0=cz-RL/2; rz1=cz+RL/2; }
-else if(RS==='W'){ rx0=A.x0+0.3; rx1=rx0+RW; rz0=cz-RL/2; rz1=cz+RL/2; }
-else if(RS==='N'){ rz1=A.z1-0.3; rz0=rz1-RL; rx0=cx-RW/2; rx1=cx+RW/2; }
-else { rz0=A.z0+0.3; rz1=rz0+RL; rx0=cx-RW/2; rx1=cx+RW/2; }
-solidBox(MAT.stone,rx1-rx0,0.45,rz1-rz0,(rx0+rx1)/2,gY-0.225,(rz0+rz1)/2,0);
-// 2026-11-15 封"掉人缝": 顶板 RL=16.4 比厅深 18 短 1.6m ⇒ 两端各留 0.5m×10m 街面高度竖缝直通坑底
-// (顶板顶面与墙顶齐=街面, 实机踩进缝里就摔进站厅)。梯道口居中, 顶板只占 E/W 侧 10m ⇒ 缝段不压梯道,
-// 两端缝整条封死, 顶面与墙顶同高衔接 (verify-buildings 3b 梯道净高不受影响: 梯道不在顶板 x 跨内)。
-if(RS==='E'||RS==='W'){
-const zN1=A.z1-0.3, zS0=A.z0+0.3;
-if(zN1-(cz+RL/2)>0.05) solidBox(MAT.stone,rx1-rx0,0.45,zN1-(cz+RL/2),(rx0+rx1)/2,gY-0.225,(cz+RL/2+zN1)/2,0);
-if((cz-RL/2)-zS0>0.05) solidBox(MAT.stone,rx1-rx0,0.45,(cz-RL/2)-zS0,(rx0+rx1)/2,gY-0.225,(zS0+cz-RL/2)/2,0);
-}
-for(const [px,pz] of [[rx0+1.6,rz0+1.6],[rx0+1.6,rz1-1.6],[rx1-1.6,rz0+1.6],[rx1-1.6,rz1-1.6]]){
-const g0=heightAt(px,pz), h=gY-0.45-g0;
-mesh(new THREE.CylinderGeometry(0.35,0.4,h,8),MAT.stone,px,g0+h/2,pz);
-CYLS.push({x:px,z:pz,r:0.4,y0:g0,y1:gY-0.45});
-}
-}
-// ── 站内长椅/瓦砾 + 入口亭 (复用 metroPavilion, 朝向梯道) ──
-for(const [bx,bz] of [[cx-5,cz-5],[cx+4,cz+6]]){
-mesh(boxGeo(1.8,0.5,0.5),MAT.woodDark,bx,heightAt(bx,bz)+0.25,bz,0);
-}
-if(wr(0,1)<0.85) mesh(boxGeo(wr(0.9,1.6),wr(0.4,0.8),wr(0.9,1.6)),MAT.rubble,cx+wr(-3,3),heightAt(cx+2,cz+2)+0.3,cz+wr(-4,4),wr(0,3));
-const pav=side==='N'?[at,A.z1+5.5,Math.PI]:side==='S'?[at,A.z0-5.5,0]:side==='E'?[A.x1+8,at,-HPI]:[A.x0-8,at,HPI];
-metroPavilion(pav[0],pav[1],pav[2]);
-// ── 通行带: 梯口/梯道中段/梯脚/隧道口 (Bot 寻路进站) ──
-NAV_CLEARS.push({x:ex[0],z:ex[1],r:2.6});
-NAV_CLEARS.push({x:(foot[0]+ex[0])/2,z:(foot[1]+ex[1])/2,r:2.6});
-NAV_CLEARS.push({x:foot[0],z:foot[1],r:2.4});
-if(T&&gaps.S.length) NAV_CLEARS.push({x:(T.x0+T.x1)/2,z:A.z0+2.5,r:2.4});
-if(T&&gaps.N.length) NAV_CLEARS.push({x:(T.x0+T.x1)/2,z:A.z1-2.5,r:2.4});
-coverPoints.push({x:cx,z:cz});
-BUILD_REG.push({type:'metroStation',x:cx,z:cz,ry:0,w:A.x1-A.x0,d:A.z1-A.z0,floor:fY,doors:[],roofY:gY,hall:idx});
-}
-function metroTunnel(T){
-// 分段 (≤6m): 两侧埋墙 + 贴地顶板 + 洞内底板。2026-11-15 四改 (用户实机"顶与墙连接松垮 / 没有地板 / 齐平却不能过坦克"):
-//   ① 隧道带地形已由 terrain metroLiftY 桥式抬到街面 (config street:1) —— 载具如过桥面碾过, 旧版 −2.6
-//      明坑高度场才是"齐平也过不去"的根因 (vehicles 贴地走 heightAt); 洞体降级为纯建造件;
-//   ② 街面基准=metroLiftNodes 节点 (terrain 侧同一套采样: 旗标期轴心采样+两轮滑动平均) —— 建造件与
-//      heightAt 桥面同源, 段间无锯齿;
-//   ③ 段内 gy=min(两端节点) —— 顶板顶=gy−0.02、墙顶=gy−0.05 恒在地形下方 (平滑节点与线性插值地形之间
-//      可能差 0.2~0.3m, 顶板冒头会剐蹭坦克 hull);
-//   ④ 底板顶=fy+0.06 (fy=gy−d, 洞内净深 d=2.6 —— 旧版 fy 采 heightAt, 抬升后返回街面已失效) + 墙厚
-//      2.0 全埋 (不冒出街面), 顶板 8m 宽恰好盖到墙外皮; 步兵厅间通道语义保留 (洞内净高 ≈2.0m)。
-const L=metroLiftNodes(T);
-const WT=2.0;
-// 建造件分段=稠密段 (segL≈1.2, 与桥面同源同粒度); 顶板基准=段内两列节点最小值 → 两轮滑动平滑
-// (灭段间锯齿, 残差 ≤0.07) → 钳回该段原始最小值 (平滑会向高处拉; 线性插值在段内 ≥两端节点最小值
-// ⇒ rawMin 是段内地形下界, 钳制后顶板/墙顶恒在地形之下, 不冒头按构造成立, 不剐蹭 hull)
-const rawMin=[],refs=[];
-for(let i=0;i<L.n;i++){
-rawMin.push(Math.min(L.ns[i][0],L.ns[i][1],L.ns[i+1][0],L.ns[i+1][1]));
-refs.push(rawMin[i]);
-}
-for(let pass=0;pass<2;pass++){
-for(let i=0;i<L.n;i++){
-const a=refs[Math.max(0,i-1)],c=refs[Math.min(L.n-1,i+1)];
-refs[i]=(a+refs[i]+c)/3;
-}
-}
-for(let i=0;i<L.n;i++) if(refs[i]>rawMin[i]) refs[i]=rawMin[i];
-for(let i=0;i<L.n;i++){
-const z0=T.z0+i*L.segL;
-const seg=Math.min(L.segL,T.z1-z0), zc=z0+seg/2;
-const gy=refs[i];                     // 段内顶板基准 (≤段内地形下界, 贴街面剖面)
-const fy=gy-(T.d||2.6);               // 洞内底面
-const wb=fy-0.8;
-for(const wx of [T.x0,T.x1]) solidBox(MAT.stone,WT,gy-0.05-wb,seg+0.02,wx,(gy-0.05+wb)/2,zc,0); // 墙顶=gy−0.05 全埋
-solidBox(MAT.stone,T.x1-T.x0+WT,0.45,seg+0.02,(T.x0+T.x1)/2,gy-0.245,zc,0); // 顶面=gy−0.02 (贴地可碾)
-solidBox(MAT.stone,T.x1-T.x0-1.0,0.5,seg+0.02,(T.x0+T.x1)/2,fy-0.19,zc,0);  // 底板 (顶=fy+0.06, maxY<gh+0.5 ⇒ OCC 豁免)
-}
-}
-function metroStation(){
-const M=CITY&&CITY.metro; if(!M) return;
-const HALLS=M.halls||[], T=M.tunnel||null;
-if(!HALLS.length&&!T) return;
-// 2026-11-15: 每局清采样缓存 —— _fy/_ln 锚定"本局世界"的地形 (护环 pad/广场碟/urban 噪声都进节点);
-//   CAMPAIGN 克隆若跨局复用, 旧局缓存会污染新局街面/坑底 (浅碟剖面错位 ~0.2m 级)。
-for(const h of HALLS){ if(h._fy!==undefined) delete h._fy; }
-if(T&&T._ln) delete T._ln;
-// ── 护环垫层 (2026-11-15 用户实机"地铁站侧墙旁边总是有沟"): 矩形下沉的 0.4m 陡坎被 ~2.77m 间距的
-//   渲染顶点抹成贴墙 2~2.5m 宽的凹沟 (物理竖坎/视觉斜坡剖面不一致)。在厅矩形**外** 3m 环带上登记
-//   权威 pad 压回街面 (PADS 在 metroDep 之后生效 ⇒ 不会填坑), 渲染网格在环带内=平街面 ⇒ 沟消失;
-//   坑缘竖坎由挡土墙遮住。pad 高取环带外缘 8 点采样均值 (urban 噪声平滑); 隧道穿广场浅碟不设环
-//   (环会填掉广场碟形), 隧道两侧以 2.0m 厚墙遮坎 (见 metroTunnel)。
-const D=3;
-for(const A of HALLS){
-let acc=0,n=0;
-for(const [sx,sz] of [[A.x0-D-1.2,A.z0-D-1.2],[A.x1+D+1.2,A.z0-D-1.2],[A.x0-D-1.2,A.z1+D+1.2],[A.x1+D+1.2,A.z1+D+1.2],[A.x0-D-1.2,(A.z0+A.z1)/2],[A.x1+D+1.2,(A.z0+A.z1)/2],[(A.x0+A.x1)/2,A.z0-D-1.2],[(A.x0+A.x1)/2,A.z1+D+1.2]]){
-acc+=heightAt(sx,sz); n++;
-}
-const hs=acc/n;
-addPad((A.x0+A.x1)/2,A.z0-D/2,0,(A.x1-A.x0)/2+D,D/2,2.2,hs);   // 南环
-addPad((A.x0+A.x1)/2,A.z1+D/2,0,(A.x1-A.x0)/2+D,D/2,2.2,hs);   // 北环
-addPad(A.x0-D/2,(A.z0+A.z1)/2,0,D/2,(A.z1-A.z0)/2+D,2.2,hs);   // 西环
-addPad(A.x1+D/2,(A.z0+A.z1)/2,0,D/2,(A.z1-A.z0)/2+D,2.2,hs);   // 东环
-}
-if(T) metroTunnel(T);
-HALLS.forEach((A,i)=>metroHall(A,T,i));
-// 隧道中段通行带 (Bot 穿行两端进站)
-if(T){
-const mx=(T.x0+T.x1)/2, mz=(T.z0+T.z1)/2;
-NAV_CLEARS.push({x:mx,z:T.z0+3,r:2.4},{x:mx,z:T.z1-3,r:2.4},{x:mx,z:mz,r:2.4});
-coverPoints.push({x:mx,z:mz});
-}
 }
 // ═══════════ 地貌组新建筑 (2026-09-10: 淞沪/百团/莫斯科三图改造) ═══════════
 // 石拱桥 (淞沪水网): 低矮石桥, 步兵/坦克可通行 —— 桥面高度由 heightAt 的 BRIDGES 抬升提供,

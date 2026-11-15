@@ -183,102 +183,12 @@ return h;
 }
 // 博卡日农田田块表 (诺曼底): 色带/庄稼软遮蔽/断续树篱共用; 其他战役为空
 const RURAL_FIELDS=CAMPAIGN.fields||[];
-// 城市语义 (2026-09-05 城市组·斯大林格勒/柏林): 街道矩形/地铁站厅下沉 ——
+// 城市语义 (2026-09-05 城市组·斯大林格勒/柏林): 街道矩形 ——
 // 顶点色带/heightAt 下沉/布局建筑避让/小地图 共读 (严禁布局另写一套坐标)
 const CITY=CAMPAIGN.city||null;
-const METRO=(CITY&&CITY.metro)||null;
-// 地铁下沉特征 (2026-09-09 柏林地铁网): 圆=旗点广场浅下沉 (缓坡可走), halls[]/tunnel=矩形深下沉
-// (近垂直边缘 + 挡土墙收边, 见 05a metroStation); 各特征独立取深度后取 max (重叠区不叠加深)
-const METRO_FALL=0.4; // 矩形下沉边缘过渡带 (m): 近垂直, 由挡土墙遮住地形断口
-// 站厅/隧道矩形表 (03-terrain/05-world/沙箱共读一份; 表本体在 config.metro —— 严禁布局另写坐标)
-const METRO_RECTS=[];
-if(METRO){ for(const h of (METRO.halls||[])) METRO_RECTS.push(h); if(METRO.tunnel) METRO_RECTS.push(METRO.tunnel); }
 function rectDist(x,z,x0,z0,x1,z1){
 const dx=Math.max(x0-x,0,x-x1), dz=Math.max(z0-z,0,z-z1);
 return Math.hypot(dx,dz);
-}
-let _mNoDep=false; // metroFlatY/metroLiftNodes 反查"无地铁明坑基准高"期间置真 —— 矩形明坑/压平短路防递归;
-// 广场圆碟不短路 (碟形是街面剖面的一部分, 隧道带桥式抬升的节点采样必须含碟, 否则桥在碟心悬空 +1.1m)
-function metroDep(x,z){
-if(!METRO) return 0;
-let dep=0;
-const d0=Math.hypot(x-METRO.x,z-METRO.z);
-if(d0<METRO.r) dep=Math.max(dep,METRO.d*sstep(1-d0/METRO.r));
-if(_mNoDep) return dep; // 旗标期: 只保留广场碟形
-for(const s of METRO_RECTS){
-if(s.street) continue; // 街面桥矩形不下沉 (地形由 metroLiftY 抬到街面, 明坑只在洞内由建造件表达)
-const dd=rectDist(x,z,s.x0,s.z0,s.x1,s.z1);
-if(dd<METRO_FALL) dep=Math.max(dep,(s.d||METRO.d)*sstep(1-dd/METRO_FALL));
-}
-return dep;
-}
-// 坑底压平 (2026-11-15 用户实机"没有底下的地板/如下水道"): 矩形下沉内部原本随 urban 噪声起伏
-// ±0.4~0.7m ⇒ 站厅底板没法平贴、"地板"观感破碎。矩形内整体压到"当地地面−深度" (权威覆盖,
-// 在 metroDep 之后执行); 基准高用旗标反查一次并按矩形缓存。
-// 2026-11-15: street 矩形优先 —— 厅/带边界线上的点判给街面桥 (否则洞口一线 heightAt 跌进厅坑,
-// 载具跨线瞬间坠采样; 桥语义优先)。
-function metroFlatRect(x,z){
-if(!METRO||_mNoDep) return null;
-for(const s of METRO_RECTS){ if(s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-for(const s of METRO_RECTS){ if(!s.street&&x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return s; }
-return null;
-}
-function metroFlatY(s){
-if(s._fy!==undefined) return s._fy;
-_mNoDep=true;
-const base=heightAt((s.x0+s.x1)/2,(s.z0+s.z1)/2);
-_mNoDep=false;
-s._fy=base-(s.d||METRO.d);
-return s._fy;
-}
-// ── 隧道带桥式抬升 (2026-11-15 用户实机"地铁顶端和地面齐平, 却不能过坦克"): 旧隧道带是 −2.6 明坑,
-//   顶板再齐平也没用 —— vehicles 贴地走 heightAt (15-vehicles), 带内高度场仍是坑。正解=桥面注册同一
-//   套路 (BRIDGES 抬升分支): 街矩形内 heightAt 抬到"街面节点插值", 洞体 (底板/埋墙/贴地顶板) 全部
-//   改为 metroTunnel 纯建造件。节点=旗标期沿带逐段采样 (raw+广场碟+护环 pad = 真实街面剖面),
-//   缓存 s._ln。★ 节点保持**原始采样不做平滑** —— 带缘连续性要求"带内值=该 z 处带外真实地面",
-//   任何平滑都会在广场碟峰这类剖面急变处把节点抬离邻侧地面 (实测两轮平滑在碟峰留 0.42m 缘台阶);
-//   段间锯齿是顶板 (建造件) 的问题, 在 metroTunnel 内对顶板基准单独平滑+钳回原始最小值。
-//   ★ 每节点采矩形两条长边**两列**再横向线性混合 —— 单列 (轴心) 采样在广场碟上会留 0.35~0.46m 的
-//   带缘台阶 (碟心在带轴正上, 带缘碟浅, 单列把碟心剖面铺满全带宽 ⇒ 带缘比邻侧地面低 0.4m); 两列
-//   采样与带外邻点同源同位, 带缘连续性按构造成立, 带内横坡 ≤碟的 x 梯度 (~0.4m/6m=3.8°, 无感)。
-function metroLiftNodes(s){
-if(s._ln) return s._ln;
-const alongZ=(s.z1-s.z0)>=(s.x1-s.x0);
-const span=alongZ?(s.z1-s.z0):(s.x1-s.x0);
-// 节距 1.2m: 节点线性插值要重构护环 pad 的 2.2m sstep 裙坡与广场碟膝点 —— 旧 6m 节距在 pad 裙坡段
-// 实测带缘台阶 0.55m (裙坡夹在两节点之间被线性抄近路); 1.2m 节距插值误差 ≤0.08m。
-const nS=Math.max(1,Math.ceil((span-0.01)/1.2));
-const segL=span/nS;
-_mNoDep=true;
-const ns=[]; // 每节点 [边1, 边2] 两列 (原始采样)
-for(let i=0;i<=nS;i++){
-const t=alongZ?(s.z0+i*segL):(s.x0+i*segL);
-if(alongZ) ns.push([heightAt(s.x0,t),heightAt(s.x1,t)]);
-else ns.push([heightAt(t,s.z0),heightAt(t,s.z1)]);
-}
-_mNoDep=false;
-s._ln={n:nS,segL,ns,alongZ};
-return s._ln;
-}
-function metroLiftY(s,x,z){
-const L=metroLiftNodes(s);
-const t=L.alongZ?(z-s.z0):(x-s.x0);
-const fi=Math.min(L.n-0.0001,Math.max(0,t/L.segL));
-const i=Math.floor(fi), f=fi-i;
-const i2=Math.min(L.n,i+1);
-const u=L.alongZ?Math.max(0,Math.min(1,(x-s.x0)/(s.x1-s.x0))):Math.max(0,Math.min(1,(z-s.z0)/(s.z1-s.z0)));
-const lo=L.ns[i][0]+(L.ns[i2][0]-L.ns[i][0])*f;
-const hi=L.ns[i][1]+(L.ns[i2][1]-L.ns[i][1])*f;
-return lo+(hi-lo)*u;
-}
-function metroClear(x,z){ // 到最近地铁特征的带外距离 (hgridClear 用)
-if(!METRO) return 1e9;
-let m=Math.hypot(x-METRO.x,z-METRO.z)-METRO.r;
-for(const s of METRO_RECTS){
-const dd=rectDist(x,z,s.x0,s.z0,s.x1,s.z1)-METRO_FALL;
-if(dd<m) m=dd;
-}
-return m;
 }
 // 街道距离: 街内=0, 街外=到最近街道矩形的距离 (建筑避让/植被/草丛让位共用)
 function streetDist(x,z){
@@ -298,11 +208,6 @@ function cityUrban(x,z){
 if(!CITY) return false;
 if(CITY.blocks) for(const s of CITY.blocks){ if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true; }
 if(CITY.yard&&x>=CITY.yard.x0&&x<=CITY.yard.x1&&z>=CITY.yard.z0&&z<=CITY.yard.z1) return true;
-// 2026-09-09 柏林地铁站厅/隧道区: 也算建成区 (地面压土色 + 植被让位, 防树/草长进下沉庭院)
-if(METRO){
-if(Math.hypot(x-METRO.x,z-METRO.z)<METRO.r) return true;
-for(const s of METRO_RECTS) if(x>=s.x0&&x<=s.x1&&z>=s.z0&&z<=s.z1) return true;
-}
 return false;
 }
 function fieldAt(x,z){
@@ -986,7 +891,7 @@ return 1.4*Math.sin(x*0.021)*Math.cos(z*0.024)
 }
 }
 function heightAt(x,z,noBridge){
-// 2026-09-06 B6/P1-5 快路: 所在 3m 格距全部修正特征(FLATS/地铁下沉/土路/壕沟/河道/桥面)都超出
+// 2026-09-06 B6/P1-5 快路: 所在 3m 格距全部修正特征(FLATS/土路/壕沟/河道/桥面)都超出
 // 特征半径+格半对角余量 ⇒ 各修正项在该格恒为 0, 直接返回 rawHeight —— 省 FLATS/沟壑/河道逐项距离遍历。
 // 零插值: 快路返回值与原函数逐位一致; 带内格走原函数全程精修 (等价探针 _probe_equiv 扩展验证)。
 {
@@ -1001,13 +906,6 @@ const t=1-d/f.r;
 const s=sstep(t);
 h=lerp(h,f.h,s);
 }
-}
-// 柏林地铁站厅/广场: 圆形+矩形下沉 (在 FLATS 之后叠加以保证旗点平台不被抬走)
-// 2026-11-15: 矩形内的压平/抬升权威覆盖拆到 padHeight 之后 (见下方第二段) —— 护环 pad 的 2.2m ramp
-//   会越过墙线渗进厅坑把坑底边缘抬回街面 (实测厅内高差 2.26m, 底板被埋), 矩形内必须以 metro 为权威;
-//   而 metroDep 明坑本体留在这 —— 0.4m 陡坎裙带要被护环 pad 盖回街面 (杀"侧墙旁的沟"), pad 必须后行。
-if(METRO){
-h-=metroDep(x,z);
 }
 // 诺曼底: 博卡日下沉土路 —— 土路低于两侧田野约 0.45m (战壕下切模板减半)
 // 城市组不适用 (斯大林格勒田地旗复用农田表, 但城区道路不参与下沉 → !CITY 门控, 2026-09-06)
@@ -1109,13 +1007,6 @@ h-=1.3*sstep(k);
 	//    壕沟不参与建筑选址, 战壕横穿地基会把楼面重新切成壕沟(实测: 塔拉瓦两处椰木掩体室内 1.3m 沟);
 	//    地基是"施工完成面", 压在天然下切之上。桥面抬升仍在其后(桥面优先)。
 	h=padHeight(x,z,h);
-	// 柏林地铁矩形权威覆盖 (2026-11-15 自 padHeight 后行): 厅矩形压到坑底平面 (metroFlatY —— 底板平贴,
-	//   坑缘 pad ramp 的渗入在此被否决), street 矩形 (隧道带) 抬到街面节点 (metroLiftY 桥式 —— 坦克/步兵
-	//   如过桥面碾过, 明坑只存在于洞内建造件)。桥面抬升仍在其后 (桥优先)。
-	if(METRO){
-	const mr=metroFlatRect(x,z);
-	if(mr) h=mr.street?metroLiftY(mr,x,z):metroFlatY(mr);
-	}
 	// 大桥桥面: 桥矩形区域内地面抬升至桥面高度 (两岸衔接, 步兵/车辆直接通行)
 	// noBridge: 采样真实河床/地面 (水面高度计算用, 避免把桥面当河床)
 	if(!noBridge&&BRIDGES.length){
@@ -1125,12 +1016,12 @@ h-=1.3*sstep(k);
 	return h;
 }
 // ===== 高度查询修正带清空场 (2026-09-06 B6/P1-5): 3m 粗格惰性缓存"格心到最近修正特征的带外距离" =====
-// 特征集: FLATS 平台/地铁站厅下沉/博卡日土路/壕沟/河道/桥面抬升。格心带距>0 ⇒ 全格点各修正项恒为 0
+// 特征集: FLATS 平台/博卡日土路/壕沟/河道/桥面抬升。格心带距>0 ⇒ 全格点各修正项恒为 0
 // (smoothstep 在特征半径外精确为 0), 快路直接返回 rawHeight。惰性首触填充, 无启动停顿。零插值保证逐位等价。
 const HGRID={res:3, N:Math.ceil((MAP_SIZE+120)/3), off:(MAP_SIZE+120)/2, data:null};
 // 2026-11-13 性能批 B: 缓存壳保持原样 (惰性首触填 Float32 场), 全扫计算体拆成 hgridClearFast (桶化候选集)
 // 与 hgridClearSlow (旧实现留档, 纯函数)。window.HGRID_OFF ⇒ 走 Slow (heightAt 侧已有同旗总门)。
-// 等价性: 各小表 (FLATS/PADS/METRO/TRENCHES/ridges/paddy/ponds/terraces/maos/benches/BRIDGES) 逐字保留;
+// 等价性: 各小表 (FLATS/PADS/TRENCHES/ridges/paddy/ponds/terraces/maos/benches/BRIDGES) 逐字保留;
 // 大折线表 (RIVER/CHANS/gullies/ALPINE) 与 roads (经 roadDist) 走桶化候选集 —— 候选集外条目的
 // dd = 距离-半径 > 带 PAD(2.2)+1 (reach=阈值+2.2+12.4 ⇒ 保found半径=阈值+1), 而 argmin 条目 dd≤PAD 时
 // 必在候选集内 ⇒ 新 m ≥ 旧 m 且旧 m≤PAD 时逐位相等 ⇒ 快路判定 (>0) 逐位一致 (唯一消费方 heightAt:734)。
@@ -1165,7 +1056,6 @@ const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
 const dd=(ax<=0&&az<=0)?-1:Math.hypot(ax>0?ax:0,az>0?az:0)-p.ramp;
 if(dd<m) m=dd;
 }
-if(METRO){ const dd=metroClear(cx,cz); if(dd<m) m=dd; }
 if(RURAL_FIELDS.length&&!CITY){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; } // !CITY 门控同 heightAt 下沉项
 for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
 if(RIVER){
@@ -1264,7 +1154,6 @@ const ax=Math.abs(lx)-p.hw, az=Math.abs(lz)-p.hd;
 const dd=(ax<=0&&az<=0)?-1:Math.hypot(ax>0?ax:0,az>0?az:0)-p.ramp;
 if(dd<m) m=dd;
 }
-if(METRO){ const dd=metroClear(cx,cz); if(dd<m) m=dd; }
 if(RURAL_FIELDS.length&&!CITY){ const dd=roadDist(cx,cz)-4; if(dd<m) m=dd; } // !CITY 门控同 heightAt 下沉项
 for(let k=0;k<TRENCHES.length;k++){ const t=TRENCHES[k]; const dd=segDist(cx,cz,t.x1,t.z1,t.x2,t.z2)-2.4; if(dd<m) m=dd; }
 if(RIVER){

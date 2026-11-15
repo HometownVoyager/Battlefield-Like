@@ -1131,7 +1131,8 @@ const score=(t,ty,lowHp)=>{
 const dx=t.pos.x-ex, dz=t.pos.z-ez;
 const d=Math.hypot(dx,dz);
 // 环境暗度动态暴露度联动: 载具大灯照亮路面也暴露自身 (暴雨天/夜间开灯强光暴露)
-let vis=T.vis*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
+// ★2026-11-15 天气×地图雾叠加: 坦克目视发现同样吃地图主题雾 THEME.fogMul (雾林守线浓雾里坦克不再隔雾索敌), 天气在其后叠加
+let vis=T.vis*(THEME.fogMul||1)*(NIGHT_MODE?NIGHT_CFG.viewDMul:1)*WX_CFG.viewDMul;
 const envLum=(typeof getEnvBrightness==='function')?getEnvBrightness():(NIGHT_MODE?0.12:1.0);
 const darkRatio=clamp(1.0-envLum,0,1);
 let lightExposed=false;

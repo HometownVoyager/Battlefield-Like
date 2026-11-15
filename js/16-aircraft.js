@@ -1334,6 +1334,10 @@ return null;
 const PLANE_COL_BODY_K=1.7, PLANE_COL_CLOSE=2;
 const _plColVa=V3(), _plColVb=V3();
 function updatePlaneCollisions(dt){
+// ★2026-11-15 CCD 批 (用户裁定"用算法优化飞机相撞"): 旧判据是当帧离散距离 —— 对头接近 240m/s 时
+//   每帧掠过 ~4m, 恰好从 rr (≈4.8m) 边缘滑过就漏判 (隧穿)。改匀速直线扫掠: 两机相对运动下距离在
+//   t*=(rel·d0)/|rel|² 处最小, t*∈[0,dt] 且该时刻距离<碰撞半径 ⇒ 本帧内必然交叠。并加广相门
+//   (帧内最坏相对位移 (|va|+|vb|)·dt 都够不着就跳过), 远距对不再白算速度向量。
 if(!(dt>0)||planes.length<2) return;
 for(let i=0;i<planes.length;i++){
 const a=planes[i];
@@ -1344,10 +1348,20 @@ const b=planes[j];
 if(!b||!b.alive) continue;
 const dx=b.pos.x-a.pos.x, dy=b.pos.y-a.pos.y, dz=b.pos.z-a.pos.z;
 const rr=PLANE_COL_BODY_K*(a.def.size+b.def.size);
-if(dx*dx+dy*dy+dz*dz>=rr*rr) continue;
+// 广相门: 本帧可达距离 = rr + 相对位移上界 —— 连扫掠都够不着, 免算 fwdDir
+const reach=rr+(a.speed+b.speed)*dt;
+if(dx*dx+dy*dy+dz*dz>=reach*reach) continue;
 b.fwdDir(_plColVb).multiplyScalar(b.speed);
+const rx=_plColVa.x-_plColVb.x, ry=_plColVa.y-_plColVb.y, rz=_plColVa.z-_plColVb.z;
 // 收拢门: (va-vb)·(b-a) > CLOSE ⇒ a 相对 b 正在撞过去 (同速/分离=豁免)
-if((_plColVa.x-_plColVb.x)*dx+(_plColVa.y-_plColVb.y)*dy+(_plColVa.z-_plColVb.z)*dz<=PLANE_COL_CLOSE) continue;
+const relDot=rx*dx+ry*dy+rz*dz;
+if(relDot<=PLANE_COL_CLOSE) continue;
+// CCD 最近接近点: t* 截到 [0,dt], 该时刻距离 < rr 才算撞上
+const rel2=rx*rx+ry*ry+rz*rz;
+let tt=rel2>1e-9?relDot/rel2:0;
+if(tt>dt) tt=dt; else if(tt<0) tt=0;
+const cx2=dx-rx*tt, cy2=dy-ry*tt, cz2=dz-rz*tt;
+if(cx2*cx2+cy2*cy2+cz2*cz2>=rr*rr) continue;
 const aPilot=a.playerDriven?player:(a.crewBot||a.crew);
 const bPilot=b.playerDriven?player:(b.crewBot||b.crew);
 a.die(bPilot,true);

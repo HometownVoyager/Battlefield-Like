@@ -411,7 +411,7 @@ if(p) ruinedHouse(p.x,p.z,7,6,p.ry,MAT.brick,0.55);
 }
 }
 function berlinStreet(){
-// 主街电车 (东西大道 z=0): 双轨+架空线 —— 分三段避开地铁广场/隧道 (x -45..-22.5 空出)  // 2026-11-14 缩图批 ×0.5625
+// 主街电车 (东西大道 z=0): 双轨+架空线, 三段铺设  // 2026-11-14 缩图批 ×0.5625
 tramRails(-137.3,-45,0); tramRails(-22.5,67.5,0); tramRails(90,137.3,0);
 tramWreck(-67.5,2.6,HPI+0.05); tramWreck(36,-2.6,HPI-0.04); tramWreck(-99,2.6,HPI+0.03);
 // 街灯: 主街两侧 + 中央纵街 (x=-39.4) 两侧 (区间/步距 ×0.5625; 灯侧摆 ±7.2 相对偏移不缩)
@@ -439,10 +439,10 @@ else if(r<0.92) barrel(x,z);
 for(let x=-137.3;x<=137.3;x+=14.6) scatter(x+wr(-4,4),wr(-6,6)); // 2026-11-14 缩图批 区间/步距 ×0.5625, 抖动不缩
 for(let z=-112.5;z<=112.5;z+=14.6){ if(Math.abs(z)<12) continue; scatter(-39.4+wr(-6,6),z+wr(-4,4)); }
 }
-// -- 城市组·柏林 (2026-09-09 点位改版): 640 大地图 + 三路推进 6 旗 + 国会大厦/防空塔双地标 + 地铁站厅 --
+// -- 城市组·柏林 (2026-09-09 点位改版; 2026-11-15 地铁站整体删除): 640 大地图 + 三路推进 6 旗 + 国会大厦/防空塔双地标 --
 // 布局拓扑 (用户定案): 苏军主基西侧(-290,0) / 德军主基东侧(290,0), 六旗 2D 扇面:
 //   ①北站场(-190,148) ②南街区(-190,-148) = 两翼出发阵地 (距苏基最近, 开局自动归攻方);
-//   ③市中心(-55,0) = 中央地铁广场 (站厅+地下通道); ④防空塔(-55,198) ⑤街垒区(-55,-198) = 南北纵深;
+//   ③市中心(-55,0) = 中央广场街景; ④防空塔(-55,198) ⑤街垒区(-55,-198) = 南北纵深;
 //   ⑥国会大厦(150,0) = 东端终点大城标 (德军主基前 140m)
 function layoutBerlin(){
 cityBlockRows(true); // 2026-11-14 缩图批 640→360: 恢复默认间距 16 (旧 640 图放宽到 24 控总量; 缩后街块 ×0.5625 与 24→16 抵消, 每街块落屋数不变)
@@ -495,8 +495,7 @@ if(freeSpot(px,pz,2)) rubblePile(px,pz,wr(1.8,2.6));
 }
 }
 if(freeSpot(-111.4,-84.4,2.2)) crater(-111.4,-84.4,2.2); if(freeSpot(-101.3,-90,2.2)) crater(-101.3,-90,2.0);
-// ── ③ 市中心: 地铁站厅 + 地下通道 (地标机制) + 广场街景 ──
-metroStation();
+// ── ③ 市中心: 广场街景 ──
 railBarricade(-22.5,1.1,HPI); railBarricade(-16.9,-3.4,0); // 2026-11-14 缩图批 ×0.5625
 tankWreck(-2,5.6,1.2); // 2026-11-14 缩图批: 缩值 (-11.3,5.6) 落进新北站厅 (x≤-7.9), 东移至厅东缘外
 if(freeSpot(-40.5,11.3,2.2)) crater(-40.5,11.3,2.2); if(freeSpot(-20.3,-9,2.2)) crater(-20.3,-9,2.0); // 前者落街3内=旧版同款街内弹坑
@@ -682,6 +681,69 @@ const hogs=[[52,-10],[12,10],[-28,-4],[-40,-70],[30,30]];
 for(const [px,pz] of hogs){ if(freeSpot(px,pz,1.5)) hedgehog(px,pz); }
 const dts=[[40,10],[-44,20],[60,-50]];
 for(const [px,pz] of dts){ if(freeSpot(px,pz,1.5)) deadTree(px,pz); }
+}
+// ── ⑨ 江南竹丛带 (2026-11-15 竹子批: 竹=树同款机制 kind:'bamboo', 05b bambooClump 已入 TREE_LIVE 走 04b 树链) ──
+// 江南水乡意象: 沿主河/支流两岸竹丛 + 村团环带 + 丝厂侧畔。★本块必须压在整个 layoutDelta 最末 ——
+// 布局 wr 流在其之前的消耗逐位不变, 柳树批 golden 柳位序列 (verify-willow-20261110 ⑧ 保序子列) 不受扰。
+if(D.willow&&typeof RIVER!=='undefined'&&RIVER){
+const P=RIVER.pts;
+for(let i=0;i<P.length-1;i++){
+const dx=P[i+1][0]-P[i][0], dz=P[i+1][1]-P[i][1];
+const L2=Math.hypot(dx,dz)||1;
+const steps=Math.floor(L2/8);
+for(let s=0;s<=steps;s++){
+const t=s/steps;
+const cx=P[i][0]+dx*t, cz=P[i][1]+dz*t;
+for(const side of [-1,1]){
+const nx=-dz/L2*side, nz=dx/L2*side;
+const px=cx+nx*(RIVER.w+3+wr(0,2.5)), pz=cz+nz*(RIVER.w+3+wr(0,2.5));
+if(wr(0,1)<0.72) continue;
+if(roadDist(px,pz)<5) continue;
+if(inRiverChannel(px,pz)) continue;
+if(typeof inWaterBody==='function'&&inWaterBody(px,pz)) continue;
+if(onBridge(px,pz,3)) continue;
+if(!freeSpot(px,pz,1.2)) continue;
+bambooClump(px,pz);
+}
+}
+}
+// 支流 (前4条) 沿岸竹丛 (与 ⑥ 柳带同构, 步距/让位参数独立)
+if(typeof DELTA_CHANS!=='undefined'&&DELTA_CHANS.length){
+for(const ch of DELTA_CHANS.slice(0,4)){
+for(let i=0;i<ch.length-1;i++){
+const dx=ch[i+1][0]-ch[i][0], dz=ch[i+1][1]-ch[i][1];
+const L2=Math.hypot(dx,dz)||1;
+const steps=Math.floor(L2/10);
+for(let s=0;s<=steps;s++){
+const t=s/steps;
+const cx=ch[i][0]+dx*t, cz=ch[i][1]+dz*t;
+if(wr(0,1)<0.6) continue;
+const side=wr(0,1)<0.5?-1:1;
+const px=cx+(-dz/L2)*side*(3.5+wr(0,2.5)), pz=cz+(dx/L2)*side*(3.5+wr(0,2.5));
+if(roadDist(px,pz)<5||inRiverChannel(px,pz)||(typeof inWaterBody==='function'&&inWaterBody(px,pz))||!freeSpot(px,pz,1.2)) continue;
+bambooClump(px,pz);
+}
+}
+}
+}
+}
+// 村团环带竹丛 (每村 3 试, 村缘带 1.05r~1.35r) + 丝厂侧畔 2 丛
+for(const v of V){
+for(let k=0;k<3;k++){
+const a=wr(0,TAU), rr=v.r*wr(1.05,1.35);
+const px=v.x+Math.cos(a)*rr, pz=v.z+Math.sin(a)*rr;
+if(typeof inShallowChannel==='function'&&inShallowChannel(px,pz)) continue;
+if(!freeSpot(px,pz,1.2)) continue;
+bambooClump(px,pz);
+}
+}
+{
+for(let k=0;k<2;k++){
+const px=LM.x+wr(-16,16)+(k?24:-24), pz=LM.z+wr(-12,12);
+if(typeof inShallowChannel==='function'&&inShallowChannel(px,pz)) continue;
+if(!freeSpot(px,pz,1.2)) continue;
+bambooClump(px,pz);
+}
 }
 }
 // -- 黄土沟壑 (百团, 2026-09-12 立体化重制: 5库扇面 · 坡道网络 · 沟底可玩; 2026-11-14 缩图批 640→360) --
@@ -1986,7 +2048,7 @@ const vegOK=(x,z,r)=>{
 if(shoreDist(x,z)>-FLORA_CFG.shoreGuard) return false;                                        // 滩头禁入带 (背坡起)
 if(roadDist(x,z)<4.5) return false;                                                          // 让开道路/小径
 if(rectDist(x,z,SEA.runway.x0,SEA.runway.z0,SEA.runway.x1,SEA.runway.z1)<=0) return false;   // 跑道面
-if(!freeSpot(x,z,r)) return false;                                                           // 建筑足迹/地铁下沉区
+if(!freeSpot(x,z,r)) return false;                                                           // 建筑足迹
 for(const f of CAMPAIGN.flags) if(Math.hypot(x-f.x,z-f.z)<f.r+2) return false;               // 旗点圈留白 (同散布局口径)
 return true;
 };
@@ -2863,6 +2925,8 @@ flushTreeBatch();
 // 垂柳实例批合并 (2026-11-10 柳树批): 干/枝/叶冠 3 张 InstancedMesh —— 必须在全部布局代码之后
 // (村口柳 ④① / 沿河柳带 ⑥ / 草原村柳 都在 buildWorld 内登记 WILL_BATCH)
 flushWillows();
+// 竹丛实例批合并 (2026-11-15 竹子批): 杆 1 张 InstancedMesh —— 同柳, 全部布局代码之后 (胡康密林/淞沪沿河竹)
+flushBamboos();
 // 建筑地基平台 (2026-09-20): 布局期登记的 PADS 在此一次性写回地形网格顶点 (网格载入期已按原地形建好)
 if(typeof refreshTerrainMesh==='function'){ const _padN=refreshTerrainMesh(); if(_padN&&typeof console!=='undefined'&&console.log) console.log('[地形] 建筑地基平台: 重刷 '+_padN+' 个地形顶点'); }
 // 深度分层 · 共面冲突消解 (2026-09-27) **不在这里调**: 05c 之后还有 15f 反舰炮台 / 17 固定炮位 / 16 坠机残骸

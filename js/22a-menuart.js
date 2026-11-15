@@ -165,19 +165,6 @@ if(CAMPAIGN.city.yard){ // 厂区: 更深的块 + 一侧亮缘 (产能地标)
 const r=proj.rect(CAMPAIGN.city.yard.x0,CAMPAIGN.city.yard.z0,CAMPAIGN.city.yard.x1,CAMPAIGN.city.yard.z1);
 s+=`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="#332f28" fill-opacity=".62" stroke="#8a7a52" stroke-opacity=".5" stroke-width="1"/>`;
 }
-if(CAMPAIGN.city.metro){ // 地铁: 两站 + 区间虚线 (柏林)
-const m=CAMPAIGN.city.metro;
-s+=`<g fill="none" stroke="#e8dcc0" stroke-opacity=".55" stroke-width="1.4" stroke-dasharray="3 3">`;
-for(const h of m.halls){
-const r=proj.rect(h.x0,h.z0,h.x1,h.z1);
-s+=`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="#1d1a15" fill-opacity=".7"/>`;
-}
-if(m.tunnel){
-const r=proj.rect(m.tunnel.x0,m.tunnel.z0,m.tunnel.x1,m.tunnel.z1);
-s+=`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>`;
-}
-s+='</g>';
-}
 return s;
 }
 // 田块: 软遮蔽色块 (wheat/corn/rice → 三种土色; pasture/till 更淡)

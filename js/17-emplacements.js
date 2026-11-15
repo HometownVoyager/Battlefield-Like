@@ -389,7 +389,7 @@ return best||FLAGS[0];
 //     ① lane 使用热度 —— 最近 SPAWN_USE_WIN 秒内该 lane 的出生次数线性衰减求和 × SPAWN_USE_W:
 //        同一批/连续重生不会反复砸同一个 lane, 用满自动轮转到本点位其它 lane 或其它点位;
 //     ② lane 活人拥挤 —— 28m 内同队存活 (含本帧占位认领) 加权和 × LANE_CROWD_W: 往空处推;
-//     ③ 落点级 —— 建筑足迹/地铁下沉区硬排除 + 最近邻距离评分 + 同帧占位互斥 (一轮成果保留)。
+//     ③ 落点级 —— 建筑足迹硬排除 + 最近邻距离评分 + 同帧占位互斥 (一轮成果保留)。
 // 口径: 出发区只围绕官方点位展开, 不在地图中部凭空生成 (用户 2026-09-20 选定)。
 const SPAWN_LANES_BASE=4;  // 基地扇区数 (前 / 左前 / 右前 / 侧翼)
 const SPAWN_LANES_PT=3;    // 旗点/强点/前出点扇区数
@@ -525,7 +525,7 @@ if(_spawnClaimT!==nowT){ _spawnClaimT=nowT; SPAWN_CLAIMS.length=0; }
 function spawnLandingClear(x,z,margin){
 // (2026-11-10: 旧"大舰甲板出生豁免"capDeckOf 分支随大舰子系统下架摘除)
 if(occBlocked(x,z)) return false;
-if(!freeSpot(x,z,margin===undefined?0.9:margin)) return false; // 建筑足迹/地铁下沉区 (freeSpot: B_FOOT + METRO_RECTS)
+if(!freeSpot(x,z,margin===undefined?0.9:margin)) return false; // 建筑足迹 (freeSpot: B_FOOT)
 // 死袋闸 (2026-09-26): 该点所在 5m 格必须"走得出去" —— 判据与 findPath 共用同一张连通分量表 (NAV.spawnSpotOk)。
 // 为什么需要: 5m 格 + 0.9m 采样是保守判据, 物理上能挤过去的窄门在格图上可能整片封死; 强点工事环
 // (草原遭遇 7 个 spawns: 对角沙袋环+箱桶+拒马) 或一件随机落在门线上的道具, 就能把点位圈成 2~5 格的死袋 ——

@@ -629,7 +629,7 @@ if(v&&v.alive&&!v.playerDriven) vehSpawn=v;
 	if(f.owner!==p.team){ sx=sBase.x; sz=sBase.z; }
 	else { sx=f.x; sz=f.z; }
 	}
-// 玩家落点 (2026-09-19): 走与 Bot 同一套落点选择 —— 落点也避开建筑足迹/地铁下沉区,
+// 玩家落点 (2026-09-19): 走与 Bot 同一套落点选择 —— 落点也避开建筑足迹,
 // 并尽量离同队最近邻远一点 (不再叠进出生点人堆里)。玩家选了点位语义仍然保留 (优先落点在所选点位圈内)。
 const lp=(typeof pickSpawnPoint==='function'&&typeof pickSpawnFor==='function')
 ? pickSpawnPoint(p.team,{x:sx,z:sz,base:isBaseSpot(),r:12})
