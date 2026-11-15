@@ -2,3 +2,5 @@ dev/*.log
 dev/out/
 node_modules/
 .zcode/
+*参考*.jpg
+*参考*.png
