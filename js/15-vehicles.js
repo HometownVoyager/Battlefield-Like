@@ -722,7 +722,8 @@ if(t.shape==='smallRound'){ const bu=new THREE.Mesh(new THREE.BoxGeometry(tw*0.8
 }else if(t.shape==='hex'||t.shape==='hexLong'){ // 六角炮塔 (T-34/76 六棱 / KV 加长尾舱)
 const hx=new THREE.Mesh(new THREE.CylinderGeometry(R*0.86,R,th,6),mat);
 hx.rotation.y=Math.PI/6; hx.position.y=th/2; G.add(hx);
-if(t.shape==='hexLong'){ const bu=new THREE.Mesh(new THREE.BoxGeometry(tw*0.72,th*0.42,0.36*ts),mat); bu.position.set(0,th*0.30,-R-0.14*ts); G.add(bu); }
+if(t.shape==='hexLong'){ // 尾舱贴后面: 六棱转 PI/6 ⇒ 后面平面=0.866R (旧 -R-0.14ts 悬空 0.17m = KV-1 头后分离盒), 前端探入棱柱 0.05 保贴合
+const bu=new THREE.Mesh(new THREE.BoxGeometry(tw*0.72,th*0.42,0.36*ts),mat); bu.position.set(0,th*0.30,-(R*0.866)-0.18*ts+0.05); G.add(bu); }
 }else{ // 方箱炮塔 (四号/黑豹): 直壁 + 前斜板 + 尾舱
 const bx=new THREE.Mesh(new THREE.BoxGeometry(tw,th,tl),mat); bx.position.y=th/2; G.add(bx);
 const fp=new THREE.Mesh(new THREE.BoxGeometry(tw*0.96,th*0.55,0.42*ts),mat);

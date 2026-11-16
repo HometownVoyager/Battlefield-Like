@@ -741,7 +741,7 @@ wkPart(tg,new THREE.CylinderGeometry(R0*0.60,R0*0.86,tH*0.14,14),M.paintT,0,tH*0
 if(tS==='smallRound') wkPart(tg,boxGeo(tW*0.86,tH*0.46,tL*0.22),M.paintT,0,tH*0.30,-R0*0.92,0,0,0,'turretBustle');
 }else if(tS==='hex'||tS==='hexLong'){
 wkPart(tg,new THREE.CylinderGeometry(R0*0.86,R0,tH,6),M.paintT,0,tH/2,0,0,Math.PI/6,0,'turret');
-if(tS==='hexLong') wkPart(tg,boxGeo(tW*0.72,tH*0.42,0.36),M.paintT,0,tH*0.30,-R0-0.14,0,0,0,'turretBustle');
+if(tS==='hexLong') wkPart(tg,boxGeo(tW*0.72,tH*0.42,0.36),M.paintT,0,tH*0.30,-(R0*0.866)-0.13,0,0,0,'turretBustle'); // 2026-11-16: 贴六棱后面 0.866R (旧 -R0-0.14 悬空分离)
 }else{ // box (四号/黑豹) 与 vickers (维克斯/T-26) 都由直壁箱体派生, 靠尺寸档区分
 wkPart(tg,boxGeo(tW,tH,tL),M.paintT,0,tH/2,0,0,0,0,'turret');
 wkPart(tg,boxGeo(tW*0.96,tH*0.55,0.40),M.paintT,0,tH*0.42,tL/2-0.05,-0.30,0,0,'turretFront');
