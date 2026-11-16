@@ -98,6 +98,19 @@ const H=RAG_POSE.h;
 let b;
 b=mkPart(pantMat,0.2,0.13,0.12,6,...locP(0,H,0)); const pelvis=b;
 b=mkPart(coatMat,0.22,0.25,0.13,9,...locP(0,H+ST.torso,0)); const torso=b;
+// 背包随躯干 (2026-11-16 批7, 用户实报"布娃娃背后的背包会消失, 要粘在背上不要乱动"): 活人模型的
+// 背包是 torsoG 里的匿名盒 (11-soldiers.js, 0.3×0.34×0.14 背在身后 z=-0.18, 无引用带出), 布娃娃重建
+// 7 件裸身体时没带它 + 原模型整体隐藏 ⇒ 死亡瞬间背包凭空消失。修法 = 躯干 mesh 的**子网格**: 躯干
+// 刚体每帧 position/quaternion 写进 mesh, 子网格自动继承全部翻滚/冻结位姿 = "粘在背上", 零新增
+// 刚体/约束/更新代码 (独立刚体档会"被撞飞不粘背", 与需求相反)。几何随 removeRagdoll 的 traverse 回收。
+{
+const tMesh=parts[parts.length-1].mesh;
+const bpG=new THREE.BoxGeometry(0.3,0.34,0.14);
+const bpM=new THREE.Mesh(bpG,pantMat);
+bpM.position.set(0,0.02,-0.16);   // 躯干半深 0.13, 背包半深 0.07 @ z=-0.16 ⇒ 后缘 -0.23 贴背微嵌入
+bpM.castShadow=false;
+tMesh.add(bpM);
+}
 b=mkPart(skinMat,0.1,0.11,0.1,2.5,...locP(0,H+ST.head,0)); const head=b;
 b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(-ST.armX,H+ST.arm,0)); const armL=b;
 b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(ST.armX,H+ST.arm,0)); const armR=b;
@@ -180,8 +193,8 @@ scene.remove(p.mesh);
 // 几何逐具回收 (2026-09-25 修): 每具尸体的 7~8 个 Box/Sphere 几何都是 spawnRagdoll 当场 new 的
 // (材质才是共享的 U.coat/pants/skin/helm —— 只能删几何, 删材质会打穿全队制服)。旧版只 scene.remove,
 // 几何留在 GPU 上: 一局打下来几百具尸体 = 几百个几何常驻, 就地重开也收不回。同文件 removeDebrisEntry 本是这个写法。
-const g=p.mesh&&p.mesh.geometry;
-if(g&&typeof g.dispose==='function') g.dispose();
+// ★2026-11-16 批7: traverse 回收 —— 躯干 mesh 带背包子网格后, 旧的单层 geometry.dispose 会漏掉它。
+if(p.mesh) p.mesh.traverse(o=>{ const g=o&&o.geometry; if(g&&typeof g.dispose==='function') g.dispose(); });
 }
 RAG.list.splice(i,1);
 }

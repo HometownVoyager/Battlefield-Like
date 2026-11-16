@@ -75,7 +75,7 @@ clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry
 //   "g.clearGroups is not a function", 整场世界构建中断 (实测: verify-tankai / verify-fixbatch-20260926
 //   直接崩在 Tank 构造里; 其余全链探针只是把异常吞掉, 拿到的是**半建成的世界**)。
 //   与 isMesh / setMatrixAt / lastChild 那几处同规: 这是**桩不忠实**, 不是被测代码的问题。
-class Geo{constructor(...a){this.attributes={};this.parameters={};this.groups=[];}translate(){return this;}rotateX(){return this;}rotateY(){return this;}rotateZ(){return this;}setAttribute(n,a){this.attributes[n]=a;return this;}setIndex(){return this;}setFromPoints(){return this;}computeVertexNormals(){return this;}dispose(){}
+class Geo{constructor(...a){this.attributes={};this.parameters={};this.groups=[];}translate(){return this;}rotateX(){return this;}rotateY(){return this;}rotateZ(){return this;}setAttribute(n,a){this.attributes[n]=a;return this;}setIndex(i){this.index=(i&&i.array!==undefined)?i:{array:(i&&i.length!==undefined)?i:[]};return this;}setFromPoints(){return this;}computeVertexNormals(){return this;}dispose(){}
 clearGroups(){this.groups.length=0;return this;}
 addGroup(start,count,materialIndex){this.groups.push({start,count,materialIndex:materialIndex||0});return this;}}
 // 几何尺寸兜底: 真 THREE 每个几何都有 parameters + position 属性; 桩里非盒几何两样都没有 ⇒
@@ -92,7 +92,28 @@ this.attributes.position={count:8,array:A,getX:i=>A[i*3],getY:i=>A[i*3+1],getZ:i
 boundingDims(){ const p=this.parameters; return {hx:Math.abs(p.hx||0.5),hy:Math.abs(p.hy||0.5),hz:Math.abs(p.hz||0.5)}; }}
 class _BoxGeo2 extends Geo2{constructor(w=1,h=1,d=1){super('BoxGeometry',{width:w,height:h,depth:d,hx:w/2,hy:h/2,hz:d/2});}}
 class _CylGeo2 extends Geo2{constructor(rt=1,rb=1,h=1,seg=8){super('CylinderGeometry',{radiusTop:rt,radiusBottom:rb,height:h,radialSegments:seg,hx:Math.max(Math.abs(rt),Math.abs(rb)),hy:h/2,hz:Math.max(Math.abs(rt),Math.abs(rb))});}}
-class _SphereGeo2 extends Geo2{constructor(r=1,ws=8,hs=6){super('SphereGeometry',{radius:r,widthSegments:ws,heightSegments:hs,hx:r,hy:r,hz:r});}}
+// ★2026-11-17 桩升级 (照 conecollide 批"桩补真 setIndex"先例): 05b 的 _hedgeBlobGeo 直接读 SphereGeometry 的
+// position/uv/index 三数组做叶团合并 —— Geo2 的 8 顶点盒既无 uv 也无 index (setIndex 丢弃式) ⇒ 世界构建期
+// 含树篱的图全体探针炸桩 (桩不忠实, 非被测代码问题)。_SphereGeo2 升级为忠实经纬球 (indexed, 与真 THREE
+// 同形同序); parameters/boundingDims 接口不变, 其余几何桩不动。
+class _SphereGeo2 extends Geo2{constructor(r=1,ws=8,hs=6){super('SphereGeometry',{radius:r,widthSegments:ws,heightSegments:hs,hx:r,hy:r,hz:r});
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix2=0;ix2<=ws;ix2++){ const u=ix2/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);
+}
+}
+for(let iy=0;iy<hs;iy++)for(let ix2=0;ix2<ws;ix2++){
+const a=iy*(ws+1)+ix2+1, b=a-1, c=(iy+1)*(ws+1)+ix2, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);
+}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.index={array:new Uint16Array(idx)};
+}}
 class _ConeGeo2 extends Geo2{constructor(r=1,h=1,seg=8){super('ConeGeometry',{radius:r,height:h,radialSegments:seg,hx:r,hy:h/2,hz:r});}}
 class _TorusGeo2 extends Geo2{constructor(r=1,tube=0.4,rs=8,ts=6){super('TorusGeometry',{radius:r,tube:tube,radialSegments:rs,tubularSegments:ts,hx:r+tube,hy:tube,hz:r+tube});}}
 class _CircleGeo2 extends Geo2{constructor(r=1,seg=8){super('CircleGeometry',{radius:r,segments:seg,hx:r,hy:0,hz:r});}}

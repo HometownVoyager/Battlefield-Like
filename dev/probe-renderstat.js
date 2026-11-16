@@ -1,3 +1,22 @@
+// ★2026-11-17: 05b _hedgeBlobGeo (叶团重做) 真读 SphereGeometry 的 position/uv/index 三数组
+// ⇒ 无数组局部桩全体炸桩 (桩不忠实, 非被测代码问题)。局部桩表升级忠实经纬球
+// (与 _bootstub._SphereGeo2 同形同序, extends 本文件的 Geo 保 no-op 方法面)。
+function _FF17Sph(Base){ return class extends Base{constructor(r=1,ws=8,hs=6){super(r,ws,hs);if(!this.attributes) this.attributes={};if(!this.parameters) this.parameters={};
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix=0;ix<=ws;ix++){ const u=ix/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);}}
+for(let iy=0;iy<hs;iy++)for(let ix=0;ix<ws;ix++){ const a=iy*(ws+1)+ix+1, b=a-1, c=(iy+1)*(ws+1)+ix, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.attributes.normal={count:pos.length/3,array:new Float32Array(pos.length)};
+this.index={array:new Uint16Array(idx)};
+this.parameters={radius:r,widthSegments:ws,heightSegments:hs};
+}dispose(){}};}
 // ─────────────────────────────────────────────
 // dev/probe-renderstat.js —— 渲染规模探针 (2026-10-24 性能排查批)
 // 用法: node dev/probe-renderstat.js [战役序号|all] [night]
@@ -86,7 +105,7 @@ Vector2:class{constructor(x=0,y=0){this.x=x;this.y=y;}set(x,y){this.x=x;this.y=y
 Vector3:V3,Vector4:V3,Euler:Euler,Quaternion:class{set(){return this;}setFromUnitVectors(){return this;}identity(){return this;}setFromEuler(){return this;}setFromAxisAngle(){return this;}premultiply(){return this;}},
 Color:_Color,
 Fog:_Fog,FogExp2:_FogExp2,
-BoxGeometry:Geo,CylinderGeometry:Geo,SphereGeometry:Geo,ConeGeometry:Geo,TorusGeometry:Geo,RingGeometry:Geo,CircleGeometry:Geo,PlaneGeometry:_PlaneGeo,
+BoxGeometry:Geo,CylinderGeometry:Geo,SphereGeometry:_FF17Sph(Geo),ConeGeometry:Geo,TorusGeometry:Geo,RingGeometry:Geo,CircleGeometry:Geo,PlaneGeometry:_PlaneGeo,
 BufferGeometry:Geo,BufferAttribute:BufAttr,Float32BufferAttribute:BufAttr,InstancedBufferAttribute:BufAttr,
 MeshLambertMaterial:_mat(class{constructor(){}}),
 MeshBasicMaterial:_mat(class{constructor(){}}),

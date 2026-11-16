@@ -79,7 +79,7 @@ function audit(campIdx,seedN){
 				for(let f=0;f<6;f++){
 					let u0=1e9,u1=-1e9,v0=1e9,v1=-1e9;
 					for(let k=0;k<4;k++){ const i=f*8+k*2; u0=Math.min(u0,a[i]); u1=Math.max(u1,a[i]); v0=Math.min(v0,a[i+1]); v1=Math.max(v1,a[i+1]); }
-					const rec={S,mat:mname.get(m)||'?',w:p.width,h:p.height,d:p.depth,f,su:u1-u0,sv:v1-v0,eu:E[f][0],ev:E[f][1]};
+					const rec={S,mat:mname.get(m)||'?',w:p.width,h:p.height,d:p.depth,f,su:u1-u0,sv:v1-v0,eu:E[f][0],ev:E[f][1],gt:o.geometry.type};
 					if(!isBox) nonBox.push(rec);
 					else if(S) recs.push(rec);
 					else plain.push(rec);
@@ -133,9 +133,14 @@ for(const ci of [11,0]){
 	for(const r of plain){ if(Math.abs(r.su-1)>1e-6||Math.abs(r.sv-1)>1e-6) plainBad++; }
 	chk(plainBad===0,`④ 未登记材质的 ${plain.length} 个面 UV 保持 0..1 (越界 ${plainBad})`);
 	// ④b 口径边界: 归一只作用于盒面 —— 圆柱/锥(树干·管·柱)的环绕 UV 保持原样
+	// ★2026-11-17: 桩升级忠实经纬球后球面每面 UV 跨度天然 <1 (旧桩盒式 0..1 每面=桩时代假绿),
+	//   球面改判 0..1 界内 (若被误归一, 跨度×世界尺寸必超 1 转红); 柱/锥仍按每面 0..1 判。
 	let nonBoxBad=0;
-	for(const r of nonBox){ if(Math.abs(r.su-1)>1e-6||Math.abs(r.sv-1)>1e-6) nonBoxBad++; }
-	chk(nonBoxBad===0,`④b 非盒构件 (柱/锥 ${nonBox.length} 面) 环绕 UV 不动 (越界 ${nonBoxBad})`);
+	for(const r of nonBox){
+		if(r.gt==='SphereGeometry'){ if(r.su>1+1e-6||r.sv>1+1e-6) nonBoxBad++; }
+		else if(Math.abs(r.su-1)>1e-6||Math.abs(r.sv-1)>1e-6) nonBoxBad++;
+	}
+	chk(nonBoxBad===0,`④b 非盒构件 (柱/锥 ${nonBox.length} 面) 环绕 UV 不动 (球面忠实桩界内判, 越界 ${nonBoxBad})`);
 }
 // ②b 用户看得见的那件事: 同一材质的"整段墙板"与"窗台/墙垛"砖块世界尺寸必须一致
 {

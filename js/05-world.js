@@ -1028,8 +1028,16 @@ function crushCoverBox(b){
 if(!b||b.dead) return;
 const cx=(b.minX+b.maxX)/2, cz=(b.minZ+b.maxZ)/2, gy=(b.minY+b.maxY)/2;
 if(b.flora&&typeof vanishFlora==='function'){
-vanishFlora(b.flora,true);
+if(b.flora.kind==='hedge'&&typeof hedgeShatter==='function'){
+hedgeShatter(b.flora,false,false); // 树篱 (2026-11-16 批3): 碾/爆 → 叶质碎块化, 不再"直接消失"
 }else{
+vanishFlora(b.flora,true);
+}
+}else{
+// 矮墙/木箱等 crush 件 (2026-11-16 批3): 与墙体坍塌同款物理碎块化后再摘碰撞/视觉 —— 旧版只
+// killBox+扬尘 = "直接消失" (用户实报)。spawnWallDebris 按 mesh 几何参数切块、材质取自原 mesh
+// (无宽高深参数的几何如圆柱倒木自动跳过, 行为不变); 石墙段 → 石块, 木箱 → 木块。
+if(b.mesh&&b.mesh.parent&&typeof spawnWallDebris==='function') spawnWallDebris(b.mesh,cx,cz);
 killBox(b);
 for(let k=0;k<5;k++) spawnP(PT.dirt,cx+rand(-0.6,0.6),gy+rand(0,0.4),cz+rand(-0.6,0.6),rand(-2,2),rand(0.8,2.4),rand(-2,2),rand(0.25,0.5),0.7,rand(0.5,0.9),0.9,4);
 }

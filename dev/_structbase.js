@@ -28,6 +28,25 @@ class NonBoxGeo extends Geo{ constructor(t,...a){ super(...a); this.type=t; }
 //   uvGeo 的圆柱失败路径曾把这种类型翻转的克隆顶替给网格, 探针"非盒构件"判据被静默清空 (假绿)。
 clone(){ const g=new NonBoxGeo(this.type,this.parameters.width,this.parameters.height,this.parameters.depth); if(this.attributes&&this.attributes.uv) g.attributes.uv.array=this.attributes.uv.array.slice(); return g; } }
 class PlaneGeo extends Geo{ constructor(w=1,h=1,sg=1,sh=1){ super(w,h); this.type='PlaneGeometry'; const gx=(sg||1)+1, gy=(sh||1)+1; this.attributes={position:{count:gx*gy,array:new Float32Array(gx*gy*3),getX:i=>((i%gx)/gx-0.5)*w,getZ:i=>(Math.floor(i/gx)/gy-0.5)*h,getY:()=>0,setY(){},setX(){},setZ(){}}}; this.index=null; } }
+// ★2026-11-17: 忠实经纬球 (05b _hedgeBlobGeo 真读 position/uv/index; NonBoxGeo 只有盒式无 position/index) —— 同 _bootstub._SphereGeo2
+class _SB17Sph extends NonBoxGeo{ constructor(r=1,ws=8,hs=6){ super('SphereGeometry',r,ws,hs);
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix=0;ix<=ws;ix++){ const u=ix/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);}}
+for(let iy=0;iy<hs;iy++)for(let ix=0;ix<ws;ix++){ const a=iy*(ws+1)+ix+1, b=a-1, c=(iy+1)*(ws+1)+ix, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.attributes.normal={count:pos.length/3,array:new Float32Array(pos.length)};
+this.index={array:new Uint16Array(idx)};
+}
+dispose(){ } }
+
+
 return {
 Group:class extends Obj3{}, Mesh:class extends Obj3{ constructor(g,m){ super(); this.geometry=g||new Geo(); this.material=m||{}; } },
 InstancedMesh:class extends Obj3{ constructor(g,m,n){ super(); this.geometry=g; this.material=m; this.count=n; } setMatrixAt(){} },
@@ -35,7 +54,7 @@ Object3D:Obj3, Vector3:P3, Quaternion:Quat, CanvasTexture:class{ constructor(c){
 Euler:class{ set(){ return this; } },
 Matrix4:class{ compose(){ return this; } },
 BoxGeometry:Geo, CylinderGeometry:class extends NonBoxGeo{ constructor(...a){ super('CylinderGeometry',...a); } },
-PlaneGeometry:PlaneGeo, SphereGeometry:class extends NonBoxGeo{ constructor(...a){ super('SphereGeometry',...a); } },
+PlaneGeometry:PlaneGeo, SphereGeometry:_SB17Sph,
 ConeGeometry:class extends NonBoxGeo{ constructor(...a){ super('ConeGeometry',...a); } },
 TorusGeometry:class extends NonBoxGeo{ constructor(...a){ super('TorusGeometry',...a); } },
 CircleGeometry:class extends NonBoxGeo{ constructor(...a){ super('CircleGeometry',...a); } },

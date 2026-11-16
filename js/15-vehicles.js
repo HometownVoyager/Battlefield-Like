@@ -156,6 +156,13 @@ T=_tankTuneCache[i]=Object.assign({ diff:i, name:d.name,
 }
 return T;
 }
+// ── 坦克补给箱修理距离门 (2026-11-16 批1 单源, 2026-11-17 Bot 侧并入): 舰上箱 (ac.ship) 不算维修点。
+// 玩家 tryVehRepair (18-game) 与 Bot 车组起步门共用 —— 半径/排除口径只写这一份。
+function vehRepairCrateNear(x,z){
+if(typeof AMMO_CRATES==='undefined') return false;
+for(const ac of AMMO_CRATES){ if(!ac.ship&&Math.hypot(ac.x-x,ac.z-z)<=VEH_REPAIR_R) return true; }
+return false;
+}
 // ── 坦克↔坦克车体分离/推挤 (2026-09-20 I1 用户: "坦克彼此穿模") ──
 // 与 vehiclePushSoldiers 同构: 逐车调用, **只推自己**, 每对车各推一半 ⇒ 一次接触完成一次分离,
 // 不会像"每帧全推"那样互相过推抖动; 车体用沿轴线的三圆近似 (与 update 里的建筑碰撞三圆同源 ±1.85),
@@ -265,7 +272,7 @@ const _tsQ={x:0,z:0,h:0};
 function _tsBoxCb(b){
 if(b.dead) return;
 const bh=b.maxY-b.gh;
-if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
+if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush||b.antiTank)) return; // antiTank: 龙牙锥硬阻挡, 悬挂俯仰不贴其顶 (2026-11-16 批2.5)
 const cx=clamp(_tsQ.x,b.minX,b.maxX), cz=clamp(_tsQ.z,b.minZ,b.maxZ);
 const dx=_tsQ.x-cx, dz=_tsQ.z-cz;
 if(dx*dx+dz*dz<1.55*1.55&&b.maxY>_tsQ.h) _tsQ.h=b.maxY;
@@ -288,10 +295,12 @@ const _trQ={x:0,z:0,baseY:0,h:0};
 function _trBoxCb(b){
 if(b.dead) return;
 if(b.maxY<=_trQ.baseY-0.25||b.maxY>_trQ.baseY+TANK_STEP) return; // 足印内平齐/已过/太高都不算
-// 可跨越 = 障碍自身低矮(顶面高出其地面≤1.3m) 且 无 dGroup 撞塌/无 crush 碾毁 的可放行类别;
+// 可跨越 = 障碍自身低矮(顶面高出其地面≤1.3m) 且 无 dGroup 撞塌/无 crush 碾毁/无 antiTank 硬阻挡 的可放行类别;
 // <0.7m 的本来就放行 (与碰撞循环口径一致), 高度按自身相对地面判定 — 不随坦克瞬时高度漂变
+// antiTank (2026-11-16 批2.5): 龙牙锥——旧版锥高 1.05≤TANK_STEP 被当跨槛抬上锥顶 = 碾过反坦克锥, 与
+// _tkBoxCb 的推挤放行同病; 排除后坦克抵锥即被推挤拦停, 只能绕行缺口 (NAV 占用网格本就绕锥)。
 const bh=b.maxY-b.gh;
-if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush)) return;
+if(bh>0.7&&(bh>TANK_STEP||b.dGroup||b.crush||b.antiTank)) return;
 const cx=clamp(_trQ.x,b.minX,b.maxX), cz=clamp(_trQ.z,b.minZ,b.maxZ);
 const dx=_trQ.x-cx, dz=_trQ.z-cz;
 if(dx*dx+dz*dz<2.2*2.2&&b.maxY>_trQ.h) _trQ.h=b.maxY;
@@ -335,7 +344,7 @@ T.suspPV-=Math.sign(T.vel)*0.25;
 if(T.playerDriven) addTrauma(0.12);
 return;
 }
-if(!b.dGroup&&!b.crush&&b.maxY-b.gh<=TANK_STEP) return;
+if(!b.dGroup&&!b.crush&&!b.antiTank&&b.maxY-b.gh<=TANK_STEP) return; // antiTank: 龙牙锥不吃"低矮可跨越"豁免, 照常推挤拦停 (2026-11-16 批2.5)
 let pnx=0, pnz=0;
 if(d2>1e-8){
 const d=Math.sqrt(d2);
@@ -957,6 +966,20 @@ if(!this.alive) return;
 if(!this.playerDriven&&!this.crewBot&&!this.burning&&this.hp<this.maxHp&&nowT-(this.lastDmgT||-99)>10){
 this.hp=Math.min(this.maxHp,this.hp+this.maxHp*0.025*dt);
 }
+// Bot 坦克补给箱修理 tick (2026-11-17 Bot/玩家同步): 账挂 tank.vehRepair (玩家账挂 player.vehRepair, 打断钩两处同款)。
+// 8s 走完回 25%×maxHp; 起火/死亡在此清账; 移动打断=driveAI 驻车门, 开火=fireCannon/AI同轴钩, 重伤>26%=takeDmg 钩。
+if(!this.playerDriven&&this.vehRepair){
+if(!this.alive||this.burning){ this.vehRepair=null; }
+else{
+const vr=this.vehRepair;
+vr.t+=dt;
+if(vr.t>=vr.dur){
+this.vehRepair=null;
+this.hp=Math.min(this.maxHp,this.hp+this.maxHp*VEH_REPAIR_HEAL);
+if(this.pos.distanceTo(camera.position)<45&&typeof metalSlide==='function') metalSlide(0.12);
+}
+}
+}
 // 扒车统计 (2026-10-07d, 丧尸模式): 每帧重算挂在身上的丧尸数 —— 驱动履带卡尸减速 (下方 mvx 段)。
 if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE&&typeof ZOMBIES!=='undefined'&&ZOMBIES.length){
 let _zn=0;
@@ -1293,9 +1316,31 @@ return {x:this.pos.x+Math.sin(a)*12,z:this.pos.z+Math.cos(a)*12};
 return null;
 }
 driveAI(dt){
+// 补给箱修理驻车 (2026-11-17 Bot/玩家同步): 修理中不开车不寻路 (与玩家"移动打断"同规 —— 玩家的移动是
+// 踩油门, Bot 的移动意图=推进目标存在)。接敌 (车长/炮塔有活目标)、指挥官下达机动令、起火 (tick 收) 即让位。
+if(this.vehRepair){
+this.vel=dampF(this.vel,0,4,dt); this.path=null; this.progT=0; this.lastPos.copy(this.pos);
+const _tt=this.tTarget, _tv=this.tVehTgt;
+if((_tt&&_tt.alive!==false)||(_tv&&_tv.alive&&_tv.team!==this.team)
+||(typeof cmdTankCmd==='function'&&cmdTankCmd(this))){ this.vehRepair=null; }
+return;
+}
 this.thinkCD-=dt; this.repathT-=dt;
 	if(this.thinkCD<=0){
 	this.thinkCD=rand(0.6,0.9);
+	// 补给箱修理起步门 (2026-11-17 Bot/玩家同步): 残血 (<60%×maxHp) + 脱离接敌 (车长无目标/记忆已清 + 4s 未挨打)
+	// + 补给箱在 VEH_REPAIR_R 内 + 无指挥官机动令 → 就地驻车自修 (8s 回 25%×maxHp, 与玩家按 R 同规同价;
+	// 修完仍 <60% 会在后续 think 里再起一轮 = 与玩家连按 R 等价)。已在修理中不会进这里 (driveAI 顶部驻车早退)。
+	if(!this.vehRepair&&this.hp<this.maxHp*0.6&&nowT-(this.lastDmgT||-99)>4){
+	const _ct0=(typeof cmdTankCmd==='function')?cmdTankCmd(this):null;
+	const _tt0=this.tTarget, _tv0=this.tVehTgt;
+	if(!_ct0&&!(_tt0&&_tt0.alive!==false)&&!(_tv0&&_tv0.alive&&_tv0.team!==this.team)
+	&&typeof vehRepairCrateNear==='function'&&vehRepairCrateNear(this.pos.x,this.pos.z)){
+	this.vehRepair={t:0,dur:VEH_REPAIR_TIME};
+	this.path=null; this.aiOrder=null; this.aiCover=null;
+	return;
+	}
+	}
 	// 指挥官坦克令 (2026-10-26 指挥官批, 26-commander cmdTankCmd 单源): 非 free 令直接覆写推进目标 ——
 	// attack_move/hold 都 = 开往指定点 (坦克交战层战术机动在下方照常接管, 到点 engagedStop 静止对射口径不变);
 	// free 令走下方默认选点 = 零回归。令解除时清 objective 让默认选点即刻重选。
@@ -1549,7 +1594,9 @@ else this.cannonCd=0.6;
 }
 // 同轴机枪打步兵 (同样先过友军弹道预检: 机枪散布更小, 更容易扫到友军)
 // A#3 (2026-09-21): 过热强制停火 —— vehMgCanFire 门在最前, 每发 vehMgHeatAdd 积热 (AI 散热 0.15/s 常散)
+// ★2026-11-17 Bot/玩家同步: AI 同轴开火同样打断修理 (玩家侧走 firePlayerMG 的同款钩)
 if(!isVeh&&dh<95&&this.mgT<=0&&this.mgPause<=0&&vehMgCanFire(this)){
+if(this.vehRepair) this.vehRepair=null;
 if(this.mgBurst<=0) this.mgBurst=randi(7,12);
 this.mgT=0.09;
 const mdir=dir.clone();
@@ -1567,6 +1614,9 @@ if(--this.mgBurst<=0) this.mgPause=rand(0.35,0.8);
 }
 }
 fireCannon(customDir){
+// ★2026-11-16 批1: 开火打断坦克修理 (玩家账挂 player.vehRepair; 2026-11-17 Bot 侧并入: 账挂 tank.vehRepair 同款打断)
+if(this.playerDriven&&player&&player.vehRepair&&player.vehRepair.tank===this){ player.vehRepair=null; showScorePop('维修被打断: 开火'); }
+else if(!this.playerDriven&&this.vehRepair){ this.vehRepair=null; }
 if(this.cannonCd>0) return;
 this.cannonCd=this.def.reload;
 let dir=this.aimDir();
@@ -1594,6 +1644,8 @@ shooter.lastFiredT=nowT;
 gunEvents.push({x:origin.x,z:origin.z,team:this.team,t:nowT,shooter});
 }
 firePlayerMG(dir){
+// ★2026-11-16 批1: 同轴机枪开火同样打断坦克修理 (firePlayerMG 只被玩家座位链调用)
+if(player&&player.vehRepair&&player.vehRepair.tank===this){ player.vehRepair=null; showScorePop('维修被打断: 开火'); }
 vehMgTrigger(this); // A#3 扳机保持: 本帧有开火请求 (必须早于冷却早退 —— 20a-seats 冷却中也每帧调)
 if(this.mgT>0) return;
 if(!vehMgCanFire(this)) return; // A#3 过热强制停火 (散到 unlock=0.35 才解锁)
@@ -1615,6 +1667,10 @@ if(typeof specRide==='function'&&specRide(this)) return;
 if(!ap) amt*=TANK_ARMOR;
 this.hp-=amt;
 this.lastDmgT=nowT;
+// ★2026-11-16 批1: 单次受伤 >26%×maxHp 打断坦克修理 (与步兵读条 25 点门槛同族, 按载具血量比例; 刮伤/小跳伤不打断)
+// ★2026-11-17 Bot 侧并入: 账挂 tank.vehRepair, 同一门槛同款打断 (Bot 无 score pop)
+if(this.playerDriven&&player&&player.vehRepair&&player.vehRepair.tank===this&&amt>this.maxHp*VEH_REPAIR_DMG_FRAC){ player.vehRepair=null; showScorePop('维修被打断: 重伤'); }
+else if(!this.playerDriven&&this.vehRepair&&amt>this.maxHp*VEH_REPAIR_DMG_FRAC){ this.vehRepair=null; }
 // 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走, 烧毁仍走本 die 链; 正常受创照常结算)
 if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
 if(this.playerDriven){ addDmgFlash(0.35); addTrauma(0.3); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
@@ -1711,6 +1767,7 @@ if(this.burning||this.burnBy||this.burnSrc){
 if(this.burnSrc){ removeFireSource(this.burnSrc); this.burnSrc=null; }
 this.burning=false; this.burnBy=null;
 }
+this.vehRepair=null; // Bot 修理账不跨生死携带 (2026-11-17 批; 玩家账挂 player.vehRepair 由 die/cancelReadBar 收)
 const bp=basePos(this.team);
 // 同variant多车(东线4辆/西线3辆)按队内序号错位前后排, 避免叠在同一点 (2026-09-02 加载具配套)
 const ord=tanks.filter(t=>t.team===this.team).indexOf(this);

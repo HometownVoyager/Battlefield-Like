@@ -1189,6 +1189,17 @@ let DEATHCAM_KILLER=localStorage.getItem('sf_deathcam')==='killer';
 // 玩家与 Bot 同规 (消费点: 13-combat explodeAt/splashDamage/loiterDetonate 三处单源口); 无主爆炸
 // (地雷/油桶/钢水包, attacker=null) 无队可认, 保持对双方生效。友方手雷近距离告警 (updateNades) 也随本开关。
 let EXPLO_FF=localStorage.getItem('sf_explo_ff')!=='0';
+// 死亡时手雷落下 (2026-11-16 批4): 默认开=士兵死亡 (玩家/Bot) 手里捏的手雷掉落 + 引信继承 (dropHeldNade
+// 单源 13-combat, 四个调用点全过它); 关=死亡时手里的雷就地消失, 不掉落不入 nades 账。
+let NADE_DEATH_DROP=localStorage.getItem('sf_nadedrop')!=='0';
+// 主动优化档 (2026-11-16 批5): 0=关闭 1=标准 2=激进 —— 帧率持续偏低时主动清理战场碎屑
+// (碎块/弹壳/烟云/粒子; 激进档再压布娃娃与弹坑)。决策器 = 24-main perfOptTick (1s 窗均帧率+迟滞防抖)。
+let PERF_OPT=(function(){ const v=parseInt(localStorage.getItem('sf_perfopt'),10); return (v===0||v===1||v===2)?v:1; })();
+// 坦克补给箱修理 (2026-11-16 批1): 玩家坦克停靠补给箱 (AMMO_CRATES, 舰上箱除外) VEH_REPAIR_R 米内按 R
+// 读条 VEH_REPAIR_TIME 秒, 走完回 VEH_REPAIR_HEAL×maxHp。打断网: 移动 (前进输入或 |vel|>VEH_REPAIR_MOVE) /
+// 主炮/同轴机枪开火 / 下车 / 起火 / 远离补给点 (1.35×R 迟滞) / 单次受伤 >VEH_REPAIR_DMG_FRAC×maxHp。
+// Bot 坦克不修理 (无人要求)。读条 UI 复用 22-hud _demolishBar, 账挂 player.vehRepair (进 readBarActive 取消网)。
+const VEH_REPAIR_R=4.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26, VEH_REPAIR_MOVE=0.6;
 // 动态换弹时长系数单源: 关=1 (原时长); 开=clamp(已耗/容量,0,1)。已耗<=0 (满弹匣, 正常被换弹门拦) 或容量非法回退 1, 防零时长瞬间换弹
 function dynReloadFac(mag,cap){ if(!DYN_RELOAD||!cap||cap<=0) return 1; const used=cap-Math.max(0,mag); return used<=0?1:clamp(used/cap,0,1); }
 const THEMES={

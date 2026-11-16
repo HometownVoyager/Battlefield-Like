@@ -383,6 +383,36 @@ coverPoints.push({x:(x1+x2)/2-dz/len*1.4,z:(z1+z2)/2+dx/len*1.4});
 // 2026-09-02 树篱实心方形材质: 原透明叶面贴图(有机团块感) → 方形修剪绿篱硬块 (用户指定"材质改为方形")
 // 同日贴图优化: 平色 → TEX.hedge 修剪绿篱叶簇纹理 (02-scene), 保留方形体块
 const hedgeMat=new THREE.MeshLambertMaterial({map:TEX.hedge});
+// ── 树篱叶团建模 (2026-11-16 批3.5): 旧版整段一个硬方盒 (4.4×h×2.2) 贴叶簇贴图, 实机观感"活像实心墙"
+// (用户原话)。新模型 = 沿段长轴 3 团低多边形叶球 (确定性顶点抖动, 全场同形语言) + 1 团顶冠, 合并成
+// **单份 BufferGeometry / 单 Mesh** —— "每段一个网格"的既有管线全部原样保留: killBox 摘 mesh /
+// hedgeChar·vanishFlora 换焦黑材质 / queueSink 沉没 / 23b 材质快照 mm, 都不用为 Group 适配。
+// 球体 UV 保留 (TEX.hedge 叶簇贴图照用), 非均匀缩放+抖动后 computeVertexNormals 重算法线。
+function _hedgeHash3(x,y,z){ const s=Math.sin(x*12.9898+y*78.233+z*37.719)*43758.5453; return s-Math.floor(s); }
+function _hedgeBlobGeo(blobs){
+const pos=[],uv=[],idx=[]; let vo=0;
+for(let bi=0;bi<blobs.length;bi++){
+const b=blobs[bi];
+const g=new THREE.SphereGeometry(1,7,5);
+const p=g.attributes.position.array, u=g.attributes.uv.array, ix=g.index.array;
+for(let i=0;i<p.length;i+=3){
+const px=p[i],py=p[i+1],pz=p[i+2];
+const j=1+(_hedgeHash3(px,py,pz)-0.5)*0.34;   // 径向抖动 ±17%: 同坐标同偏移
+p[i]=px*j*b.rx+b.x; p[i+1]=py*j*b.ry2+b.y; p[i+2]=pz*j*b.rz+b.z;
+}
+for(let i=0;i<u.length;i++) uv.push(u[i]);
+for(let i=0;i<p.length;i++) pos.push(p[i]);
+for(let i=0;i<ix.length;i++) idx.push(ix[i]+vo);
+vo+=p.length/3;
+g.dispose();
+}
+const geo=new THREE.BufferGeometry();
+geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+geo.setIndex(idx);
+geo.computeVertexNormals();
+return geo;
+}
 function hedgerow(x1,z1,x2,z2){
 const dx=x2-x1,dz=z2-z1;
 const len=Math.hypot(dx,dz), ry=Math.atan2(dx,dz)+HPI;
@@ -396,13 +426,27 @@ propTake(x,z,1.7);
 const g0=heightAt(x,z);
 const h=wr(2.2,3.0);
 const fit=groundFit(x,z,ry,2.2,1.1);
-const m=mesh(boxGeo(4.4,h,2.2),hedgeMat,x,fit.y+h/2,z,ry);
+// 叶团布局: 3 主团沿**纯局部 X** 错落 + 顶冠 1 团; y 相对段心地面 (mesh 原点=地面, applyFit 贴坡以地面为轴心);
+// 主团长半轴 ~1.6 略超段半长, 相邻段自然搭接成连续绿篱。★2026-11-17 修 (用户实报"模型与碰撞判定垂直错 90°"):
+// 叶团偏移必须写在**纯局部坐标** (加长轴=局部 X, 与旧版 boxGeo(4.4,h,2.2) 同约定) —— 曾把 (cs·o,-sn·o)
+// 当局部偏移又被 mesh 的 ry 转一次 = 双重旋转, 世界轴向变 (cos 2ry,-sin 2ry): 东西向篱恰好对齐、南北向篱
+// 垂直反 90°、斜向篱歪 45°。ry=atan2(dx,dz)+HPI 下局部 +X→世界 (cos ry,-sin ry) ∥ 篱线, 任意走向成立。
+const cs=Math.cos(ry), sn=Math.sin(ry);
+const blobs=[];
+for(let k=-1;k<=1;k++){
+const o=k*wr(1.1,1.4);
+blobs.push({x:o+wr(-0.2,0.2),y:h*wr(0.36,0.46),z:wr(-0.2,0.2),rx:wr(1.45,1.75),ry2:h*wr(0.46,0.58),rz:wr(0.95,1.2)});
+}
+blobs.push({x:wr(-0.5,0.5),y:h*wr(0.54,0.66),z:wr(-0.35,0.35),rx:wr(0.85,1.15),ry2:h*wr(0.28,0.38),rz:wr(0.65,0.85)});
+const m=mesh(_hedgeBlobGeo(blobs),hedgeMat,x,fit.y,z,ry);
 applyFit(m,ry,fit);
-// 碰撞盒留存: 树篱段被烧尽/炸毁/坦克碾过时随视觉一并移除 (killBox / crushCoverBox)
+// 碰撞盒留存: 树篱段被烧尽/炸毁/坦克碾过时随视觉一并移除 (killBox / crushCoverBox→hedgeShatter)
 const box=addBoxCollider(x,g0+h/2,z, Math.abs(Math.sin(ry))>0.5?2.2:4.4, h, Math.abs(Math.sin(ry))>0.5?4.4:2.2);
 box.mesh=m; box.crush=true; // 2026-09-02 坦克直接碾过树篱
+box.noTop=true; // 2026-11-16 批3.6: 树篱顶不可站 (04-collision _shBoxCb 跳过), 侧面照常挡人
 fuelAdd(x,z,1.1);
-const rec={kind:'hedge',x,z,g0,meshes:[m],box,alive:true,dead:false};
+// ax/az = 局部长轴的世界方向 (局部 +x → world (cs,-sn)); hl = 段半长 —— hedgeShatter 沿轴散布碎块用 (2026-11-17)
+const rec={kind:'hedge',x,z,g0,meshes:[m],box,alive:true,dead:false,ax:cs,az:-sn,hl:2.2};
 box.flora=rec;
 floraHashAdd(rec);
 }

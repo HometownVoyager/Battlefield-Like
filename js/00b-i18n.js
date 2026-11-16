@@ -48,6 +48,12 @@ const I18N_EN={
 '游戏内容':'GAMEPLAY','游戏内容设置':'GAMEPLAY SETTINGS','游 戏 内 容 设 置':'GAMEPLAY SETTINGS','🎮 游戏内容设置...':'🎮 Gameplay Settings...','地图全图信息':'ALL MAP INTEL','手雷预瞄地图标记':'NADE PREVIEW MARKERS',
 // 2026-11-14 批: 手雷对友方造成伤害 (爆炸友伤总开关)
 '手雷对友方造成伤害':'FRIENDLY EXPLOSION DAMAGE',
+// 2026-11-16 批4/5: 死亡掉雷开关 + 主动优化三档
+'死亡时手雷落下':'GRENADE DROP ON DEATH',
+'开启（默认）＝士兵死亡（玩家与 Bot 同规）时手里捏着的手雷掉落在地，引信照常走完；关闭后死亡时手里的手雷直接消失，不再掉落。':'ON (default) = when a soldier dies (player and bots alike), the grenade they are holding drops to the ground with its fuse still running; when off, the held grenade simply vanishes on death instead of dropping.',
+'主动优化':'ACTIVE OPTIMIZATION',
+'帧率持续偏低时自动清理战场碎屑（碎块/弹壳/烟云/部分粒子）: 关闭＝从不主动清；标准＝帧率跌破约 24 帧触发；激进＝约 34 帧即触发，且额外压缩布娃娃尸体与弹坑贴花。改档即时生效。':'When the frame rate stays low, battlefield clutter (debris chunks, shell casings, smoke clouds, some particles) is cleared automatically: Off = never; Standard = kicks in below ~24 fps; Aggressive = kicks in below ~34 fps and additionally trims ragdoll corpses and crater decals. Applies immediately.',
+'关闭':'OFF','激进':'Aggressive',
 '开启（默认）＝手雷爆炸伤双方、友方手雷近距离告警；关闭后手雷、坦克炮弹、火箭弹、航弹、迫击炮弹、AT 炸药、巡飞弹等有归属的爆炸一律不伤友军步兵与载具（玩家与 Bot 同规），友方手雷告警一并停用。无主爆炸（地雷、油桶）不受此开关影响。':'ON (default) = grenades wound both teams and nearby friendly grenades trigger a warning; when off, owned explosives (grenades, tank shells, rockets, bombs, mortar rounds, AT charges, loiter munitions) never wound friendly infantry or vehicles — player and bots alike — and the friendly-grenade warning is disabled too. Unowned blasts (mines, fuel barrels) are unaffected.',
 '实验模式':'EXPERIMENTAL',
 // 2026-11-09 四项批: 游戏内容设置两新开关 + 载具起火警告 + 自动脱离弹字

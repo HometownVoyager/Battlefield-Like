@@ -49,6 +49,28 @@ const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
 const turn=(keys.KeyD?1:0)-(keys.KeyA?1:0);
 t.vel=dampF(t.vel,fwd<0?-t.def.rev:fwd*t.def.spd,2.5,dt);
 t.yaw-=turn*t.def.turn*dt*(fwd<0?-1:1);
+// ★2026-11-16 批1 坦克修理读条推进 + 移动/起火/远离打断 (开火打断在 fireCannon/firePlayerMG;
+//   重伤打断在 Tank.takeDmg; 下车打断在 20-player tryInteract)。前进输入立即打断 (vel 阻尼爬升慢,
+//   只判 |vel| 会迟 ~0.3s), 原地转向不算移动; 远离门 1.35×R 迟滞防边界抖动。
+if(p.vehRepair){
+const vr=p.vehRepair;
+if(vr.tank!==t||!t.alive||t.burning){ p.vehRepair=null; if(t.burning) showScorePop('维修被打断: 起火'); }
+else if(fwd!==0||Math.abs(t.vel)>VEH_REPAIR_MOVE){ p.vehRepair=null; showScorePop('维修被打断: 移动'); }
+else{
+let near=false;
+if(typeof AMMO_CRATES!=='undefined') for(const ac of AMMO_CRATES){ if(ac.ship) continue; if(Math.hypot(ac.x-t.pos.x,ac.z-t.pos.z)<=VEH_REPAIR_R*1.35){ near=true; break; } }
+if(!near){ p.vehRepair=null; showScorePop('维修被打断: 远离补给点'); }
+else{
+vr.t+=dt;
+if(vr.t>=vr.dur){
+p.vehRepair=null;
+t.hp=Math.min(t.maxHp,t.hp+t.maxHp*VEH_REPAIR_HEAL);
+showScorePop('维修完成 +25%');
+if(typeof AudioSys!=='undefined'&&AudioSys.metalSlide) AudioSys.metalSlide(0.5,0.4,260,120);
+}
+}
+}
+}
 const wantTY=angDiff(t.yaw,p.yaw+Math.PI);
 t.turretYaw=angleLerpTo(t.turretYaw,wantTY,t.def.tRate*dt);
 let wantPitch=clamp(p.pitch,-0.12,0.32);

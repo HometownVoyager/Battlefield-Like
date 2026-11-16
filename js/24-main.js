@@ -5,6 +5,41 @@
 'use strict';
 var lastT=performance.now(); let fpsAcc=0, fpsN=0, fpsShow=0, deployRefreshT=0;
 var _loopErrN=0; // ★2026-11-14 批④: 帧内异常护栏的节流计数器 (见 loop 尾部 catch)
+// ── 主动优化 (2026-11-16 批5, sf_perfopt: 0=关闭 1=标准 2=激进, 单源 00-config PERF_OPT) ──
+// 用户口径"帧率降低的时候迅速清除一些碎块等"。决策器 = 1s 滑窗均帧率, 连续 2 窗低于档位阈值 → 清一次场
+// (碎块/弹壳/烟云/40% 粒子; 激进档再冻结超额布娃娃 + 删旧弹坑贴花), 随后 8 窗冷却 + 迟滞 (回升到 阈值+8
+// 才重新武装), 防"清→回暖→再清"锯齿。清理只动**视觉碎屑层** (DEBRIS/casings/SMOKES/particles), 在途弹/
+// 手雷/载具/士兵等玩法对象一律不碰; 冻结布娃娃=停动画不消失 (尸体仍在, 复用 freezeRagdoll 快照档)。
+// ★2026-11-17: 原写在 loop 体内 (局部函数), 现提为文件顶层 —— 账本本就是模块级语义, 且沙箱探针/外部
+//   工具可见可测; 调用点仍在 loop 内每帧喂 rdt。
+let _poWin=0,_poN=0,_poLow=0,_poCd=0,_poArmed=true;
+function perfOptPurge(aggressive){
+let n=0;
+try{ if(typeof DEBRIS!=='undefined'&&DEBRIS.list.length){ while(DEBRIS.list.length){ removeDebrisEntry(DEBRIS.list[0]); DEBRIS.list.shift(); n++; } } }catch(e){}
+try{ if(typeof casings!=='undefined'&&casings.length){ while(casings.length){ const c=casings.shift(); if(c&&c.m&&c.m.parent) scene.remove(c.m); n++; } } }catch(e){}
+try{ if(typeof SMOKES!=='undefined'&&SMOKES.length>2){ while(SMOKES.length>2){ const old=SMOKES.shift(); for(let si=0;si<old.sprites.length;si++){ const osp=old.sprites[si].sp; if(osp&&osp.parent) scene.remove(osp); if(osp&&osp.material&&osp.material.dispose) osp.material.dispose(); } n++; } } }catch(e){}
+try{ if(typeof particles!=='undefined'&&typeof recycleP==='function'&&particles.length){ const cut=Math.floor(particles.length*0.4); for(let i=0;i<cut;i++) recycleP(particles.shift()); n+=cut; } }catch(e){}
+if(aggressive){
+try{ if(typeof RAG!=='undefined'&&typeof freezeRagdoll==='function'){ let act=0; for(const r of RAG.list) if(!r.frozen) act++; const keep=2; for(const r of RAG.list){ if(act<=keep) break; if(!r.frozen){ freezeRagdoll(r); act--; n++; } } } }catch(e){}
+try{ if(typeof runtimeCraters!=='undefined'&&runtimeCraters.length>12){ while(runtimeCraters.length>12){ const old=runtimeCraters.shift(); if(old&&old.parent) world.remove(old); n++; } } }catch(e){}
+}
+return n;
+}
+function perfOptTick(rdt){
+if(typeof PERF_OPT==='undefined'||PERF_OPT===0) return;
+if(gamePaused||matchOver||menuHold){ _poWin=0; _poN=0; _poLow=0; return; }
+_poWin+=rdt; _poN++;
+if(_poWin<1) return;
+const fps=_poN/_poWin; _poWin=0; _poN=0;
+if(_poCd>0){ _poCd--; return; }
+const thr=(PERF_OPT===2?34:24);
+if(fps>=thr+8){ _poLow=0; _poArmed=true; return; }
+if(fps>=thr) return;
+_poLow++;
+if(_poLow<2||!_poArmed) return;
+_poArmed=false; _poCd=8; _poLow=0;
+perfOptPurge(PERF_OPT===2);
+}
 function loop(){
 requestAnimationFrame(loop); // rAF 最前重排: 链条永续 (旧有纪律, 2026-09 起码见两批注释)
 // ★2026-11-14 批④帧级护栏 (用户实报④症状形状之一: 画面僵死但 DOM/按钮还活着 = 每帧异常击穿主循环
@@ -67,6 +102,7 @@ lastT=now;
 nowT=(now-nowOff)/1000;
 fpsAcc+=1/Math.max(rdt,0.001); fpsN++;   // FPS 表按**真实**帧时间统计 (时停 dt=0: 旧写法会显示 1000 FPS)
 if(fpsN>=30){ fpsShow=Math.round(fpsAcc/fpsN); fpsAcc=0; fpsN=0; el('fps').textContent=fpsShow+' FPS'; }
+perfOptTick(rdt); // ★2026-11-17: perfOpt 决策器提为文件顶层 (原 loop 内局部: 沙箱探针不可见+与"模块账"语义不符); 定义移至文件头, 调用点原地保留
 // 暂停/对局结束/返回主界面(menuHold): 战斗、移动、天气、旗点等全部冻结, 仅维持画面渲染
 if(gamePaused||matchOver||menuHold){
 // ★指挥减速冻结期自愈 (2026-10-26 排查轮): 本分支 return 在 cmdFrameTick (末段) 之前, 按住 V 时按 Esc
@@ -150,7 +186,12 @@ updateWeather(dt);
 //   "坦克上的大灯没有实际效果")。照明弹/探照灯是暗光装备, 08-effects 内已加 isDark 门兜住,
 //   晴天不会因这档放宽凭空长出照明弹。AI 载具的灯由夜档/暗光自动管理, 晴天本就全灭, 不受影响。
 const _hlRideOn=!!(player&&((player.onVehicle&&player.onVehicle.lightsOn)||(player.onNaval&&player.onNaval.lightsOn)));
-if((NIGHT_MODE&&typeof nightGearTick==='function')||((typeof isDarkEnvironment==='function'&&isDarkEnvironment()||(player&&player.flashlight)||_hlRideOn)&&typeof nightGearTick==='function')) nightGearTick(dt); // 夜档/暴雨暗光/照明开启: 大灯/手电/照明弹/探照灯
+// ★2026-11-16 时停关灯修复: 唤醒门补"灯还亮着"记忆位 —— 旧门全是开侧条件, 时停期间按 L 关灯的那一帧起
+//   门塌 false ⇒ nightGearTick 被断粮 ⇒ playerFlashlightTick 的 else 收灯分支执行不到, 手电光锥/真光源
+//   停在最后一次 tick 的位姿就地停留, 时停结束后也永不恢复 (用户实报)。nightGearLightsOn() 读四件套
+//   真实可见态 (08-effects 单源), 关灯后靠它再喂一帧 tick 把灯收干净, 时停 dt=0 与结束恢复两态都覆盖。
+const _flChainOn=(typeof nightGearLightsOn==='function')&&nightGearLightsOn();
+if((NIGHT_MODE&&typeof nightGearTick==='function')||((typeof isDarkEnvironment==='function'&&isDarkEnvironment()||(player&&player.flashlight)||_hlRideOn||_flChainOn)&&typeof nightGearTick==='function')) nightGearTick(dt); // 夜档/暴雨暗光/照明开启: 大灯/手电/照明弹/探照灯
 updateSmokes(dt);
 for(const s of soldiers){
 // (2026-11-10: 旧 s.capCrew 大舰甲板炮手 skip 随大舰子系统下架摘除 —— 该兵种不再生成)

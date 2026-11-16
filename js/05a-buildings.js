@@ -1463,18 +1463,29 @@ BUILD_REG.push({type:'caveDwelling',x,z,ry,w:hw*2,d:hd*2,floor:f.floor,doors:ctx
 }
 // 龙牙 (莫斯科反坦克): 混凝土三角锥 —— 坦克不可碾 (无 crush), 硬掩体
 // 空间账: 底 1.4×1.4 高 1.0; 交错布置防坦克直线冲过; 可作步兵矮掩体
+// ★2026-11-16 批2/2.5 两修:
+//   ① 贴坡: 旧版恒竖直 (只绕 Y), 与石墙/树篱/木箱的 groundFit+applyFit 地形自适应不一致 (用户实报
+//     "白色水泥锥摆放只有竖直状态")。锥底是菱形朝向 (rotation.y=ry+HPI/2), 贴坡采样沿菱形棱边轴走,
+//     半跨 0.58 覆盖菱形半边 0.53+余量; 视觉贴坡, 碰撞 AABB 仍竖直近似 (与树篱同口径)。
+//   ② 挡坦克: 旧版锥高 1.05 ≤ TANK_STEP 1.3, _tkBoxCb 的"低矮可跨越"豁免把锥整体放行, _trBoxCb
+//     悬挂还把车体抬上锥顶 ⇒ 坦克无视龙牙直接碾过 (注释宣称"硬掩体"≠实现)。新增 box.antiTank 标记,
+//     三处消费 (15-vehicles): _tkBoxCb 推挤不再豁免 / _trBoxCb 悬挂不再抬升 / _tsBoxCb 俯仰采样不再
+//     贴顶。Bot 寻路无需新字段 —— 锥本就进 BOXES ⇒ buildOccupancy 占用网格 ⇒ NAV 烘焙绕行 (与龙牙
+//     既有关账一致), 坦克 Bot 只从缺口走。
 function dragonTooth(x,z,ry){
 if(!propFree(x,z,1.1)||!freeSpot(x,z,1.0)) return;
 propTake(x,z,1.1);
 const g0=heightAt(x,z);
 const geo=new THREE.ConeGeometry(0.75,1.05,4);
 const m=new THREE.Mesh(uvGeo(geo,MAT.concrete||MAT.stone),MAT.concrete||MAT.stone);
-m.position.set(x,g0+0.52,z);
-m.rotation.y=ry+HPI/2; // 菱形朝向
+const fit=groundFit(x,z,ry+HPI/2,0.58,0.58);
+m.position.set(x,fit.y+0.52,z);
+applyFit(m,ry+HPI/2,fit); // 菱形朝向 (ry+HPI/2) 保持原值传入
 m.castShadow=true;
 world.add(m);
-// 碰撞: 倾斜菱形用 AABB 近似 (1.1×1.05×1.1)
-addBoxCollider(x,g0+0.5,z,1.1,1.05,1.1);
+// 碰撞: 倾斜菱形用 AABB 近似 (1.1×1.05×1.1); antiTank=反坦克锥硬阻挡 (15-vehicles 三处消费)
+const box=addBoxCollider(x,g0+0.5,z,1.1,1.05,1.1);
+box.antiTank=true;
 coverPoints.push({x,z});
 }
 // ═══════════ 淞沪水乡大件 (2026-09-12 环形旗点+水乡风貌改版) ═══════════

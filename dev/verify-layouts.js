@@ -1,3 +1,22 @@
+// ★2026-11-17: 05b _hedgeBlobGeo (叶团重做) 真读 SphereGeometry 的 position/uv/index 三数组
+// ⇒ 无数组局部桩全体炸桩 (桩不忠实, 非被测代码问题)。局部桩表升级忠实经纬球
+// (与 _bootstub._SphereGeo2 同形同序, extends 本文件的 Geo 保 no-op 方法面)。
+function _FF17Sph(Base){ return class extends Base{constructor(r=1,ws=8,hs=6){super(r,ws,hs);if(!this.attributes) this.attributes={};if(!this.parameters) this.parameters={};
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix=0;ix<=ws;ix++){ const u=ix/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);}}
+for(let iy=0;iy<hs;iy++)for(let ix=0;ix<ws;ix++){ const a=iy*(ws+1)+ix+1, b=a-1, c=(iy+1)*(ws+1)+ix, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.attributes.normal={count:pos.length/3,array:new Float32Array(pos.length)};
+this.index={array:new Uint16Array(idx)};
+this.parameters={radius:r,widthSegments:ws,heightSegments:hs};
+}dispose(){}};}
 // ─────────────────────────────────────────────
 // dev/verify-layouts.js —— 布局层沙箱 (不进 Index.html)
 // 用法: node dev/verify-layouts.js [战役序号]   (默认全部战役)
@@ -36,7 +55,7 @@ InstancedMesh:class extends Obj3{ constructor(g,m,n){ super(); this.geometry=g; 
 Object3D:Obj3, Vector3:P3, Quaternion:Quat, CanvasTexture:class{ constructor(c){ this.image=c; } },
 Euler:class{ set(){ return this; } },
 Matrix4:class{ compose(){ return this; } },
-BoxGeometry:Geo, CylinderGeometry:Geo, PlaneGeometry:PlaneGeo, SphereGeometry:Geo, ConeGeometry:Geo, TorusGeometry:Geo, CircleGeometry:Geo,
+BoxGeometry:Geo, CylinderGeometry:Geo, PlaneGeometry:PlaneGeo, SphereGeometry:_FF17Sph(Geo), ConeGeometry:Geo, TorusGeometry:Geo, CircleGeometry:Geo,
 MeshLambertMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } },
 MeshBasicMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } },
 BufferGeometry:class{ constructor(){ this.attributes={}; } setAttribute(n,a){ this.attributes[n]=a; return this; } setIndex(){return this;} setFromPoints(){return this;} computeVertexNormals(){return this;} },

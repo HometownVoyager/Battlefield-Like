@@ -190,6 +190,7 @@ try{ TB_PENDING.length=0; TB_THREATS.length=0; tbT=6; }catch(e){}
 try{ FALLING.length=0; BURNING_TREES.length=0; TREE_SINKS.length=0; }catch(e){}
 try{ if(player.loiter) loiterDespawn(player.loiter); player.loiter=null; }catch(e){}
 try{ FIRE_SOURCES.length=0; }catch(e){}
+try{ HEDGE_CRUMBLE.length=0; }catch(e){} // 树篱烧尽二段账 (2026-11-16 批3): 留着会对已还原的原始树篱再碎一次
 try{ MINES.length=0; }catch(e){}
 try{ if(typeof BotDebug!=='undefined'&&BotDebug.on) BotDebug.on=false; }catch(e){}
 try{ gunEvents.length=0; }catch(e){}

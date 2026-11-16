@@ -246,6 +246,10 @@ if(e.code==='KeyR') tryReload(true);
 if(e.code==='KeyF') tryInteract();   // 水上上艇/上下船/使用阵位 (用户裁定①: 必须游泳贴近才够得着)
 return;
 }
+// ★2026-11-16 批1 坦克补给箱修理: R 在坦克座位上的新语义 —— 距补给箱 VEH_REPAIR_R 米内起修读条
+//   (旧版 R 在任何座位都被 tryReload 的座位门吞成 no-op, 无冲突)。重按不重启 (tryVehRepair 内早退);
+//   X 键取消 (readBarActive 已含 vehRepair, 下面的 KeyX 分支照常覆盖)。
+if(e.code==='KeyR'&&player.onVehicle&&player.onVehicle.kind==='tank'&&typeof player.tryVehRepair==='function'){ player.tryVehRepair(); return; }
 if(e.code==='KeyR') tryReload(true);
 if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else { player.crouch=!player.crouch; player.prone=false; } }   // !player.loiter: 操控巡飞弹本体定身 (2026-11-07 裁定③ "无法行动")
 if(e.code==='KeyZ'&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.prone=!player.prone; if(player.prone){ player.crouch=false; player.braced=false; } }   // !player.loiter: 操控定身 (2026-11-07)

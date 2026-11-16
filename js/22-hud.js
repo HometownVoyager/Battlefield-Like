@@ -1140,6 +1140,7 @@ const rb=((player.alive||player.specViewHost)&&!hudBlocked)   // ★2026-11-03: 
 :(player.specViewHost&&typeof VM!=='undefined'&&VM.state==='bandage')?{lab:t2('宿主 · 包扎 …'),k:clamp((VM.stateT||0)/Math.max(0.01,VM.stateDur||0.01),0,1)}
 :player.demolish?{lab:player.demolish.mortar?t2('回收中: 迫击炮 …'):t2('拆除中: {0} …',t2(BUILD_NAMES[player.demolish.b.type])),k:clamp(player.demolish.t/DEMOLISH_T,0,1)}
 :player.useCast?{lab:t2(EMCAST[player.useCast.kind]||'使用中: 火力点 …'),k:clamp(player.useCast.t/Math.max(0.01,player.useCast.dur),0,1)}
+:player.vehRepair?{lab:t2('坦克维修中: {0}s · 移动/开火打断',Math.max(0,(player.vehRepair.dur||0)-(player.vehRepair.t||0)).toFixed(1)),k:clamp((player.vehRepair.t||0)/Math.max(0.01,(player.vehRepair.dur||0.01)),0,1)}   // 坦克补给箱修理 (2026-11-16 批1): 8s 读条回 25%×maxHp, 打断网见 18-game tryVehRepair
 :player.bandaging>0?{lab:t2('包扎中: {0}s',Math.max(0,player.bandaging).toFixed(1)),k:clamp(1-player.bandaging/BANDAGE_T,0,1)}
 :(_nk&&typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)?(_nk==='frag'
 ?{lab:t2('手雷 · 引信 {0}s · X 收回',Math.max(0,player.nadeFuse).toFixed(1)),k:clamp(1-Math.max(0,player.nadeFuse)/_fuseT,0,1)}
@@ -2491,6 +2492,21 @@ syncMenuButtons();
 		};
 		}
 		}
+		// 死亡时手雷落下 (2026-11-16 批4): 单源 NADE_DEATH_DROP (00-config), 默认开=现行为 (死亡掉雷+引信继承)。
+		// 关=dropHeldNade 顶部直接早退, 手里的雷就地消失 (玩家/Bot 四个调用点全过单源, 收尾账各调用方自理)。
+		{
+		const ndb=el('nadeDropBtn');
+		if(ndb){
+		const syncNd=()=>{ ndb.textContent='💣 '+t('死亡时手雷落下')+': '+t(NADE_DEATH_DROP?'开':'关'); ndb.classList.toggle('sel',NADE_DEATH_DROP); };
+		syncNd();
+		ndb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		NADE_DEATH_DROP=!NADE_DEATH_DROP;
+		localStorage.setItem('sf_nadedrop',NADE_DEATH_DROP?'1':'0');
+		syncNd();
+		};
+		}
+		}
 		// 成就弹窗位置 (2026-11-11 数据批): 单钮循环 右上↔正下 —— 27-achievements achToastPump 每次弹出现读 sf_ach_pos, 改档即时生效不重载
 		{
 		const pb=el('achPosBtn');
@@ -2679,6 +2695,22 @@ SETTINGS.precipIdx=(SETTINGS.precipIdx+1)%PRECIP_MUL_STEPS.length;
 localStorage.setItem('sf_pmul',SETTINGS.precipIdx);
 if(typeof initWeather==='function') initWeather();
 syncPm();
+};
+}
+}
+// 主动优化 (2026-11-16 批5): 三档单钮循环 关闭/标准/激进 —— 决策器 24-main perfOptTick (1s 窗均帧率+迟滞),
+// 帧率持续偏低时主动清战场碎屑 (碎块/弹壳/烟云/粒子; 激进档再压布娃娃与弹坑)。改档即时生效不重载。
+{
+const pob=el('perfOptBtn');
+if(pob){
+const _poNames=['关闭','标准','激进'];
+const syncPo=()=>{ pob.textContent='🧹 '+t('主动优化')+': '+t(_poNames[PERF_OPT]||_poNames[1]); pob.classList.toggle('sel',PERF_OPT!==0); };
+syncPo();
+pob.onclick=()=>{
+AudioSys.resume&&AudioSys.resume();
+PERF_OPT=(PERF_OPT+1)%3;
+localStorage.setItem('sf_perfopt',String(PERF_OPT));
+syncPo();
 };
 }
 }

@@ -122,7 +122,7 @@ leanT:0,
 //   ① "打断"的完整语义 = 读条期间做**其他交互动作**会打断读条 (换枪/装填/举雷/包扎/近战/建造拆除/
 //      F 交互栈…各入口在确认起步后调 stealBar 抢占; 同键重按不抢——R 重按不重启换弹、同种雷重举不重烧引信);
 //   ② 受伤打断门槛 = 单次伤害 >READBAR_DMG_GATE (25) 才打断, 刮伤/火蚀/小跳伤不再打断 (damage 内单源门)。
-readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast
+readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast||!!this.vehRepair
 ||(typeof VM!=='undefined'&&((VM.state==='nade'&&this.nadeHeld)||VM.state==='reload')); },
 // 读条期间"身体被别的行动占用"的判据 (包扎 tick 每帧问一次, 见 20-player 的包扎段):
 //   上炮/上车/上艇/进炮位/驾巡飞弹/取弹 (grabAction) 任一为真, 或 VM 动作态已被抢走 ⇒ 按被打断收账。
@@ -139,6 +139,7 @@ let any=false;
 if(this.bandaging>0){ this.bandaging=0; any=true; }
 if(this.demolish){ if(typeof stopDemolish==='function') stopDemolish(this,true); else this.demolish=null; any=true; }
 if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; any=true; }
+if(this.vehRepair){ this.vehRepair=null; any=true; }   // 坦克维修读条 (2026-11-16 批1): 并入取消网, X/死亡收口/F 抢占同口清账
 if(nadeHold){ this.nadeHeld=false; any=true; }   // 举雷收回: 雷回 pouch 不消耗 (VM/雷模由 vmAbortAction 收)
 if(rl){ any=true; }                              // 换弹中止: 弹药不结算 (finishReload 只在自然走完那条路)
 if(any&&!quiet&&this.isPlayer) showScorePop(msg||'已取消');
@@ -148,6 +149,24 @@ return any;
 //   两层, 与 X/受击同一出口; 新动作自身的提示就是反馈, 不再叠"已取消")。空按 (无目标/冷却中/同键重按)
 //   不得走到这里 —— 不该白丢读条。调用方: 19-input 各动作键 / 20-player tryInteract 交互栈 / 06-engineering 建造。
 stealBar(){ if(this.readBarActive()) this.cancelReadBar(null,true); },
+// ★2026-11-16 批1 坦克补给箱修理 (起步口): 玩家坦克停在补给箱 (AMMO_CRATES, 舰上箱除外) VEH_REPAIR_R 米内
+// 按 R 起修 —— 8s 读条走完回 25%×maxHp。打断全部走 cancelReadBar 单源 (账挂 player.vehRepair, 已进
+// readBarActive): 移动/远离 (20a-seats updatePlayerTank tick) / 开火 (fireCannon+firePlayerMG) / 下车
+// (20-player tryInteract) / 起火 (tick 判 burning) / 单次重伤 >26%×maxHp (Tank.takeDmg)。R 重按不重启
+// (已在读条中直接早退, 与换弹口径一致)。Bot 车组同规自动修 (2026-11-17 同步批): 残血+脱离接敌+箱在 R 内
+// 驻车自修, 账挂 tank.vehRepair, 打断钩与玩家共用 (fireCannon/AI同轴/takeDmg), 见 15-vehicles driveAI/update。
+tryVehRepair(){
+if(!this.alive||this.spectator) return;
+const t=this.onVehicle;
+if(!t||t.kind!=='tank'||!t.alive||t.burning) return;
+if(t.hp>=t.maxHp) return;
+if(this.vehRepair) return;
+// 距离门走 15-vehicles 单源 vehRepairCrateNear (2026-11-17 Bot 车组起步门共用; 舰上箱除外)
+if(typeof vehRepairCrateNear!=='function'||!vehRepairCrateNear(t.pos.x,t.pos.z)){ showScorePop('附近没有补给箱, 无法维修'); return; }
+this.stealBar();   // 确认起步才抢 (2026-10-25 纪律): 旧读条安静收账
+this.vehRepair={t:0,dur:VEH_REPAIR_TIME,tank:t};
+showScorePop('维修中… 移动/开火将打断');
+},
 // ★2026-10-30 读条交互批 (用户裁定③) 打断确认单源: 读条中按**其他动作键**第一次 = 只记键**不抢** (22-hud
 //   的读条上会亮"再按一次打断"提示), BAR_ARM_WIN 秒内**同键**再按才放行。放行后抢占仍由调用方在
 //   "确认起步"处调 stealBar (★2026-10-25 的"确认起步才抢"纪律原样保留 —— 第二次按时目标没了/起步失败了

@@ -267,7 +267,8 @@ pos.x=clamp(pos.x,-lim,lim); pos.z=clamp(pos.z,-lim,lim);
 }
 const _shS={x:0,z:0,curY:0,h:0};
 function _shBoxCb(b){
-if(b.dead) return;
+if(b.dead||b.noTop) return;   // noTop (2026-11-16 批3.6): 树篱顶不可站 —— 顶面永不作支撑, 跳上去会
+  //                          落进叶腔再被 _cmBoxCb 横推挤出; 侧面横推 (_cmBoxCb) 不受影响照常挡人
 if(_shS.x>b.minX-0.05&&_shS.x<b.maxX+0.05&&_shS.z>b.minZ-0.05&&_shS.z<b.maxZ+0.05){
 if(b.maxY<=_shS.curY+0.55&&b.maxY>_shS.h) _shS.h=b.maxY;
 }

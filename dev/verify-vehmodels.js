@@ -1,3 +1,22 @@
+// ★2026-11-17: 05b _hedgeBlobGeo (叶团重做) 真读 SphereGeometry 的 position/uv/index 三数组
+// ⇒ 无数组局部桩全体炸桩 (桩不忠实, 非被测代码问题)。局部桩表升级忠实经纬球
+// (与 _bootstub._SphereGeo2 同形同序, extends 本文件的 Geo 保 no-op 方法面)。
+function _FF17Sph(Base){ return class extends Base{constructor(r=1,ws=8,hs=6){super(r,ws,hs);if(!this.attributes) this.attributes={};if(!this.parameters) this.parameters={};
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix=0;ix<=ws;ix++){ const u=ix/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);}}
+for(let iy=0;iy<hs;iy++)for(let ix=0;ix<ws;ix++){ const a=iy*(ws+1)+ix+1, b=a-1, c=(iy+1)*(ws+1)+ix, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.attributes.normal={count:pos.length/3,array:new Float32Array(pos.length)};
+this.index={array:new Uint16Array(idx)};
+this.parameters={radius:r,widthSegments:ws,heightSegments:hs};
+}dispose(){}};}
 // ─────────────────────────────────────────────
 // dev/verify-vehmodels.js —— 载具剪影建模验收探针 (不进 Index.html)
 // 用法: node dev/verify-vehmodels.js
@@ -123,7 +142,7 @@ const out=[]; for(let i=0;i<a.length;i+=3){ out.push([a[i],a[i+1],a[i+2]]); if(o
 }
 return { Vector3:V3, Euler:Ev, Object3D:Obj3, Group, Mesh, Sprite, BufferGeometry:BufGeo,
 BufferAttribute:BufAttr, Float32BufferAttribute:BufAttr, Uint16BufferAttribute:BufAttr, Uint32BufferAttribute:BufAttr,
-BoxGeometry:mk('Box'), CylinderGeometry:mk('Cylinder'), SphereGeometry:mk('Sphere'),
+BoxGeometry:mk('Box'), CylinderGeometry:mk('Cylinder'), SphereGeometry:_FF17Sph(mk('Sphere')),
 // ConeGeometry(radius,height,seg) 归一化成 CylinderGeometry(0,radius,height,seg) 口径 (three.js 里 Cone = Cylinder 的特例)
 ConeGeometry:class extends Geo{ constructor(r=1,h=1,seg=8,...rest){ super('Cylinder',[0,r,h,seg,...rest]); this.wasCone=true; } },
 PlaneGeometry:mk('Plane'), CircleGeometry:mk('Circle'), RingGeometry:mk('Ring'), TorusGeometry:mk('Torus'),

@@ -498,6 +498,7 @@ thrower,team:(thrower.spectator?-1:thrower.team),spin:V3(rand(-6,6),rand(-6,6),r
 // 调用方: 玩家 die() (18-game, 持雷+出手弧两态) / Bot die() (14-bots, 前摇两态)。受创>25 打断**不掉**
 // (人没死, 雷收回 —— 与 2026-10-25 打断网口径一致)。
 function dropHeldNade(u){
+if(!NADE_DEATH_DROP) return; // 2026-11-16 批4: 设置"死亡时手雷落下"关闭 = 手里的雷就地消失 (不掉落/不入引信账; 玩家/Bot 四个调用点全过本单源)
 if(!u||!u.pos) return;
 if(u.onVehicle||u.onNaval) return;
 const o=u.pos.clone(); o.y+=1.15; o.x+=rand(-0.15,0.15); o.z+=rand(-0.15,0.15);

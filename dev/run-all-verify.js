@@ -115,6 +115,8 @@ const SANDBOX=[
 ['dev/verify-waterentry-20261115.js',[],'2026-11-15 入水特效批: waterSplash 五参 (spd=入水速度) 粒子档位 6/14/24 + AudioSys.splash 四参透传 + Bot dry→wet 边沿 (14-bots moveDir, 大落差 scale 2.2/big) + 坦克 3.4/卡车 2.6 车体级跃迁账 + 飞机触水先溅后毁 (含 --neg)'],
 ['dev/verify-audio3-20261115c.js',[],'2026-11-15c 音效完全推倒重写批: 契约面 (bypass Set/naval 段三写点/splash 四参/引擎 pitch 写法) + 四档案表 (每枪 sid 全覆盖/炮 13 条/爆 18 kind/引擎 9 档+旧档别名) + 逐阵营坦克/飞机引擎档实spawn (normandy+songhu+baituan, 权重档读 tk.wc) + identity 接线锚 (sid/mgSid 四 style/坦克炮三档/planeMG/flak20/naval_*/battery/loiter/truck) + 行为 (每发变奏/未知回落/旧数字口径/tankJp saw pitch1.35/truck square/radial vs inline) + 远枪限流 (含 --neg)'],
 ['dev/verify-crater-20261115.js',[],'2026-11-15 自适应弹坑批 (二轮修黑弧): terrainSurfaceY 单源 (渲染弦面同格同对角) + 顶点贴地不变式 (≥弦面+0.04) + 绕向翻正法线朝上 + 125 顶点 BufferGeometry/贴花档材质/36 上限账/无 Torus rim (桩补真 setIndex/computeVertexNormals; 含 --neg)'],
+['dev/verify-bamboo-20261115.js',[],'2026-11-15 竹子批: BAMBOO_IM 实例批+燃烧倒伏碾压链+淞沪竹带 (含 --neg 摘碾压转红)'],
+['dev/verify-fieldfix2-20261116.js',[],'2026-11-16 八项批+11-17 返修: 树篱三链路/Bot 坦克修理/撞机规避/掉雷开关/主动优化/布娃娃背包/时停关灯 (含 --neg 14 补丁)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

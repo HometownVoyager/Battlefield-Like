@@ -486,6 +486,64 @@ spawnP(blasted?PT.dirt:PT.smoke,rec.x+rand(-0.5,0.5),gy+rand(0.2,0.9),rec.z+rand
 }
 if(blasted) for(let k=0;k<3;k++) spawnP(PT.spark,rec.x,gy+0.5,rec.z,rand(-3,3),rand(1,4),rand(-3,3),0.12,-0.05,rand(0.2,0.4),1,6,true);
 }
+// ===== 树篱破碎 (2026-11-16 批3): 旧版树篱被碾/被炸/烧尽都只是"直接消失" (vanishFlora 尘土+沉入),
+// 用户要求与墙体同款物理碎块化。树篱专用档: 抛叶质碎块 (spawnDebris 96 块池; 与实心砖墙的砌块区分 ——
+// 树篱块更小更碎、带叶簇贴图), 烧毁档抛焦黑碎块。调用点: crushCoverBox (坦克碾/爆炸扫掠共汇, 05-world)
+// 与烧尽二段 (updateFires 的 HEDGE_CRUMBLE 定时账)。无 CANNON 的沙箱 spawnDebris 自动跳过, 尘照扬。
+const HEDGE_CRUMBLE=[]; // {rec,t}: 烧毁后先焦黑停留, t 到点再物理碎块化 (dt 账, 时停里随战场冻结)
+function hedgeChar(rec){
+// 一段 (烧尽): 碰撞即死 + 材质换焦黑 (与 vanishFlora charred 档同款 _charredFloraMat), 视觉停留等碎块化
+// ★2026-11-17 修 (用户实报"没有变黑后破碎"): 碰撞击杀必须走 killOne 而不是 killBox —— 树篱盒的 box.mesh
+// 正指着树篱视觉网格, killBox 会连视觉一起 world.remove ⇒ 焦黑材质还没显形树篱就整个消失, 且 2.5~5s 后的
+// hedgeShatter 二段因 mesh.parent 已空永远不触发 (HEDGE_CRUMBLE 账空转)。killOne 只杀碰撞+占格, 视觉留场。
+if(!rec||rec.dead) return;
+rec.dead=true; rec.alive=false;
+if(rec.box&&typeof killOne==='function') killOne(rec.box);
+fireTmp();
+if(!_charredFloraMat) _charredFloraMat=new THREE.MeshLambertMaterial({color:0x241d16});
+if(rec.meshes) for(const m of rec.meshes){ if(m&&m.material){ try{ m.material=_charredFloraMat; }catch(e){} } }
+}
+function hedgeShatter(rec,charred,alreadyDead){
+// 二段: 碰撞+视觉一并摘除, 抛树篱质碎块 (绿叶/焦黑), 尘/烟与 vanishFlora blasted 档同源;
+// alreadyDead=true = 烧尽二段路径 (hedgeChar 已摘碰撞换焦黑), 这里只补视觉摘除+碎块
+if(!rec) return;
+if(!alreadyDead){
+if(rec.dead) return;
+rec.dead=true; rec.alive=false;
+if(rec.box) killBox(rec.box);
+}
+const gy=heightAt(rec.x,rec.z);
+if(rec.meshes) for(const m of rec.meshes){ if(m&&m.parent) world.remove(m); }
+if(typeof spawnDebris==='function'&&window.CANNON){
+const mat=charred?(_charredFloraMat||(typeof hedgeMat!=='undefined'?hedgeMat:null)):(typeof hedgeMat!=='undefined'?hedgeMat:null);
+if(mat){
+// ★2026-11-17 修 (用户实报"多块只有其中一块散碎片"): 碎块沿树篱段长轴散布 —— 旧版 6~7 块全堆在段心
+// 1.6m 半径内, 而一段树篱 4.4m 长 ⇒ 观感是"只有中间一团碎了, 两头凭空消失"。轴向/半长由建模器写进
+// rec (05b hedgerow: ax/az=局部轴世界向, hl≈2.2), 旧记录缺字段时回落段心散布 (行为不劣化)。
+const _ax=(typeof rec.ax==='number')?rec.ax:1, _az=(typeof rec.az==='number')?rec.az:0;
+const _hl=(typeof rec.hl==='number')?rec.hl:1.1;
+const nD=charred?8:9;
+for(let k=0;k<nD;k++){
+const u=nD>1?((k/(nD-1))*2-1):0;   // -1..1 沿段轴均匀铺开, 两端 0.9×hl 内收半拍防越界
+const px=rec.x+_ax*u*_hl*0.9-_az*rand(-0.55,0.55);
+const pz=rec.z+_az*u*_hl*0.9+_ax*rand(-0.55,0.55);
+spawnDebris(mat,px,gy+rand(0.5,1.6),pz,rand(0,TAU),
+rand(0.34,0.72),rand(0.26,0.52),rand(0.3,0.6),px,pz);
+}
+}
+}
+// 尘烟沿段轴多点起爆 (同上: 单点尘=中段炸两头无感的另一半病根)
+{
+const _ax=(typeof rec.ax==='number')?rec.ax:1, _az=(typeof rec.az==='number')?rec.az:0;
+const _hl=(typeof rec.hl==='number')?rec.hl:1.1;
+for(let k=0;k<(charred?4:6);k++){
+const u=rand(-1,1);
+spawnP(charred?PT.smoke:PT.dirt,rec.x+_ax*u*_hl*0.8-_az*rand(-0.6,0.6),gy+rand(0.2,1.2),rec.z+_az*u*_hl*0.8+_ax*rand(-0.6,0.6),rand(-1.6,1.6),rand(0.6,2),rand(-1.6,1.6),rand(0.3,0.6),0.9,rand(0.4,0.8),0.85,charred?0.5:4);
+}
+}
+if(charred) for(let k=0;k<3;k++) spawnP(PT.spark,rec.x,gy+0.6,rec.z,rand(-2,2),rand(1,3),rand(-2,2),0.1,-0.05,rand(0.2,0.4),1,5,true);
+if(typeof markNavDirty==='function') markNavDirty();
+}
 // ===== 树木倒伏 =====
 const FALLING=[];      // 倒伏动画中的树
 const BURNING_TREES=[]; // 树冠着火的树
@@ -896,7 +954,11 @@ if(obj) floraTopple(rec,Math.sin(a),Math.cos(a)); else treeFall(rec,Math.sin(a),
 }
 }
 }else if(d<radius*0.85){
-vanishFlora(rec,true);
+// ★2026-11-17 修 (用户实报"多段树篱只有一段出碎片"): 爆炸扫到的树篱段此前走 vanishFlora 直接消失 ——
+// 只有一段被 05-world 的箱扫掠 (crushCoverBox→hedgeShatter) 够到才出碎块, 其余段无声蒸发。现在全部
+// 段统一叶质碎块化 (dead 守卫防与箱扫掠双杀: hedgeShatter 内 rec.dead 早退)。
+if(rec.kind==='hedge'&&typeof hedgeShatter==='function') hedgeShatter(rec,false,false);
+else vanishFlora(rec,true);
 }
 }
 }
@@ -941,7 +1003,9 @@ spawnP(PT.dirt,rec.x,rec.g0+0.5,rec.z,rand(-1.5,1.5),rand(1,2.5),rand(-1.5,1.5),
 }
 }else if(d<2.0){
 if(rec.alive===false) continue;   // 同上: 倒伏中的椰树等不再被碾碎重登记
-vanishFlora(rec,false);
+// ★2026-11-17 修: 车体中心 2m 内的树篱此前走 vanishFlora 直接消失 (侧擦/倒车路径绕过了箱扫掠), 统一碎块化
+if(rec.kind==='hedge'&&typeof hedgeShatter==='function') hedgeShatter(rec,false,false);
+else vanishFlora(rec,false);
 hitAny=true;
 }
 }
@@ -958,6 +1022,17 @@ function updateFires(dt){
 fireFlameN=0;
 _fireFxN=0;          // A: 每帧火粒子预算重置
 _imFr++;             // D: 实例矩阵局部上传的帧戳 (树写全部发生在本帧其后)
+// 树篱烧毁二段调度 (2026-11-16 批3): 焦黑停留 2.5~5s 后物理碎块化 (dt 账 —— 时停/布势冻结里随战场冻住)。
+// 旧 rec 若已被世界重建/还原摘出场景 (mesh 无 parent) 就地出账, 防跨局幽灵碎块。
+for(let i=HEDGE_CRUMBLE.length-1;i>=0;i--){
+const hc=HEDGE_CRUMBLE[i];
+hc.t-=dt;
+if(hc.t<=0){
+const hm=hc.rec&&hc.rec.meshes&&hc.rec.meshes[0];
+if(hm&&hm.parent) hedgeShatter(hc.rec,true,true);
+HEDGE_CRUMBLE.splice(i,1);
+}
+}
 updateCreaturesBurning(dt); // 生物附着燃烧推进 (每帧)
 // ── 持续火源 ──
 for(let i=FIRE_SOURCES.length-1;i>=0;i--){
@@ -1063,7 +1138,10 @@ spawnP(PT.dark,cx2,gy2+0.5,cz2,rand(-0.2,0.2),rand(0.8,1.4),rand(-0.2,0.2),1.0,1
 	}
 	// 格内灌木等对象植被消失 (枯树/椰树若已倒伏则跳过: 残骸已挂在自己的沉入任务上, 见 scheduleFloraObjSink)
 const arr=FLORA_HASH.get(ci);
-if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree'&&rec.kind!=='willow'&&rec.kind!=='bamboo') vanishFlora(rec,false,true); // 烧尽 ⇒ 染焦黑 (灌木/蕨丛/树篱/枯树; 乔木/柳/竹走自己的树冠-树干链, 柳/竹被格子火点燃由 treeIgnitePass 认领)
+if(arr) for(const rec of arr) if(!rec.dead&&rec.alive!==false&&rec.kind!=='tree'&&rec.kind!=='willow'&&rec.kind!=='bamboo'){
+if(rec.kind==='hedge'){ hedgeChar(rec); HEDGE_CRUMBLE.push({rec,t:rand(2.5,5)}); } // 树篱: 先焦黑停留, 再物理碎块化 (2026-11-16 批3, 用户指定"变黑后破碎")
+else vanishFlora(rec,false,true); // 烧尽 ⇒ 染焦黑 (灌木/蕨丛/枯树; 乔木/柳/竹走自己的树冠-树干链, 柳/竹被格子火点燃由 treeIgnitePass 认领)
+}
 if(fireNavT<=0) fireNavT=5;
 }
 }

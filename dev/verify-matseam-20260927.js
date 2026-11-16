@@ -1,3 +1,22 @@
+// ★2026-11-17: 05b _hedgeBlobGeo (叶团重做) 真读 SphereGeometry 的 position/uv/index 三数组
+// ⇒ 无数组局部桩全体炸桩 (桩不忠实, 非被测代码问题)。局部桩表升级忠实经纬球
+// (与 _bootstub._SphereGeo2 同形同序, extends 本文件的 Geo 保 no-op 方法面)。
+function _FF17Sph(Base){ return class extends Base{constructor(r=1,ws=8,hs=6){super(r,ws,hs);if(!this.attributes) this.attributes={};if(!this.parameters) this.parameters={};
+ws=Math.max(3,ws|0); hs=Math.max(2,hs|0);
+const pos=[],uv=[],idx=[];
+for(let iy=0;iy<=hs;iy++){ const v=iy/hs;
+for(let ix=0;ix<=ws;ix++){ const u=ix/ws;
+pos.push(-r*Math.cos(u*Math.PI*2)*Math.sin(v*Math.PI), r*Math.cos(v*Math.PI), r*Math.sin(u*Math.PI*2)*Math.sin(v*Math.PI));
+uv.push(u,1-v);}}
+for(let iy=0;iy<hs;iy++)for(let ix=0;ix<ws;ix++){ const a=iy*(ws+1)+ix+1, b=a-1, c=(iy+1)*(ws+1)+ix, d=c+1;
+if(iy!==0) idx.push(a,b,d);
+if(iy!==hs-1) idx.push(b,c,d);}
+this.attributes.position={count:pos.length/3,array:new Float32Array(pos),getX:i=>pos[i*3],getY:i=>pos[i*3+1],getZ:i=>pos[i*3+2]};
+this.attributes.uv={count:uv.length/2,array:new Float32Array(uv)};
+this.attributes.normal={count:pos.length/3,array:new Float32Array(pos.length)};
+this.index={array:new Uint16Array(idx)};
+this.parameters={radius:r,widthSegments:ws,heightSegments:hs};
+}dispose(){}};}
 // ─────────────────────────────────────────────
 // dev/verify-matseam-20260927.js —— 建筑材质一致性验收 (逐块色相收敛 / 平铺无缝 / 帆布密度归一)
 // 用法: node --stack-size=4000 dev/verify-matseam-20260927.js
@@ -80,7 +99,7 @@ Group:class extends Obj3{},Mesh:class extends Obj3{constructor(g,m){super();this
 Object3D:Obj3,Sprite:class extends Obj3{constructor(m){super();this.material=m||{};if(!this.material.color)this.material.color={set(){}};}},
 Vector3:V3,Color:_Color,
 Fog:class{constructor(c){this.color=_colorOf(c);this.near=0;this.far=0;}},
-SphereGeometry:Geo,PlaneGeometry:Geo,BoxGeometry:Geo,CylinderGeometry:Geo,
+SphereGeometry:_FF17Sph(Geo),PlaneGeometry:Geo,BoxGeometry:Geo,CylinderGeometry:Geo,
 // ★2026-11-01 桩补 (非回归): 02-scene 天体批起 boot 期直建星空 Points(new THREE.BufferGeometry + Float32BufferAttribute),
 //   本轻桩缺这三样 ⇒ 探针载入即 TypeError 整篇崩。只补载入面, 不影响本探针的材质/UV 断言。
 BufferGeometry:class extends Geo{setAttribute(n,a){this.attributes=this.attributes||{};this.attributes[n]=a;return this;}setIndex(){return this;}},

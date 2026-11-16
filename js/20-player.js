@@ -264,6 +264,7 @@ return;
 }
 if(player.onVehicle){
 const t=player.onVehicle;
+if(player.vehRepair){ player.vehRepair=null; showScorePop('维修被打断: 下车'); } // 坦克修理读条随下车收账 (2026-11-16 批1)
 if(t.kind==='plane'){
 // 跳伞
 t.playerDriven=false;

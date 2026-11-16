@@ -953,6 +953,17 @@ function playerFlashlightTick(dt){
     if(cone&&cone.visible) cone.visible=false;
   }
 }
+// 手电四件套"还亮着"记忆位 (2026-11-16 时停关灯修复): 24-main 的 nightGearTick 唤醒门全是"开侧"条件
+// (flashlight 开 / 暗环境 / 载具大灯开), 没有任何"灯还亮着"的记忆 —— 时停期间按 L 关灯的那一帧起
+// 门塌 false ⇒ tick 整个被断粮, else 收灯分支永远执行不到 ⇒ 光锥/真光源/溢光停在最后一次 tick 的位姿
+// ("就地停留不再跟随"), 时停结束后门依旧 false ⇒ 永久停留。此谓词读四件套真实可见态, 24-main 唤醒门
+// 并上它之后, 关灯后至少还能跑到一帧 tick 把灯收掉 (时停里 dt=0 照收, 时停结束后同样收干净)。
+// 注意不调 _ensure* (惰性建灯): 未点亮时四件套可能还没建, 直接读模块级引用, 不为查状态凭空造灯。
+function nightGearLightsOn(){
+  return !!((_playerFlashlight&&_playerFlashlight.visible)
+    ||(_playerFlSpill&&_playerFlSpill.visible)
+    ||(_playerFlCone&&_playerFlCone.visible));
+}
 // ── 每帧总入口 (24-main, 暗光或照明开启时运行) ──
 // 夜战装备**战斗钟** (2026-11-05 时停照明弹批): 本段一切相位/扫掠只吃这里的世界帧长 —— 时停 dt=0 ⇒
 // 照明弹缓降/飘移与探照灯扫掠整段冻结, 指挥减速 ×0.2 ⇒ 同步慢放。旧版直接读 nowT (24-main 的墙钟表盘,

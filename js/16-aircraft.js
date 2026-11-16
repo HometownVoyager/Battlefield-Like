@@ -288,7 +288,9 @@ this.hp=this.def.hp; this.maxHp=this.def.hp; this.alive=true;
 // 出生固定在己方主基地上空 (2026-09-01 用户指定): 无基地战役回退本阵营主力前出点
 const bp=basePos(team);
 const sx0=bp.x+rand(-14,14), sz0=bp.z+rand(-14,14);
-this.pos=V3(sx0,Math.max(65,heightAt(sx0,sz0)+40),sz0);
+// 出生高度按队错层 +12m (2026-11-16 批6): 两队基地相向 + 同高出生 = 首趟对头 merge 必然撞面,
+// 错层让开局第一趟交汇从"正碰"降为"高度差擦过", 与巡航层错层 (+10m) 同一思路。
+this.pos=V3(sx0,Math.max(65,heightAt(sx0,sz0)+40)+team*12,sz0);
 this.yaw=team===0?0:Math.PI; this.pitch=0; this.speed=PLANE_FLIGHT.birthSpeed; this.roll=0;
 // fctl 意图三件 (P3-7a): 玩家 (playerFly) 与 AI (planeAI) 都只写"想怎么飞", 怎么飞由 flightStep 单源积分
 this.fctl={bank:0,pitchT:0,spdTgt:PLANE_FLIGHT.patrolSpd};
@@ -642,6 +644,7 @@ if(this.pos.y<gh+2) this.die(this.lastHitBy||null,true); // crash 档 (三虫批
 }
 planeAI(dt){
 this.stateT-=dt;
+planeAvoidScan(this,dt);   // 撞机规避扫描 (2026-11-16 批6): 低频预测+hold 账, 见 PLANE_AVOID 注块
 // ── 地形规避 (修 AI 撞山): 沿航向前方 60/130/200m 三点采样, 预测净空不足即提前拉起,
 //    同时向地形更低的一侧转向。旧版只有俯冲/缠斗状态有 14~16m 的临死反应式拉起,
 //    巡逻状态完全没有规避 —— 高山地图巡航层 62m 会直接穿山自毁。
@@ -672,6 +675,15 @@ return;
 if(this.evadeT>0){
 this.evadeT-=dt;
 this.fctl.bank=-this.evadeDir; this.fctl.pitchT=0.32; this.fctl.spdTgt=this.def.spd[1];
+return;
+}
+// ── 撞机规避执行 (2026-11-16 批6): 优先级在地形规避/受击规避之后、一切攻击几何之前 ——
+//    缠斗对头 merge 也被覆盖 (高闭合才触发, 咬尾档 miss 大天然不进)。缓抬 0.16 错层脱离。
+if(this._avoid&&this._avoid.t>0){
+const dyA=angDiff(this.yaw,this._avoid.a);
+this.fctl.bank=clamp(-dyA*1.9,-1,1);
+this.fctl.pitchT=0.16;
+this.fctl.spdTgt=this.def.spd[1];
 return;
 }
 // ── 7b-乙 拒止带 (软): 出了"战场半宽+20m"先回场 —— 缠斗/俯冲都可能把飞机拖出图,
@@ -766,7 +778,9 @@ return;
 if(this.state==='patrol'){
 // 巡航层: 有山战役自动抬升到"全图最高地形+42m", 无山维持 62m;
 // 巡逻圈半径随地图缩放 (320 图 110m 不变, 800 图≈174m 覆盖全部旗区)
-const cruise=Math.max(PLANE_FLIGHT.cruiseMin,terrainMaxH()+PLANE_FLIGHT.cruiseOver);
+// ★2026-11-16 批6: 巡航层按队错层 +10m —— 两队同一公式同层对穿是撞机第一来源, 错层把对头 merge
+//   从"同高度正碰"降为"高度差擦过" (配合 planeAvoidScan 双保险)。
+const cruise=Math.max(PLANE_FLIGHT.cruiseMin,terrainMaxH()+PLANE_FLIGHT.cruiseOver)+this.team*10;
 const pr=PLANE_FLIGHT.patrolR*Math.sqrt(MAP_SIZE/320);
 // 2026-09-30 实机批 (用户报"动作十分生硬"): 定坡度盘旋取代"追绕圈航点" ——
 // 旧航点角速度恒定 0.1rad/s (11m/s), 而飞机在巡逻圈上的角速度 ≈0.35rad/s, 永远追不上也甩不掉
@@ -784,7 +798,8 @@ for(const t of tanks){
 if(!t.alive||t.team===this.team) continue;
 if(typeof specRide==='function'&&specRide(t)) continue;   // 观战者座驾不被战机俯冲点名 (2026-09-26H)
 const d=t.pos.distanceTo(this.pos);
-if(d<280){ const sc=(this.bombs>0?150:60)-d*0.3+rand(0,30); if(sc>bs){ bs=sc; best=t; } }
+if(d<280){ let sc=(this.bombs>0?150:60)-d*0.3+rand(0,30); if(diveClaimedBy(t,this)) sc-=250; // 同目标汇聚抑制 (2026-11-16 批6)
+if(sc>bs){ bs=sc; best=t; } }
 }
 // 对舰目标 (2026-10-01b): 小艇扫射/轰炸皆可 (与对地步兵同档, 挂弹加成) —— 塔拉瓦的沿岸小艇从此也在
 //   空袭范围内。(2026-11-10: 大舰挂弹点名分支随大舰子系统下架摘除)
@@ -793,7 +808,8 @@ if(!c||!c.alive||c.team===this.team||c.state==='sinking'||c.state==='wreck') con
 if(typeof specRide==='function'&&specRide(c)) continue;
 const d=Math.hypot(c.pos.x-this.pos.x,c.pos.z-this.pos.z);
 if(d>340) continue;
-const sc=(this.bombs>0?170:90)-d*0.3+rand(0,30);
+let sc=(this.bombs>0?170:90)-d*0.3+rand(0,30);
+if(diveClaimedBy(c,this)) sc-=250;   // 同目标汇聚抑制 (2026-11-16 批6)
 if(sc>bs){ bs=sc; best=c; }
 }
 for(const s of combatants){
@@ -805,6 +821,7 @@ if(s.empUse||s.mgUse) sc+=70;
 let cluster=0;
 for(const s2 of combatants){ if(s2.alive&&s2.team===s.team&&Math.hypot(s2.pos.x-s.pos.x,s2.pos.z-s.pos.z)<9) cluster++; }
 sc+=cluster*16;
+if(diveClaimedBy(s,this)) sc-=250;   // 同目标汇聚抑制 (2026-11-16 批6)
 if(sc>bs){ bs=sc; best=s; }
 }
 // 丧尸群点名 (2026-10-07d, 用户"投弹炸丧尸而不是其他点位"): 丧尸模式巡逻选目标时把尸潮当
@@ -1149,7 +1166,7 @@ respawn(){
 // 重生固定在己方主基地上空 (2026-09-01 用户指定): 无基地战役回退本阵营主力前出点
 const bp2=basePos(this.team);
 const sx1=bp2.x+rand(-14,14), sz1=bp2.z+rand(-14,14);
-this.pos.set(sx1,Math.max(65,heightAt(sx1,sz1)+40),sz1);
+this.pos.set(sx1,Math.max(65,heightAt(sx1,sz1)+40)+this.team*12,sz1);   // 按队错层 (2026-11-16 批6, 同构造器)
 this.yaw=this.team===0?0:Math.PI; this.pitch=0; this.roll=0;
 this.hp=this.maxHp; this.alive=true; this.crew.alive=true; this.speed=PLANE_FLIGHT.birthSpeed;
 // 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者不得跨生死携带 (机体模型重生复用)
@@ -1180,6 +1197,53 @@ if(this.team===player.team) announceVehRespawn(this);
 function enemyPlaneAlive(team){
 for(const p of planes) if(p.alive&&p.team!==team) return p;
 return null;
+}
+// ════════ 撞机规避 (2026-11-16 批6, 用户实报"仍经常能看见飞机撞机") ════════
+// 勘察结论: Bot 飞行 AI 全程零机-机避让 (planeAI 除 pickDogTarget 不引用 planes 表), 撞机全靠碰撞层
+// 的 CCD"必中"兜底 —— 旧漏判场景 (对头 240m/s 每帧掠 4m) 在 CCD 批后全部入账, 观感从"看不见"变"高频"。
+// 三条汇聚路径 + 三道对策:
+//   ① 同巡航层对穿中场 (两队出生相向+同一巡航公式) → 巡航层按队错层 team*10m + 出生高度错层 team*12m;
+//   ② 缠斗对头 merge / 直线穿越 → planeAvoidScan 预测最近接近点 (3s 窗, 26m miss 门 > 1.7×size 碰撞半径),
+//     触发后 1.2s 侧向强压坡脱离 (选与当前航向夹角更小的一侧, 少转); 地形规避仍在更前 (撞山优先于撞机);
+//   ③ 多机同扑一个地面目标 (dive 打分无占用检查) → diveClaimedBy 汇聚抑制 (己方已俯冲同目标重罚)。
+// 尾追档 (relDot 小/miss 大) 天然不触发 —— 缠斗咬尾开火几何不受影响。
+const PLANE_AVOID={lookahead:3.0, margin:26, every:0.35, hold:1.2};
+function planeAvoidScan(pl,dt){
+pl._avT=(pl._avT||0)-dt;
+if(pl._avoid&&pl._avoid.t>0) pl._avoid.t-=dt;
+if(pl._avT>0) return;
+pl._avT=PLANE_AVOID.every;
+if(pl._avoid&&pl._avoid.t>0) return;   // 规避保持期不重扫 (hold 走完再判)
+const mvx=Math.sin(pl.yaw)*pl.speed, mvz=Math.cos(pl.yaw)*pl.speed;   // 水平相对几何足够 (竖速小量忽略)
+let th=null,tMiss=1e9;
+for(const o of planes){
+if(!o||!o.alive||o===pl) continue;
+const dx=o.pos.x-pl.pos.x, dy=o.pos.y-pl.pos.y, dz=o.pos.z-pl.pos.z;
+if(dx*dx+dy*dy+dz*dz>420*420) continue;
+const ovx=Math.sin(o.yaw)*o.speed, ovz=Math.cos(o.yaw)*o.speed;
+const rx=mvx-ovx, rz=mvz-ovz, rel2=rx*rx+rz*rz;
+if(rel2<1) continue;                                  // 相对静止/并行: 收拢门语义, 不算威胁
+const relDot=rx*dx+rz*dz;
+// ★2026-11-17 符号修正 (写探针预期几何时实锤): rel 定义为 v_me−v_o ⇒ 最近接近时刻 t*=Δ·rel/|rel|² 取**正号**,
+// 旧版 -relDot/rel2 对一切正在逼近的对象算出负 tcp 被下方 continue 跳过 = 对头/交叉真威胁零规避 (扫描失灵),
+// 只有正在远离的对象反而进计算。修正后: 逼近 relDot>0 ⇒ tcp>0 放行, 远离 relDot<0 ⇒ tcp≤0 跳过。
+let tcp=relDot/rel2;
+tcp=clamp(tcp,0,PLANE_AVOID.lookahead);
+if(tcp<=0) continue;                                  // 正在远离
+const cx=dx-rx*tcp, cz=dz-rz*tcp;   // ★同族修正: Δ(t)=Δ−rel·t (旧 + 号算的是 -t* 时刻=过去最近点)
+const miss=Math.sqrt(cx*cx+cz*cz+dy*dy);
+if(miss<PLANE_AVOID.margin&&miss<tMiss){ tMiss=miss; th=o; }
+}
+if(th){
+const a=Math.atan2(th.pos.x-pl.pos.x,th.pos.z-pl.pos.z);
+const left=Math.abs(angDiff(pl.yaw,a-HPI)), right=Math.abs(angDiff(pl.yaw,a+HPI));
+pl._avoid={a:(left<right?a-HPI:a+HPI),t:PLANE_AVOID.hold};
+}
+}
+// 同目标汇聚抑制 (dive 打分占用检查): 己方另一架已在俯冲扑同一目标 ⇒ 打分重罚, 防多机空中交汇。
+function diveClaimedBy(tgt,me){
+for(const q of planes){ if(q!==me&&q.alive&&q.team===me.team&&q.state==='dive'&&q.target===tgt) return true; }
+return false;
 }
 // ════════ 7b-乙/丙 (2026-09-30): AI 决策共用原语 + 玩家锁定/AI 接管 ════════
 // steerToward —— 统一转向原语: 期望瞄准点 → 期望航向/俯仰 → fctl 意图三件。缠斗/俯冲/拒止带回场/
