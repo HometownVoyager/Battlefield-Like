@@ -347,13 +347,13 @@ if(wr){ impactFX(wr.point,wr.normal,wr.kind); AudioSys.click(1800,0.3,0.05); }
 if(this.nadeIsIncin){
 player._src='燃烧弹';
 const v=dir.multiplyScalar(NADE_THROW.incin.v).add(V3(0,NADE_THROW.incin.up,0)).add(this.vel.clone().multiplyScalar(0.4));
-throwNade(this,o,v,1.6,false,false,true);
+throwNade(this,o,v,Math.max(0,this.nadeFuse),false,false,true);   // ★2026-11-17 批2.6: 燃烧弹出手带烹饪余值 (旧固定 1.6; 举雷期引信已照烧)
 this.incinCount--;
 this.nadeIsIncin=false;
 } else if(this.nadeIsSmoke){
 player._src='烟雾弹';
 const v=dir.multiplyScalar(NADE_THROW.smoke.v).add(V3(0,NADE_THROW.smoke.up,0)).add(this.vel.clone().multiplyScalar(0.4));
-throwNade(this,o,v,1.8,false,true);
+throwNade(this,o,v,Math.max(0,this.nadeFuse),false,true);   // ★2026-11-17 批2.6: 烟雾弹出手带烹饪余值 (旧固定 1.8)
 this.smokeCount--;
 this.nadeIsSmoke=false;
 } else if(this.nadeIsAT){

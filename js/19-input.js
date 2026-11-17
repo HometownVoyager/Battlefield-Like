@@ -52,7 +52,7 @@ if(e.code==='Escape'){
   //   实际弹暂停菜单、布势地图被 cmdMapPauseGate 藏起, 玩家看到的是"按 Esc 没反应/界面全换了"。
   //   上提到门外; 暂停优先 (D20): gamePaused 时先解暂停不确认布势 (地图由 cmdMapPauseGate 藏着, 解冻即回)。
   if(typeof cmdMapUIOpen==='function'&&cmdMapUIOpen()&&!gamePaused){
-if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm();
+if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm(true);   // ★2026-11-17 批6: esc=true ⇒ 盖章只看 CMD.deployTouched (没布过势的 ESC 不锁兵种)
 else if(typeof cmdMapClose==='function') cmdMapClose(true);
 return;
   }
@@ -303,8 +303,9 @@ const sameHeld=player.nadeHeld&&player.nadeIsAT;
 const ok=player.atNades>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit3')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
-// 持掷化 (2026-09-30 批, 与 KeyG 同口径): 按住=举雷瞄准 (弹道预演亮出), 松手=出手。nadeFuse=99 哨兵
-// —— 20-player 的"持握倒计时→手中自爆"只该管普通雷 (3.8s 引信), AT/烟雾/燃烧是出手才开始计时的短引信。
+// 持掷化 (2026-09-30 批, 与 KeyG 同口径): 按住=举雷瞄准 (弹道预演亮出), 松手=出手。AT 保持 nadeFuse=99
+// 哨兵 —— 撞炸弹无引信可烹 (出手即武装, 撞什么炸什么, 99 不会被 releaseNade 采用); 烟雾/燃烧已改
+// 真引信 (2026-11-17 批2.6: 举雷期照烧 = 可烹饪, 与普通雷同口径)。
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
 player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=true; player.nadeIsSmoke=false; player.nadeIsIncin=false;
 vmSndFlags={};
@@ -324,7 +325,7 @@ const ok=player.smokeCount>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!pl
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit4')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
-player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;
+player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.smoke; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;   // ★2026-11-17 批2.6: 烟雾弹改可烹饪真引信 (旧 99 哨兵)
 vmSndFlags={};
 AudioSys.click(1000,0.28,0.05);
 }
@@ -340,7 +341,7 @@ const ok=!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.on
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit6')) return; player.stealBar(); }
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
-player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=true;
+player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.incin; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=true;   // ★2026-11-17 批2.6: 燃烧弹改可烹饪真引信 (旧 99 哨兵)
 vmSndFlags={};
 AudioSys.click(880,0.3,0.05);
 }

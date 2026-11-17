@@ -170,7 +170,7 @@ has(combat,'const ev=nadeStep(n,ndt)','F1e updateNades 逐枚走 nadeStep');
 lacks(combat,"if(st.fuse<=0) return 'blow'","F1f 空炸路径绝迹 (引信到点不再直接引爆 —— 批2 用户裁定)");
 has(combat,'const armed=!st.armOnFuse||st.fuse<=0','F1g 武装判据 (表内看引信到点; 表外出手即武装)');
 has(combat,'const touchG=ny<=gh+0.05','F1h 接触判据之触地');
-has(combat,'if(touchG||touchT||hitVeh||(!st.armOnFuse&&bounced))','F1i 引爆 = **武装 且 接触** 双条件收口 (触敌/触载具/撞墙分档)');
+has(combat,'if(touchG||touchT||hitVeh||boxBlow||(!st.armOnFuse&&bounced))','F1i 引爆 = **武装 且 接触** 双条件收口 (触敌/触载具/撞墙/盒面分档; ★2026-11-17 批2.5/2.ex 跟码: boxBlow=表外弹任意面/表内弹楼板顶面)');
 has(combat,'armOnFuse:!!NADE_ARMED_BY_FUSE[kind]','F1j throwNade 挂"武装方式"旗');
 lacks(combat,'n.fuse=Math.min(n.fuse,0.02)','F1k 旧"撞墙改引信"绝迹 (反坦克族接触口径收口进 nadeStep)');
 lacks(combat,'n.vel.y*=-0.38','F1l 旧抄写件绝迹 (物理只此一份)');

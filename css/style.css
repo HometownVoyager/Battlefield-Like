@@ -117,6 +117,8 @@ body.mobile #menuArt { display:none; }
 #menuDock .mSub { width:100%; background:rgba(10,12,8,.55); border:1px solid rgba(210,200,160,.22); border-radius:6px; padding:16px 20px; backdrop-filter:blur(4px); flex:none; }
 /* 主标题禁止折行: 480px 蒙版时代 "钢 铁 前 线" 会被折成两行 (2026-09-13 用户反馈) */
 .gameLogo { text-align:center; font-size:52px; font-weight:800; letter-spacing:14px; white-space:nowrap; color:#e8dcb0; text-shadow:0 2px 0 #4a3f22, 0 6px 22px rgba(0,0,0,.8); margin-top:10px; }
+/* EN 主标题: 拉丁字母配 14px 字距过散, lang-en 下收紧 (2026-11-17 批1: gameLogo 加 data-i18n, 词典键 '钢 铁 前 线') */
+html.lang-en .gameLogo { letter-spacing:8px; }
 .gameLogoSub { text-align:center; font-size:13px; letter-spacing:6px; color:rgba(220,210,170,.55); margin:4px 0 14px; }
 .menuNav { display:flex; flex-direction:column; align-items:center; gap:12px; margin:30px 0 26px; }
 .navBtn { width:320px; max-width:100%; font-size:19px; letter-spacing:8px; padding:14px 0; }

@@ -132,7 +132,7 @@ if(this.wpI>=P.length-1){
 this.escaped=true; this.alive=false;
 if(this.engine){ this.engine.stop(); this.engine=null; } // 突围下线即停引擎 (★2026-11-15c)
 if(CONVOY_STATE){ CONVOY_STATE.esc++; CONVOY_STATE.left=Math.max(0,CONVOY_STATE.left-1); }
-addKillMsg(`运输车突围! 已突围 ${CONVOY_STATE?CONVOY_STATE.esc:0} 辆`,(CAMPAIGN.convoy&&CAMPAIGN.convoy.escortTeam!==undefined)?CAMPAIGN.convoy.escortTeam:1);
+addKillMsg(t('运输车突围! 已突围 {0} 辆',CONVOY_STATE?CONVOY_STATE.esc:0),(CAMPAIGN.convoy&&CAMPAIGN.convoy.escortTeam!==undefined)?CAMPAIGN.convoy.escortTeam:1);   // ★2026-11-17 批1: 模板串收进词典键 (动态拼接串永远查不到表)
 world.remove(this.grp);
 return;
 }
@@ -233,7 +233,7 @@ addKillfeed(attacker,this,false);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击毁红档 (2026-09-30 批): 卡车无乘员死亡链
 if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
-addKillMsg(`运输车被摧毁! 剩余 ${CONVOY_STATE?CONVOY_STATE.left:0} 辆`,attacker?attacker.team:player.team);
+addKillMsg(t('运输车被摧毁! 剩余 {0} 辆',CONVOY_STATE?CONVOY_STATE.left:0),attacker?attacker.team:player.team);   // ★2026-11-17 批1: 模板串收进词典键
 }
 }
 function updateTrucks(dt){

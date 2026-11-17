@@ -529,6 +529,12 @@ return kill.length;
 }
 function endMatch(forceWinner){
 matchOver=true;
+// ★2026-11-17 批3: 读条随终局收口 —— 结算起主循环由 matchOver 冻结, updateHUD 不再跑, 读条条
+//   (window._demolishBar, z40 直接挂 body, 不进 .screen 显隐链) 会以最后一帧的 display:block 永久
+//   压在结算页/主菜单上 (用户实报: 读条中打完回主页条还挂着)。与 die/showDeploy/resetPlayerForNewMatch
+//   三个既有收口同规: cancelReadBar(quiet) 清账+收模型层, 再显式藏条兜底 (冻结后没人再写显隐)。
+if(player.readBarActive&&player.readBarActive()) player.cancelReadBar(null,true);
+const _db=window._demolishBar; if(_db&&_db.wrap) _db.wrap.style.display='none';
 if(typeof killcamEnd==='function') killcamEnd(); // killcam 随结算一次收账 (2026-11-12 死亡视角批: 结算屏覆盖前先还原画布滤镜)
 // 观战时停随战局结束收尾 (2026-09-27M 时停修复批, 审计 P1-4): specTimeFrozen 本身就要求 !matchOver ⇒
 // 结算起时停已自动失效; 这里显式复位的是**状态残留** (SPEC_TIME.paused), 免得"结算 → 返回主界面 →
@@ -623,8 +629,8 @@ return '';
 function addKillfeed(attacker,victim,isHead){
 const kf=el('killfeed');
 const div=document.createElement('div');
-const an=attacker.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${attacker.team}">${attacker.name}</span>`;
-const vn=victim.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${victim.team}">${victim.name}</span>`;
+const an=attacker.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${attacker.team}">${t(attacker.name)}</span>`;   // ★2026-11-17 批1: 人名走词典 (EN=拉丁转写, zh 原样回退)
+const vn=victim.isPlayer?`<span class="me">${t('你')}</span>`:`<span class="kf${victim.team}">${t(victim.name)}</span>`;
 const src=t(killSrcLabel(attacker));
 div.innerHTML=`${an} ${isHead?'☠':'✕'} ${vn}${src?` <span class="kfSrc">[${src}]</span>`:''}`;
 kf.prepend(div);

@@ -208,7 +208,7 @@ assert('19-input: 开图期 keydown 放行 减速键 + cmdMapKeyGate 三命令�
 assert('19-input: Esc 的 cmdMapUIOpen 分支上提到 deployed 门之外 + 暂停优先 (!gamePaused) + 双出口',
  s19.includes('cmdMapUIOpen()&&!gamePaused){')
  &&s19.indexOf('cmdMapUIOpen()&&!gamePaused')<s19.indexOf('if(player.deployed&&player.alive&&!matchOver){')
- &&/cmdMapUIOpen\(\)&&!gamePaused\)\{\s*if\(typeof cmdDeployPhase==='function'&&cmdDeployPhase\(\)&&typeof cmdDeployConfirm==='function'\) cmdDeployConfirm\(\);\s*else if\(typeof cmdMapClose==='function'\) cmdMapClose\(true\);/.test(s19));
+ &&/cmdMapUIOpen\(\)&&!gamePaused\)\{\s*if\(typeof cmdDeployPhase==='function'&&cmdDeployPhase\(\)&&typeof cmdDeployConfirm==='function'\) cmdDeployConfirm\(true\);\s*else if\(typeof cmdMapClose==='function'\) cmdMapClose\(true\);/.test(s19));   // ★2026-11-17 批6 判据跟码: esc=true ⇒ 盖章只看 CMD.deployTouched (没布过势的 ESC 不锁兵种)
 assert('19-input: 近战键改成 KeyN (V 让给减速)',
  s19.includes("if(e.code==='KeyN'){")&&!s19.includes("if(e.code==='KeyV'){"));
 assert('24-main tMelee 触控键 → KeyN',s24.includes("bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));"));

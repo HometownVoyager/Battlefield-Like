@@ -122,9 +122,9 @@ assert('18-game: 重部署时序零改动 (blackOv/showDeploy 两个 addMatchTim
  s18.includes("addMatchTimeout(()=>{ if(!this.alive){ const bo=document.getElementById('blackOv'); if(bo) bo.style.opacity=0.75; } },dly);")
  &&s18.includes("addMatchTimeout(()=>{ if(!matchOver&&!this.alive&&typeof showDeploy==='function') showDeploy(true); },dly+700);"));
 assert('run-all 已登记本探针',ra.includes('verify-dynreload-deathcam-20261112.js'));
-assert('版本戳 20261117a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261112a 清零',
- [...ih.matchAll(/20261117a/g)].length>=48&&ih.includes("window.__sfStyleVer='20261117a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261117a')).length===45
+assert('版本戳 20261117b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261112a 清零',
+ [...ih.matchAll(/20261117b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261117b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261117b')).length===45
  &&!ih.includes('20261112a')&&!gf.includes('20261112a'));
 }
 

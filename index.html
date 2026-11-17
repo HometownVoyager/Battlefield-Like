@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>钢铁前线 · 战役合集</title>
-<link rel="stylesheet" href="css/style.css?v=20261117a">
+<link rel="stylesheet" href="css/style.css?v=20261117b">
 <script>
 // 首屏引导 (必须在 <body> 内容之前执行):
 // ① 语言: EN 存档时给 <html> 加 lang-en, 配合 CSS 把中文原文先藏起来等 applyI18n() 盖章, 消除"先中文后英文";
@@ -14,7 +14,7 @@
 //    (菜单期 HUD 不隐藏即是)。这里在 DOMContentLoaded 后实测新样式是否生效 (#menuArt 的计算 display
 //    在新版是 flex、旧版是 block), 没生效就换一个 URL 把样式表重新载入一次。
 //    ④ 本文件所有 css/js 引用统一带 ?v=<版本>; 改样式或脚本后把下面的版本号与引用一起 +1。
-window.__sfStyleVer='20261117a';
+window.__sfStyleVer='20261117b';
 // ⑤ boot 异常屏上可见 (2026-09-30 Ctrl+F5 事故教训): three/cannon 曾走 CDN, 硬刷新时 CDN 拉不到 ⇒
 //    脚本链首用 THREE 处即抛 ⇒ 页面只剩页尾 bootFail 兜底摘 inMenu (HUD 全裸+黑屏), 报错只在控制台。
 //    这里把全局错误尽早记进 __sfErrs, 页尾 bootFail 分支负责把它们写到 #bootErr 浮层上 ——
@@ -144,7 +144,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 </div>
 <div id="menuDock">
 <div id="mHome">
-<div class="gameLogo">钢 铁 前 线</div>
+<div class="gameLogo" data-i18n>钢 铁 前 线</div>
 <div class="gameLogoSub" data-i18n>STEEL FRONT · 第二次世界大战</div>
 <div class="subtitle" id="menuSub">—— 战役 ——</div>
 <div class="menuNav">
@@ -714,37 +714,63 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
       <div class="center" style="margin:8px 0"><button class="bigBtn p-btn" id="pauseHelpBtn" style="width:260px;white-space:nowrap" data-i18n>键 位 说 明</button></div>
       <div class="center" style="margin:8px 0"><button class="bigBtn menuBackBtn danger" id="pauseMenuBtn" style="width:260px;color:#ff9c8a;white-space:nowrap" data-i18n>返 回 主 界 面</button></div>
     </div>
-    <div id="pauseSettingPanel" class="hidden" style="text-align:left;padding:10px 16px">
+    <div id="pauseSettingPanel" class="hidden" style="text-align:left;padding:10px 6px;max-height:min(64vh,520px);overflow-y:auto">
       <h3 style="margin-top:0;text-align:center;color:#e8dcb0" data-i18n>战 斗 设 置</h3>
-      <div class="secLabel" data-i18n>鼠标灵敏度</div>
-      <div class="rowFlex" style="align-items:center;gap:10px">
-        <input type="range" id="pauseSensRange" min="10" max="400" value="100" style="flex:1">
-        <span id="pauseSensVal" style="width:40px;text-align:right;color:#e8dcb0">1.0</span>
+      <div class="setCard">
+        <div class="setHead"><div class="setTitle" data-i18n>鼠标灵敏度</div><div class="setCtrls" style="flex:1;min-width:140px">
+          <input type="range" id="pauseSensRange" min="20" max="200" value="100" style="width:100%">
+        </div></div>
+        <div class="setDesc" style="display:flex;justify-content:space-between;align-items:center"><span data-i18n>战斗中即时生效, 与主菜单设置同源</span><b id="pauseSensVal" style="color:#e8dcb0">1.0</b></div>
       </div>
-      <div class="secLabel" data-i18n>主音量</div>
-      <div class="rowFlex" style="align-items:center;gap:10px">
-        <input type="range" id="pauseVolRange" min="0" max="100" value="100" style="flex:1">
-        <span id="pauseVolVal" style="width:40px;text-align:right;color:#e8dcb0">100</span>
+      <div class="setCard">
+        <div class="setHead"><div class="setTitle" data-i18n>主音量</div><div class="setCtrls" style="flex:1;min-width:140px">
+          <input type="range" id="pauseVolRange" min="0" max="100" value="100" style="width:100%">
+        </div></div>
+        <div class="setDesc" style="display:flex;justify-content:space-between;align-items:center"><span data-i18n>环境/引擎/枪炮总闸</span><b id="pauseVolVal" style="color:#e8dcb0">100</b></div>
       </div>
-      <div class="secLabel" data-i18n>画面质量</div>
-      <div class="rowFlex" style="justify-content:center;gap:8px">
-        <button class="optBtn pauseQualBtn" data-q="0" data-i18n>低画质</button>
-        <button class="optBtn pauseQualBtn" data-q="1" data-i18n>中画质</button>
-        <button class="optBtn pauseQualBtn" data-q="2" data-i18n>高画质</button>
+      <div class="setCard">
+        <div class="setHead"><div class="setTitle" data-i18n>画面质量</div><div class="setCtrls">
+          <button class="optBtn pauseQualBtn" data-q="0" data-i18n>低画质</button>
+          <button class="optBtn pauseQualBtn" data-q="1" data-i18n>中画质</button>
+          <button class="optBtn pauseQualBtn" data-q="2" data-i18n>高画质</button>
+        </div></div>
+        <div class="setDesc" data-i18n>渲染分辨率/阴影/视距/粒子四旋钮的快捷档, 细调请回主菜单「性能与画面」</div>
       </div>
-      <div class="center" style="margin-top:16px">
+      <div class="setCard">
+        <div class="setHead"><div class="setTitle" data-i18n>游戏中显示详细操作</div><div class="setCtrls">
+          <button class="optBtn" id="pauseCtlHintsBtn">💡</button>
+        </div></div>
+        <div class="setDesc" data-i18n>关=只留单键交互入口提示, 隐藏多键操作明细 (改档即时生效)</div>
+      </div>
+      <div class="center" style="margin-top:14px">
         <button class="bigBtn" id="pauseSettingBackBtn" style="width:160px;white-space:nowrap" data-i18n>返 回</button>
       </div>
     </div>
-    <div id="pauseHelpPanel" class="hidden" style="text-align:left;padding:10px 16px;font-size:13px;line-height:1.7;color:#cdd8c8">
+    <div id="pauseHelpPanel" class="hidden" style="text-align:left;padding:10px 14px;max-height:min(64vh,520px);overflow-y:auto">
       <h3 style="margin-top:0;text-align:center;color:#e8dcb0" data-i18n>操作与键位说明</h3>
-      <div><b>WASD</b> 移动 / <b>空格</b> 跳跃 / <b>Shift</b> 冲刺</div>
-      <div><b>鼠标左键</b> 开火 / <b>右键</b> 瞄准机瞄 / <b>滚轮/1-4</b> 切枪</div>
-      <div><b>R</b> 换弹(读条中<b>X</b>取消) / <b>C</b> 蹲下 / <b>Z</b> 卧倒 / <b>N</b> 近战刺刀</div>
-      <div><b>M</b> 战场大地图 / <b>F</b> 载具操控 / <b>L</b> 车灯·手电</div>
-      <div><b>Esc</b> 战局整备与重部署 / 再按 <b>Esc</b> 暂停游戏</div>
-      <div><b>Tab</b> 战场记分板 / <b>F1</b> 开关HUD</div>
-      <div class="center" style="margin-top:14px">
+      <div class="helpCard"><div class="helpKeys">
+        <div class="hkRow"><span class="hkKey" data-i18n>WASD</span><span class="hkDesc" data-i18n-html>移动</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>Shift</span><span class="hkDesc" data-i18n-html>疾跑(机瞄时为屏息稳枪)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>空格</span><span class="hkDesc" data-i18n-html>跳跃</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>左键</span><span class="hkDesc" data-i18n-html>射击</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>右键</span><span class="hkDesc" data-i18n-html>机瞄/瞄准镜</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>R</span><span class="hkDesc" data-i18n-html>装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>1 / 2</span><span class="hkDesc" data-i18n-html>切换武器</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>G / 3 / 4 / 6</span><span class="hkDesc" data-i18n-html>手雷 / 反坦克雷 / 烟雾弹 / 燃烧弹 (均可按住烹饪引信, 举雷中按<b>X</b>收回)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>近战</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>C</span><span class="hkDesc" data-i18n-html>蹲</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>Z</span><span class="hkDesc" data-i18n-html>卧倒</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>X</span><span class="hkDesc" data-i18n-html>在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>Q / E</span><span class="hkDesc" data-i18n-html>左右侧身探头</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>U</span><span class="hkDesc" data-i18n-html>第三人称: 开/关 (步行可用; 开镜或上车时自动回到第一人称)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>M</span><span class="hkDesc" data-i18n-html>战场大地图</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>Tab</span><span class="hkDesc" data-i18n-html>战场记分板</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>F1</span><span class="hkDesc" data-i18n-html>开关HUD</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>F</span><span class="hkDesc" data-i18n-html>载具上下/交互</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>L</span><span class="hkDesc" data-i18n-html>车灯 · 手电</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>Esc</span><span class="hkDesc" data-i18n-html>战局整备与重部署 · 再按=暂停</span></div>
+      </div></div>
+      <div class="center" style="margin-top:12px">
         <button class="bigBtn" id="pauseHelpBackBtn" style="width:160px;white-space:nowrap" data-i18n>返 回</button>
       </div>
     </div>
@@ -754,59 +780,59 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
      一起绕缓存重拉, CDN 抽风 (国内常态) ⇒ THREE 未定义 ⇒ 脚本链首用即抛 ⇒ bootFail (HUD 全裸+黑屏)。
      现收编进仓库 lib/ (three r152 + cannon 0.6.2, 与 dev/vendor 探针副本同源), file:// 离线可用。
      版本戳与 js/ 同纪律统一 ?v= (verify-spec T8 把守), 且禁止改回外链 (T8 有 cdn 断言)。 -->
-<script src="lib/three.min.js?v=20261117a"></script>
-<script src="lib/cannon.min.js?v=20261117a"></script>
+<script src="lib/three.min.js?v=20261117b"></script>
+<script src="lib/cannon.min.js?v=20261117b"></script>
 
-<script src="js/00-config.js?v=20261117a"></script>
-<script src="js/00b-i18n.js?v=20261117a"></script>
-<script src="js/00c-procgen.js?v=20261117a"></script>
-<script src="js/01-audio.js?v=20261117a"></script>
-<script src="js/02-scene.js?v=20261117a"></script>
-<script src="js/03-terrain.js?v=20261117a"></script>
-<script src="js/04-collision.js?v=20261117a"></script>
-<script src="js/04b-fire.js?v=20261117a"></script>
-<script src="js/05-world.js?v=20261117a"></script>
-<script src="js/05a-buildings.js?v=20261117a"></script>
-<script src="js/05b-props.js?v=20261117a"></script>
-<script src="js/05c-layouts.js?v=20261117a"></script>
-<script src="js/06-engineering.js?v=20261117a"></script>
-<script src="js/07-nav.js?v=20261117a"></script>
-<script src="js/08-effects.js?v=20261117a"></script>
-<script src="js/09a-defs.js?v=20261117a"></script>
-<script src="js/09-weapons.js?v=20261117a"></script>
-<script src="js/10-viewmodel.js?v=20261117a"></script>
-<script src="js/11-soldiers.js?v=20261117a"></script>
-<script src="js/12-ragdolls.js?v=20261117a"></script>
-<script src="js/13-combat.js?v=20261117a"></script>
-<script src="js/14-bots.js?v=20261117a"></script>
-<script src="js/15-vehicles.js?v=20261117a"></script>
-<script src="js/15b-trucks.js?v=20261117a"></script>
-<script src="js/15c-specveh.js?v=20261117a"></script>
+<script src="js/00-config.js?v=20261117b"></script>
+<script src="js/00b-i18n.js?v=20261117b"></script>
+<script src="js/00c-procgen.js?v=20261117b"></script>
+<script src="js/01-audio.js?v=20261117b"></script>
+<script src="js/02-scene.js?v=20261117b"></script>
+<script src="js/03-terrain.js?v=20261117b"></script>
+<script src="js/04-collision.js?v=20261117b"></script>
+<script src="js/04b-fire.js?v=20261117b"></script>
+<script src="js/05-world.js?v=20261117b"></script>
+<script src="js/05a-buildings.js?v=20261117b"></script>
+<script src="js/05b-props.js?v=20261117b"></script>
+<script src="js/05c-layouts.js?v=20261117b"></script>
+<script src="js/06-engineering.js?v=20261117b"></script>
+<script src="js/07-nav.js?v=20261117b"></script>
+<script src="js/08-effects.js?v=20261117b"></script>
+<script src="js/09a-defs.js?v=20261117b"></script>
+<script src="js/09-weapons.js?v=20261117b"></script>
+<script src="js/10-viewmodel.js?v=20261117b"></script>
+<script src="js/11-soldiers.js?v=20261117b"></script>
+<script src="js/12-ragdolls.js?v=20261117b"></script>
+<script src="js/13-combat.js?v=20261117b"></script>
+<script src="js/14-bots.js?v=20261117b"></script>
+<script src="js/15-vehicles.js?v=20261117b"></script>
+<script src="js/15b-trucks.js?v=20261117b"></script>
+<script src="js/15c-specveh.js?v=20261117b"></script>
 <!-- 2026-09-20N 海战批: 15e(剪影建模) 必须在 15d(载具本体) 之前 —— 15d 的构造器调用 15e 的
      navBuildModel, 两者都走 const/函数声明, 倒序会在 TDZ 里抛错。15f(反舰炮位) 依赖 15d 的
      navalNear 索敌接口, 故排在其后、17-emplacements 之前 (炮位在布局期由 17 架设)。 -->
-<script src="js/15e-navmodels.js?v=20261117a"></script>
-<script src="js/15d-naval.js?v=20261117a"></script>
-<script src="js/15f-battery.js?v=20261117a"></script>
+<script src="js/15e-navmodels.js?v=20261117b"></script>
+<script src="js/15d-naval.js?v=20261117b"></script>
+<script src="js/15f-battery.js?v=20261117b"></script>
 <!-- 2026-11-10: 纯海战图 (coral/ironbottom) 与大舰子系统 (15g/15h) 整体下架 → archive/naval-coral-ironbottom-20261110/。
      15d/15e/15f (小艇/两栖建模/岸炮) 为塔拉瓦环礁 (island) 共用, 保留。 -->
-<script src="js/16-aircraft.js?v=20261117a"></script>
-<script src="js/17-emplacements.js?v=20261117a"></script>
-<script src="js/18-game.js?v=20261117a"></script>
-<script src="js/19-input.js?v=20261117a"></script>
-<script src="js/19b-gamepad.js?v=20261117a"></script>
-<script src="js/20-player.js?v=20261117a"></script>
-<script src="js/20a-seats.js?v=20261117a"></script>
-<script src="js/21-match.js?v=20261117a"></script>
-<script src="js/22-hud.js?v=20261117a"></script>
-<script src="js/22a-menuart.js?v=20261117a"></script>
-<script src="js/22b-speclayer.js?v=20261117a"></script>
-<script src="js/23-deploy.js?v=20261117a"></script>
-<script src="js/23b-worldrestore.js?v=20261117a"></script>
-<script src="js/25-zombies.js?v=20261117a"></script>
-<script src="js/26-commander.js?v=20261117a"></script>
-<script src="js/27-achievements.js?v=20261117a"></script>
-<script src="js/24-main.js?v=20261117a"></script>
+<script src="js/16-aircraft.js?v=20261117b"></script>
+<script src="js/17-emplacements.js?v=20261117b"></script>
+<script src="js/18-game.js?v=20261117b"></script>
+<script src="js/19-input.js?v=20261117b"></script>
+<script src="js/19b-gamepad.js?v=20261117b"></script>
+<script src="js/20-player.js?v=20261117b"></script>
+<script src="js/20a-seats.js?v=20261117b"></script>
+<script src="js/21-match.js?v=20261117b"></script>
+<script src="js/22-hud.js?v=20261117b"></script>
+<script src="js/22a-menuart.js?v=20261117b"></script>
+<script src="js/22b-speclayer.js?v=20261117b"></script>
+<script src="js/23-deploy.js?v=20261117b"></script>
+<script src="js/23b-worldrestore.js?v=20261117b"></script>
+<script src="js/25-zombies.js?v=20261117b"></script>
+<script src="js/26-commander.js?v=20261117b"></script>
+<script src="js/27-achievements.js?v=20261117b"></script>
+<script src="js/24-main.js?v=20261117b"></script>
 <script>
 // 兜底: 首屏 pre-hide 之后若主脚本链中途抛错, 不要留下"全黑屏且无 UI"的死局 ——
 // 只有 24-main 正常跑完才会置 window.__sfBooted; 未置位则解除隐藏并把菜单抬到最前, 让报错可见可交互。

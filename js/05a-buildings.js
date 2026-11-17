@@ -665,6 +665,28 @@ BUILD_REG.push({type:'facade',x,z,ry,w:fw,d:0.5,floor:g0,doors:ctx.doors.slice()
 }
 // 电车残骸 (斯大林格勒电车街): 车厢壳体可进入 —— 端门+侧窗射击带+塌陷顶盖;
 // 全组一个可毁结构 (打爆→碎块化), 端门登记通行区 (Bot 可入内当掩体)
+// 2026-11-18 车厢残骸重做 (16→35 件, 05b 残骸工具箱风): 烧黑/锈蚀两档材质 + 铆接补板/铆钉条 +
+//   侧窗框残柱 + 歪斜端门叶 + 烧毁长椅残段 + 顶盖肋条 (挂顶盖本体随塌陷角一起歪) + 轮轴,
+//   保住"顶盖塌陷/门歪斜"的废墟剪影, 不修复成完好电车。
+//   碰撞/账目逐字不动: 12 次 dBox (位置/尺寸/材质参数/顺序)、dEnd hp=520、NAV_CLEARS/coverPoints/
+//   BUILD_REG 原样, 不新增 dBox/solidBox/addBoxCollider/CYLS。
+//   ★随组死亡: 05-world.dEnd 只收 dBox 专建的 mesh ⇒ 新增纯视觉件全部经 dVis() 在 dBegin/dEnd
+//   窗口内手动入列 _dG.meshes, destroyStructure 时随组移除/碎块化; 旧转向架轮组原是 dEnd 之后的
+//   裸 mesh (摧毁后残留), 本批移进窗口随组死亡 —— 几何/位姿参数逐字保留, 旧件一件不漏。
+//   ★wr 全局流逐位不动: 全函数仍只那 1 次 rf.rotation.z=wr(-0.06,0.06) (顶盖塌陷随机角, 原位原样,
+//   布局指纹零漂移); 其余造型抖动走 wkRand 本地哈希 (salt 0x74e1, 与 05b 三残骸 0x51a7/0x1c0f 错开)。
+// 共享几何 (15b-trucks wGeo 同款写法): 轮/轮轴/制动缸不再逐件 new —— 跨台/跨件复用
+const TRAM_WHL_GEO=new THREE.CylinderGeometry(0.42,0.42,0.24,9);
+const TRAM_AXLE_GEO=new THREE.CylinderGeometry(0.09,0.09,1.86,8);
+const FL_BRK_GEO=new THREE.CylinderGeometry(0.15,0.15,0.5,9); // 红十月平板车皮制动缸 (下方车皮块用)
+// dGroup 纯视觉件登记帮手: 05-world 的 dEnd 只收 dBox 专建的 mesh —— dBegin/dEnd 窗口里的裸
+// mesh() 不会自动入组, 而 destroyStructure 按 g.meshes 移除/碎块化 ⇒ 漏登记 = 打爆后孤儿悬浮件。
+// 本帮手 = mesh() + 窗口期内手动 push 进 _dG.meshes (05-world 模块级 let; 不新增 dBox/solidBox)。
+function dVis(geo,mat,x,y,z,ry,cast){
+const m=mesh(geo,mat,x,y,z,ry,cast);
+if(_dG) _dG.meshes.push(m);
+return m;
+}
 function tramWreck(x,z,ry){
 if(!propFree(x,z,5.6)||!freeSpot(x,z,5.4)) return; // freeSpot: 避开建筑足迹
 propTake(x,z,5.6);
@@ -703,16 +725,63 @@ dBox(MAT.metalDark,2.53,0.45,0.16,q[0],fit.y+0.25+2.325,q[1],ry);
 // 顶盖 (塌陷: 一端略低)
 p=ctx.L(0,0);
 const rf=dBox(MAT.metalDark,2.5,0.2,10.2,p[0],fit.y+0.25+H+0.1,p[1],ry);
-rf.rotation.z=wr(-0.06,0.06);
-const g=dEnd();
-if(g) g.hp=520;
-// 转向架轮组 (纯视觉, 烧黑)
+rf.rotation.z=wr(-0.06,0.06);   // ★ 全函数唯一一次全局取数 —— 原样保留 (布局指纹)
+// ── 2026-11-18 重做新增纯视觉件 (以下至 dEnd 前的全部件零碰撞账, 经 dVis 入 dGroup 随组死亡) ──
+const R=wkRand(x,z,ry,0x74e1);
+const M=wkPaint(0x8a7a58); // 褪色奶油漆 = 没烧透的车厢残漆; burnt/rust/steel/wood 与 05b 残骸同档同实例
+const dkY=fit.y+0.25;      // 地板顶面 (局部高度基准)
+// ① 转向架轮组 (纯视觉, 烧黑) —— 原为 dEnd 之后的裸 mesh, 移进窗口随组死亡 (几何/位姿逐字保留)
 for(const wz of [-3.2,3.2]){
 const q=ctx.L(0,wz);
 for(const wx of [-0.85,0.85]){
-mesh(new THREE.CylinderGeometry(0.42,0.42,0.24,9),MAT.metalDark,q[0]+wx*Math.cos(ry),fit.y+0.42,q[1]-wx*Math.sin(ry),ry);
+dVis(TRAM_WHL_GEO,MAT.metalDark,q[0]+wx*Math.cos(ry),fit.y+0.42,q[1]-wx*Math.sin(ry),ry);
+}
+const ax=dVis(TRAM_AXLE_GEO,M.burnt,q[0],fit.y+0.42,q[1],ry); // 轮轴 (贯连两侧轮对, 烧黑)
+ax.rotation.order='YXZ'; ax.rotation.z=HPI;
+}
+// ② 侧窗立柱 ×6 (射击带里的窗框残柱: 每侧留 3 根其余被烧塌/撬走; 钢/烧黑两档 + 歪斜走本地哈希)
+for(const s2 of [1,-1]){
+for(const wz2 of (s2>0?[-3.6,-1.2,1.2]:[-3.6,1.2,3.6])){
+const q3=ctx.L(s2*1.175,wz2);
+const mu=dVis(boxGeo(0.14,0.85,0.07),R.chance(0.5)?M.steel:M.burnt,q3[0],dkY+1.375,q3[1],ry);
+mu.rotation.order='YXZ'; mu.rotation.x=R.r(-0.08,0.08); // 烧塌歪斜 (沿车厢长轴俯仰)
 }
 }
+// ③ 端门歪斜门叶 ×1 (+z 端整扇半开卡在门框里 —— 门歪斜; 纯视觉, 不挡端门通行区)
+{
+const q4=ctx.L(-0.18,4.5);
+const dl=dVis(boxGeo(1.22,1.95,0.06),M.burnt,q4[0],dkY+0.975,q4[1],ry+0.55);
+dl.rotation.order='YXZ'; dl.rotation.x=-0.10;
+}
+// ④ 烧毁长椅残段 ×2 (车厢木内饰: 一段没烧透 + 一段焦黑, 各带塌陷歪斜)
+{
+const b1=ctx.L(0.72,1.6);
+dVis(boxGeo(0.42,0.32,0.55),M.wood,b1[0],dkY+0.36,b1[1],ry).rotation.z=-0.10;
+const b2=ctx.L(-0.72,-2.3);
+dVis(boxGeo(0.42,0.22,0.6),M.burnt,b2[0],dkY+0.28,b2[1],ry).rotation.z=0.08;
+}
+// ⑤ 顶盖肋条 ×3 (wkPart 挂 rf 本体作子件 —— 随顶盖塌陷角一起歪; 一根烧断半截, 不入 _dG 亦随父亡)
+wkPart(rf,boxGeo(0.06,0.1,9.4),M.burnt,-0.78,-0.16,0,0,0,0,'tramRoofRib').castShadow=true;
+wkPart(rf,boxGeo(0.06,0.1,9.4),M.rust,0.78,-0.16,0,0,0,0,'tramRoofRib').castShadow=true;
+wkPart(rf,boxGeo(0.06,0.1,4.6),M.burnt,0.1,-0.16,-2.7,0,0,0,'tramRoofRib').castShadow=true;
+// ⑥ 裙板铆接补板 ×2 + 铆钉条 ×2 (锈蚀档: 外贴烧变形补焊板, 各带一道通长铆钉条)
+{
+const pa1=ctx.L(1.28,-2.0);
+dVis(boxGeo(0.03,0.5,0.9),M.rust,pa1[0],dkY+0.5,pa1[1],ry);
+const st1=ctx.L(1.305,-2.0);
+dVis(boxGeo(0.035,0.06,0.72),M.rust,st1[0],dkY+0.62,st1[1],ry);
+const pa2=ctx.L(-1.28,2.4);
+dVis(boxGeo(0.03,0.45,0.85),M.rust,pa2[0],dkY+0.48,pa2[1],ry);
+const st2=ctx.L(-1.305,2.4);
+dVis(boxGeo(0.035,0.06,0.66),M.rust,st2[0],dkY+0.6,st2[1],ry);
+}
+// ⑦ 残留涂装 ×1 (上眉外壁画没烧透的那块: 褪色奶油漆 —— 民用车厢残漆, 残骸上"哪国车"的线索)
+{
+const pc1=ctx.L(1.28,0.8);
+dVis(boxGeo(0.03,0.5,0.8),M.paint,pc1[0],dkY+2.1,pc1[1],ry);
+}
+const g=dEnd();
+if(g) g.hp=520;
 // 端门通行区 (Bot 进出车厢)
 for(const ez of [5.9,-5.9]){
 const q=ctx.L(0,ez);
@@ -847,6 +916,57 @@ wh.rotation.order='YXZ';
 wh.rotation.y=ry; wh.rotation.z=HPI; // 轮轴沿厂房长轴垂直方向 (车皮纵轴)
 wh.castShadow=true;
 world.add(wh);
+}
+// ── 2026-11-18 车皮细节化 (纯视觉 ×17/皮): 不新增 solidBox/addBoxCollider/CYLS/dBox —— 碰撞/账目
+//    逐字不动。高度账: 车皮 solidBox 顶 = fy+1.475 —— 新件最高 (制动台罩顶 fy+1.72) 在 +0.25 内,
+//    不立挡板, 剪影仍是无侧板平板车; 车底账: 轨面 ≈ fy+0.10 —— 底架件统一贴 fy+0.115~0.225 带,
+//    不压轨头、让开轮鼓 (z±2.6 半径 0.4)。材质走 05b 残骸工具箱 (wkMat 同档跨车同实例)。
+const cs3=Math.cos(ry), sn3=Math.sin(ry);
+const LPf=(lx,lz)=>[p[0]+lx*cs3+lz*sn3, p[1]-lx*sn3+lz*cs3];
+const RFc=wkRand(p[0],p[1],ry,0x5d2a);
+const MFc={frame:wkMat('frame',0x3a3d38,TEX.metalBrush,1.2),rust:wkMat('rust',0x7d5535,TEX.rust,1.2),
+wood:wkMat('wood',0x6a583c,TEX.deckWood,1.1),steel:wkMat('steel',0x767770,TEX.metalBrush,0.8)};
+{
+const qD=LPf(0,0);
+mesh(boxGeo(2.9,0.06,7.3),MFc.wood,qD[0],fy+1.512,qD[1],ry,false,true); // 木铺板 (钢面板上一线缝防 Z 斗)
+}
+for(const sl of [-1.58,1.58]){ // 侧梁 ×2 (底架纵向梁, 贴车皮侧板外缘下缘)
+const qS=LPf(sl,0);
+mesh(boxGeo(0.16,0.11,7.1),MFc.frame,qS[0],fy+0.17,qS[1],ry,false,true);
+}
+for(const eb of [-3.6,3.6]){ // 端梁 ×2 (贯通两侧梁, 贴车皮端面下缘)
+const qE=LPf(0,eb);
+mesh(boxGeo(3.3,0.11,0.2),MFc.frame,qE[0],fy+0.17,qE[1],ry,false,true);
+}
+for(const bl of [-2.0,2.0]){ // 枕梁 ×2 (轮鼓内侧横梁, 底架带)
+const qB=LPf(0,bl);
+mesh(boxGeo(3.3,0.11,0.24),MFc.frame,qB[0],fy+0.17,qB[1],ry,false,true);
+}
+{ // 制动台 (端部小踏板 + 罩壳, 顶 ≤ fy+1.72) + 制动缸 (底架中部小圆鼓, FL_BRK_GEO 共享几何)
+const qP=LPf(-1.0,3.0);
+mesh(boxGeo(0.8,0.05,0.6),MFc.steel,qP[0],fy+1.572,qP[1],ry,false,true);
+const qH=LPf(-1.0,2.55);
+mesh(boxGeo(0.26,0.13,0.26),MFc.steel,qH[0],fy+1.655,qH[1],ry,false,true);
+const qC=LPf(0,0.5);
+const qc2=mesh(FL_BRK_GEO,MFc.frame,qC[0],fy+0.155,qC[1],ry,false,true);
+qc2.rotation.order='YXZ'; qc2.rotation.z=HPI;
+}
+for(const rv of [-1.515,1.515]){ // 铆钉线 ×2 (侧板面通长铆条)
+const qR=LPf(rv,0);
+mesh(boxGeo(0.03,0.06,6.9),MFc.steel,qR[0],fy+1.2,qR[1],ry,false,true);
+}
+for(const ev of [-3.765,3.765]){ // 端面铆条 ×2
+const qR2=LPf(0,ev);
+mesh(boxGeo(2.4,0.06,0.03),MFc.steel,qR2[0],fy+1.2,qR2[1],ry,false,true);
+}
+for(const st of [-1,1]){ // 锈渍档 (侧板垂锈 ×2, 纵向位置本地哈希定)
+const zz=RFc.r(-2.8,2.8);
+const qT=LPf(st*1.509,zz);
+mesh(boxGeo(0.02,0.7,0.5),MFc.rust,qT[0],fy+0.85,qT[1],ry,false,true);
+}
+{ // 锈渍档 (端面锈 ×1)
+const qT2=LPf(RFc.r(-1,1),3.759);
+mesh(boxGeo(0.5,0.6,0.02),MFc.rust,qT2[0],fy+0.9,qT2[1],ry,false,true);
 }
 coverPoints.push({x:p[0]+cs*2.4,z:p[1]-sn*2.4},{x:p[0]-cs*2.4,z:p[1]+sn*2.4});
 }

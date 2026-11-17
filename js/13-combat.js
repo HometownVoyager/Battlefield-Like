@@ -505,8 +505,9 @@ const o=u.pos.clone(); o.y+=1.15; o.x+=rand(-0.15,0.15); o.z+=rand(-0.15,0.15);
 const v=V3(rand(-0.9,0.9),1.3,rand(-0.9,0.9));
 if(u.isPlayer){
 if(u.nadeIsAT) throwNade(u,o,v,1.6,true);
-else if(u.nadeIsSmoke) throwNade(u,o,v,1.8,false,true);
-else if(u.nadeIsIncin) throwNade(u,o,v,1.6,false,false,true);
+// ★2026-11-17 批2.6: 掉雷继承烹饪余值 (与 frag 同规); 99 哨兵/未定账防御性回落全长
+else if(u.nadeIsSmoke) throwNade(u,o,v,Math.max(0,Math.min(1.8,(u.nadeFuse!==undefined&&u.nadeFuse<90)?u.nadeFuse:1.8)),false,true);
+else if(u.nadeIsIncin) throwNade(u,o,v,Math.max(0,Math.min(1.6,(u.nadeFuse!==undefined&&u.nadeFuse<90)?u.nadeFuse:1.6)),false,false,true);
 else { u._src='手雷'; throwNade(u,o,v,Math.max(0,u.nadeFuse||0)); }
 }else{
 const rem=clamp((u.nadeAnimT||0)/0.8,0,1);   // 0.8 = 14-bots 三处前摇字面量 (state 置位时的 nadeAnimT 初值)
@@ -536,23 +537,51 @@ return null;
 // ── nadeStep 逐帧账复用 (2026-11-01 性能批) ──
 // 盒候选回调提升 (旧版每雷每帧 1 个捕获闭包, bounced/nx/ny/nz/st 经 _ndBoxCtx 传递;
 // 回调体内无重入路径)。(_ndL/_ndW 模块级 scratch 2026-11-10 随大舰超结构反弹块下架一并摘除)
-const _ndBoxCtx={st:null,nx:0,ny:0,nz:0,bounced:false};
+const _ndBoxCtx={st:null,nx:0,ny:0,nz:0,bounced:false,blow:false};
 function _ndBoxCb(b){
 const C=_ndBoxCtx;
-if(C.bounced) return;
+if(C.bounced||C.blow) return;
 if(C.nx>b.minX-0.06&&C.nx<b.maxX+0.06&&C.ny>b.minY-0.06&&C.ny<b.maxY+0.06&&C.nz>b.minZ-0.06&&C.nz<b.maxZ+0.06){
 const dl=Math.min(C.nx-b.minX,b.maxX-C.nx), dv=Math.min(C.ny-b.minY,b.maxY-C.ny), dd=Math.min(C.nz-b.minZ,b.maxZ-C.nz);
-if(dv<=dl&&dv<=dd){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; }
-else if(dl<=dd){ C.st.vel.x*=-0.5; } else { C.st.vel.z*=-0.5; }
+// ★2026-11-17 批2.5/2.ex: 盒面命中分档 ——
+//   表外弹 (at/迫击炮/航弹, 出手即武装): **任意面**命中即炸 (老口径"撞墙即炸"不变)。
+//   表内弹 (frag/smoke/incin, 引信武装): 仅**顶面**命中 (楼板/平顶/墙顶/箱顶, dv 最小且贴顶带) 视作
+//     "落地" ⇒ 引爆 (楼板=地面, 用户裁定 2.5 —— 旧版楼板上引信烧完也永远不炸, 弹体滞留 nades 表);
+//     侧/底面照旧弹跳。弹跳统一补**位置弹出** (沿命中面法向推回面外 0.02, 写回 C.nx/ny/nz 由调用方
+//     取回) —— 旧版只翻速度不修位, 弹体嵌在 0.06 判定带里逐帧反复翻速度 = 嵌墙滞留的根因。
+const armed=!C.st.armOnFuse||C.st.fuse<=0;
+const topHit=dv<=dl&&dv<=dd&&C.ny>=b.maxY-0.06;
+if(armed&&(!C.st.armOnFuse||topHit)){ C.blow=true; return; }
+if(topHit&&C.st.vel.y<0){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; C.ny=b.maxY+0.02; }
+else if(dv<=dl&&dv<=dd){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; C.ny=(C.st.vel.y>0?b.maxY+0.02:b.minY-0.02); }
+else if(dl<=dd){ C.st.vel.x*=-0.5; C.nx=(C.st.vel.x>0?b.maxX+0.02:b.minX-0.02); }
+else { C.st.vel.z*=-0.5; C.nz=(C.st.vel.z>0?b.maxZ+0.02:b.minZ-0.02); }
 C.bounced=true;
 }
 }
 function nadeStep(st,dt){
 st.fuse-=dt;
+// ★2026-11-17 批2.ex: 高速弹隧穿防护 —— 单步位移 >0.24m 时按子步推进 (薄墙 0.15~0.3m + 0.06 判定带,
+// 需要"步长 < 扩边后厚度"才保证点采样命中; 0.24m 对 ≥0.13m 的墙/楼板留 1.8× 余量)。子步共享同一积分
+// (重力/制导按子步等比), 弹跳/引爆/哑火在子步内即时结算返回 —— 单步 (≤0.24m) 时与旧写逐位等价。
+// 上限 8 子步 (航弹末速 ~75m/s × 1/60s ≈ 1.25m ⇒ 6 子步封顶), 每枚弹每帧最多 8 次邻近查询。
+const spd=Math.sqrt(st.vel.x*st.vel.x+st.vel.y*st.vel.y+st.vel.z*st.vel.z);
+const n=Math.min(8,Math.max(1,Math.ceil(spd*dt/0.24)));
+const sdt=dt/n;
+let bouncedAny=false;
+for(let k=0;k<n;k++){
+const ev=_nadeMove(st,sdt);
+if(ev==='blow'||ev==='fizzle') return ev;
+if(ev==='bounced') bouncedAny=true;
+}
+return bouncedAny?'bounced':'none';
+}
+function _nadeMove(st,dt){
 st.vel.y-=9.8*dt;
 // 航弹锁定制导 (2026-09-30k): 投弹瞬间射手带锁定目标 (dropBomb 挂账 lock) ⇒ 弹体以限角速度
 // BOMB_GUIDE_RATE 朝目标掰 —— 只改速度方向不改模长, 落体加速/触发引信/入水哑火全走原链;
 // 目标中途死亡 (lock.alive) 即退回诚实弹道。逐枚走自己的 ndt (时停下冻结弹不拐弯)。
+// (2026-11-17 批2.ex: 移入子步体 —— dt 为子步长, BOMB_GUIDE_RATE×sdt 逐步累加与整步同值)
 if(st.bomb&&st.lock&&st.lock.alive){
 const tx=st.lock.pos.x-st.pos.x, ty=st.lock.pos.y+(st.lock.kind==='tank'?1.2:0.9)-st.pos.y, tz=st.lock.pos.z-st.pos.z;
 const tl=Math.sqrt(tx*tx+ty*ty+tz*tz)||1;
@@ -570,12 +599,13 @@ st.vel.set(gx/gl*vl,gy/gl*vl,gz/gl*vl);
 }
 }
 let nx=st.pos.x+st.vel.x*dt, ny=st.pos.y+st.vel.y*dt, nz=st.pos.z+st.vel.z*dt;
-let bounced=false;
+let bounced=false, boxBlow=false;
 // 2026-09-06 B5/P0-2: 手雷撞盒全量扫描改 RGRID 邻近候选 (±0.06 判定 + 0.02 采样余量);
 // 原实现命中首个盒即 break —— 以 bounced 旗复刻, 候选次序差异由等价探针覆盖
-{const C=_ndBoxCtx; C.st=st; C.nx=nx; C.ny=ny; C.nz=nz; C.bounced=false;
+{const C=_ndBoxCtx; C.st=st; C.nx=nx; C.ny=ny; C.nz=nz; C.bounced=false; C.blow=false;
 eachBoxNear(nx-0.08,nz-0.08,nx+0.08,nz+0.08,_ndBoxCb);
-bounced=C.bounced;}
+if(C.bounced){ nx=C.nx; ny=C.ny; nz=C.nz; }   // ★批2.ex: 弹跳位置弹出 (回调内沿命中面推回面外 0.02)
+bounced=C.bounced; boxBlow=C.blow;}
 // 反坦克炸药/航弹/迫击炮弹的载具触发圈: 2.6m 内即算"接触" (老口径; 它们出手即武装, 由下面统一收口)
 let hitVeh=false;   // (2026-11-10: hitVehY 随大舰甲板接触账下架摘除, 原文见 archive/naval-coral-ironbottom-20261110/)
 if(st.at||st.bomb||st.mortar){
@@ -606,13 +636,14 @@ if(wy>-1e8&&Math.max(ny,gh+0.05)<wy&&waterDepthAt(nx,nz)>0.6){ st.pos.set(nx,Mat
 //   武装完成: 表内弹种 (手雷/烟雾/燃烧) = 引信到点 —— 举雷期间引信照烧, 烧到 0 手里那颗也不炸 (无接触),
 //     只是出手后"第一次碰到什么就炸什么"; 表外 (反坦克炸药/航弹/迫击炮弹) = 出手即武装。
 //   接触: ① 触地 ② 敌兵躯干球 (nadeContactTarget, 只有表内弹种查 —— 老口径里反坦克炸药族撞人不炸,
-//     撞地面/载具就够) ③ 载具触发圈 (仅表外弹种) ④ 撞墙 (仅表外弹种: 老口径撞墙即炸)。
-//   ⇒ 普通手雷撞墙**不炸** (墙不是地面也不是合法目标), 照旧弹跳, 落到地上再炸。
+//     撞地面/载具就够) ③ 载具触发圈 (仅表外弹种) ④ 撞墙 (仅表外弹种: 老口径撞墙即炸) ⑤ 盒面命中
+//     (boxBlow, 2026-11-17 批2.5/2.ex: 表外弹任意面 / 表内弹顶面=楼板落地视作触地)。
+//   ⇒ 普通手雷撞墙**不炸** (墙不是地面也不是合法目标), 照旧弹跳, 落到地上(含楼板/箱顶面)再炸。
 const armed=!st.armOnFuse||st.fuse<=0;
 const touchG=ny<=gh+0.05;
 if(armed){
 const touchT=st.armOnFuse?!!nadeContactTarget(nx,ny,nz,st.team,st.thrower):false;
-if(touchG||touchT||hitVeh||(!st.armOnFuse&&bounced)){ st.pos.set(nx,Math.max(ny,gh+0.05),nz); return 'blow'; }
+if(touchG||touchT||hitVeh||boxBlow||(!st.armOnFuse&&bounced)){ st.pos.set(nx,Math.max(ny,gh+0.05),nz); return 'blow'; }
 }
 if(touchG){
 st.pos.y=gh+0.05;

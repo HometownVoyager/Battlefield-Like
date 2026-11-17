@@ -118,6 +118,7 @@ const SANDBOX=[
 ['dev/verify-bamboo-20261115.js',[],'2026-11-15 竹子批: BAMBOO_IM 实例批+燃烧倒伏碾压链+淞沪竹带 (含 --neg 摘碾压转红)'],
 ['dev/verify-fieldfix2-20261116.js',[],'2026-11-16 八项批+11-17 返修: 树篱三链路/Bot 坦克修理/撞机规避/掉雷开关/主动优化/布娃娃背包/时停关灯 (含 --neg 14 补丁)'],
 ['dev/verify-20261117.js',[],'2026-11-17 四项批: 模型重做(残骸简化44→19件·轿车6→13件·卡车11→21件, 碰撞口径逐字不动)+弹道细化(钢轨街垒 bulletPass 弹道穿透·拒马 cyl.hb 三梁逐梁判定空隙穿弹)+断崖公路(出生半山腰→崖顶 rd>28/h>13·OCC 崖顶走廊打通·enemyTankNear 劫道纳入卡车·convoy.hp 320→800)+游戏内容设置 点位周边补给箱数量 sf_crates 1/2 (第二箱确定性环扫零 wr 漂移) (含 --neg 四补丁)'],
+['dev/verify-20261117b.js',[],'2026-11-17 十三项批: 读条终局收口(endMatch/returnToMenu)+大地图飞行弹点+手雷簇(nadeStep 子步隧穿防护·盒顶面=楼板落地引爆·弹跳修位·烹饪引信 NADE_COOK_FUSE 推广)+车厢模型重做+枯树碾压倒伏+指挥官 ESC 按是否已部署锁章(CMD.deployTouched)+非盒几何碎块兜底(Box3 分块)+残骸排斥(vehiclePushSoldiers 纯推出)+坦克 3 票(TICKET_COST.tank)+暂停面板卡片化/键帽表+帐篷朝营区中心+I18N(标题/killfeed 人名转写/词典+146) (含 --neg 四补丁)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

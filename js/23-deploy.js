@@ -82,7 +82,7 @@ if(i===3&&typeof EXPERIMENT!=='undefined'&&EXPERIMENT){
 const pend=(typeof player.specWant==='boolean');
 card.classList.toggle('spec',!!(player.spectator||pend));
 if(card.style) card.style.outline=(player.spectator||pend)?'2px solid #ffd76b':'';
-if(cn) cn.textContent='巡飞弹兵'+(player.spectator?' · 调试中':(pend?' · 调试待生效':''));
+if(cn) cn.textContent=t2('巡飞弹兵')+(player.spectator?t2(' · 调试中'):(pend?t2(' · 调试待生效'):''));   // ★2026-11-17 批1: 状态刷新路径也走翻译
 }else if(cn&&typeof t2==='function'&&typeof CLASSES!=='undefined'&&CLASSES[i]){
 cn.textContent=t2(CLASSES[i].name);
 }
@@ -142,7 +142,7 @@ if(!isDead) return '';
 const lifeT=Math.max(0,nowT-(player.lifeStartT||nowT));
 const mm2=Math.floor(lifeT/60), ss3=Math.floor(lifeT%60);
 const lk=player.lifeKills||0, ls=(player.score||0)-(player.lifeScoreStart||0);
-return (player.killerName?t('你被 {0} 击杀了',`<b>${player.killerName}</b>${player.killerSrc?` <span style="font-size:12px;color:#cfd8c2">[${t(player.killerSrc)}]</span>`:''}`)+'<br>':'')+
+return (player.killerName?t('你被 {0} 击杀了',`<b>${t(player.killerName)}</b>${player.killerSrc?` <span style="font-size:12px;color:#cfd8c2">[${t(player.killerSrc)}]</span>`:''}`)+'<br>':'')+   // ★批1: 击杀者名走词典
 `<span style="font-size:13px;color:#cdd8c8">${t('本次存活 {0} · 击杀 {1} · 获得 +{2} 分',mm2+':'+(ss3<10?'0':'')+ss3,lk,ls)} &nbsp;|&nbsp; ${t('本局总计 {0} 杀 / {1} 死 / {2} 分',player.kills,player.deaths,player.score)}</span>`;
 })();
 if(isAliveDeployed){
@@ -233,7 +233,7 @@ if(typeof player!=='undefined'&&player){ player.deployed=false; }
 //   gate(5) 判成「本局未选指挥官」/ 其余卡被判成「本局已锁定指挥官」—— 撤销按钮等于把人锁死在原地。
 //   这正是「撤销 = 本次选择作废」的完整语义: 盖章与撤章必须成对出现在同一条链上, 单源只有 CMD.lockedDir。
 // 「out」同样归 null (异常路径提前盖了章也属本次作废)。
-if(typeof CMD!=='undefined'&&CMD){ CMD.lockedDir=null; }
+if(typeof CMD!=='undefined'&&CMD){ CMD.lockedDir=null; CMD.deployTouched=false; }   // ★2026-11-17 批6: 布势动作账随撤销一并作废
 // ── ④b 「这次看图」临时账归零 ──
 // CMD.hl/sel/cursor/focusFire 是 26-commander 交互重做批新增的**看图期**临时账 (高亮单位 / 点选单位 /
 // 鼠标世界坐标 / 集火点)。它们与布势同生共死: 撤销后布势界面没了, 任何一项残留都会带进下一次进图 ——

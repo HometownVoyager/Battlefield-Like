@@ -1713,6 +1713,9 @@ incin:{v:22,up:2.6}
 // 普通手雷引信全长 (2026-10-25 收口单源, 旧为 19-input 一处字面量): 举起时 nadeFuse 从此值起烧
 // (举雷期照烧是 2026-09-30 用户裁定的"厨雷"手感)。读处: 19-input 举起设定 / 22-hud 读条分母 (引信进度条)。
 const NADE_FUSE_T=3.8;
+// ★2026-11-17 批2.6: 烟雾/燃烧弹烹饪引信全长 (与 frag 同口径: 举起即起烧, 出手带余值, 掉雷继承)。
+//   AT 不在表内 —— 撞炸弹无引信可烹 (保持 19-input 的 99 哨兵, releaseNade 不读它)。读处: 19-input 举起 / 22-hud 读条分母。
+const NADE_COOK_FUSE={smoke:1.8,incin:1.6};
 // 读条受击打断门槛 (★2026-10-25 反馈轮② 用户裁定"会被高于25的单次伤害打断"): 单次伤害 >25 才打断
 // 包扎/拆除/前摇/举雷/换弹 (18-game damage 单源门); ≤25 的刮伤——枪弹蹭伤/火蚀/严寒激流小跳伤——不再打断。
 const READBAR_DMG_GATE=25;
@@ -1803,7 +1806,9 @@ const EM_CAST_DUR=0.9;   // 固定火力点使用前摇 (玩家 20-player 与 Bo
 // smoothstep 单源 (2026-09-06 B7a/P3-8: 旧 03-terrain/06-engineering ≥9 处内联 t*t*(3-2*t))
 const sstep=t=>t*t*(3-2*t);
 const SCORE_TABLE={kill:100,head:125,tank:300,plane:250,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};
-const TICKET_COST={tankLight:5,tankHeavy:6,plane:3};
+// ★2026-11-17 批11 (用户裁定): 坦克本身一律占 3 票 (不分轻重/有人无人) —— 车体装备票, 与乘员人命票
+//   (各 1 票, 见 CREW_TICKET_EACH) 分开记。旧口径: 有人车 0 装备票 / 空车 5~6 装备票。
+const TICKET_COST={tank:3,plane:3};
 const TICKET_CAP=999;
 // ===== 地图可破坏物得分 (2026-09-26 破坏得分批) =====
 // 口径: 摧毁地图上的一"组"可破坏物 (05-world 的 DESTRUCTIBLES 台账 —— 砖墙/木栅/楼板/厂房设备/
@@ -1842,8 +1847,8 @@ const STRUCT_HP={ref:6, base:0.6, span:0.4, min:0.75, max:2.6};
 const STRUCT_ROOF={base:260, perSqrtArea:70, min:300, max:1500};
 // ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) =====
 // A#7 坦克三人车组: 编制人数 = 3。车毁恒结算 CREW_N 次死亡 / CREW_N 杀 / CREW_N 票 (每票 1 人)。
-//   为什么票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,
-//   一张 5~6 票的坦克票表达的是"装备损失", 与 A#7 的语义不同。TICKET_COST 仍供其他载具沿用。
+//   为什么**乘员**票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,
+//   与"装备损失"票分开 —— 车体装备票 = TICKET_COST.tank=3 (2026-11-17 批11: 有人车也收, 见 15-vehicles die)。
 const CREW_N=3;              // 每车乘员数 (含玩家占位: 玩家上车即顶替原 AI 驾驶员, 车内恒为 3 人)
 // ★2026-09-26 审计复核: 本常量只作编制契约的显式声明 (22-hud 乘员数 / crewRoster 口径);
 //   车毁**有意**不按它乘票乘杀 (见 15-vehicles 里那条"只对真人成立, 故一律不加") —— 不是漏读。

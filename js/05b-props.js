@@ -994,6 +994,12 @@ mesh(boxGeo(0.1,0.1,step+0.1),MAT.metalDark,rx,g0+0.1,rz,ry,false,true);
 }
 }
 // 平板车残骸: 硬掩体, 坦克不可碾 (无 crush) —— 破袭目标感
+// 2026-11-18 车皮细节化 (纯视觉 ×15/皮, 8→23 件): 侧梁/端梁/枕梁 (木底架带) + 制动台 + 铆钉线 +
+//   锈渍档, 与残骸工具箱同调 (wkMat 锈蚀/裸钢/木 三档)。碰撞/账目逐字不动: solidBox 参数、
+//   平板面/车轮/端挡板、coverPoints 原样, 不新增 solidBox/addBoxCollider/CYLS。
+//   高度账: 车架 solidBox 顶 = fit.y+0.725 —— 新件最高 (制动台罩顶 fit.y+0.97) 在 +0.25 内, 不立
+//   挡板, 剪影仍是无侧板平板车; 底架带贴 fit.y+0.285~0.375 (车架底缘下), 让开轮对 (x ±0.76~0.94)。
+//   随机流: 本函数 0 次 wr —— 细节抖动走 wkRand 本地哈希 (salt 0x3b29), 布局指纹零漂移。
 function railFlatcar(x,z,ry){
 if(!propFree(x,z,3.5)||!freeSpot(x,z,3.2)) return;
 propTake(x,z,3.5);
@@ -1014,6 +1020,45 @@ mesh(new THREE.CylinderGeometry(0.32,0.32,0.18,8),MAT.metalDark,wx,fit.y+0.32,wz
 for(const sgn of [-1,1]){
 const px=x+sn*sgn*2.7, pz=z+cs*sgn*2.7;
 mesh(boxGeo(2.1,0.7,0.12),MAT.woodDark,px,fit.y+1.1,pz,ry,false,true);
+}
+// ── 2026-11-18 底架细节化 (纯视觉 ×15, 零碰撞账; 材质走残骸工具箱 wkMat 同档同实例) ──
+const LF2=(lx,lz)=>[x+lx*cs+lz*sn, z-lx*sn+lz*cs];
+const RF2=wkRand(x,z,ry,0x3b29);
+const MF2={wood:wkMat('wood',0x6a583c,TEX.deckWood,1.1),rust:wkMat('rust',0x7d5535,TEX.rust,1.2),
+steel:wkMat('steel',0x767770,TEX.metalBrush,0.8)};
+for(const sl of [-1.02,1.02]){ // 侧梁 ×2 (木底架纵梁, 贴车架侧板内侧下缘, 让开轮对)
+const qS=LF2(sl,0);
+mesh(boxGeo(0.16,0.09,5.6),MF2.wood,qS[0],fit.y+0.33,qS[1],ry,false,true);
+}
+for(const eb of [-2.82,2.82]){ // 端梁 ×2 (贯通两侧梁)
+const qE=LF2(0,eb);
+mesh(boxGeo(2.2,0.09,0.16),MF2.wood,qE[0],fit.y+0.33,qE[1],ry,false,true);
+}
+for(const bl of [-1.55,1.55]){ // 枕梁 ×2 (轮对内侧横梁, 底架带)
+const qB=LF2(0,bl);
+mesh(boxGeo(2.2,0.09,0.2),MF2.wood,qB[0],fit.y+0.33,qB[1],ry,false,true);
+}
+{ // 制动台 (端部木踏板 + 钢罩壳, 罩顶 fit.y+0.97 在 +0.25 上限内)
+const qp=LF2(-0.6,2.25);
+mesh(boxGeo(0.6,0.05,0.45),MF2.wood,qp[0],fit.y+0.865,qp[1],ry,false,true);
+const qh=LF2(-0.6,1.9);
+mesh(boxGeo(0.2,0.08,0.2),MF2.steel,qh[0],fit.y+0.93,qh[1],ry,false,true);
+}
+for(const rv of [-1.115,1.115]){ // 铆钉线 ×2 (车架侧板面通长钢铆条)
+const qr=LF2(rv,0);
+mesh(boxGeo(0.03,0.05,5.4),MF2.steel,qr[0],fit.y+0.55,qr[1],ry,false,true);
+}
+for(const ev of [-2.915,2.915]){ // 端面铆条 ×2
+const qe=LF2(0,ev);
+mesh(boxGeo(2.0,0.05,0.03),MF2.steel,qe[0],fit.y+0.55,qe[1],ry,false,true);
+}
+{ // 锈渍档 ×3 (平板面锈斑 ×2 落位走本地哈希 + 侧板垂锈 ×1)
+for(let i=0;i<2;i++){
+const qs=LF2(RF2.r(-0.5,0.5),RF2.r(-1.8,1.8));
+mesh(boxGeo(0.8,0.02,0.55),MF2.rust,qs[0],fit.y+0.845,qs[1],ry,false,true);
+}
+const qt=LF2((RF2.chance(0.5)?1:-1)*1.109,RF2.r(-2,2));
+mesh(boxGeo(0.02,0.5,0.4),MF2.rust,qt[0],fit.y+0.55,qt[1],ry,false,true);
 }
 coverPoints.push({x:x+cs*1.4,z:z-sn*1.4},{x:x-cs*1.4,z:z+sn*1.4});
 }

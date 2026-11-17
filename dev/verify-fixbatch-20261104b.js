@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────
-// dev/verify-fixbatch-20261117a.js —— 时停五项批验收 (2026-11-04b, 不进 index.html)
-// 用法: node dev/verify-fixbatch-20261117a.js
+// dev/verify-fixbatch-20261117b.js —— 时停五项批验收 (2026-11-04b, 不进 index.html)
+// 用法: node dev/verify-fixbatch-20261117b.js
 // 判据:
 //   ① 时停击杀/破坏即现: spawnRagdoll/spawnDebris 生成当帧把刚体位姿贴给网格 (dt=0 也可见)
 //   ② 全部部署/重部署不继承上一次选择: 新对局 resetPlayerForNewMatch 清 cls/selectedSpawn,
@@ -171,14 +171,14 @@ ok(typeof r==='object'&&Math.abs(r.rainLen-0.7)<1e-4,
 // 版本戳 ───────────────────────────────────────────────────────
 console.log('版本戳');
 {
-ok(SRC['index.html'].indexOf("window.__sfStyleVer='20261117a';")>=0&&
-   (SRC['index.html'].match(/20261117a/g)||[]).length>=44&&
+ok(SRC['index.html'].indexOf("window.__sfStyleVer='20261117b';")>=0&&
+   (SRC['index.html'].match(/20261117b/g)||[]).length>=44&&
    !SRC['index.html'].includes('20261104a'),
- 'index.html 全量升 20261117a (__sfStyleVer + css/js 引用, 老戳清零) (2026-11-10 跟码: 49 处/45 行)');
+ 'index.html 全量升 20261117b (__sfStyleVer + css/js 引用, 老戳清零) (2026-11-10 跟码: 49 处/45 行)');
 ok(!read('dev/_game_files.txt').includes('20261104a')&&
-   (read('dev/_game_files.txt').match(/20261117a/g)||[]).length===45,
+   (read('dev/_game_files.txt').match(/20261117b/g)||[]).length===45,
  'dev/_game_files.txt 45 行同步升戳 (2026-11-10 海战移除批判据跟码)');
 }
 
-console.log(`\n═══ verify-fixbatch-20261117a: ${PASS} 通过 / ${FAILS} 失败 ═══`);
+console.log(`\n═══ verify-fixbatch-20261117b: ${PASS} 通过 / ${FAILS} 失败 ═══`);
 process.exit(FAILS?1:0);

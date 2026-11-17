@@ -232,7 +232,24 @@ e.mesh.geometry.dispose();
 function spawnWallDebris(m,cx,cz){
 if(!window.CANNON) return;
 const P=m.geometry&&m.geometry.parameters;
-if(!P||!(P.width>0&&P.height>0&&P.depth>0)) return; // 参数缺失/桩环境直接跳过 (防 NaN 碎块)
+if(!P||!(P.width>0&&P.height>0&&P.depth>0)){
+// ★2026-11-17 批7 (用户实报"水泥墩子被毁直接消失"): 非盒几何 (圆柱锅炉/烟囱/圆锥锥体一类) 旧版在此
+//   直接跳过 ⇒ 这类件被毁只有尘没有 CANNON 碎块。兜底: 按世界包围盒 (Box3.setFromObject, 免管
+//   rotation.z 竖立圆柱的局部轴) 均布切块抛出, 材质取原 mesh, 2×2×2 块数上限防 96 池被单件灌满。
+//   桩环境 (THREE.Box3 缺失/几何异常) 静默跳过, 行为与旧版一致。
+if(!m.geometry||typeof THREE==='undefined'||typeof THREE.Box3!=='function') return;
+try{
+const bb=new THREE.Box3().setFromObject(m);
+const w=bb.max.x-bb.min.x, h=bb.max.y-bb.min.y, d=bb.max.z-bb.min.z;
+if(!(w>0.3&&h>0.2&&d>0.3&&w*h*d>0.06)) return;
+const nx=Math.max(1,Math.min(2,Math.round(w/1.2))), ny=Math.max(1,Math.min(2,Math.round(h/1.4))), nz=Math.max(1,Math.min(2,Math.round(d/1.2)));
+for(let ix=0;ix<nx;ix++)for(let iy=0;iy<ny;iy++)for(let iz=0;iz<nz;iz++){
+const cw=Math.max(0.22,(w/nx)*rand(0.7,0.95)), ch=Math.max(0.2,(h/ny)*rand(0.7,0.95)), cd=Math.max(0.22,(d/nz)*rand(0.7,0.95));
+spawnDebris(m.material,bb.min.x+w*(ix+0.5)/nx,bb.min.y+h*(iy+0.5)/ny,bb.min.z+d*(iz+0.5)/nz,0,cw,ch,cd,cx,cz);
+}
+}catch(e){}
+return;
+}
 const ry=m.rotation.y||0;
 const w=P.width,h=P.height,d=P.depth;
 if(!(w*h*d>0.04)) return;

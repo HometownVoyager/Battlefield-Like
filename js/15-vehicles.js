@@ -906,6 +906,14 @@ this.beaconMat.opacity=0.6+0.4*Math.sin(nowT*2.6+this.team*2.3);
 	if(!this.alive){
 	this.respawnT-=dt*tankRespawnMul(this.team); // 厂房在手: 苏军坦克重生倒计时倍速消耗 (22~29s)
 	this.engine.update(0,0);
+	// ★2026-11-17 批8 (用户裁定): 残骸排斥 —— 沉没前 (wreckBs 未摘) 残骸车体照 vehiclePushSoldiers
+	// 同参推挤步兵 (moving=false ⇒ 无碾压分支, 纯推出): 下车/被炸飞进残骸 footprint 里的人不再卡壳。
+	// onHalf 摘 wreckBs 即停 (半沉车壳不再推人, 与碰撞账同生死)。
+	if(this.wreckBs){
+	const _o=_vpsOpts; _o.dt=dt; _o.crusher=null; _o.moving=false; _o.yMax=1.9; _o.frontalBand=1.5;
+	_o.symmetricFrontal=false; _o.crushDmg=0; _o.pushVel=0; _o.checkSpectator=false;
+	vehiclePushSoldiers(this,Math.max(2.05,this.halfW||2.05),this.def.hullL/2+0.45,_o);
+	}
 	// 兵力票归零 → 该队坦克封重生 (清场阶段敌方不再补充载具, 2026-09-04)
 	if(this.respawnT<=0&&!matchOver&&tickets[this.team]>0) this.respawn();
 	return;
@@ -1715,15 +1723,17 @@ if(typeof driver.crewKill==='function') driver.crewKill(attacker); // bots: 走 
 else driver.damage(999,attacker,false);                            // 兜底: 数字一致
 }
 for(const s of this.crewSlots) if(!spec) settleCrewSlotDeath(s,attacker,this.team); // 2 个名额: 各 1 死/1 票/+1 杀 (观战者座驾不结算, 见上)
-}else{
-tickets[this.team]=Math.max(0,tickets[this.team]-(this.def.heavy?TICKET_COST.tankHeavy:TICKET_COST.tankLight));
 }
+// ★2026-11-17 批11 (用户裁定): 坦克本身一律占 3 票 (TICKET_COST.tank) —— 车体装备票不再只对空车收
+//   5~6 票, 而是有人车/空车都收 3 票; 乘员照旧各自 1 票 (驾驶员死亡链 + 2 个名额, 上面已结算)。
+//   有人车整损 = 3 车体 + 3 人命, 空车 = 3 车体 (旧: 有人车 3 / 空车 5~6)。观战者座驾照旧零票 (观战无反噬)。
+if(!spec) tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.tank);
 if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力, 毁"己方"载具不记分不播报)
 // 一次车毁只出一条战报 (victim 写清 3 名乘员; 玩家在内时死亡链另有 1 行 ⇒ 合计 ≤2 行)
 // ★2026-09-26 修: **空车**不吹"乘员×3" —— 上面空车分支明确"没有人可杀 (0 死 0 杀)", 战报却照写 3 名乘员,
 // 观感是"打死三个人的战报、记分板上零击杀" (与被炸毁的无人坦克对不上)。有人才写乘员数, 空车只报车名。
 // 2026-09-26H 同规: 观战者座驾同样不写乘员数 (上面 spec 分支不结算任何乘员)。
-const feedName=(driver&&!spec)?(this.name+' · 乘员×3'):this.name;
+const feedName=(driver&&!spec)?(t(this.name)+' · '+t('乘员×3')):t(this.name);   // ★2026-11-17 批1: 战报名走词典 (动态拼接串查不到表; addKillfeed 侧 t() 对英文回退原样)
 addKillfeed(attacker,{name:feedName,team:this.team,isPlayer:false},false);
 // 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); 与"3 杀"的击杀分是两回事, 只结算这一处
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁坦克',SCORE_TABLE.tank);

@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
-// dev/verify-audio3-20261117a.js —— 音效系统完全推倒重写批 (2026-11-15c)
-// 用法: node dev/verify-audio3-20261117a.js [--neg]
+// dev/verify-audio3-20261117b.js —— 音效系统完全推倒重写批 (2026-11-15c)
+// 用法: node dev/verify-audio3-20261117b.js [--neg]
 // 判据:
 //   T1 契约不破: 闸门 bypass Set 13 键 verbatim / naval 段逐字锚 (navalAudioTick 定义+挂 api /
 //      navalAudEngine 只写 osc.type·osc2.detune·lp.frequency) / splash 四参签名 / 引擎频率写法带 pitch 倍率。
@@ -111,7 +111,7 @@ let IDX=0; { const c0=boot(0); IDX=vm.runInContext('CAMPAIGNS.findIndex(c=>c.id=
 const ctx=boot(IDX,true);
 const SH=ctx2=>s=>vm.runInContext(s,ctx2);
 const Gm=SH(ctx);
-ok(html.includes("__sfStyleVer='20261117a'"),'前置: 版本戳 20261117a 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261117b'"),'前置: 版本戳 20261117b 在位 (index.html 内联)');
 ok(Gm('player.alive')===true,'前置: 开局/部署成功 (normandy)');
 
 // ══ T1 契约不破 ══
@@ -232,5 +232,5 @@ console.log('T6 限流');
 ok(src01.includes('if(dist>70){')===true&&src01.includes('if(++farWinN>4) return;')===true,'T6 远枪限流仍在 (dist>70 · 100ms 窗 4 发)');
 
 console.log('');
-console.log('verify-audio3-20261117a: PASS='+PASS.length+' FAIL='+FAILN+(NEG?' (--neg)':''));
+console.log('verify-audio3-20261117b: PASS='+PASS.length+' FAIL='+FAILN+(NEG?' (--neg)':''));
 if(FAILN>0) process.exit(1);

@@ -290,7 +290,12 @@ try{
 var tk=null; for(var i=0;i<tanks.length;i++){ if(tanks[i].team===player.team){ tk=tanks[i]; break; } }
 if(!tk) return {err:'缺本队坦克'};
 var tkTeam=tk.team;
-tk.alive=true; tk.hp=100; tk.playerDriven=false;
+// ★2026-11-17b 判据加固: hp 100→500 —— ① 的观战 AT雷 (splashDamage 载具 340 ap, 圈缘命中 ≈185) 原本会把
+// 100hp 的车当场炸毁, die() 当场注册的 3 只 2.5×1.9×2.5 残骸盒 (registerDynCollider) 正好躺在 ② 的弹道走廊里:
+// 旧代码单步 0.45m 一脚踩进残骸盒心 0.44m 才爆 (爆点落盒内 y=0.59, 离地 0.10 巧过 <0.3 代理), 新代码子步
+// 采样在盒面就爆 (0.32) 被误判"没落地"。让车活过 ① (只掉血不摧毁), ② 才是干净地对着"活着的友军坦克"测
+// 载具圈认队 —— 活车不注册 RGRID 盒, 走廊净空, 落地才炸的判据才成立。
+tk.alive=true; tk.hp=500; tk.playerDriven=false;
 // 清场: 其它坦/卡搬走 (触发圈 2.6m 不容旁观车)
 var savedV=[];
 for(i=0;i<tanks.length;i++){ var t2v=tanks[i]; if(t2v!==tk&&t2v.alive){ savedV.push([t2v,t2v.pos.x,t2v.pos.y,t2v.pos.z]); t2v.pos.x+=500; t2v.pos.z+=500; } }
@@ -303,6 +308,17 @@ var a=0.17+k*0.224, dx=Math.sin(a), dz=Math.cos(a);
 tx=player.pos.x+dx*5; tz=player.pos.z+dz*5;
 if(!_isLand(tx,tz)||occBlocked(tx,tz)) continue;
 if(raycastWorld(V3(tx,heightAt(tx,tz)+0.55,tz),V3(0,1,0),3)) continue;
+// ★2026-11-17b 判据加固: 弹道走廊净空 —— 出手点沿 dir 0.75~6m 采样带内不得有低空盒 (旧判据只查摆车点,
+// 走廊里有墙体/残骸盒时 AT雷撞面 0.32m 高度即爆被判"没落地"。撞墙/撞残骸即炸本是表外弹种老口径 (触发判据④),
+// 子步采样 (2026-11-17 批2.ex 隧穿防护) 让爆点从"穿进盒里 0.44m 的内部点"挪到盒面=更诚实; 阴性组要测的
+// 是"载具圈不认友军", 走廊必须净空, 落地高度 <0.3 才是有效代理)。带顶 1.6m 覆盖全程弹道 (1.4 出手→0.05 落地)。
+var flyClear=true;
+for(var m=0.75;m<=6&&flyClear;m+=0.75){
+var sx=player.pos.x+dx*m, sz=player.pos.z+dz*m, sg=heightAt(sx,sz);
+eachBoxNear(sx-0.5,sz-0.5,sx+0.5,sz+0.5,function(b){ if(b.minY<sg+1.6&&b.maxY>sg+0.05) flyClear=false; });
+}
+if(!flyClear) continue;
+if(Math.abs(heightAt(tx,tz)-heightAt(player.pos.x,player.pos.z))>1) continue;
 dir=V3(dx,0,dz);
 }
 if(!dir){ for(i=0;i<savedV.length;i++){ savedV[i][0].pos.x=savedV[i][1]; savedV[i][0].pos.y=savedV[i][2]; savedV[i][0].pos.z=savedV[i][3]; } return {err:'无摆坦克的开阔地'}; }
@@ -316,10 +332,10 @@ var nd=nades[nades.length-1];
 var r1=_stepNade(nd,240);
 out.specAirBlow=!!(r1.blow&&r1.blow.y-heightAt(r1.blow.x,r1.blow.z)>0.5);
 out.specBlowH=r1.blow?(r1.blow.y-heightAt(r1.blow.x,r1.blow.z)):null;
-out.specTankDmg=tk.hp<100;
+out.specTankDmg=tk.hp<500;
 out.specSteps=r1.steps;
-// ② 非观战阴性: 同一条弹道不空中触发, 落地才炸
-tk.hp=100;
+// ② 非观战阴性: 同一条弹道不空中触发, 落地才炸 (车活着: 圈认队判据真成立, 且无残骸盒污染走廊)
+tk.hp=500;
 player.spectator=false;
 player._src='反坦克炸药';
 throwNade(player,o,V3(dir.x*9,-0.5,dir.z*9),9,true);
@@ -337,7 +353,7 @@ return out;
 if(t4.err){ ok(false,'T4 异常 '+t4.err); }
 else{
 ok(t4.specAirBlow===true,'T4 ★观战 AT雷空中直击己方坦克触发 (步数 '+t4.specSteps+', 触发点高于地面) —— 直击中立核心判据');
-ok(t4.specTankDmg===true,'T4 观战 AT雷爆炸伤到己方坦克 (hp 100 → '+t4.specTankDmg+' 已掉血, 溅射 -1 链)');
+ok(t4.specTankDmg===true,'T4 观战 AT雷爆炸伤到己方坦克 (hp 500 → '+t4.specTankDmg+' 已掉血, 溅射 -1 链; 只掉血不摧毁=无残骸盒污染)');
 ok(t4.plainGroundBlow===true,'T4 阴性: 非观战 AT雷对己方坦克照旧穿过 (步数 '+t4.plainSteps+', 落地才炸)');
 }
 

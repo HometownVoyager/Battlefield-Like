@@ -61,6 +61,10 @@ mapOn:false,          // 指挥地图开着
 mapDeploy:false,      // 布势版 (D21: 世界冻结 + 配比/初始命令 + 确认开战)
 // (旧字段 pick 已随两步下令链退场删除, 见 cmdMapBind 左键分支的说明块; sel 保留 = 面板/选中环兼容读)
 deploySeen:false,     // 本局布势界面是否已出过 (只在首次选指挥官卡时自动弹一次)
+deployTouched:false,  // ★2026-11-17 批6: 本次布势是否真的做出过部署动作 (下令/集火/调配比任一即置位) ——
+                      // ESC 收图回部署页时按它决定盖不盖兵种锁 (用户裁定: 没布过势的 ESC 不锁兵种)。
+                      // 置位点: cmdOrderUnit 非 free 命令 / cmdFocusFire / cmdRatioAdj (均带 mapDeploy 门);
+                      // 复位点: cmdDeployOpen 进图 / cmdResetMatch 换局 / cmdDeployUndo 撤销。
 sel:null,             // 选中的 unit
 bake:null,            // {cv, S, half} 底图 (烘焙完成后的成品, cmdBakeNeeded 读它)
 _bj:null,             // 底图烘焙**作业** (预算式续算中); 完成即搬到 bake 并置 null (见 cmdBakeAdvance)
@@ -337,6 +341,7 @@ if(typeof planes!=='undefined') for(const pl of planes){ if(!pl) continue; if(pl
 CMD.orbat=null; CMD.lockedDir=null; CMD.focus=CMD_TIME.FOCUS_MAX;
 CMD.slowOn=false; CMD.slowLock=false; CMD.sel=null; CMD.bake=null; CMD.view=null; CMD._follow=true;
 CMD.deploySeen=false;
+CMD.deployTouched=false;   // ★2026-11-17 批6: 布势动作账换局归零
 CMD._pauseHid=false;
 CMD._disbanded=null;   // 私人小队解散账 (反馈批用户需求 4): 换局作废 —— SQUAD.members 由换局链自己清
 CMD.hl=null; CMD.cursor=null; CMD.focusFire=null;   // 交互重做批: 高亮/光标/集火都是局数据, 换局归零
@@ -417,6 +422,7 @@ const pl=unit.veh;
 if(mode==='strike'&&pl){
 pl.strikePt={x:+x,z:+z}; pl.strikeT0=(typeof nowT==='number')?nowT:0;
 o.mode='strike'; o.x=+x; o.z=+z;
+if(CMD.mapDeploy) CMD.deployTouched=true;   // ★2026-11-17 批6: 布势期下初始令=部署动作
 }else if(mode==='free'){
 // ★2026-10-26 排查轮二审 修复 (free 后 strikeT0 残留 = 幽灵任务时间戳): 16-aircraft 的 strike 块用
 //   "strikeT0!==undefined && nowT-strikeT0>45" 判 45s 超时, 并把 strikeT0 当作「本次任务开始时刻」。
@@ -434,7 +440,7 @@ return false;
 }
 }else{
 if(mode==='free'){ o.mode='free'; o.x=0; o.z=0; }
-else if(mode==='attack_move'||mode==='hold'){ o.mode=mode; o.x=+x; o.z=+z; }
+else if(mode==='attack_move'||mode==='hold'){ o.mode=mode; o.x=+x; o.z=+z; if(CMD.mapDeploy) CMD.deployTouched=true; }   // ★2026-11-17 批6
 else return false;
 if(unit.kind==='inf'){
 for(const b of unit.members){ if(b){ b.decisionT=0; b.repathT=0; b.path=null; b.defendPt=null; } }
@@ -931,6 +937,7 @@ else if(mode==='strike'||mode==='attack_move') showScorePop(t2('命令: {0} → 
 function cmdFocusFire(x,z){
 if(!cmdIsCommander()) return;
 CMD.focusFire={x:+x,z:+z,t0:(typeof nowT==='number'?nowT:0),until:(typeof nowT==='number'?nowT:0)+CMD_FIRE.DUR};
+if(CMD.mapDeploy) CMD.deployTouched=true;   // ★2026-11-17 批6: 布势期集火=部署动作
 CMD.hl=null; CMD.sel=null;                     // 集火是"对一片区域下令", 不针对某个单位 → 清掉高亮
 // 广播: 半径内己方单位记下 focus 点 (消费点见 cmdFocusTarget)
 let n=0;
@@ -1623,6 +1630,7 @@ const total=s.members.length;
 const sum=cur.reduce((a,b)=>a+b,0);
 if(d>0){ if(sum>=total) return; cur[ci]++; }
 else { if(cur[ci]<=0) return; cur[ci]--; }
+if(CMD.mapDeploy) CMD.deployTouched=true;   // ★2026-11-17 批6: 布势期调配比=部署动作
 cmdRatioApply(s);
 }
 function cmdRatioApply(s){
@@ -1647,6 +1655,7 @@ if(cmdBakeNeeded()&&!CMD._bj){ try{ cmdBakeBegin(); }catch(e){} }
 CMD.mapOn=true; CMD.mapDeploy=true; CMD.sel=null;
 CMD._pauseHid=false;
 CMD.deploySeen=true;
+CMD.deployTouched=false;   // ★2026-11-17 批6: 进图重新计账 —— ESC 是否锁章只看本次布势做过什么
 // 私人小队互斥 (2026-10-26 反馈批, 用户需求 4): 进布势即解散收编 —— 让布势地图从第一帧起就看到
 // 完整编制 (含被 startMatch 组队占掉的那 3 人); 确认开战盖章路径的同名调用幂等 (SQUAD 已空=零操作)。
 // 撤销布势走 cmdDeployUndo → cmdSquadRestore 原样还编 (23-deploy 接线)。
@@ -1663,7 +1672,7 @@ cmdMapWrapShow(true);
 if(document.pointerLockElement) document.exitPointerLock();
 cmdMapResize(); cmdMapDraw(); cmdMapPanelTick();
 }
-function cmdDeployConfirm(){
+function cmdDeployConfirm(esc){
 // 确认开战: 收起布势地图 (部署页就在身后), 世界解冻 (cmdDtGate 不再回 0)。
 // ★ 必须**先** cmdMapClose: close 靠读 mapDeploy 判断"布势版挂在 body, 收起要搬回 #ui 压制网" ——
 //   先清标志再收图 = 宿主永远滞留 body (布势后再开战斗图会连显隐压制网一起绕过)。
@@ -1679,7 +1688,11 @@ CMD.mapDeploy=false;
 //     与「撤销布势」不冲突 —— cmdDeployUndo (23-deploy 单源) 会把 lockedDir 复位成 null, 所以
 //     「撤销 → 重选兵种 → 再确认」这条链照常成立, 撤销正是用户需求 6 的前半句。
 //     副作用面: 只有布势确认这一条路径新增盖章 (非指挥官玩家走不到这里), 其余零回归。
-if(typeof cmdLockStamp==='function') cmdLockStamp(player.cls);
+// ★2026-11-17 批6 (用户裁定): 盖章按「是否已经做出部署」分流 —— 显式提交 (✚确认开战按钮/触屏关图,
+//   esc 缺省) 照旧无条件盖章; ESC 收图 (19-input 传 esc=true) 只在本次布势真的做过部署动作
+//   (CMD.deployTouched: 下令/集火/调配比任一) 时才盖章, 纯看了一眼就 ESC = 不锁兵种, 卡片保持全可选。
+//   落地那一刻的 cmdLockStamp (23-deploy deployPlayer) 原样保留 —— R10「首次部署可选」语义不变。
+if((!esc||CMD.deployTouched)&&typeof cmdLockStamp==='function') cmdLockStamp(player.cls);
 const dep=document.getElementById('deploy');
 if(dep&&dep.classList.contains('hidden')&&typeof showDeploy==='function'&&player.alive) showDeploy(false);
 if(typeof AudioSys!=='undefined'&&AudioSys.click) AudioSys.click(1300,0.3,0.06);

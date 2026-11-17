@@ -606,6 +606,12 @@ c.beginPath(); c.moveTo(0,-5); c.lineTo(4,4); c.lineTo(0,2); c.lineTo(-4,4); c.c
 c.restore();
 }
 
+// 飞行中投射物小点 (2026-11-17 批2: 与 drawMinimap 第 1 层 378-381 同款) —— 手雷/迫击炮弹/航弹
+//   在飞时小地图有 #ffd050 小点, 大地图原本漏了这一块 ⇒ 开 M 图弹点就"消失" (用户实报)。同色同尺寸补齐。
+for(const n of nades){
+const [px,py]=toM(n.pos.x,n.pos.z);
+c.fillStyle='#ffd050'; c.fillRect(px-1.5,py-1.5,3,3);
+}
 // ── 第 2 层: 黑色蒙版与视野圆透视 (点位图层之上，基础地图图层之下) ──
 const fullIntel=(typeof MAP_ALL_INTEL!=='undefined'&&MAP_ALL_INTEL);
 if(!fullIntel && player.alive && !player.spectator){
@@ -806,7 +812,7 @@ const _naP=V3(0,0,0), _naQ=V3(0,0,0);
 // 预瞄地图标记账 (2026-11-03 批): 预演激活帧挂落点/圈半径/圈内目标, drawMinimap/drawBigMap 读取画
 // "落点小圈 + 圈内目标黄边" (NADE_MAP_MARK 开关, 游戏内容设置)。对象/数组复用零分配 (20261101 性能批同规)。
 const _naMapMark={on:false,x:0,z:0,r:0}; const _naMarks=[];
-function nadeArcFuseOf(type){ return type==='frag'?Math.max(0.1,player.nadeFuse):(type==='at'?1.6:(type==='smoke'?1.8:1.6)); }
+function nadeArcFuseOf(type){ return type==='at'?1.6:Math.max(0,player.nadeFuse); }   // ★2026-11-17 批2.6: frag/smoke/incin 预演引信=烹饪余值 (at 撞炸无引信, 1.6 仅预演积分用)
 function nadeArcRingR(type){ return type==='frag'?NADE_BLAST_R:(type==='at'?5.5:3); } // 圈=杀伤范围示意 (at=5.5 溅射圈/烟雾燃烧=云圈示意)
 // 地表面高 (画圈用): 有水时画在水面上 —— 入水哑火点/浅水落点才不会把圈画到水底去
 function nadeSurfY(x,z){
@@ -1130,6 +1136,8 @@ const EMCAST={mortar:'使用中: 迫击炮 …',mg:'使用中: 机枪 …',at:'�
 //   (烧满即"触物即炸"), 其余三弹种引信 99 哨兵无计时 ⇒ 满条表示"已举起待发"。收雷 = X / ✕。
 const _nk=(typeof vmNadeKind==='function'&&typeof player.nadeFuse!=='undefined')?vmNadeKind():null;
 const _nkName={at:'反坦克雷 · X 收回',smoke:'烟雾弹 · X 收回',incin:'燃烧弹 · X 收回'};
+const _nkLabel={frag:'手雷',smoke:'烟雾弹',incin:'燃烧弹'};   // ★2026-11-17 批2.6: 烟雾/燃烧改真引信后也显倒数
+const _nfT={frag:((typeof NADE_FUSE_T!=='undefined')?NADE_FUSE_T:3.8),smoke:1.8,incin:1.6};   // 条分母按弹种全长 (与 00-config NADE_COOK_FUSE 同值)
 const _fuseT=(typeof NADE_FUSE_T!=='undefined')?NADE_FUSE_T:3.8;
 // 换弹条座位门: 换弹计时在 VM 上, 上车/上炮后被冻 (24-main 不再跑 updateViewModel) —— 条只对步行的
 //   换弹显示; 冻结的换弹下车自会续走, 不在此列 (与 24-main 的 updateViewModel 门同一张清单)。
@@ -1142,8 +1150,8 @@ const rb=((player.alive||player.specViewHost)&&!hudBlocked)   // ★2026-11-03: 
 :player.useCast?{lab:t2(EMCAST[player.useCast.kind]||'使用中: 火力点 …'),k:clamp(player.useCast.t/Math.max(0.01,player.useCast.dur),0,1)}
 :player.vehRepair?{lab:t2('坦克维修中: {0}s · 移动/开火打断',Math.max(0,(player.vehRepair.dur||0)-(player.vehRepair.t||0)).toFixed(1)),k:clamp((player.vehRepair.t||0)/Math.max(0.01,(player.vehRepair.dur||0.01)),0,1)}   // 坦克补给箱修理 (2026-11-16 批1): 8s 读条回 25%×maxHp, 打断网见 18-game tryVehRepair
 :player.bandaging>0?{lab:t2('包扎中: {0}s',Math.max(0,player.bandaging).toFixed(1)),k:clamp(1-player.bandaging/BANDAGE_T,0,1)}
-:(_nk&&typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)?(_nk==='frag'
-?{lab:t2('手雷 · 引信 {0}s · X 收回',Math.max(0,player.nadeFuse).toFixed(1)),k:clamp(1-Math.max(0,player.nadeFuse)/_fuseT,0,1)}
+:(_nk&&typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)?(_nk!=='at'   // ★2026-11-17 批2.6: 引信倒数扩到烟雾/燃烧 (at 撞炸无引信, 保持满条"已举起")
+?{lab:t2((_nkLabel[_nk]||'手雷')+' · 引信 {0}s · X 收回',Math.max(0,player.nadeFuse).toFixed(1)),k:clamp(1-Math.max(0,player.nadeFuse)/(_nfT[_nk]||_fuseT),0,1)}
 :{lab:t2(_nkName[_nk]||'手雷 · X 收回'),k:1})
 :(typeof VM!=='undefined'&&VM.state==='reload'&&!_seated)?{lab:t2('换弹中: {0}s',Math.max(0,(VM.stateDur||0)-(VM.stateT||0)).toFixed(1)),k:clamp((VM.stateT||0)/Math.max(0.01,VM.stateDur||0.01),0,1)}
 :null)
@@ -1407,6 +1415,11 @@ return true;
 function returnToMenu(){
 if(!askReturnToMenu()) return;
 if(typeof clearMatchTimers==='function') clearMatchTimers();
+// ★2026-11-17 批3: 读条随"离开战局"收口 (与 endMatch 同规, 2026-11-17 批3) —— menuHold 冻结后
+//   updateHUD 不再跑, 举雷/换弹/包扎等读条条会以最后一帧的样子永久挂在主菜单航拍上 (用户实报)。
+//   未打完就回主页的分支原本只挡在"打完结算"那头, 这里补齐离开侧。
+if(player.readBarActive&&player.readBarActive()) player.cancelReadBar(null,true);
+const _db=window._demolishBar; if(_db&&_db.wrap) _db.wrap.style.display='none';
 // 观战时停随"离开战局"收尾 (2026-09-27M 时停修复批, 审计 P1-4): SPEC_TIME 原先只在换局/关观战时复位 ⇒
 // 时停中回主菜单再点「继续」, 回来时 paused 仍是 true (战场静止而玩家多半已忘了自己按过 K)。菜单冻结
 // (menuHold) 与观战时停是两套冻结, 不该叠加 —— 回主菜单 = 退出观战工具态, 就地解除。
@@ -2279,6 +2292,20 @@ document.querySelectorAll('.pauseQualBtn').forEach(b=>{
     if(typeof applyQuality==='function') applyQuality();
   };
 });
+// 详细操作提示开关进暂停面板 (2026-11-17 批10): 与主菜单 showCtlHintsBtn 同账同写点 (sf_ctlhints),
+//   两边按钮互为镜像 —— 就地读 SHOW_CTL_HINTS 的各写点每帧重算, 改档即时生效不重载。
+const pCtlB=el('pauseCtlHintsBtn');
+if(pCtlB){
+  const syncPC=()=>{ pCtlB.textContent='💡 '+t('游戏中显示详细操作')+': '+t(SHOW_CTL_HINTS?'开':'关'); pCtlB.classList.toggle('sel',SHOW_CTL_HINTS); };
+  syncPC();
+  pCtlB.onclick=()=>{
+    SHOW_CTL_HINTS=!SHOW_CTL_HINTS;
+    localStorage.setItem('sf_ctlhints',SHOW_CTL_HINTS?'1':'0');
+    syncPC();
+    const mb=el('showCtlHintsBtn');
+    if(mb){ mb.textContent=pCtlB.textContent; mb.classList.toggle('sel',SHOW_CTL_HINTS); }
+  };
+}
 syncPauseSeedLine();
 }
 
@@ -3024,7 +3051,7 @@ const pend=(typeof player.specWant==='boolean');
 d.classList.toggle('spec',player.spectator||pend);
 d.style.outline=(player.spectator||pend)?'2px solid #ffd76b':'';
 const cn=d.querySelector('.cname');
-if(cn) cn.textContent='巡飞弹兵'+(player.spectator?' · 调试中':(pend?' · 调试待生效':''));
+if(cn) cn.textContent=t2('巡飞弹兵')+(player.spectator?t2(' · 调试中'):(pend?t2(' · 调试待生效'):''));   // ★2026-11-17 批1: 状态刷新路径也走翻译 (旧裸拼覆盖建卡时的英文)
 const cw=el('cw3'); if(cw) cw.textContent=classCardWeaponText(3);
 if(typeof syncDeploySelectionDOM==='function') syncDeploySelectionDOM();
 buildSpawnList();
