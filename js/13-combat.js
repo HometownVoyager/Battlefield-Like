@@ -367,6 +367,10 @@ waterSplash(_fbHit.set(origin.x+dir.x*wallD,origin.y+dir.y*wallD,origin.z+dir.z*
 } else if(wr){
 endD=wr.dist;
 impactFX(wr.point,wr.normal,wr.kind);
+// 油桶受击记账 (2026-11-18 油桶殉爆批): 子弹打桶旧口径只出火花 (桶=免疫枪弹的纯装饰), 现按弹种记账 ——
+//   步枪/机枪 24/发 (~5 发殉爆)、反坦克枪 (atRifle) 70/发 (2 发)。记账单源 05-world barrelDamage,
+//   判据全在 00-config BARREL; wr.cyl 仅 cyl 档携带 (04-collision 结果槽, 树/拒马/地面恒 null 不记账)。
+if(wr.kind==='cyl'&&wr.cyl&&wr.cyl.explosive&&typeof barrelDamage==='function') barrelDamage(wr.cyl,def.atRifle?BARREL.atRifleHit:BARREL.bulletHit,shooter);
 } else endD=maxD;
 // 海战: 上面那条 if/else 链里的 wr/uwStop/maxD 都是"收窄前"的世界距离 ⇒ 若挡在中间的是艇体, 终点不得越过它
 // (曳光弹/超声压制都读 endD; 缺这一行会出现"弹道穿艇而过、只是艇掉了血")
@@ -551,11 +555,15 @@ const dl=Math.min(C.nx-b.minX,b.maxX-C.nx), dv=Math.min(C.ny-b.minY,b.maxY-C.ny)
 //     取回) —— 旧版只翻速度不修位, 弹体嵌在 0.06 判定带里逐帧反复翻速度 = 嵌墙滞留的根因。
 const armed=!C.st.armOnFuse||C.st.fuse<=0;
 const topHit=dv<=dl&&dv<=dd&&C.ny>=b.maxY-0.06;
+// ★2026-11-18 弹性削减批 (用户令"有限减少一些手雷等投射物的弹性"): 反弹恢复系数全面下调一档 ——
+//   法向 0.4→0.26 / 0.5→0.34 (弹得低、滚不远), 切向摩擦 0.7→0.62 (多蹭掉一份动能)。有限削减不归零:
+//   弹跳位置弹出/嵌墙防治/弹跳音效 (bounces<4)/楼板顶面引爆分档全链不动; 预瞄弧 (22-hud updateNadeArc)
+//   与实弹共用 nadeStep ⇒ 预览自动同款。
 if(armed&&(!C.st.armOnFuse||topHit)){ C.blow=true; return; }
-if(topHit&&C.st.vel.y<0){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; C.ny=b.maxY+0.02; }
-else if(dv<=dl&&dv<=dd){ C.st.vel.y*=-0.4; C.st.vel.x*=0.7; C.st.vel.z*=0.7; C.ny=(C.st.vel.y>0?b.maxY+0.02:b.minY-0.02); }
-else if(dl<=dd){ C.st.vel.x*=-0.5; C.nx=(C.st.vel.x>0?b.maxX+0.02:b.minX-0.02); }
-else { C.st.vel.z*=-0.5; C.nz=(C.st.vel.z>0?b.maxZ+0.02:b.minZ-0.02); }
+if(topHit&&C.st.vel.y<0){ C.st.vel.y*=-0.26; C.st.vel.x*=0.62; C.st.vel.z*=0.62; C.ny=b.maxY+0.02; }
+else if(dv<=dl&&dv<=dd){ C.st.vel.y*=-0.26; C.st.vel.x*=0.62; C.st.vel.z*=0.62; C.ny=(C.st.vel.y>0?b.maxY+0.02:b.minY-0.02); }
+else if(dl<=dd){ C.st.vel.x*=-0.34; C.nx=(C.st.vel.x>0?b.maxX+0.02:b.minX-0.02); }
+else { C.st.vel.z*=-0.34; C.nz=(C.st.vel.z>0?b.maxZ+0.02:b.minZ-0.02); }
 C.bounced=true;
 }
 }
@@ -648,8 +656,10 @@ if(touchG||touchT||hitVeh||boxBlow||(!st.armOnFuse&&bounced)){ st.pos.set(nx,Mat
 if(touchG){
 st.pos.y=gh+0.05;
 if(st.vel.y<-0.5) bounced=true;
-st.vel.y*=-0.38;
-st.vel.x*=0.68; st.vel.z*=0.68;
+// ★2026-11-18 弹性削减批 (用户令"有限减少一些手雷等投射物的弹性"): 落地反弹恢复 0.38→0.24,
+//   切向 0.68→0.60 —— 手雷不再蹦跶出老远, 短停即滚停; 触发判据 (bounced 阈 −0.5)/弹跳音效/预瞄弧全链不动
+st.vel.y*=-0.24;
+st.vel.x*=0.60; st.vel.z*=0.60;
 if(st.spin) st.spin.multiplyScalar(0.6);
 }
 st.pos.set(nx,Math.max(ny,gh+0.05),nz);

@@ -1917,7 +1917,7 @@ const y=o.y+dir.y*t;
 if(y<c.y0||y>c.y1) return null;
 const px=o.x+dir.x*t, pz=o.z+dir.z*t;
 const nx=(px-c.x)/c.r, nz=(pz-c.z)/c.r;
-_rcR.t=t; _rcR.nx=nx; _rcR.ny=0; _rcR.nz=nz;
+_rcR.t=t; _rcR.nx=nx; _rcR.ny=0; _rcR.nz=nz; _rcR.cyl=c;   // cyl=命中圆柱引用 (2026-11-18 油桶殉爆批: fireBullet 按桶记账用; 槽即时消费契约不变, 拒马 hb 分支不走本行=无 .cyl)
 return _rcR;
 }
 // dirty=单一外接矩形 (兼容口径) / dirtyList=矩形簇表 (2026-11-11, NAV.refresh 簇级增量消费);

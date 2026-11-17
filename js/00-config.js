@@ -1845,6 +1845,15 @@ const STRUCT_HP={ref:6, base:0.6, span:0.4, min:0.75, max:2.6};
 // ⑤ 屋顶/楼板承伤 (B2: 直接轰屋顶零效果): 平顶板/坡顶碰撞带/山墙挂 ref.hp = base + perSqrtArea×√(投影面积),
 //   一场爆炸按"最近那条带"给 ref 记一次伤害 (与组"一次结算"同规), 累计 ≥ hp ⇒ 整片坍塌 (collapseRoof)。
 const STRUCT_ROOF={base:260, perSqrtArea:70, min:300, max:1500};
+// ⑥ 油桶伤害累积 (2026-11-18 油桶殉爆批): 子弹 (13-combat fireBullet) / 爆炸溅射 (05-world
+//   damageStructures ③) / 火烧 (04b-fire updateFires 受热账) 三路统一进 barrelDamage 记账,
+//   hp 归零即殉爆 (barrelBlast) 并原地留下燃烧火池 (addFireSource)。所有数字只写在这里。
+//   hp=100 ⇒ 步枪/机枪弹 24/发 (~5 发殉爆)、反坦克枪 (atRifle) 70/发 (2 发);
+//   爆炸 ×3 = 燃料蒸气远比墙体敏感: 现有全部爆炸源 amt≥45 (手雷 explodeAt 最低档) ⇒ 圈内一击
+//   殉爆, 与旧"圈内即爆"口径逐位一致 (油桶自身殉爆 90×3=270 ⇒ 连锁半径不变);
+//   火烧三路 (持续火源圈 / 燃烧草格 / 燃烧弹云) 0.4s 记账 dps ⇒ 烤 7~9s 殉爆 (口径对齐
+//   fireDamageTick 的 0.4s×dps 步调); 殉爆后原地留 poolTtl 秒火池 (灼烧圈内单位+点燃植被+烤相邻桶)。
+const BARREL={hp:100, bulletHit:24, atRifleHit:70, blastMul:3, fireDps:14, cellFireDps:12, poolR:2.3, poolTtl:14, poolDps:16};
 // ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) =====
 // A#7 坦克三人车组: 编制人数 = 3。车毁恒结算 CREW_N 次死亡 / CREW_N 杀 / CREW_N 票 (每票 1 人)。
 //   为什么**乘员**票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,

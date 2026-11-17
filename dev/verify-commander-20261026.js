@@ -29,7 +29,7 @@
 //     耗尽只回常速 / 观战免费不减 (R8) / 死亡不可用 / selfExempt 超人档 (pdt/座驾豁免) / 设置项落 localStorage
 //   ⑦ 指挥地图: 姿态门矩阵 (D18) / 开关+定身 (R11) / R12 dotVis 与小地图判据逐点对账 (全图开关/观战/死亡
 //     旁路 + 视野圆) / 布势开关-冻结-确认解冻-宿主切换 (body↔#ui) / 配比增减+落装 (setClass) / 废墟补丁不炸
-//   ⑧ 回归对账: index.html 脚本表 ↔ dev/_game_files.txt 双向一致 / 版本戳 20261117b 四处 / i18n 新键全配 /
+//   ⑧ 回归对账: index.html 脚本表 ↔ dev/_game_files.txt 双向一致 / 版本戳 20261118a 四处 / i18n 新键全配 /
 //     非指挥官零回归 (cmdIsCommander false·dt 原样·slowOn false) / 小地图源码未动 (26 不碰 mmEnemyVis·
 //     drawMinimap, 22-hud 不进 cmdMap)
 //
@@ -257,10 +257,10 @@ assert('26 R11 开图定身 (布势期除外) + D18 姿态门单源 (载具/阵�
  s26.includes('function cmdMapImmobilized(){ return CMD.mapOn&&!CMD.mapDeploy; }')
  &&s26.includes('if(p.onVehicle||p.onNaval||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.loiter) return false;')   // (2026-11-10 跟码: capitalGun 项随大舰子系统下架摘除)
  &&s26.includes('if(!p.onGround||p.chute||p.swim||p.flying) return false;'));
-assert('26 D21 布势宿主切换 (body↔#ui, inDeploy 压制网外的自管显隐) + 确认开战解冻口径',
+assert('26 D21 布势宿主切换 (body↔#ui, inDeploy 压制网外的自管显隐) + 确认开战解冻口径 (2026-11-17 批6 判据跟码: 签名加 esc 参)',
  s26.includes('function cmdMapReparent(forDeploy){')
  &&s26.includes("const want=forDeploy?document.body:document.getElementById('ui');")
- &&s26.includes('function cmdDeployConfirm(){')
+ &&s26.includes('function cmdDeployConfirm(esc){')
  &&s26.includes('CMD.mapDeploy=false;'));
 assert('26 D19 废墟补丁: 挂 g.onDead 包装 (不覆盖既有回调) + 单点重画不做全图重烘',
  s26.includes('g.onDead=(gg)=>{ try{ cmdMarkRubble(gg); }catch(e){} if(prev) prev(gg); };')
@@ -303,9 +303,9 @@ assert('24-main 帧长接线四线全就位 (dt 门 / pdt 超人档 / vdt 座驾
  &&s24.includes("if(typeof cmdFrameTick==='function') cmdFrameTick(rdt);"));
 
 const s19=srcOf('js/19-input.js');
-assert('19-input 三接线: Esc 先关指挥地图 / 通讯仪右键开图 (姿态门内聚 cmdMapToggle) / 丢锁不弹部署页',
+assert('19-input 三接线: Esc 先关指挥地图 / 通讯仪右键开图 (姿态门内聚 cmdMapToggle) / 丢锁不弹部署页 (2026-11-17 批6 判据跟码: Esc 路径传 esc=true)',
  s19.includes("if(typeof cmdMapUIOpen==='function'&&cmdMapUIOpen()){")
- &&s19.includes("if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm();")
+ &&s19.includes("if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm(true);")
  &&s19.includes("else if(typeof cmdMapClose==='function') cmdMapClose(true);")
  &&s19.includes("player.curW.key==='radio'&&typeof cmdMapToggle==='function'")
  &&s19.includes('const inCmdMap=(typeof cmdMapUIOpen===\'function\')&&cmdMapUIOpen();'));
@@ -383,7 +383,7 @@ const sidx=SRC('index.html');
 {
 const i25=sidx.indexOf('js/25-zombies.js'),i26=sidx.indexOf('js/26-commander.js'),i24=sidx.indexOf('js/24-main.js');
 assert('index.html: 26-commander 脚本行 (25-zombies 之后 24-main 之前) + 设置两按钮',
- sidx.includes('<script src="js/26-commander.js?v=20261117b"></script>')
+ sidx.includes('<script src="js/26-commander.js?v=20261118a"></script>')
  &&i25>=0&&i25<i26&&i26<i24
  &&sidx.includes('id="cmdFocusBtn"')&&sidx.includes('id="cmdSelfBtn"'));
 }
@@ -914,12 +914,12 @@ assert('index.html 脚本表 ↔ dev/_game_files.txt 双向一致 (序即载入�
  `index ${idxScripts.length} vs files ${gfFiles.length}`);
 assert('26-commander 载入位: 25-zombies 之后 (27-achievements 插其后, 24-main 收尾; 编制先于主循环; 2026-11-11 成就批判据跟码)',
  gfFiles.indexOf('26-commander.js')===gfFiles.indexOf('25-zombies.js')+1&&gfFiles.indexOf('26-commander.js')+1===gfFiles.indexOf('27-achievements.js')&&gfFiles.indexOf('27-achievements.js')+1===gfFiles.indexOf('24-main.js'));
-const stamps=[...idx.matchAll(/\?v=20261117b/g)].length;
-assert('版本戳 20261117b: index.html 全量脚本+样式戳 + __sfStyleVer + _game_files 全行 + 三探针 (2026-11-10 海战移除批判据跟码)',
- stamps>=44&&idx.includes("window.__sfStyleVer='20261117b';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261117b')).length===45
+const stamps=[...idx.matchAll(/\?v=20261118a/g)].length;
+assert('版本戳 20261118a: index.html 全量脚本+样式戳 + __sfStyleVer + _game_files 全行 + 三探针 (2026-11-10 海战移除批判据跟码)',
+ stamps>=44&&idx.includes("window.__sfStyleVer='20261118a';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261118a')).length===45
  &&['dev/verify-animfix-20261012.js','dev/verify-hudfix-20261007.js','dev/verify-perf-20261024.js']
-  .every(f=>SRC(f).includes('20261117b')));
+  .every(f=>SRC(f).includes('20261118a')));
 
 const i18n=SRC('js/00b-i18n.js');
 const keys=['指挥官','通讯仪','指挥地图','布势阶段','指挥读条','减速消耗读条','减速对我无效',
@@ -1158,8 +1158,8 @@ assert('BUG4 滚轮/右键菜单同样吞掉冒泡 (不进全局滚轮/切枪与
  /cv\.addEventListener\('wheel',e=>\{[\s\S]{0,200}e\.stopPropagation\(\);/.test(_s26b)
  &&/contextmenu',e=>\{ e\.preventDefault\(\); e\.stopPropagation\(\); \}/.test(_s26b));
 // BUG5/6: 布势期 Esc / 右键 走 cmdDeployConfirm (默认布势开战) 而不是 cmdMapClose (关图不留部署页 = 卡 UI)。
-assert('BUG5 布势期 Esc = 跳过布势走 cmdDeployConfirm (旧: cmdMapClose 关图后部署页不回来)',
- _s19b.includes("if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm();"));
+assert('BUG5 布势期 Esc = 跳过布势走 cmdDeployConfirm (旧: cmdMapClose 关图后部署页不回来) (2026-11-17 批6 判据跟码: esc=true, 盖章按 deployTouched 分流)',
+ _s19b.includes("if(typeof cmdDeployPhase==='function'&&cmdDeployPhase()&&typeof cmdDeployConfirm==='function') cmdDeployConfirm(true);"));
 assert('BUG6 布势期右键 = 跳过布势走 cmdDeployConfirm (cmdMapToggle 首分支, 不再把布势关掉)',
  /function cmdMapToggle\(\)\{[\s\S]{0,400}if\(CMD\.mapOn&&CMD\.mapDeploy\)\{ cmdDeployConfirm\(\); return; \}/.test(_s26b),
  _s26b.includes('if(CMD.mapOn&&CMD.mapDeploy){ cmdDeployConfirm(); return; }')?'':'缺布势首分支');

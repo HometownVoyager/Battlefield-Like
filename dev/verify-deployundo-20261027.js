@@ -87,12 +87,12 @@ const srcOf=f=>(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:SRC(f));
 section('① 源码防回退 (修好的写法在 / 旧写法不在)');
 {
 const s23=srcOf('js/23-deploy.js'),s22=srcOf('js/22-hud.js');
-assert('23-deploy 撤销单源就位: 全局 cmdDeployUndo 存在且五步齐备',
+assert('23-deploy 撤销单源就位: 全局 cmdDeployUndo 存在且五步齐备 (2026-11-17 批6 判据跟码: 撤章同时作废 CMD.deployTouched 布势动作账)',
  s23.includes('function cmdDeployUndo(){')
  &&s23.includes("if(typeof cmdMapClose==='function'){ cmdMapClose(false); }")
  &&s23.includes('s.ratio=null;')
  &&s23.includes("if(typeof player!=='undefined'&&player){ player.deployed=false; }")
- &&s23.includes("if(typeof CMD!=='undefined'&&CMD){ CMD.lockedDir=null; }")
+ &&s23.includes("if(typeof CMD!=='undefined'&&CMD){ CMD.lockedDir=null; CMD.deployTouched=false; }")
  &&s23.includes("if(typeof showDeploy==='function') showDeploy(false);"));
 // 判据只取**代码行** (先剔注释): 注释里必须能写清"为什么不能自己写 CMD.mapOn=false", 那不是缺陷。
 const s23code=s23.split('\n').filter(l=>!/^\s*\/\//.test(l)).join('\n');
@@ -464,8 +464,8 @@ assert('撤销后同一函数的判据输入复位 (lockedDir===null ⇒ 不锁,
 {
 section('⑧ 回归对账: 既有链路未被打断');
 const s23=srcOf('js/23-deploy.js'),s22=srcOf('js/22-hud.js'),s26=srcOf('js/26-commander.js');
-assert('cmdDeployConfirm 的收图语义未变 (先 cmdMapClose 再清 mapDeploy, 宿主搬运不跳过)',
- s26.includes('function cmdDeployConfirm(){')
+assert('cmdDeployConfirm 的收图语义未变 (先 cmdMapClose 再清 mapDeploy, 宿主搬运不跳过) (2026-11-17 批6 判据跟码: 签名加 esc 参 —— ESC 收图按 deployTouched 分流盖章, 收图顺序不变)',
+ s26.includes('function cmdDeployConfirm(esc){')
  &&s26.indexOf('cmdMapClose(false);')<s26.indexOf('CMD.mapDeploy=false;'));
 assert('showDeploy 仍是部署界面唯一入口 (只此一处摘 #deploy 的 hidden)',
  (s23.match(/el\('deploy'\)\.classList\.remove\('hidden'\)/g)||[]).length===1);

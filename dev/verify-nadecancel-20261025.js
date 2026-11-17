@@ -152,9 +152,9 @@ const s06=srcOf('js/06-engineering.js');
 assert('06 建造抢态入口升级 (全部早退之后=确认起造才抢)',s06.includes('player.stealBar();'));
 
 const s22=srcOf('js/22-hud.js');
-assert('22 HUD 读条链新增举雷条 (普通雷=引信倒数, 分母 NADE_FUSE_T)',
+assert('22 HUD 读条链新增举雷条 (引信倒数, 分母 _nfT[弹种]||NADE_FUSE_T) (2026-11-17 批2.6 判据跟码: 烟雾/燃烧改真引信后四弹种各按自己的引信分母)',
  s22.includes('VM.state===\'nade\'&&player.nadeHeld')
- &&s22.includes('k:clamp(1-Math.max(0,player.nadeFuse)/_fuseT,0,1)'));
+ &&s22.includes('k:clamp(1-Math.max(0,player.nadeFuse)/(_nfT[_nk]||_fuseT),0,1)'));
 assert('22 HUD 读条链新增换弹条 + 座位门 (上车后 VM 冻结不显示)',
  s22.includes("VM.state==='reload'&&!_seated")
  &&s22.includes("t2('换弹中: {0}s',Math.max(0,(VM.stateDur||0)-(VM.stateT||0)).toFixed(1))"));

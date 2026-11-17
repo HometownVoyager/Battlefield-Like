@@ -187,8 +187,8 @@ assert('26 面板美术对齐开始界面 (羊皮纸/黄铜色板常量 CMD_UI)'
 assert('26 布势面板含撤销按钮 (调 23-deploy 的 cmdDeployUndo 单源, typeof 守卫)',
  s26.includes("const undo=document.getElementById('cmdDeployUndo');")
  &&s26.includes("if(typeof cmdDeployUndo==='function'){ cmdDeployUndo(); }"));
-assert('26 确认开战即盖章 (用户需求 6「确认之后兵种锁定」的提交点)',
- /if\(typeof cmdLockStamp==='function'\) cmdLockStamp\(player\.cls\);/.test(s26));
+assert('26 确认开战即盖章 (用户需求 6「确认之后兵种锁定」的提交点) (2026-11-17 批6 判据跟码: 盖章按是否已部署分流 !esc||CMD.deployTouched)',
+ /\(!esc\|\|CMD\.deployTouched\)&&typeof cmdLockStamp==='function'\) cmdLockStamp\(player\.cls\);/.test(s26));
 
 const s14=srcOf('js/14-bots.js'),s15=srcOf('js/15-vehicles.js'),s19=srcOf('js/19-input.js');
 const s24=srcOf('js/24-main.js'),s19b=srcOf('js/19b-gamepad.js');
@@ -208,7 +208,7 @@ assert('19-input: 开图期 keydown 放行 减速键 + cmdMapKeyGate 三命令�
 assert('19-input: Esc 的 cmdMapUIOpen 分支上提到 deployed 门之外 + 暂停优先 (!gamePaused) + 双出口',
  s19.includes('cmdMapUIOpen()&&!gamePaused){')
  &&s19.indexOf('cmdMapUIOpen()&&!gamePaused')<s19.indexOf('if(player.deployed&&player.alive&&!matchOver){')
- &&/cmdMapUIOpen\(\)&&!gamePaused\)\{\s*if\(typeof cmdDeployPhase==='function'&&cmdDeployPhase\(\)&&typeof cmdDeployConfirm==='function'\) cmdDeployConfirm\(true\);\s*else if\(typeof cmdMapClose==='function'\) cmdMapClose\(true\);/.test(s19));   // ★2026-11-17 批6 判据跟码: esc=true ⇒ 盖章只看 CMD.deployTouched (没布过势的 ESC 不锁兵种)
+ &&/cmdMapUIOpen\(\)&&!gamePaused\)\{\s*if\(typeof cmdDeployPhase==='function'&&cmdDeployPhase\(\)&&typeof cmdDeployConfirm==='function'\) cmdDeployConfirm\(true\);[^\n]*\r?\n\s*else if\(typeof cmdMapClose==='function'\) cmdMapClose\(true\);/.test(s19));   // ★2026-11-17 批6 判据跟码: esc=true ⇒ 盖章只看 CMD.deployTouched (没布过势的 ESC 不锁兵种); 2026-11-18 行尾注释容错 ([^\n]* 吞行内批注再换行)
 assert('19-input: 近战键改成 KeyN (V 让给减速)',
  s19.includes("if(e.code==='KeyN'){")&&!s19.includes("if(e.code==='KeyV'){"));
 assert('24-main tMelee 触控键 → KeyN',s24.includes("bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));"));
@@ -222,8 +222,9 @@ assert('i18n 本批新键全配英文 (词典闭环)',keys.every(k=>i18n.include
  '缺: '+keys.filter(k=>!i18n.includes(`'${k}':`)).join(' / '));
 assert('i18n 旧 N 键词条已全部退场 (无残留)',!i18n.includes('N=减速')&&!i18n.includes('按住 N '));
 const sidx=srcOf('index.html');
-assert('index.html 帮助面板: 近战键标 N + 减速键标 V',
- sidx.includes('<b>N</b> 近战')&&sidx.includes('<b>N</b> 近战刺刀')&&sidx.includes('按住 V 时间减速'));
+assert('index.html 帮助面板: 近战键标 N + 减速键标 V (2026-11-17 批9 暂停面板键帽表化判据跟码: <b>N</b> 旧标记 → hkRow 键帽行; 刺刀描述并入「近战」)',
+ sidx.includes('<span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>近战</span>')
+ &&sidx.includes('按住 <b>V</b> 时间减速'));
 assert('index.html 帮助面板新增「指挥官兵种」整节 (三命令键/集火/减速/布势撤销) (2026-11-12 键位表化判据跟码)',
  sidx.includes('指挥官兵种</div>')&&sidx.includes('<span class="hkKey" data-i18n>左键点地图</span><span class="hkDesc" data-i18n-html>集火该点'));
 }

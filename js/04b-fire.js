@@ -1020,6 +1020,7 @@ if(t.playerDriven&&typeof addTrauma==='function') addTrauma(0.1);
 // ===== 火焰网格主更新 =====
 const FFX=new Float32Array(FN*FN); // 每格火苗喷发计时
 let fireDmgT=0, fireFlameN=0;
+let _barrelHeatT=0;   // 油桶受热账节流钟 (2026-11-18 油桶殉爆批, 0.4s tick 同 fireDmgT)
 function updateFires(dt){
 fireFlameN=0;
 _fireFxN=0;          // A: 每帧火粒子预算重置
@@ -1061,6 +1062,46 @@ s.igniteT-=dt;
 if(s.igniteT<=0){
 s.igniteT=0.7;
 igniteArea(s.x,s.z,s.r*0.85,s.attacker);
+}
+}
+// ── 油桶受热账 (2026-11-18 油桶殉爆批): 火源圈 / 燃烧草格 / 燃烧弹云三路 0.4s 记账 → 到点殉爆
+//   (05-world barrelDamage 单源, 判据见 00-config BARREL)。旧口径火烧对桶毫无反应 —— 桶站火里永远不炸。
+//   无火早退 (绝大多数帧零开销); 桶混在树圆柱表里不建缓存 (06-engineering CYLS.splice 会让缓存下标漂移,
+//   2026-11-17 批 RGRID 同族教训), 全 CYLS 扫描 2.5 次/s 数量级可忽略; dps 口径对齐 fireDamageTick
+//   (0.4s tick × dps, 步兵灼烧同款), 圈判据也对齐 (火源 r+0.4→桶放宽到 r+0.6 / 燃烧格 2.7m / y 带 3.5)。
+_barrelHeatT-=dt;
+if(_barrelHeatT<=0){
+_barrelHeatT=0.4;
+const _smOK=(typeof SMOKES!=='undefined');
+let _smIn=0;
+if(_smOK) for(let k=0;k<SMOKES.length;k++){ const sm=SMOKES[k]; if(sm.incin&&sm.t<sm.dur-0.5) _smIn++; }
+if((FIRE_SOURCES.length>0||FIRE_ACTIVE.length>0||_smIn>0)&&typeof barrelDamage==='function'&&typeof CYLS!=='undefined'&&typeof BARREL!=='undefined'){
+for(let i=0;i<CYLS.length;i++){
+const c=CYLS[i];
+if(!c||!c.explosive||c.dead) continue;
+let dps=0;
+for(let k=0;k<FIRE_SOURCES.length;k++){ const fs=FIRE_SOURCES[k];
+if(Math.hypot(c.x-fs.x,c.z-fs.z)<fs.r+0.6&&Math.abs((c.y0+c.y1)/2-fs.y)<3.5){ dps+=BARREL.fireDps; break; } }
+if(!dps){
+// 燃烧草格: 桶底 3×3 邻域任一燃烧格 ≤2.7m 记热 (步兵灼烧同款圈判据)
+const ci0=fCellI(c.x,c.z), cxi=ci0%FN, czi=(ci0/FN)|0;
+for(let dj=-1;dj<=1&&!dps;dj++)for(let di=-1;di<=1;di++){
+const ni=cxi+di, nj=czi+dj;
+if(ni<0||nj<0||ni>=FN||nj>=FN) continue;
+const ci=nj*FN+ni;
+if(FBURN[ci]<=0) continue;
+const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
+if(Math.hypot(c.x-cx,c.z-cz)<2.7){ dps+=BARREL.cellFireDps; break; }
+}
+}
+if(!dps&&_smOK){
+// 燃烧弹云: 云不落 FUEL 格 (裸地/水泥地也能烤桶); t<dur-0.5 与云内步兵灼烧窗同门
+for(let k=0;k<SMOKES.length;k++){ const sm=SMOKES[k];
+if(sm.incin&&sm.t<sm.dur-0.5&&Math.hypot(c.x-sm.x,c.z-sm.z)<sm.r+0.6){ dps+=BARREL.fireDps; break; }
+}
+}
+if(dps>0) barrelDamage(c,dps*0.4,null);   // 火烧殉爆无主 (与 fireDamageTick 的 att=FATT/fs.attacker 不同: 桶爆的溅射本就中立)
+}
 }
 }
 // ── 燃烧格子: 耗燃料/积热蔓延/视觉 ──

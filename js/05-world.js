@@ -1303,6 +1303,8 @@ roofs.forEach((d,r)=>roofDamage(r,amt*(1-d/R*STRUCT_HIT.falloff),attacker));
 }
 // ── ⑤ 油桶引爆 (A3): 先摘账 (killCyl + 移除网格) 再结算 —— 同一只桶只会引爆一次, 链式引爆有界 ──
 // 旧版油桶只进 CYLS (挡子弹) 且无 crush/无移除路径 ⇒ 永远炸不掉、碾不掉 (全库 killCyl 只有植被/炮位在用)。
+// ★2026-11-18 油桶殉爆批: 殉爆后原地留下燃烧火池 (addFireSource, 灼烧圈内单位+每 0.7s 点燃周边植被+
+//   经 04b 受热账烤相邻桶) —— "被攻击一些次数后爆炸并留下火焰"的火焰端。口径见 00-config BARREL。
 let _barrelDepth=0;
 function barrelBlast(c,attacker){
 if(!c||c.dead||!c.explosive) return false;
@@ -1317,9 +1319,24 @@ for(let k=0;k<5;k++) spawnP(PT.dark,p.x+rand(-0.6,0.6),p.y+rand(0.2,1.2),p.z+ran
 // 溅射不认人 (燃料爆炸, 对双方一视同仁) + 点燃周边植被; 已归零的桶自身不再参与
 if(typeof splashDamage==='function') splashDamage(p,attacker,-1,3.4,95,60);
 if(typeof igniteArea==='function') igniteArea(c.x,c.z,2.2,attacker,6);
+// 留下火焰 (2026-11-18): 桶位余火池 = 持续火源 (同残骸火源口径, dps 供 fireDamageTick 灼烧圈内单位),
+//   attacker 归点火者 (addFireSource 内 attacker||null 同规); 时停/布势冻结里随战场冻住 (updateFires dt 账)
+if(typeof addFireSource==='function') addFireSource(c.x,c.z,p.y+0.3,BARREL.poolR,BARREL.poolTtl,BARREL.poolDps,attacker||null);
 // 连锁: 震塌近处结构 (半径/伤害取桶级小爆); 深度上限防"油桶阵互相递归" —— 每只桶只会引爆一次
 if(_barrelDepth<3){ _barrelDepth++; try{ damageStructures(p,2.8,90,attacker); } finally{ _barrelDepth--; } }
 return true;
+}
+// ── ⑤b 油桶伤害累积单源 (2026-11-18 油桶殉爆批): 子弹 (13-combat fireBullet wr 分支) /
+//   爆炸溅射 (damageStructures ③ ×blastMul) / 火烧 (04b updateFires 受热账) 三路统一从这儿进门;
+//   hp 归零即殉爆。旧口径桶只认"爆炸圈内即爆"一条路: 子弹打桶只出火花 (永不掉血)、火烤桶毫无反应,
+//   桶=免疫小伤害的纯装饰; 现在小伤害逐次记账, 大伤害一击殉爆 (判据全在 00-config BARREL)。
+//   hp 懒建: 建图期 CYLS.push 不带 hp 字段 (05b 账目逐位不动, 沙箱/布局指纹零漂), 首次受击建档。
+function barrelDamage(c,amt,attacker){
+if(!c||c.dead||!c.explosive||!(amt>0)) return false;
+if(!(c.hp>0)) c.hp=BARREL.hp;
+c.hp-=amt;
+if(c.hp<=0) return barrelBlast(c,attacker);
+return false;
 }
 // ── ⑥ 坍塌碾压 (A4): 落体覆盖范围内的步兵/载具吃一次"被砸" (旧版坍塌是纯视觉事件: 站在楼里不会死) ──
 // 判据: 水平落在覆盖矩形 (外扩 pad) 内 + 高度在 [地面−vBand, 顶面+0.5] 之间。伤害随落体高度加码。
@@ -1434,12 +1451,14 @@ damageStructureBy(g,amt*(1-bd/R*STRUCT_HIT.falloff),attacker,
 }
 // ② 掩体/屋顶 (A3+B2): 同一发爆炸里按各自口径结算 (掩体逐个、屋顶每个 ref 一次)
 structSweepNear(p,R,amt,attacker);
-// ③ 油桶 (A3): 圈内桶逐个引爆 (引爆自身会再走一遍本函数的近场结算 —— 有界, 见 barrelBlast)
+// ③ 油桶 (A3): 圈内桶逐个记账 (2026-11-18 改: 直调 barrelBlast → barrelDamage ×blastMul —— 燃料蒸气
+//    远比墙体敏感, 现有全部爆炸源 amt≥45 ⇒ 圈内一击殉爆, 与旧"圈内即爆"逐位一致; 殉爆自身会再走一遍
+//    本函数的近场结算 —— 有界, 见 barrelBlast/barrelDamage)
 eachCylNear(p.x-R,p.z-R,p.x+R,p.z+R,c=>{
 if(!c||c.dead||!c.explosive) return;
 const dy=p.y<c.y0?c.y0-p.y:(p.y>c.y1?p.y-c.y1:0);
 const dx=c.x-p.x, dz=c.z-p.z;
-if(Math.sqrt(dx*dx+dy*dy+dz*dz)<R) barrelBlast(c,attacker);
+if(Math.sqrt(dx*dx+dy*dy+dz*dz)<R) barrelDamage(c,amt*BARREL.blastMul,attacker);
 });
 if(typeof structBatchEnd==='function') structBatchEnd();
 }

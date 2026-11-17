@@ -52,7 +52,7 @@ if(typeof window!=='undefined') window.spatialIndexAddBox=spatialIndexAddBox;
 let stampBLen=0, stampCLen=0;
 const _rcP=V3(), _rcN=V3();
 const _rcGnd={nx:0,ny:1,nz:0};   // 地面命中法线常量 (2026-11-01 性能批, 消费契约同 _rcResult)
-const _rcResult={dist:0,point:null,normal:null,kind:null}; // 共享结果槽 (2026-09-06 B6/P1-6): 全库 28 调用点均即时消费不长期持有
+const _rcResult={dist:0,point:null,normal:null,kind:null,cyl:null}; // 共享结果槽 (2026-09-06 B6/P1-6): 全库 28 调用点均即时消费不长期持有; cyl=命中圆柱引用 (2026-11-18 油桶殉爆批, 非 cyl 档恒 null)
 function raycastWorld(o,dir,maxD){
 let best=maxD, bn=null, kind=null;
 if(RGRID.boxCells){
@@ -161,6 +161,7 @@ if(!bn) return null;
 _rcP.set(o.x+dir.x*best,o.y+dir.y*best,o.z+dir.z*best);
 _rcN.set(bn.nx,bn.ny,bn.nz);
 _rcResult.dist=best; _rcResult.point=_rcP; _rcResult.normal=_rcN; _rcResult.kind=kind;
+_rcResult.cyl=(kind==='cyl'&&bn.cyl)?bn.cyl:null;   // 命中圆柱引用 (2026-11-18 油桶殉爆批): 仅 cyl 档携带 (bn 即 rayCyl 的 _rcR 槽, 每次命中改善即回写 = 恒为当前最优桶); ground/box/拒马 hb 档恒 null
 return _rcResult;
 }
 // ── RGRID 邻近候选遍历 (2026-09-06 B5/P0-2): 移动碰撞/站高/坦克足印查询不再全场景扫描 BOXES/CYLS ──

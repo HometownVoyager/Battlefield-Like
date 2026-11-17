@@ -439,7 +439,8 @@ FIRE_ACTIVE=G('FIRE_ACTIVE'), FIRE_SOURCES=G('FIRE_SOURCES'), BURN_INST=G('BURN_
 fCellI=G('fCellI'), igniteArea=G('igniteArea'), updateFires=G('updateFires'),
 updateFallingTrees=G('updateFallingTrees'), updateBurningTrees=G('updateBurningTrees'),
 explosionFlora=G('explosionFlora'), floraCrushTank=G('floraCrushTank'),
-treeIgnite=G('treeIgnite'), addFireSource=G('addFireSource');
+treeIgnite=G('treeIgnite'), addFireSource=G('addFireSource'),
+CYLS=G('CYLS');   // ★2026-11-18 枯树碾压倒伏判据用 (批5: floraTopple 应 killCyl 摘圆柱账)
 const FALLING=G('FALLING'), BURNING_TREES=G('BURNING_TREES');
 // 1) 构建期登记
 let fuelCells=0, fuelSum=0;
@@ -619,18 +620,24 @@ else ok('倒车撞树向车尾方向倒');
 }
 for(let s=0;s<120;s++) updateFallingTrees(0.05);
 }
-// 枯树 (无叶): 车体一碰即碎 —— 只取**仍直立**的枯树 (2026-09-26 起倒伏中的枯树残骸走各自的沉入任务,
-// 不再被"碾碎"二次登记, 见 04b floraCrushTank 的 alive===false 早退; 判据要跟着选直立株)
+// 枯树 (无叶): ★2026-11-17 批5 (用户裁定) 碾压并入"倒伏"口径 —— 旧"一碰即碎" (vanishFlora) 改走
+// floraTopple (倒向车行方向, 倒伏残骸照常 16~22s 后沉入; 用户实机报旧档枯树"只会逐渐沉下去"没有倒下
+// 动作)。判据跟码: 只取**仍直立**的枯树 (04b 的 alive===false 早退守卫原样保留), 断言 = fall 登记 +
+// 树干圆柱摘账 + 倒伏残骸登记沉入 (与乔木碾压同一套)。
 let drec=null;
 for(const arr of FLORA_HASH.values()){ for(const rec of arr){ if(rec.kind==='dead'&&!rec.dead&&rec.alive!==false){ drec=rec; break; } } if(drec) break; }
 if(!drec) console.log('  ⚠ 本布局无枯树, 跳过枯树碾压');
 else{
 const tank4={pos:{x:drec.x+2,y:0,z:drec.z},vel:3,yaw:0};
 floraCrushTank(tank4);
-if(!drec.dead) fail('枯树未被坦克碾碎 (舱段垂距=2.0, 阈值=2.05)');
+if(!drec.fall) fail('枯树未被坦克碾压倒伏 (批5: 应并入倒伏口径走 floraTopple)');
 else{
-ok('枯树可被坦克碾碎 (碰撞体即杀)');
-if(!drec.cyl||drec.cyl.r!==0) fail('枯树碾碎后树干碰撞体未移除');
+ok('枯树可被坦克碾压倒伏 (批5: 与其他树同一套倒伏+沉入)');
+for(let s=0;s<120;s++) updateFallingTrees(0.05);
+if(!drec.sinkQ) fail('枯树倒伏残骸未登记沉入 (会永久留在场上)');
+else ok('枯树倒伏残骸已登记沉入 (16~22s 后 3.6s 沉入)');
+if(!drec.cyl||drec.cyl.r!==0) fail('枯树倒伏后树干碰撞体未摘账 (floraTopple 应 killCyl: r=0 + dead 标记)');
+else ok('枯树倒伏后树干碰撞体已摘账 (killCyl: r=0)');
 }
 }
 }
