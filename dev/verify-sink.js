@@ -94,7 +94,7 @@ const _h2r=h=>{ h=typeof h==='number'?h:parseInt(String(h).replace('#',''),16)||
 _Color.prototype.lerp=function(t,a){ const c0=_h2r(this.c), c1=_h2r(t&&t.c!==undefined?t.c:t); const m=c0.map((v,i)=>Math.round(v+(c1[i]-v)*a)); this.c=(m[0]<<16)|(m[1]<<8)|m[2]; return this; };
 }
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}clone(){const c=new this.constructor();Object.assign(c,this);c.color=_wrapColor(this.color);return c;}}; };   // 2026-11-18 跟码: craterMat.clone (弹坑批, 与 _bootstub 同规)
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={

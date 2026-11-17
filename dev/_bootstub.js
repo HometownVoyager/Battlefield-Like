@@ -67,6 +67,12 @@ remove(m){const i=this.children.indexOf(m);if(i>=0){this.children.splice(i,1);m.
 traverse(fn){fn(this);for(const c of this.children)if(c&&c.traverse)c.traverse(fn);}
 updateMatrix(){}
 lookAt(){return this;}
+// 2026-11-18: rotateX/Y/Z 桩补齐 (忠实化桩, 真浏览器里真 THREE.Object3D 本来就有) —— 05b barrelWreck
+//   (油桶残骸批) 在 setFromUnitVectors 倾地后调 grp.rotateY 自旋, 桩上缺它 = 建残骸即抛。
+//   桩实现为 no-op: 沙箱无渲染, 探针断言只数几何构成不读自旋角 (与 Geo.rotateX/Y/Z no-op 同规)。
+rotateX(){return this;}
+rotateY(){return this;}
+rotateZ(){return this;}
 clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry;if(this.material)c.material=this.material;c.position=new V3(this.position.x,this.position.y,this.position.z);c.rotation=new Euler();if(this.rotation.x||this.rotation.y||this.rotation.z)c.rotation.set(this.rotation.x,this.rotation.y,this.rotation.z);c.scale=new V3(this.scale.x,this.scale.y,this.scale.z);c.visible=this.visible;c.castShadow=this.castShadow;c.name=this.name;return c;}};
 // ★ 2026-09-28: 补 groups/clearGroups/addGroup —— 真 THREE.BufferGeometry 上这三个是标配
 //   (确切的语义: groups 是 [{start,count,materialIndex}], clearGroups 清空, addGroup 追加)。
@@ -143,7 +149,10 @@ return this;
 };
 }
 const _wrapColor=c=>(c&&typeof c==='object'&&typeof c.set==='function')?c:new _Color(c);
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
+// 2026-11-18: 材质 clone() 桩补齐 (忠实化桩, 真浏览器里真 THREE.Material 本来就有) —— 05b crater()
+//   (弹坑批) 逐坑独立材质走 craterMat.clone() (淡出写 opacity 不污染共享底版), 桩上缺它 = 建图期
+//   布局静态坑一建即抛 (verify-perf 等只挂裸 _bootstub 的探针 boot 崩)。桩实现 = 浅拷贝同参新实例。
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}clone(){const c=new this.constructor();Object.assign(c,this);c.color=_wrapColor(this.color);return c;}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={

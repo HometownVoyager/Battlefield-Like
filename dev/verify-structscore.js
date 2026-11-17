@@ -102,7 +102,8 @@ setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
 class _Color{constructor(c){this.c=c;}set(){return this;}}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}dispose(){}}; };
+// 2026-11-18 跟码: 05b crater() 逐坑材质 craterMat.clone() —— 局部 _mat 补 clone (与 _bootstub 同规)
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}dispose(){}clone(){const c=new this.constructor();Object.assign(c,this);c.color=_wrapColor(this.color);return c;}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={

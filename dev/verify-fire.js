@@ -56,8 +56,8 @@ InstancedMesh:IM, Object3D:Obj3, Vector3:P3, Quaternion:Quat, CanvasTexture:clas
 Euler:class{ set(){ return this; } },
 Matrix4:M4, Color:Col,
 BoxGeometry:Geo, CylinderGeometry:Geo, PlaneGeometry:PlaneGeo, SphereGeometry:_FF17Sph(Geo), ConeGeometry:Geo, TorusGeometry:Geo, CircleGeometry:Geo,
-MeshLambertMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color=new Col(0xffffff); } },
-MeshBasicMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } },
+MeshLambertMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color=new Col(0xffffff); } clone(){ const c=new this.constructor(); Object.assign(c,this); return c; } },   // 2026-11-18 跟码: craterMat=MeshLambert 逐坑 clone (弹坑批)
+MeshBasicMaterial:class{ constructor(o){ Object.assign(this,o||{}); if(!this.color) this.color={set(){}}; } clone(){ const c=new this.constructor(); Object.assign(c,this); return c; } },   // 2026-11-18 跟码: crater() 逐坑材质 clone (弹坑批)
 BufferGeometry:class{ constructor(){ this.attributes={}; } setAttribute(n,a){ this.attributes[n]=a; return this; } setIndex(){return this;} setFromPoints(){return this;} computeVertexNormals(){return this;} },
 BufferAttribute:class{ constructor(a,n){ this.array=a; this.itemSize=n; } },
 Float32BufferAttribute:class{},

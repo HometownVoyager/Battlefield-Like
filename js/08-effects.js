@@ -1434,5 +1434,5 @@ flashLight.intensity=60; flashTimer=0.14;
 // heightAt(x,z) = 爆点正下方的地面 ⇒ 半空/楼面的爆炸隔空在地上盖坑 (高炮空炸/撞楼/楼面中弹全中招)。
 // 爆点高于支撑地面 2.2m 不再盖坑 (2.2 取值: 坠地机 die 门是 floor+2, 手雷/炮弹触地爆都在 1m 级 ——
 // 全部照旧盖坑; 水面上 heightAt 是水底, 深水自然不盖, 浅水盖在水底不可见=旧同款); noCrater 再显式压一档。
-if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true);
+if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true,p.y);   // supY=爆点: 支撑面跟随 (2026-11-18 弹坑批, 桥面/楼板上的爆炸贴支撑地板顶画, 甜甜圈病根)
 }

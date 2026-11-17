@@ -62,7 +62,7 @@ WSN.sceneKids=scene.children.filter(c=>!(c&&(c._isPrecip||c._isCloud||(typeof wi
 WSN.boxN=BOXES.length;
 WSN.box=BOXES.map(b=>[b.dead?1:0,b.minX,b.minY,b.minZ,b.maxX,b.maxY,b.maxZ]);
 WSN.cylN=CYLS.length;
-WSN.cyl=CYLS.map(c=>[c.dead?1:0,c.r,c.y0,c.y1]);
+WSN.cyl=CYLS.map(c=>[c.dead?1:0,c.r,c.y0,c.y1,c.hp!==undefined?c.hp:-1]);   // ⑤补 hp (2026-11-18 殉爆批: 桶 hp 懒建, 不入快照会跨局残留半血)
 // ③ 可毁结构组 + 屋顶坍塌链 (反查: pitchedRoof 把 ref 挂在承重墙组的 roofRef 上)
 WSN.dest=DESTRUCTIBLES.map(g=>[g.dead?1:0,g.hp]);
 WSN.roof=[]; WSN.roofSeen=new Set();
@@ -236,6 +236,7 @@ for(let i=0;i<CYLS.length;i++){
 const s=WSN.cyl[i]; if(!s) break;
 const c=CYLS[i];
 c.dead=!!s[0]; c.r=s[1]; c.y0=s[2]; c.y1=s[3];
+if(s.length>4&&s[4]>=0){ c.hp=s[4]; } else if(c.hp!==undefined){ delete c.hp; }   // ⑤补 hp 复位 (懒建回 undefined=下一局首次受击重建满血)
 }
 // ④ 可毁结构组 (视觉网格已由台账还原; 这里只回写"被打没了"这件事)
 for(let i=0;i<DESTRUCTIBLES.length;i++){
@@ -303,6 +304,8 @@ if(typeof MG42S!=='undefined'){ _wsnTrim(MG42S,WSN.mgN); for(const m of MG42S){ 
 if(typeof ATGUNS!=='undefined') _wsnAimRestore(ATGUNS,WSN.aimAT);
 if(typeof AAGUNS!=='undefined') _wsnAimRestore(AAGUNS,WSN.aimAA);
 if(typeof runtimeCraters!=='undefined') _wsnTrim(runtimeCraters,WSN.craterN);
+if(typeof cratersResetLife==='function') cratersResetLife();   // 弹坑寿命清零 (2026-11-18 弹坑批: 布局旧痕随快照回场=全新战场重新计时; 局内战斗坑随台账摘除出账)
+
 _wsnTrim(CROP_FIELDS,WSN.cropN);
 // ⑨ 旗面: 归属回快照 (开局=中立), 布料顶点回基线, 旗高回该归属的目标位
 // (旗高不写快照读数而写"目标位": 旗高是每帧向目标阻尼的动画量, 菜单期待机期间一直在动 ——

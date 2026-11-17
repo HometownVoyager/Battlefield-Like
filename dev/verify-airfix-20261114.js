@@ -53,7 +53,7 @@ const NEG=process.argv.includes('--neg');
 const SRC={},PATCH_MAP={};
 const NEG_PATCHES=[
 // N1 弹坑高度门拆 (回退无条件盖坑): T1b 高空爆炸隔空盖坑红
-['js/08-effects.js','if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true);','crater(p.x,p.z,rand(1.2,1.7),true);'],
+['js/08-effects.js','if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true,p.y);','crater(p.x,p.z,rand(1.2,1.7),true);'],
 // N2 撞楼档拆 (第三参丢): T2a wreck.bld 红 + T2b 低空撞楼 die 隔空盖坑红
 ['js/16-aircraft.js','this.die(this.lastHitBy||null,true,true);','this.die(this.lastHitBy||null,true);'],
 // N3 侧面滑落拆 (回退贴墙悬浮静置): T3a 滑落段 state 红 + 终点贴地红
@@ -101,7 +101,7 @@ if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
 G('for(const s of soldiers) s.protUntil=0; player.protUntil=0;');
 ok(G('soldiers.length')>0,'前置: 战场已开局并部署 (soldiers='+G('soldiers.length')+', player.alive='+G('player.alive')+')');
-ok(html.includes("__sfStyleVer='20261118a'"),'前置: 版本戳 20261118a 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261118b'"),'前置: 版本戳 20261118b 在位 (index.html 内联)');
 
 // ── 场地: CF 走廊 (承 loiterarm 同式) + 探针工具 ──
 G("CF=null; { const R=MAP_SIZE/2-70; const tallBox=(x0,z0,x1,z1,gy)=>{ for(const b of BOXES){ if(b.dead) continue; if(b.maxX<x0||b.minX>x1||b.maxZ<z0||b.minZ>z1) continue; if(b.maxY>gy-0.4&&b.minY<gy+1.5) return true; } return false; }; const tallCyl=(x0,z0,x1,z1,gy)=>{ for(const c of CYLS){ if(c.dead||c.foliage) continue; if(c.x<x0-(c.r+1.5)||c.x>x1+(c.r+1.5)||c.z<z0-(c.r+1.5)||c.z>z1+(c.r+1.5)) continue; if(c.y1>gy-0.4&&c.y0<gy+1.5) return true; } return false; }; for(let z=-R;z<=R&&CF===null;z+=13)for(let x=-R;x<=R-44;x+=13){ const gh=heightAt(x,z); if(gh<1||gh>45) continue; if(occBlocked(x,z)) continue; let flat=true; for(let xx=x-4;xx<=x+40&&flat;xx+=3){ if(Math.abs(heightAt(xx,z)-gh)>2) flat=false; } if(!flat) continue; if(tallBox(x-6,z-6,x+40,z+6,gh+5)) continue; if(tallCyl(x-6,z-6,x+40,z+6,gh+5)) continue; CF={x:x,z:z,gh:gh}; break; } }");
@@ -200,7 +200,7 @@ ok(G('_t7.cleared')===true,'T7c 普查字段读后即清 (不跨死亡误触发)
 console.log('T8 源码锚 (与 NEG 九补丁一一对应)');
 const rd=f=>fs.readFileSync(path.join(root,f),'utf8');
 const s16=rd('js/16-aircraft.js'), s08=rd('js/08-effects.js'), s15=rd('js/15-vehicles.js'), s22=rd('js/22-hud.js'), s24=rd('js/24-main.js'), s27=rd('js/27-achievements.js');
-ok(s08.includes('if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true);'),'T8 锚1 08-effects 弹坑高度门+noCrater 在位');
+ok(s08.includes('if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true,p.y);'),'T8 锚1 08-effects 弹坑高度门+noCrater 在位');
 ok(s16.includes('die(attacker,crash,bld){')&&s16.includes('bld:!!bld, onTop:false,'),'T8 锚2 16-aircraft die 第三参+残骸分档字段在位');
 ok(s16.includes('this.die(this.lastHitBy||null,true,true);')&&s16.includes('explosionFX(this.pos.clone(),!!bld);'),'T8 锚3 撞楼 die 调用+楼面无坑爆在位');
 ok(s16.includes('w.pos.y=_plSwHit.y+0.45;')&&s16.includes('w.vel.set(-_plSwD.x*2.2,w.vel.y*0.45,-_plSwD.z*2.2);'),'T8 锚4 顶面贴楼+侧面滑落在位');

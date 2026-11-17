@@ -119,6 +119,7 @@ const SANDBOX=[
 ['dev/verify-fieldfix2-20261116.js',[],'2026-11-16 八项批+11-17 返修: 树篱三链路/Bot 坦克修理/撞机规避/掉雷开关/主动优化/布娃娃背包/时停关灯 (含 --neg 14 补丁)'],
 ['dev/verify-20261117.js',[],'2026-11-17 四项批: 模型重做(残骸简化44→19件·轿车6→13件·卡车11→21件, 碰撞口径逐字不动)+弹道细化(钢轨街垒 bulletPass 弹道穿透·拒马 cyl.hb 三梁逐梁判定空隙穿弹)+断崖公路(出生半山腰→崖顶 rd>28/h>13·OCC 崖顶走廊打通·enemyTankNear 劫道纳入卡车·convoy.hp 320→800)+游戏内容设置 点位周边补给箱数量 sf_crates 1/2 (第二箱确定性环扫零 wr 漂移) (含 --neg 四补丁)'],
 ['dev/verify-20261117b.js',[],'2026-11-17 十三项批: 读条终局收口(endMatch/returnToMenu)+大地图飞行弹点+手雷簇(nadeStep 子步隧穿防护·盒顶面=楼板落地引爆·弹跳修位·烹饪引信 NADE_COOK_FUSE 推广)+车厢模型重做+枯树碾压倒伏+指挥官 ESC 按是否已部署锁章(CMD.deployTouched)+非盒几何碎块兜底(Box3 分块)+残骸排斥(vehiclePushSoldiers 纯推出)+坦克 3 票(TICKET_COST.tank)+暂停面板卡片化/键帽表+帐篷朝营区中心+I18N(标题/killfeed 人名转写/词典+146) (含 --neg 四补丁)'],
+['dev/verify-20261118a.js',[],'2026-11-18 油桶殉爆批+弹坑批+残骸批+火池二令: 油桶三路记账(子弹 wr.cyl/爆炸×blastMul/火烧受热账)+殉爆留火池+投射物弹性削减(0.38→0.24 等)+弹坑生命周期(CRATER fresh150/scar450=3×/fade45, CRATER_LIFE 双账+24-main 驱动+23b 还原清零)+弹坑支撑面跟随(craterBoxTop 逐顶点盒顶+craterFloorTop 铺装层骑面顶+0.02, 地板视作地面, 甜甜圈拔根)+油桶残骸(barrelWreck 压瘪桶身+翻口沿+滚箍×2+焦土 supY=桶底, 纯视觉不入账)+火池二令(poolTtl 360=6分钟+noWx 整链免天气: 灼烧伤害/燃烧时长/植被格暴雨浇灭·受潮减速·蔓延压火全豁免视同晴档) (含 --neg 十补丁)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

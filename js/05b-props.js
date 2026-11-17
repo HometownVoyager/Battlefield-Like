@@ -315,26 +315,71 @@ WILL_BATCH.length=0;
 //   explosionFX 的 crater(...) 调用点原样 (verify-airfix 钉 verbatim)。
 const craterMat=new THREE.MeshLambertMaterial({color:0x4a4238,transparent:true,opacity:0.85,depthWrite:false,map:TEX.crater}); // 2026-09-06 B8/P3-12: 焦土径向贴图取代纯色
 const runtimeCraters=[];
-function crater(x,z,r,runtime=false){
+// 面层探查 (一次/坑): 结构盒顶 bt 之上找**纯视觉面层件**的顶面 —— 铺装层/木板条/镶边是 05-world
+// pavement 档族 ("几何上只高 0~7cm", 无碰撞账), 盒顶支撑会沉进面层里被深度遮死 (胡康大桥实测:
+// 铺装顶 dy+0.07 vs 结构盒顶 dy = "厚甜甜圈"病根)。只扫 world 顶层 (mesh() 直挂) 的薄盒几何件
+// (boxGeo parameters), 窗口 (bt, bt+0.15] 对齐面层族 0~7cm 注记; 护栏横杆等高位细杆 (dy+0.5+) 出窗,
+// 厚件 (>0.16) 与非盒几何跳过; 水平罩住坑心 (yaw 旋转用 max(w,d) 半宽+0.3 保守余量)。
+function craterFloorTop(bt,cx,cz){
+let top=-1e9;
+for(const o of world.children){
+const p=o.geometry&&o.geometry.parameters;
+if(!p||p.width===undefined||p.height===undefined||p.depth===undefined||p.height>0.16) continue;
+const hx=Math.max(p.width,p.depth)*0.5+0.3;
+if(Math.abs(o.position.x-cx)>hx||Math.abs(o.position.z-cz)>hx) continue;
+const t=o.position.y+p.height*0.5;
+if(t>bt+0.001&&t<=bt+0.15&&t>top) top=t;
+}
+return top;
+}
+function crater(x,z,r,runtime=false,supY){
 if(!runtime){
 if(!propFree(x,z,r*0.5+0.6)) return;
 propTake(x,z,r*0.5+0.6);
 }
 const surfY=(typeof terrainSurfaceY==='function')?terrainSurfaceY:heightAt;
+const surfC=surfY(x,z);
+// 支撑面跟随 (2026-11-18 弹坑批, 用户实报全局性"地板略高于地面时弹坑呈甜甜圈形", 如胡康大桥): capY=
+//   爆点所在支撑面 (explosionFX 传 p.y) + 0.45 允差; 未传 (布局遗迹坑/炮火犁地) = 中心地形 +0.45 ⇒
+//   略高于地面的地板/桥面顶仍可接 (旧痕盖在楼板上也成立)。逐顶点在 地形弦面 vs 盒顶支撑面 取高者:
+//   略高的地板上, 坑盘体 (+0.05) 贴着地板顶画, 不再沉到地板下面只露唇缘脊 = 甜甜圈病根拔掉;
+//   桥面/楼板上的爆炸从此第一次能盖出正确的坑。craterBoxTop 只查盒 (04-collision, noTop 同规跳过)。
+const capY=((supY!==undefined)?supY:surfC)+0.45;
+// 面层抬升 (2026-11-18 二轮修, 用户实报"坑成了厚一点的甜甜圈"+处方"地板视作地面"): 坑心探一次真支撑
+//   渲染面 —— 盒顶之上若有面层件 ⇒ 骑面层顶 +0.02 (贴花档深度偏移吃掉残差); 裸结构盒顶 (=渲染面) ⇒
+//   与地形同规 +0.05。逐顶点仍按 各自位置 的盒顶取支撑, ride 统一用坑心读数 (同一块地板内部一致)。
+const btC=(typeof craterBoxTop==='function')?craterBoxTop(x,z,capY):-1e9;
+let ride=0.05;
+if(btC>-1e8){
+const flT=craterFloorTop(btC,x,z);
+ride=(flT>-1e8)?(flT-btC+0.02):0.05;
+}
 const SEG=24,RINGS=4,R2=r*1.18;   // 网格外沿 1.18r: 唇缘峰在 0.8r, 外沿熔回地形
 const verts=[],uvs=[],idx=[];
+let sMin=1e9,sMax=-1e9,tMin=1e9,tMax=-1e9;   // 支撑面 / 地形基线 两条起伏包络 (台阶门用)
 for(let ri=0;ri<=RINGS;ri++){
 const rr=ri/RINGS*R2;
 for(let si=0;si<=SEG;si++){
 const a=si/SEG*TAU;
 const wx=x+Math.cos(a)*rr, wz=z+Math.sin(a)*rr;
+const tY=surfY(wx,wz);                                  // 地形弦面 (坡地连续起伏基线)
+let ySup=tY, vr=0.05;
+const bt=(typeof craterBoxTop==='function')?craterBoxTop(wx,wz,capY):-1e9;
+if(bt>ySup){ ySup=bt; vr=ride; }                        // 地板/桥面顶 = 真支撑面 (甜甜圈修, 骑面层顶)
+if(tY<tMin) tMin=tY;
+if(tY>tMax) tMax=tY;
+if(ySup<sMin) sMin=ySup;
+if(ySup>sMax) sMax=ySup;
 const dd=Math.hypot(wx-x,wz-z)/r;                       // 0..1.18
 const edgeFade=clamp((R2/r-dd)/(R2/r-1),0,1);           // 1.0→1.18r 线性熔回 0
 const lip=0.13*r*Math.exp(-Math.pow((dd-0.8)*3.0,2));   // 唇缘脊 (峰 0.8r 处 +0.13r)
-verts.push(wx-x, surfY(wx,wz)+0.05+lip*edgeFade, wz-z);
+verts.push(wx-x, ySup+vr+lip*edgeFade, wz-z);
 uvs.push(0.5+0.5*Math.cos(a)*(rr/R2), 0.5+0.5*Math.sin(a)*(rr/R2));
 }
 }
+// 台阶门: 支撑面起伏超出地形基线起伏 0.9m = 坑正跨在地板/桥沿上 (半盘贴地半盘悬空 = 尖刺裙) ⇒ 整坑放弃
+// (纯坡地两包络相等 → 永不触发; 陡坡弹坑照常)。静态坑这里已 propTake, 占位照旧保留 (无网格, 无害)。
+if((sMax-sMin)-(tMax-tMin)>0.9) return;
 for(let ri=0;ri<RINGS;ri++)for(let si=0;si<SEG;si++){
 const a=ri*(SEG+1)+si,b=a+SEG+1;
 idx.push(a,a+1,b,a+1,b+1,b);   // 法线朝上绕向 (二轮修)
@@ -343,15 +388,48 @@ const geo=new THREE.BufferGeometry();
 geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
 geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
 geo.setIndex(idx); geo.computeVertexNormals();
-const m=mesh(geo,craterMat,x,0,z);
+const mat=craterMat.clone();   // 逐坑独立材质: 淡出写 opacity 不能污染共享底版 (craterMat 只读); 贴图引用共享
+const m=mesh(geo,mat,x,0,z);
 // 贴花登记 (2026-09-27 深度分层): 弹坑是**贴**在地形面上的图 —— 走 decal 档 (深度偏移 + renderOrder 同源)。
 // 为什么必须登记: 地形网格局部起伏 ±2cm, 100m 处 1 LSB≈7.5mm ⇒ 弹坑与地形面的深度差只剩 1~3 LSB,
 // 远景弹坑会随相机闪 (旧版这里的裸 renderOrder=1 只管透明件之间的顺序, 管不了深度测试)。
 if(typeof surfaceLane==='function') surfaceLane(m,'decal'); else m.renderOrder=1;
+const ttl=runtime?CRATER.freshTtl:CRATER.scarTtl;   // 生命周期: 战斗新坑 150s / 布局旧痕 450s (=3×, 00-config CRATER)
 if(runtime){
 runtimeCraters.push(m);
 if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); world.remove(old); }
-return;
+}
+CRATER_LIFE.push({m,age:0,ttl});
+}
+// ── 弹坑生命周期账 (2026-11-18 弹坑批, 用户裁定"开局遗迹坑也限时自然消失, 寿命≤人造坑几倍") ──
+// 与 runtimeCraters 双账并行: 后者保持 mesh 数组原形 (36 上限 shift / 23b 快照计数 craterN / 24-main
+// 性能清账三处既有消费点零改动), 本账管年龄/淡出/退场。24-main updateCraters(dt) 每帧驱动;
+// dt<=0 (时停/布势冻结) 不老 —— 与火焰/投射物同一冻结口径; 条目靠 m.parent 探活自愈 (被世界还原/
+// 性能清账/36 上限挤掉的网格不重复 remove, 账也不留尸)。
+const CRATER_LIFE=[];
+function _craterDrop(i){
+const e=CRATER_LIFE[i]; CRATER_LIFE.splice(i,1);
+if(!e) return;
+const k=runtimeCraters.indexOf(e.m); if(k>=0) runtimeCraters.splice(k,1);
+}
+function updateCraters(dt){
+if(!(dt>0)||!CRATER_LIFE.length) return;
+for(let i=CRATER_LIFE.length-1;i>=0;i--){
+const e=CRATER_LIFE[i],m=e.m;
+if(!m.parent){ _craterDrop(i); continue; }
+e.age+=dt;
+const rem=e.ttl-e.age;
+if(rem<=0){ world.remove(m); _craterDrop(i); continue; }
+if(rem<CRATER.fadeWin) m.material.opacity=0.85*clamp(rem/CRATER.fadeWin,0,1);   // 0.85=craterMat 底版 opacity
+}
+}
+// 世界还原钩 (23b ⑥ 弹坑表复位后调): 快照里的布局旧痕原对象放回来 = 全新战场 ⇒ 寿命清零+不透明度回底;
+// 局内战斗坑不在快照 → parent 已无 → 出账 (与 runtimeCraters 同步剪, 三处既有消费点读到干净账)。
+function cratersResetLife(){
+for(let i=CRATER_LIFE.length-1;i>=0;i--){
+const e=CRATER_LIFE[i];
+if(e.m.parent){ e.age=0; e.m.material.opacity=0.85; }
+else _craterDrop(i);
 }
 }
 function crate(x,z,s=1,ry=0){
@@ -388,6 +466,39 @@ world.add(grp);
 // 2026-09-27N (A3): 挂 mesh + explosive 标记 —— 爆炸/连锁引爆时连视觉一起摘掉并结算小爆。
 // 旧版只登记几何 (x/z/y0/y1), 既无 crush 也无移除路径 ⇒ 挡子弹的油桶永远炸不掉、碾不掉。
 CYLS.push({x,z,r:0.45,y0:g0,y1:g0+1.1,mesh:grp,explosive:true});
+}
+// ── 油桶残骸 (2026-11-18 用户令: 殉爆后就地留下残骸, 模型要读得出"油桶残骸") ──
+// 压瘪焦黑桶身 (复用桶皮几何 _BARREL_G.body 压到 ~0.4 高 + 歪斜) + 翻起的桶口沿 + 落地/斜搭两道滚箍残片
+// + 地上焦土贴花 (runtime 弹坑, 走 CRATER 生命周期淡出)。纯视觉不入 CYLS/BOXES 账: 0.3m 高的残骸挡
+// 坦克炮弹/寻路是负提升 (5c688ae 批"非盒几何碎块兜底回滚"用户裁定口径的延伸); 不进快照 → 世界还原
+// ① 场景台账自动摘除, 下一局是全新战场。
+let _BWRECK_M=null;
+function barrelWreck(x,z,gy){
+if(!_BARREL_G) return;   // 桶几何还没建 (正常不会: 残骸只在桶炸后出现)
+if(!_BWRECK_M) _BWRECK_M={burnt:wkMat('burnt',0x2b2823,TEX.scorch,1.7),rust:wkMat('rust',0x7d5535,TEX.rust,1.2),steel:wkMat('steel',0x767770,TEX.metalBrush,0.8)};   // 与 wkPaint 残骸三档同参
+const grp=new THREE.Group();
+grp.position.set(x,gy,z);
+grp.quaternion.setFromUnitVectors(_UP,terrNormal(x,z));
+grp.rotateY(Math.random()*TAU);
+const body=new THREE.Mesh(_BARREL_G.body,_BWRECK_M.burnt);   // 压瘪桶身: 高 1.1→0.41, 微歪
+body.scale.set(1.14,0.37,0.92);
+body.rotation.set(0.18,0,0.14);
+body.position.y=0.21; body.receiveShadow=true;
+grp.add(body);
+const rim=new THREE.Mesh(_BARREL_G.rib,_BWRECK_M.rust);      // 顶盖掀飞残留的翻口沿 (滚箍几何竖起)
+rim.rotation.set(1.2,0,0.5); rim.scale.set(0.95,0.95,0.7);
+rim.position.set(0.03,0.33,0.02); rim.receiveShadow=true;
+grp.add(rim);
+const hoop1=new THREE.Mesh(_BARREL_G.rib,_BWRECK_M.steel);   // 滚箍残片: 一道被气浪抛出平躺地面
+hoop1.rotation.set(0.05,0,0.1);
+hoop1.position.set(0.52,0.045,0.3); hoop1.receiveShadow=true;
+grp.add(hoop1);
+const hoop2=new THREE.Mesh(_BARREL_G.rib,_BWRECK_M.rust);    // 一道斜搭在瘪桶肩上
+hoop2.rotation.set(0.95,0.45,0.3);
+hoop2.position.set(-0.33,0.2,0.1); hoop2.receiveShadow=true;
+grp.add(hoop2);
+world.add(grp);
+if(typeof crater==='function') crater(x,z,1.15,true,gy);        // 焦土底 (战斗新坑, 150s 淡出)
 }
 function stoneWall(x1,z1,x2,z2,h=1.15){
 const dx=x2-x1,dz=z2-z1;

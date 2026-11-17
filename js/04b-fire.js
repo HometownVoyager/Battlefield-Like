@@ -15,6 +15,7 @@ const FUEL=new Float32Array(FN*FN);
 const FHEAT=new Float32Array(FN*FN);
 const FBURN=new Float32Array(FN*FN);   // >0 = 燃烧已持续秒数
 const FEXPIRE=new Float32Array(FN*FN); // 燃烧寿命上限(秒): 燃烧弹点燃的格提前强制熄灭, 蔓延继承 (0=不限, 残骸/树木火)
+const FNOWX=new Uint8Array(FN*FN);  // 天气豁免格 (2026-11-18 油桶火池批): 1=该格燃烧链不吃天气 (暴雨浇灭/受潮减速/蔓延压火全豁免视同晴档; 蔓延继承, 浇灭/烧尽清零)
 const FATT=new Array(FN*FN).fill(null); // 点火者 (击杀归属)
 const FIRE_ACTIVE=[];                  // 正在燃烧的格子索引
 const HEATED=[];                       // 受热但未燃的格子 (需要衰减)
@@ -61,16 +62,17 @@ function creatureIgnitable(s){
 return !!(s&&s.alive&&!s.spectator);
 }
 if(typeof window!=='undefined') window.creatureIgnitable=creatureIgnitable;
-function igniteCreature(s, attacker){
+function igniteCreature(s, attacker, noWx){
   if(!creatureIgnitable(s)||(typeof seatShielded==='function'&&seatShielded(s))) return;
   if(typeof waterYAt==='function'){
     const wy=waterYAt(s.pos.x,s.pos.z);
     if(wy>-1e8&&(s.pos.y||0)<wy+0.3) return; // 涉水灭火/免疫
   }
-  const dur=(typeof WX_CFG!=='undefined'&&WX_CFG.burnDur!==undefined)?WX_CFG.burnDur:3.5;
+  const dur=noWx?3.5:((typeof WX_CFG!=='undefined'&&WX_CFG.burnDur!==undefined)?WX_CFG.burnDur:3.5);   // 天气豁免火 (油桶) 燃烧时长视同晴档 3.5 (2026-11-18 用户令)
   if(dur<=0) return;
   s.burnTimer=Math.max(s.burnTimer||0, dur);
   if(attacker) s.burnAttacker=attacker;
+  s.burnNoWx=!!noWx;   // 燃烧态随点火源记豁免 (updateCreaturesBurning 伤害乘子读, 最新点火源定真伪)
   if(!s.burnTickT) s.burnTickT=0.4;
 }
 if(typeof window!=='undefined') window.igniteCreature=igniteCreature;
@@ -103,7 +105,7 @@ function updateCreaturesBurning(dt){
     s.burnTickT=(s.burnTickT||0.4)-d2;
     if(s.burnTickT<=0){
       s.burnTickT=0.4;
-      const dmg=3.2*dmgMul;
+      const dmg=3.2*(s.burnNoWx?1:dmgMul);   // 油桶火 (noWx) 点燃的燃烧态不吃天气伤害乘子
       s.damage(dmg, s.burnAttacker||null, false);
       if(s.isPlayer&&typeof addTrauma==='function') addTrauma(0.08);
     }
@@ -132,17 +134,18 @@ for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=1;
 occTouch(fx-1.4,fz-1.4,fx+1.4,fz+1.4); // 增量重烘焙脏矩形 (03-terrain; 缺它=火线不进寻路)
 }
 let fireNavT=0;
-function igniteCell(ci,attacker,lifeCap){
+function igniteCell(ci,attacker,lifeCap,noWx){
 if(FUEL[ci]<=0.05||FBURN[ci]>0) return;
 FBURN[ci]=0.001;
 FATT[ci]=attacker||null;
 FEXPIRE[ci]=lifeCap||0;
+FNOWX[ci]=noWx?1:0;   // 天气豁免随点火落格 (油桶火池链; 蔓延继承, 浇灭/烧尽清零)
 FIRE_ACTIVE.push(ci);
 HEATED.push(ci);
 occMarkFire(ci);
 if(fireNavT<=0) fireNavT=5;
 }
-function igniteArea(x,z,r,attacker,lifeCap){
+function igniteArea(x,z,r,attacker,lifeCap,noWx){
 const ci0=fCellI(x,z), n=Math.ceil(r/FRES);
 const cx0=ci0%FN, cz0=Math.floor(ci0/FN);
 for(let dj=-n;dj<=n;dj++)for(let di=-n;di<=n;di++){
@@ -151,7 +154,7 @@ const ci=j*FN+i;
 if(FUEL[ci]<=0.05||FBURN[ci]>0) continue;
 const wx=(ci%FN)*FRES-FOFF+FRES/2, wz=j*FRES-FOFF+FRES/2;
 const dx=wx-x, dz=wz-z;
-if(dx*dx+dz*dz<=(r+1.4)*(r+1.4)) igniteCell(ci,attacker,lifeCap);
+if(dx*dx+dz*dz<=(r+1.4)*(r+1.4)) igniteCell(ci,attacker,lifeCap,noWx);
 }
 }
 // ===== 持续火源 (坦克残骸/坠机残骸): 自身喷射火焰 + 点燃周围植被 + 灼烧圈内单位 =====
@@ -170,8 +173,8 @@ const ax=an.position.x, az=an.position.z;
 _cawP.set(s.pos.x+ax*c+az*n, s.pos.y+an.position.y, s.pos.z-ax*n+az*c);
 return _cawP;
 }
-function addFireSource(x,z,y,r,ttl,dps,attacker,follow){
-const s={x,z,y,r,ttl,dps,attacker:attacker||null,acc:0,smk:0,igniteT:0,follow:follow||null};
+function addFireSource(x,z,y,r,ttl,dps,attacker,follow,noWx){
+const s={x,z,y,r,ttl,dps,attacker:attacker||null,acc:0,smk:0,igniteT:0,follow:follow||null,noWx:noWx?1:0};   // noWx (2026-11-18 油桶火池批): 1=火池本体与点燃链不受天气影响
 FIRE_SOURCES.push(s);
 return s; // 返回源对象: 残骸开始沉入地下时 removeFireSource 提前熄火
 }
@@ -1061,7 +1064,7 @@ if(SETTINGS.quality>=1&&Math.random()<0.5&&fireFxOK()) spawnP(PT.spark,s.x,s.y+0
 s.igniteT-=dt;
 if(s.igniteT<=0){
 s.igniteT=0.7;
-igniteArea(s.x,s.z,s.r*0.85,s.attacker);
+igniteArea(s.x,s.z,s.r*0.85,s.attacker,0,s.noWx);   // 火池周期点燃带天气豁免 (油桶链)
 }
 }
 // ── 油桶受热账 (2026-11-18 油桶殉爆批): 火源圈 / 燃烧草格 / 燃烧弹云三路 0.4s 记账 → 到点殉爆
@@ -1113,8 +1116,8 @@ FBURN[ci]=age;
 const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
 
 // 暴雨博弈 (情况 A): 暴雨有概率在植被烧毁前浇灭火焰 (植被幸存)
-if(sExt>0&&Math.random()<dt*sExt){
-  FBURN[ci]=0; FHEAT[ci]=0; FATT[ci]=null;
+if(sExt>0&&!FNOWX[ci]&&Math.random()<dt*sExt){   // 天气豁免格跳过暴雨浇灭 (油桶火池链)
+  FBURN[ci]=0; FHEAT[ci]=0; FATT[ci]=null; FNOWX[ci]=0;
   FIRE_ACTIVE[i]=FIRE_ACTIVE[FIRE_ACTIVE.length-1]; FIRE_ACTIVE.pop();
   if(Math.hypot(cx-camera.position.x,cz-camera.position.z)<90){
     const gy=heightAt(cx,cz);
@@ -1124,7 +1127,7 @@ if(sExt>0&&Math.random()<dt*sExt){
 }
 
 // 烧毁需要时间总体增加: 基准消耗速率 0.055, 且乘以天气受潮乘子 burnRateMul
-FUEL[ci]-=dt*0.055*bRate;
+FUEL[ci]-=dt*0.055*(FNOWX[ci]?1:bRate);   // 受潮减速对天气豁免格不生效 (油桶火池链视同晴档)
 // 寿命上限: 燃烧弹火系到点强制熄灭 (满燃料格自然烧尽需 ~8.4-9.6s, 上限使其提前熄火)
 if(FEXPIRE[ci]>0&&age>=FEXPIRE[ci]) FUEL[ci]=0;
 // 向 8 邻格积热 (斜向减半): 受热≥0.8 且有燃料 → 蔓延
@@ -1137,8 +1140,8 @@ if(ni<0||nj<0||ni>=FN||nj>=FN) continue;
 const nj2=nj*FN+ni;
 if(FBURN[nj2]>0||FUEL[nj2]<=0.05) continue;
 if(!FHEAT[nj2]) HEATED.push(nj2);
-FHEAT[nj2]+=dt*(di&&dj?0.42:0.85)*FIRE_SPREAD;   // ×蔓延总乘子 (总体削弱 0.8 × 天气 fireMul; 头注两刀)
-if(FHEAT[nj2]>=0.8) igniteCell(nj2,FATT[ci],FEXPIRE[ci]);
+FHEAT[nj2]+=dt*(di&&dj?0.42:0.85)*(FNOWX[ci]?1:FIRE_SPREAD);   // ×蔓延总乘子 (总体削弱 0.8 × 天气 fireMul; 头注两刀); 天气豁免格 (油桶火池链) 按 1 积热
+if(FHEAT[nj2]>=0.8) igniteCell(nj2,FATT[ci],FEXPIRE[ci],FNOWX[ci]);   // 豁免随链继承 (整条火链同源)
 }
 // 视觉: 距相机近时喷火苗 (每格独立计时, 每帧总量限流)
 FFX[ci]-=dt;
@@ -1160,6 +1163,7 @@ if(FUEL[ci]<=0){
 FUEL[ci]=0; FBURN[ci]=0; FHEAT[ci]=0;
 FEXPIRE[ci]=0;
 FATT[ci]=null;
+FNOWX[ci]=0;
 FIRE_ACTIVE[i]=FIRE_ACTIVE[FIRE_ACTIVE.length-1]; FIRE_ACTIVE.pop();
 const cx2=(ci%FN)*FRES-FOFF+FRES/2, cz2=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
 const gy2=heightAt(cx2,cz2);
@@ -1235,7 +1239,7 @@ const dmgMul=wxFireDmg();
 const victims=combatants.slice();
 for(const s of victims){
 if(!creatureIgnitable(s)||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员; 2026-11-04b: 含观战者免着火
-let att=null, fireDmg=0;
+let att=null, fireDmg=0, fireNoWx=false;
 const ci0=fCellI(s.pos.x,s.pos.z);
 const cxi=ci0%FN, czi=(ci0/FN)|0;
 for(let dj=-1;dj<=1&&!fireDmg;dj++)for(let di=-1;di<=1;di++){
@@ -1244,16 +1248,16 @@ if(ni<0||nj<0||ni>=FN||nj>=FN) continue;
 const ci=nj*FN+ni;
 if(FBURN[ci]<=0) continue;
 const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
-if(Math.hypot(s.pos.x-cx,s.pos.z-cz)<2.7){ fireDmg=5.2*dmgMul; att=FATT[ci]; break; }
+if(Math.hypot(s.pos.x-cx,s.pos.z-cz)<2.7){ fireDmg=5.2*(FNOWX[ci]?1:dmgMul); att=FATT[ci]; fireNoWx=!!FNOWX[ci]; break; }
 }
 if(!fireDmg){
 for(const fs of FIRE_SOURCES){
-if(Math.hypot(s.pos.x-fs.x,s.pos.z-fs.z)<fs.r+0.4&&Math.abs((s.pos.y||0)-fs.y)<3.5){ fireDmg=fs.dps*0.4*dmgMul; att=fs.attacker; break; }
+if(Math.hypot(s.pos.x-fs.x,s.pos.z-fs.z)<fs.r+0.4&&Math.abs((s.pos.y||0)-fs.y)<3.5){ fireDmg=fs.dps*0.4*(fs.noWx?1:dmgMul); att=fs.attacker; fireNoWx=!!fs.noWx; break; }
 }
 }
 if(!fireDmg) continue;
 s.damage(fireDmg,att,false);
-igniteCreature(s,att);
+igniteCreature(s,att,fireNoWx);   // 豁免随点火源透传 (燃烧时长+燃烧态伤害乘子)
 if(s.isPlayer){ addTrauma(0.12); }
 if(Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<80&&fireFxOK()){
 const gy=s.pos.y||heightAt(s.pos.x,s.pos.z);
@@ -1262,9 +1266,9 @@ spawnP(PT.flash,s.pos.x+rand(-0.25,0.25),gy+rand(0.5,1.3),s.pos.z+rand(-0.25,0.2
 }
 for(const t of tanks){
 if(!t.alive) continue;
-let onFire=false, att=null;
+let onFire=false, att=null, tNoWx=false;
 for(const fs of FIRE_SOURCES){
-if(Math.hypot(t.pos.x-fs.x,t.pos.z-fs.z)<fs.r+1.6){ onFire=true; att=fs.attacker; break; }
+if(Math.hypot(t.pos.x-fs.x,t.pos.z-fs.z)<fs.r+1.6){ onFire=true; att=fs.attacker; tNoWx=!!fs.noWx; break; }
 }
 if(!onFire){
 const ci=fCellI(t.pos.x,t.pos.z);
@@ -1273,10 +1277,10 @@ for(let dj=-1;dj<=1&&!onFire;dj++)for(let di=-1;di<=1;di++){
 const ni=cxi+di, nj=czi+dj;
 if(ni<0||nj<0||ni>=FN||nj>=FN) continue;
 const ci2=nj*FN+ni;
-if(FBURN[ci2]>0&&FUEL[ci2]>0){ onFire=true; att=FATT[ci2]; break; }
+if(FBURN[ci2]>0&&FUEL[ci2]>0){ onFire=true; att=FATT[ci2]; tNoWx=!!FNOWX[ci2]; break; }
 }
 }
-if(onFire) t.takeDmg(3*dmgMul,att);
+if(onFire) t.takeDmg(3*(tNoWx?1:dmgMul),att);   // 油桶火池 (noWx) 不吃天气伤害乘子
 }
 }
 

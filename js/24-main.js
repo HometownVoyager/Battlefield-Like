@@ -229,6 +229,8 @@ updateMineTriggers(dt); // 反坦克雷: 车辆碾压触发 + 链爆账消费 (1
 updateSupplyPoints(dt); // 劫道方临时补给点: 限时失效
 // 火焰蔓延/树木燃烧倒伏/倒伏动画 (04b-fire)
 updateFires(dt);
+updateCraters(dt); // 弹坑淡出 (05b CRATER 生命周期账, 2026-11-18 用户裁定: 开局遗迹坑也限时自然消失; dt<=0 时停冻结)
+updateFires(dt);
 updateTreeBursts(dt); // 环境炮击: 许特根树爆(空爆) / 草原炮火犁地(贴地+点麦田) (04b-fire)
 updateWindRotors(dt); // 草原风车磨坊风叶慢转 (05a, 纯视觉)
 updateFallingTrees(dt);

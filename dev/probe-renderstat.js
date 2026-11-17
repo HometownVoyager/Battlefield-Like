@@ -89,7 +89,7 @@ const c0=_p(this.c), c1=_p(t&&t.c!==undefined?t.c:t);
 const mix=c0.map((v,i)=>Math.round(v+(c1[i]-v)*a)); this.c=(mix[0]<<16)|(mix[1]<<8)|mix[2]; return this; }
 getHex(){ return typeof this.c==='number'?this.c:0; }}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}}; };
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}clone(){const c=new this.constructor();Object.assign(c,this);c.color=_wrapColor(this.color);return c;}}; };   // 2026-11-18 跟码: craterMat.clone (弹坑批, 与 _bootstub 同规)
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={

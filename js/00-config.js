@@ -1852,8 +1852,15 @@ const STRUCT_ROOF={base:260, perSqrtArea:70, min:300, max:1500};
 //   爆炸 ×3 = 燃料蒸气远比墙体敏感: 现有全部爆炸源 amt≥45 (手雷 explodeAt 最低档) ⇒ 圈内一击
 //   殉爆, 与旧"圈内即爆"口径逐位一致 (油桶自身殉爆 90×3=270 ⇒ 连锁半径不变);
 //   火烧三路 (持续火源圈 / 燃烧草格 / 燃烧弹云) 0.4s 记账 dps ⇒ 烤 7~9s 殉爆 (口径对齐
-//   fireDamageTick 的 0.4s×dps 步调); 殉爆后原地留 poolTtl 秒火池 (灼烧圈内单位+点燃植被+烤相邻桶)。
-const BARREL={hp:100, bulletHit:24, atRifleHit:70, blastMul:3, fireDps:14, cellFireDps:12, poolR:2.3, poolTtl:14, poolDps:16};
+//   fireDamageTick 的 0.4s×dps 步调); 殉爆后原地留 poolTtl=360s 火池 (6 分钟, 2026-11-18 用户二令; 整链免天气:
+//   04b noWx —— 暴雨浇灭/受潮减速/蔓延压火/灼烧伤害/燃烧时长全豁免视同晴档, 灼烧圈内单位+点燃植被+烤相邻桶)。
+const BARREL={hp:100, bulletHit:24, atRifleHit:70, blastMul:3, fireDps:14, cellFireDps:12, poolR:2.3, poolTtl:360, poolDps:16};
+// ===== 弹坑生命周期单源 (2026-11-18 弹坑批, 用户裁定) =====
+//   两层口径: freshTtl=战斗新坑 (explosionFX/炮火犁地等 runtime crater) 寿命; scarTtl=布局层战场遗迹坑
+//   (05c 布局/散布表建图期摆的旧痕) 寿命 = 3×freshTtl (用户令"开局坑也限时自然消失, 时间不超过人造坑的几倍").
+//   剩余寿命 < fadeWin 线性淡出 (逐坑独立材质写 opacity, 共享 craterMat 只读底版). 消费: 05b crater()/
+//   updateCraters()/cratersResetLife(), 24-main 每帧驱动.
+const CRATER={freshTtl:150, scarTtl:450, fadeWin:45};
 // ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) =====
 // A#7 坦克三人车组: 编制人数 = 3。车毁恒结算 CREW_N 次死亡 / CREW_N 杀 / CREW_N 票 (每票 1 人)。
 //   为什么**乘员**票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,

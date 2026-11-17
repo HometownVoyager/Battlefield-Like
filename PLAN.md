@@ -3582,3 +3582,19 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 （正/阴两态亲见）。实机关注：①打完一局（含打爆载具）→结算/回主页→重开，地图应有载具、Bot 照动、HUD 全;
 ②烧焦树篱/枯树回主页航拍应回绿色;③游戏内容设置新开关默认开（现行为），关闭后友方爆炸不再误伤+友雷告警停用;
 ④若再遇"世界冻结/没载具"，屏幕顶部应出现红色「⚠ 帧异常」条（护栏首错上屏），把文案抄报即可定位。
+
+## 一.114 四项批：模型重做 × 障碍物子弹判定 × 断崖公路 × 补给箱设置 (2026-11-17, 补登——该批此前只落 README §八, PLAN 漏登; 一.79 先例)
+
+**用户令 (四项)**: 1 模型重做风格统一（坦克残骸 44→19 件/轿车残骸 6→13 件/运输卡车 11→21 件，碰撞盒+PROPS+coverPoints 账逐位不动）；2 障碍物/拒马子弹判定（钢轨街垒全碰撞盒挂 bulletPass 单弹道口 raycastWorld 穿弹；反坦克拒马改逐梁线段判定空隙穿弹）；3 断崖公路 1940 出生上崖顶（伏击点 6→14.5~21.3m 崖顶+3m 通行走廊；Bot 反装甲兵索敌纳入卡车；卡车 hp 320→800）；4 游戏内容设置「点位周边补给箱数量 1/2」（sf_crates，第二箱贴掩体优选落位，默认 1 档全图布局指纹零漂移）。判据 verify-20261117 四支全绿+NEG 对认；详见 README §八 2026-11-17 行。
+
+## 一.115 十三项实报批: i18n 收口 × 大地图弹点 × 手雷楼层子步 × 读条终局收口 × 车厢模型 × 枯树倒伏 × 指挥官 ESC 分流 × 油桶殉爆机制 × 投射物弹性削减 (2026-11-18, 补登——该批此前只落 README §八, PLAN 漏登; 一.79 先例)
+
+**用户原始令**（油桶殉爆与弹性削减两项）+实机十三项。核心：**油桶三路记账**（子弹 fireBullet wr.cyl 单弹道口/爆炸 damageStructures ③×blastMul/火烧 04b 受热账 0.4s tick，hp 懒建 100）+殉爆留火池（addFireSource r2.3/ttl/dps+attacker 归属）；nadeStep 拆子步（单步 >0.24m 按子步推进，薄墙必中；盒顶=楼板落地视作触地）；弹性削减（落地 0.38→0.24/切向 0.68→0.60/盒顶 0.4→0.26/盒侧 0.5→0.34）；i18n ~140 词典键+84 人名拉丁转写；油桶材质重做锈红桶皮 Group（CYLS 账逐位不动）；帐篷 ry=atan2(dx,dz) 二修；坦克残骸排斥步兵；坦克一律 3 票；暂停面板卡片化+键帽表；架枪留存。判据 dev/verify-20261117b **48/0**+--neg 44/4；六稳定红 A/B 基线（c6cdde8 worktree）全归因本批非预存。详见 README §八 2026-11-18 十三项行。
+
+## 一.116 油桶殉爆延续 × 弹坑系统 × 油桶残骸 × 火池六分钟 (2026-11-18, 待实机验收)
+
+**用户令 (四道)**: 1 油桶爆炸后就地留下残骸且模型要足够"油桶残骸"；2 地图开局就有几个爆炸坑且永不消失——"严重的系统性全局性问题"（裁定=布局遗迹坑保留但限时自然消失，寿命≤人造坑几倍）；3 地板略高于地面时弹坑呈甜甜圈形=全局性 BUG（一轮盒顶骑升实测"厚一点的甜甜圈"+处方**"将地板视作一种'地面'"**）；4 油桶爆炸的火改为持续 6 分钟且不受天气等影响。
+
+**①残骸**: 05b barrelWreck(x,z,gy)=压瘪焦黑桶身（_BARREL_G.body scale1.14/0.37/0.92 歪斜）+翻口沿+滚箍残片×2+焦土贴花 crater(1.15,supY=桶底)；纯视觉不入 CYLS/BOXES 账（5c688ae 裁定延伸）、不进快照=还原摘除；05-world barrelBlast 接线。**②弹坑生命周期**: CRATER={freshTtl:150,scarTtl:450=3×,fadeWin:45}+CRATER_LIFE 双账并行（runtimeCraters 三处既有消费点零改动）+24-main updateCraters(dt)（dt≤0 时停冻结）+23b cratersResetLife 还原钩+m.parent 探活自愈+尾窗淡出。**③甜甜圈全局修**: crater 第五参 supY（explosionFX 透传爆点）+04-collision craterBoxTop 逐顶点盒顶支撑+05b craterFloorTop 面层感知（薄盒件 (bt,bt+0.15] 窗）骑**面层顶+0.02**/裸盒顶+0.05 同规地形+台阶门>0.9 弃坑防尖刺。**④火池二令**: poolTtl 14→360+noWx 整链（04b addFireSource 第 9 只/灼烧兵坦克双路 fs.noWx?1:fireDmgMul/igniteCreature 3.5s+burnNoWx/updateCreaturesBurning 3.2×/FNOWX=Uint8Array 落格——暴雨浇灭·受潮消耗·蔓延压火三乘子全豁免视同晴档+蔓延继承；树冠火保持全局天气博弈）。**⑤顺带**: 23b WSN.cyl 快照补 hp 第 5 位+还原复位（桶 hp 懒建跨局残留）。
+
+**判据**: 新 dev/verify-20261118a **74/0 ×6 稳**（T1 子弹记账/T2×blastMul/T3 火烧三路/T4 余火烤毙/T5 弹性削减/T6 戳/T7 生命周期 15 断言/T8 铺装层骑面+0.02 逐位+全顶点窗+裸盒对照——★探针锚带 2.6m 盒净空门防沙袋/拒马矮盒顶拉走顶点/T9 残骸 4 件构成+纯视觉钉/T10 火池 6 分钟+暴雨档灼烧 6.4·燃料 0.055·时长 3.5 逐位晴档）+**--neg 31红↔10补丁全对认**（N1 子弹/N2 ③直调/N3 受热账/N4 反弹/N5 火池/N6 deaden updateCraters/N7 逐顶点骑升/N8 残骸接线/N9 ttl/N10 noWx）。**桩忠实化**: _bootstub Obj3 rotateX/Y/Z+材质 clone()（craterMat.clone/rotateY 沙箱炸桩=桩不忠实非被测代码问题）+局部桩三支同规跟补（worldrestore/fire/structscore）。**预存红 A/B 清账**: willow 40绿/2红+nade-trigger B1（三角数 NaN）=HEAD worktree 同红非本批（nade-trigger 87/1 比基线 86/2 净赚一绿）。判据跟码: verify-airfix（crater supY 锚+NEG）+verify-crater（T4f）双支绿（58/0、21/0）。**run-all r1 首过 136/148**（12 支红经 3 连跑复核=稳定红 10+偶发 2）：预存 5 支（HEAD worktree 对照同红=phase2/phase3/probe-bots/willow 40绿2红/nade-trigger 87/1）；**桩回归 5 支当场修复**（verify-boot/layouts/sink/uvscale/probe-renderstat 局部桩与共享 _structbase 材质类缺 clone ⇒ craterMat.clone 建图即炸——同规补 clone 后单跑 exit=0 复核）；偶发 2 支（loiterview 0/0/0 在案偶发；本批 20261118a 1/0/0 两根因当场修=①T1 射线走廊被布局圆柱挡（起点落圆柱内 t 为负）→ placeBarrelClear 走廊净空落桶 ②T8b 125 顶点中 1~7 个 ±0.07 混合桩抖动→支撑窗放宽"不沉底"判据（N7 沉底 ghA+0.05 仍远出窗），修后 74/0 复跑确认）；r2 用户令免跑。实机验收清单见 finished-docs/批-油桶殉爆延续×弹坑系统×油桶残骸×火池六分钟-2026-11-18.md。

@@ -296,6 +296,23 @@ eachBoxNear(x-0.07,z-0.07,x+0.07,z+0.07,_shBoxCb);
 eachCylNear(x-0.07,z-0.07,x+0.07,z+0.07,_shCylCb);
 return _shS.h;
 }
+// ── 弹坑支撑面查询 (2026-11-18 弹坑批, 用户实报全局性"地板略高于地面时弹坑呈甜甜圈形", 如胡康大桥) ──
+//   机理: 坑贴花逐顶点采样地形渲染弦面 (terrainSurfaceY), 爆点若在略高于地面的地板/桥面上, 坑盘体
+//   (+0.05m) 整个沉在地板下面被遮死, 只有唇缘脊 (+0.13r≈0.2m) 高出地板露出来 = 环形。
+//   修法: 逐顶点在"地形弦面 vs 盒顶支撑面"里取高者 —— 桥面/楼板/平台都是盒账, capY=爆点支撑高度
+//   +0.45 ⇒ 上层楼板/更高桥面不误接。只查盒不查柱 (树干/电线杆的顶不该接坑), noTop (树篱顶) 同规跳过。
+const _crTopS={x:0,z:0,capY:0,h:-1e9};
+function _crTopCb(b){
+if(b.dead||b.noTop) return;
+if(_crTopS.x>b.minX-0.05&&_crTopS.x<b.maxX+0.05&&_crTopS.z>b.minZ-0.05&&_crTopS.z<b.maxZ+0.05){
+if(b.maxY<=_crTopS.capY&&b.maxY>_crTopS.h) _crTopS.h=b.maxY;
+}
+}
+function craterBoxTop(x,z,capY){
+_crTopS.x=x; _crTopS.z=z; _crTopS.capY=capY; _crTopS.h=-1e9;
+eachBoxNear(x-0.05,z-0.05,x+0.05,z+0.05,_crTopCb);
+return _crTopS.h;
+}
 // ── 头顶天花板钳制 (2026-11-10 批, 用户实报"顶上有墙时跳跃会碰撞后穿模穿墙") ──
 // 病根: 竖直方向只有 standHeight 落地支撑, 没有"天花板"概念 —— 跳跃上升段头顶 (pos.y+1.7, 与
 // collideMove 纵带同参数) 一旦探进上方盒/柱的纵带, collideMove 的横推接管: 站在楼板正下方时

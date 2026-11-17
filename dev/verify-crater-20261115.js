@@ -103,7 +103,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261118a'"),'前置: 版本戳 20261118a 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261118b'"),'前置: 版本戳 20261118b 在位 (index.html 内联)');
 
 // ── 平坦场地 (法线判据需要平地) ──
 G("_sp=null; { const R=MAP_SIZE/2-60; for(let z=-R;z<=R&&!_sp;z+=7)for(let x=-R;x<=R;x+=7){ const gh=heightAt(x,z); if(gh<1||gh>40) continue; if(occBlocked(x,z)) continue; let flat=true; for(let dx=-3;dx<=3;dx+=3)for(let dz=-3;dz<=3;dz+=3){ if(Math.abs(heightAt(x+dx,z+dz)-gh)>0.3) flat=false; } if(!flat) continue; _sp={x:x,z:z,gh:gh}; break; } }");
@@ -143,7 +143,7 @@ ok(src05b.includes('idx.push(a,a+1,b,a+1,b+1,b);')===true,'T4b ★绕向锚 verb
 ok(src05b.includes('const surfY=(typeof terrainSurfaceY===\'function\')?terrainSurfaceY:heightAt;')===true,'T4c ★弦面采样单源锚 verbatim (黑弧病根修复)');
 ok(src05b.includes('const SEG=24,RINGS=4,R2=r*1.18;')===true,'T4d 剖面常量锚 (唇缘峰 0.8r/外沿 1.18r 熔回) verbatim');
 ok(src05b.indexOf('function crater(')<src05b.indexOf('function crate(')&&src05b.slice(src05b.indexOf('function crater('),src05b.indexOf('function crate(')).includes('Torus')===false,'T4e 唇缘 Torus rim 已废 ( crater 区段无 TorusGeometry)');
-ok(src08.includes('if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true);')===true,'T4f explosionFX 调用点 verbatim (verify-airfix T1 契约)');
+ok(src08.includes('if(!noCrater&&p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,rand(1.2,1.7),true,p.y);')===true,'T4f explosionFX 调用点 verbatim (verify-airfix T1 契约)');
 ok(src03.includes('function terrainSurfaceY(x,z){')===true,'T4g terrainSurfaceY 单源在 03-terrain verbatim');
 
 console.log('');

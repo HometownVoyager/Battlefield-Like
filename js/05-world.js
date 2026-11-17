@@ -1312,16 +1312,19 @@ const p=V3(c.x,(c.y0+c.y1)/2,c.z);
 killCyl(c);
 // 网格只摘不置空: 世界还原按 world.children 快照把网格放回来, 下一局同一只桶还能再被引爆一次
 if(c.mesh&&c.mesh.parent) world.remove(c.mesh);
+if(typeof barrelWreck==='function') barrelWreck(c.x,c.z,c.y0);   // 残骸留场 (2026-11-18 用户令: 殉爆后就地留下油桶残骸, 纯视觉随世界还原摘除)
+if(c.mesh&&c.mesh.parent) world.remove(c.mesh);
 if(typeof explosionFXSmall==='function') explosionFXSmall(p); else if(typeof explosionFX==='function') explosionFX(p);
 if(typeof AudioSys!=='undefined'&&AudioSys.explosion&&camera) AudioSys.explosion('drum',p.distanceTo(camera.position)*0.8,AudioSys.panOf(p)); // 燃料桶档 (★2026-11-15c: 亮 pop)
 for(let k=0;k<6;k++) spawnP(PT.spark,p.x,p.y,p.z,rand(-3,3),rand(1.5,4.5),rand(-3,3),0.13,-0.02,rand(0.2,0.45),1,6,true);
 for(let k=0;k<5;k++) spawnP(PT.dark,p.x+rand(-0.6,0.6),p.y+rand(0.2,1.2),p.z+rand(-0.6,0.6),rand(-1.4,1.4),rand(1,2.6),rand(-1.4,1.4),rand(0.7,1.2),2,rand(1,1.6),0.75,0.3);
 // 溅射不认人 (燃料爆炸, 对双方一视同仁) + 点燃周边植被; 已归零的桶自身不再参与
 if(typeof splashDamage==='function') splashDamage(p,attacker,-1,3.4,95,60);
-if(typeof igniteArea==='function') igniteArea(c.x,c.z,2.2,attacker,6);
+if(typeof igniteArea==='function') igniteArea(c.x,c.z,2.2,attacker,6,true);   // 首圈点燃同 noWx 链
 // 留下火焰 (2026-11-18): 桶位余火池 = 持续火源 (同残骸火源口径, dps 供 fireDamageTick 灼烧圈内单位),
 //   attacker 归点火者 (addFireSource 内 attacker||null 同规); 时停/布势冻结里随战场冻住 (updateFires dt 账)
-if(typeof addFireSource==='function') addFireSource(c.x,c.z,p.y+0.3,BARREL.poolR,BARREL.poolTtl,BARREL.poolDps,attacker||null);
+//   ★2026-11-18 二令: poolTtl=360s (6 分钟) 且整链 noWx 免天气 (04b: 暴雨浇灭/受潮减速/蔓延压火/灼烧伤害/燃烧时长全豁免, 视同晴档; 树冠火保持全局天气博弈)
+if(typeof addFireSource==='function') addFireSource(c.x,c.z,p.y+0.3,BARREL.poolR,BARREL.poolTtl,BARREL.poolDps,attacker||null,null,true);   // noWx: 油桶火池整链不受天气影响 (2026-11-18 用户二令: 持续6分钟+免天气)
 // 连锁: 震塌近处结构 (半径/伤害取桶级小爆); 深度上限防"油桶阵互相递归" —— 每只桶只会引爆一次
 if(_barrelDepth<3){ _barrelDepth++; try{ damageStructures(p,2.8,90,attacker); } finally{ _barrelDepth--; } }
 return true;
