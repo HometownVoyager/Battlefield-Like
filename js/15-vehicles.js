@@ -327,6 +327,11 @@ return _trQ.h;
 //    坦克更新在主循环里逐辆串行), 每次查询前装载、即时消费。
 const _tkOff=[-1.95,0,1.95];
 const _tkC={t:null,cx:0,cz:0,sn:0,cs:0,pass:0,hit:false};
+// ★2026-11-18 卡顿审计: tankPerceive 候选复用槽 (稳态零分配) —— 两段式感知: 评分段收槽, LOS 段按分降序逐个复核
+const _tkPerC=[], _tkPerIdx=[];
+let _tkPerN=0;
+function _tkPerCmp(a,b){ return _tkPerC[b].sc-_tkPerC[a].sc; }   // 稳定排序 ⇒ 平分保持扫描序 (与旧 sc>bs 先见先得同果)
+let _tkPhaseSeq=0;   // ★2026-11-18 卡顿审计: 感知相位序号 —— 确定性错峰不走 rand (RNG 流纪律: 探针建场对 rand 序列敏感, 11-18 tankai A/B 实录)
 function _tkBoxCb(b){
 const T=_tkC.t; if(!T) return;
 if(b.dead||T.pos.y+2<b.minY||T.pos.y>b.maxY) return;
@@ -919,6 +924,7 @@ this.beaconMat.opacity=0.6+0.4*Math.sin(nowT*2.6+this.team*2.3);
 	return;
 	}
 	this.cannonCd-=dt; this.mgT-=dt; this.mgPause-=dt;
+if(this.threatYawT>0){ this.threatYawT-=dt; if(this.threatYawT<=0) this.threatYaw=null; }   // ★2026-11-18 卡顿审计: threatYaw 6s 账 (原 setTimeout 迁移, 暂停/时停下与全场同冻结)
 // A#3 载具机枪过热 (契约 A): 每帧推进散热/解锁 (玩家 0.22/s 且开火不散 / AI 0.15/s 常散);
 // firing = 本帧是否有开火请求 (firePlayerMG / turretAI 的 MG 分支置位) —— 消费式, 消费后本帧不再算开火。
 vehMgHeatTick(this,dt,this.mgTrig,this.playerDriven);
@@ -1039,6 +1045,7 @@ this.pos.x+=mvx; this.pos.z+=mvz;
 	// (旧实现任意接触 vel*=0.5, 轻微擦碰就降到爬行, 极易进退两难)
 	let hitObstacle=false;
 	for(let pass=0;pass<2;pass++){
+	if(pass===1&&!hitObstacle) break; // ★2026-11-18 卡顿审计: 第一遍零接触 ⇒ 位姿未变, 第二遍必然同样零接触 —— 省一半底盘邻域查询 (每车 3 圆×2 查询×2 遍)
 	for(let oi=0;oi<3;oi++){
 	const off=_tkOff[oi];
 	const cxp=this.pos.x+sn*off, czp=this.pos.z+cs*off;
@@ -1157,8 +1164,11 @@ if(this.aiPerT>0) return;
 this.aiPerT=TANK_PER_T;
 const ex=this.pos.x, ey=this.pos.y+1.9, ez=this.pos.z;
 const face=this.yaw+this.turretYaw;
-let best=null,bd=0,bs=-1e9;
+let best=null,bd=0;
+_tkPerN=0;
 // 候选评分 (单源: 坦克/卡车/海战载具共用这一支 —— 视野距离/前向视锥/LOS/烟幕/庄稼/植被/粘滞/残血加分全部同规)
+// ★2026-11-18 卡顿审计: 改两段式 —— 评分段 (无射线, 收进 _tkPerC 复用槽) + 下方按分降序 LOS 复核段
+//   (评分与 LOS 无关 ⇒ 同果, 常态车长射线从 ~候选数 降到 ~1 发)
 const score=(t,ty,lowHp)=>{
 const dx=t.pos.x-ex, dz=t.pos.z-ez;
 const d=Math.hypot(dx,dz);
@@ -1179,18 +1189,7 @@ const bearing=Math.atan2(dx,dz);
 const tracked=(this.tVehTgt===t&&this.tMemT>0);
 // 前向视锥: 车体前向或炮塔指向任一覆盖即可; 记忆中的目标不再要求视锥; 强光暴露目标同样放宽
 if(!tracked&&!lightExposed&&Math.abs(angDiff(this.yaw,bearing))>TANK_VIEW_CONE&&Math.abs(angDiff(face,bearing))>TANK_VIEW_CONE) return;
-let hx=t.pos.x-ex, hy=ty-ey, hz=t.pos.z-ez;
-const hl=Math.hypot(hx,hy,hz)||1; hx/=hl; hy/=hl; hz/=hl;
-const hit=raycastWorld(V3(ex,ey,ez),V3(hx,hy,hz),hl);
-if(hit&&hit.dist<hl-1.2) return;
-if(SMOKES.length&&smokeBlocksLOS(ex,ey,ez,t.pos.x,ty,t.pos.z)) return;
-if(CROP_FIELDS.length&&cropBlocksLOS(ex,ey,ez,t.pos.x,ty,t.pos.z)) return;
-// 植被软遮蔽 (2026-09-20 I5 联动, 用户口径: 灌木/树冠挡视野但不挡子弹): 车长视线与步兵 perceive 同一套口径,
-// 坦克同样看不穿灌丛 —— 纲领第2条"玩家与 Bot、各兵种同规则". 车长镜/潜望镜**不豁免** (Lead 2026-09-20 裁定:
-// 豁免会造出"只有坦克能看穿草丛"的特例; 椰冠带本就是"地面平视从冠下穿过、塔顶才被挡"的高度带判定, 天然合理).
-// typeof 守卫: 部分沙箱探针只加载子集文件, 缺这个可选模块不该让车组 AI 整段报错
-// (与 14-bots.js 的 `typeof tankRollingToObjective==='function'` 同一纪律)
-if(typeof foliageBlocksLOS==='function'&&foliageBlocksLOS(ex,ey,ez,t.pos.x,ty,t.pos.z)) return;
+// (LOS/烟幕/庄稼/植被复核移至下方降序段 —— ★2026-11-18 卡顿审计; 植被软遮蔽口径注释随迁)
 let sc=200-d*0.5;
 // ★2026-10-26 指挥官交互重做批 (用户需求 3 集火): 车组也吃集火令 —— 判据单源在 26-commander 的
 //   cmdFocusBonus (圈内顶到最前 / 圈外线性衰减); 本文件只加进候选分, 不重复实现半径/过期判断。
@@ -1202,7 +1201,8 @@ sc+=cmdFocusBonus(_fu,t.pos.x,t.pos.z);
 }
 if(lowHp) sc+=60;  // 残血敌车是"战机": 完整AI会抓 (追击意愿另受难度分档)
 if(tracked) sc+=40;            // 目标粘滞: 不因另一辆稍微更近就来回换炮口
-if(sc>bs){ bs=sc; best=t; bd=d; }
+if(_tkPerN>=_tkPerC.length) _tkPerC.push({sc:0,t:null,ty:0,d:0});   // 复用槽 (模块级, 稳态零分配)
+const _pc=_tkPerC[_tkPerN++]; _pc.sc=sc; _pc.t=t; _pc.ty=ty; _pc.d=d;
 };
 for(const t of tanks){
 if(!t.alive||t.team===this.team||t===this) continue;
@@ -1220,6 +1220,27 @@ if(c.state==='wreck'||c.state==='sinking') continue;   // 已在沉没链上的�
 if(typeof specRide==='function'&&specRide(c)) continue;   // 观战者座驾 (2026-09-26H)
 score(c,c.pos.y+1.1,false);
 }
+}
+// ★2026-11-18 卡顿审计: LOS 复核降序单发 —— 射线/烟幕/庄稼/植被逐槽复核, 第一个过线者即目标
+//   (与旧"逐候选 LOS+评分取最高分通过者"完全同果; 平分由稳定排序保持扫描序)。
+_tkPerIdx.length=_tkPerN;
+for(let _i=0;_i<_tkPerN;_i++) _tkPerIdx[_i]=_i;
+_tkPerIdx.sort(_tkPerCmp);
+for(let _i=0;_i<_tkPerN;_i++){
+const _pc2=_tkPerC[_tkPerIdx[_i]], _bt=_pc2.t, _bty=_pc2.ty;
+let hx=_bt.pos.x-ex, hy=_bty-ey, hz=_bt.pos.z-ez;
+const hl=Math.hypot(hx,hy,hz)||1; hx/=hl; hy/=hl; hz/=hl;
+const hit=raycastWorld(V3(ex,ey,ez),V3(hx,hy,hz),hl);
+if(hit&&hit.dist<hl-1.2) continue;
+if(SMOKES.length&&smokeBlocksLOS(ex,ey,ez,_bt.pos.x,_bty,_bt.pos.z)) continue;
+if(CROP_FIELDS.length&&cropBlocksLOS(ex,ey,ez,_bt.pos.x,_bty,_bt.pos.z)) continue;
+// 植被软遮蔽 (2026-09-20 I5 联动, 用户口径: 灌木/树冠挡视野但不挡子弹): 车长视线与步兵 perceive 同一套口径,
+// 坦克同样看不穿灌丛 —— 纲领第2条"玩家与 Bot、各兵种同规则". 车长镜/潜望镜**不豁免** (Lead 2026-09-20 裁定:
+// 豁免会造出"只有坦克能看穿草丛"的特例; 椰冠带本就是"地面平视从冠下穿过、塔顶才被挡"的高度带判定, 天然合理).
+// typeof 守卫: 部分沙箱探针只加载子集文件, 缺这个可选模块不该让车组 AI 整段报错
+// (与 14-bots.js 的 `typeof tankRollingToObjective==='function'` 同一纪律)
+if(typeof foliageBlocksLOS==='function'&&foliageBlocksLOS(ex,ey,ez,_bt.pos.x,_bty,_bt.pos.z)) continue;
+best=_bt; bd=_pc2.d; break;
 }
 if(best){
 const isNew=(this.tVehTgt!==best);
@@ -1684,7 +1705,7 @@ if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.max
 if(this.playerDriven){ addDmgFlash(0.35); addTrauma(0.3); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
 else if(attacker&&attacker.pos){
 this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
-setTimeout(()=>{ if(this.threatYaw!==null) this.threatYaw=null; },6000);
+this.threatYawT=6;   // ★2026-11-18 卡顿审计: setTimeout→dt 账 (2026-11-01 雷链同族病: 弹幕刮血期每次受击挂一个 6s 定时器闭包, 且暂停/时停照走) —— update 顶部随帧递减清空
 }
 if(this.hp<=0) this.die(attacker);
 }
@@ -1831,7 +1852,7 @@ this.stuckT=0; this.vel=0; this.path=null; this.reverseT=0; this.tTarget=null; t
 // 交战层状态清零 (2026-09-20 I1): 重生=新车组, 不能带着上一辆车的目标记忆/反应计时复活
 this.tVehTgt=null; this.tVehDist=0; this.tLastPos=null; this.tLastSeenT=-99; this.tMemT=0; this.losOK=false;
 this.aiReact=0; this.aiHaltT=0; this.aiRevT=0; this.aiTacticT=0; this.aiOrder=null; this.aiCover=null;
-this.aiLeadBias=0; this.aiLeadT=0; this.aiPerT=0; this.aiFlankSide=1;
+this.aiLeadBias=0; this.aiLeadT=0; this.aiPerT=(_tkPhaseSeq++)%8*(TANK_PER_T/8); this.aiFlankSide=1; // ★2026-11-18 卡顿审计: 感知相位出生打散 (8 槽轮转 ≈ 逐帧错峰) —— 旧写全员同相位, 每 0.14s 全场坦克同帧全量感知+LOS (尖峰成簇主源); 每辆仍 7Hz, 长期行为等价; 确定性序号不消费 rand (RNG 流不变)
 this.suspP=0; this.suspR=0; this.suspPV=0; this.suspRV=0;
 if(this.wreckBs){ for(const b of this.wreckBs) killDynCollider(b); this.wreckBs=null; }
 this.grp.visible=true;

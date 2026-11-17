@@ -3611,3 +3611,23 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 
 **run-all 两轮**（跑在工作树上, 含并行会话「卡顿审计」未提交在途改动, 红账逐支归因）: r1 **103/125**（稳定红 5=probe-bots/phase2/phase3/willow/nade-trigger 与 20261118a 预存账同名; timestopfix 偶发 0/0/1 —— A/B HEAD worktree 4 跑同签名红 ⇒ 预存偶发）; r2 **104/131**（新现红三支: sink 复跑 0/3=抖动、botai 复跑 1/3=在案偶发、cmdbatch2 复跑 3/3 稳红但 HEAD 4 跑全绿=非本批引入, 根因=并行 26-commander 卡顿审计 cmdFocusHudTick 缓存化首调隐藏写跳过、判据跟码义务归该批）; 本批探针 verify-20261118c 两轮均 48/0; 升戳 20261118b→**20261118c**（index.html 49 处+css 链+__sfStyleVer+_game_files.txt 45 行+戳钉探针 28 支同扫, 旧戳清零断言原样保留）。实机验收清单见 finished-docs/批-低弹变红×严寒天气分级×火焰驱寒×受冻特效-2026-11-18.md。
 
+## 一.118 全局卡顿审计修复 × 低效代码全域批 (2026-11-18, 待实机验收)
+
+**用户令**: "我感觉现在存在明显可感的卡顿问题，请完成对于整个项目各个领域内低效代码的审计和修复。该任务的广度和深度都较大，请善用子智能体功能。"——5 个子智能体分域只读审计（核心热路径/AI·Bot/载具域/世界地形特效域/玩家UI域），主会话汇总按收益逐项修复。
+
+**逻辑病**: 24-main 重复 updateFires 摘除——7fb72eb 插 updateCraters 行时误粘了一份 updateFires，火焰蔓延/燃烧账每帧推进 2×（火池 360s 实跑 180s=上一批"火池六分钟"令被它打折）。
+
+**指挥官烘焙门**: cmdFrameTick 起作业门+cmdDeployOpen 门补 cmdIsCommander——底图只有指挥官能看见（开图/布势两入口都以指挥官为前提），普通玩家此前也照烧每帧 8-10ms×约1.5s（开局进战斗卡一阵的主源之一）；布势门判据 player.cls===5&&!player.deployed ⇒ 点指挥官卡即成立，部署页预热保留；cmdBakeAdvance 预算行不动（verify-commander 探针钉）。
+
+**坦克感知两段式**: tankPerceive 评分段（视距×雾×夜×天气/大灯暴露/前向视锥/集火分/残血/粘滞，无射线）收进模块级复用槽 _tkPerC → 按分降序 _tkPerIdx.sort 逐个 LOS 复核（raycastWorld/烟幕/庄稼/植被）取第一个过线者——与旧"逐候选 LOS+评分取最高分通过者"完全同果（评分与 LOS 无关+Array.sort 稳定保序=平分先见先得），常态车长射线 ~候选数→~1 发。**感知相位出生打散**: _tkPhaseSeq 8 槽确定性序号 aiPerT=(_tkPhaseSeq++)%8*(TANK_PER_T/8)——旧写全员同相位，每 0.14s 全场坦克同帧全量感知+LOS=尖峰成簇主源；**不走 rand（RNG 流纪律）**: rand 错峰首版令 tankai 车道搜索/交战时序漂移 1/21 红，A/B worktree 定位后改序号。**底盘碰撞 pass2 跳过**: 第一遍零接触 ⇒ 位姿未变第二遍必然零接触，省一半底盘邻域查询（推挤回调顺序敏感不动）。
+
+**updateFlak AABB 快筛**: 逐弹先做线段 AABB（余量 2.6>坦克判半径 2.3）——斯大林格勒弹幕期每发 61 人全表 distSqPointToSegment（V8 慢路径）是 17.7ms 尖峰放大器。**旗/强点**: updateFlags/updateSpots hypot→平方距离（_fr2/_sr2 预存平方半径）+旗布 30Hz 节流（波形=nowT 纯函数，采样帧逐位同值；needsUpdate 只在真写过顶点的帧置位；旗杆 y dampF 保持逐帧=worldrestore 钉）。**降水 30Hz**: _wxStepAcc 累计 dt 一次性补偿（总位移逐位守恒；wxShiftPrecip 每帧照跑=fixbatch 源文本钉；时停 dt=0 自然不步进；needsUpdate 只在步进帧置位）。**布娃娃**: 全员冻结且无散落残骸 ⇒ RAG.world.step 整步跳过（冻结具 step 后本就钉回快照、解冻探速读外力直写 body.velocity 不经 step ⇒ 判据不变；ragCollide 自带速度早退故散落残骸不另冻结）。
+
+**杂项十二**: Tank threatYaw setTimeout→threatYawT dt 账（弹幕刮血期每次受击挂 6s 定时器闭包+暂停/时停照走=11-01 雷链同族病）；卡车绷带补给 0.5s 节流；两栖负重轮 tankSurfH→heightAt（纯视觉悬挂）；resolveRuntimeSurfaces 候选数组/闭包模块级复用（_rtCand/_rtPush，稳态恒空仍每帧新建）；_gunAnchorTorso grip/fore 双槽 memo（单兵单帧 8~31 次同参求值；命中只值拷贝进 out 不把缓存别名出去=perfreg T3 槽位契约逐字保持；被跳过的 _eulerXYZ/_gatP/gunMountOf 均为纯求值）；spawn lane 表 0.5s 缓存 _laneCache（FLAGS/SPOTS 表换代即失效；convoy 车队 lane 随车动+建表消耗 rand 抖动 ⇒ 直通不缓存保 RNG 流）；cmdFocusHudTick 元素缓存+_cfHidden 幂等+宽度 1% 量化（**隐藏首调仍落一次 display='none'**——探针读 getElementById 壳元素=cmdbatch2 ⑥ 契约，并行会话把该红归因本批的判据跟码义务就地兑现；bar/lab 壳元素按需补登）；24-main 部署按钮 span 跨帧缓存（btn._spC）。
+
+**判据**: 新 dev/verify-frameperf2-20261118 **34/0**（T1 重复摘除/T2 烘焙双门源码钉+advance 行保留钉/T3 非指挥官 90 帧不烘焙行为钉/T4 指挥官一帧起作业/T5 两段式同果行为钉——近车高分被挡仍选中远车低分可见（★探针坑: 桩 raycast 被挡要返回近距命中 {dist:2}，返回 {dist:hl} 会被 hl-1.2 容差判成"打中目标本身"=通视假绿；★gunGripPoint 返回共享槽 ⇒ 断言须即时快照标量，读引用全是最后一次调用的值）／T6 相位错开 ≥2 槽/T7 pass2+flak AABB 源码钉/T8 旗布 30Hz 行为钉（needsUpdate 计数 30±5）+平方距离/T9 强点/T10 降水 30Hz 行为钉/T11 布娃娃 step 三态行为钉（★RAG.world 惰建: 无人伤亡时为 null，探针须先补 {step}）/T12 HUD 缓存行为钉（getElementById 计数 1/40、1/40）/T13 lane 缓存同一性/T14 候选复用/T15 memo 参数键（切换/切回/交错）/T16 span 缓存/T17 步进账源码钉）+ **--neg 9红↔9补丁全对认**（N1 摘烘焙门/N2 复插重复 updateFires/N3 摘 LOS 复核守卫/N4 旗布阈值归零/N5 降水门恒真/N6 摘 step 门/N7 摘 memo 登记行/N8 lane TTL 恒假/N9 摘 span 缓存；★NEG 行为判据极性=「坏状态成立才红」，源码钉极性=「钉消失才红」，首版六支极性反写全部假绿）。诊断探针 dev/probe-framespike-20261118（逐帧 wall 直方图+最慢 12 帧逐系统归因+高频助手调用计数+规模快照，恒 0 退出，与 probe-frameprofile 互补——平均剖析看不见的偶发尖帧在这里现形）。
+
+**前后对照**（沙箱 JS 900 帧）: camp0 mean 4.60→4.08ms、p99 15.45→9.49ms、>8ms 帧 7.7%→2.7%（-65%）；camp5 mean 3.30→2.35ms、>8ms 0.2%；tankPerceive 尖峰 6.3→1.6ms、updateFires -35%、updateFlags -37%（143.9→91.3µs）、updateWeather 暴雨档约减半（330→153µs）；剩余尖峰=14-bots 域（Bot.update 20ms 重生风暴帧，并行会话占用）与偶发事件帧（旗点占领 drawFlagTex/NAV 脏区重建）。
+
+**回归**: 靶向 31 支+新支全绿——cmdbatch2 35/0（判据跟码：隐藏首落 display='none' 满足壳元素契约）、tankai 21/0（RNG 流回正）、verify-20261118a 74/0（戳断言随扫）、verify-20261118c 48/0；**run-all r1 107/129 + r2 108/132**（稳定红 5=probe-bots/phase2/phase3/willow/nade-trigger 在案同名零新增；偶发 botai/timestopfix/killattr 复跑绿/_audit-foliage-ref 复跑绿）；预存红 A/B 双树同签名清账（strongpoint ②③④⑤ BUILD_REG/island SPOTS=预存、wipe craterMat.clone 桩缺、daynight ironbottom 夜档、frameperf-terrain baituan 违例1=采样偶发、zombie2 7 失败在案待 triage）。升戳 20261118c→**20261118d**（index.html 49 处+__sfStyleVer+_game_files.txt 45 行+戳钉探针 28 支同扫，负向断言保 .js 文件名引用不误伤）。实机验收清单见 finished-docs/批-全局卡顿审计修复-2026-11-18.md。
+

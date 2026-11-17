@@ -1482,9 +1482,14 @@ boom=true;
 }
 }
 // 解除"防空炮只能对空": 弹片可命中地面士兵/载具, 触地即爆 (连续扫掠防隧穿)
+// ★2026-11-18 卡顿审计: 逐弹先做线段 AABB 快筛 (余量 2.6 > 坦克判半径 2.3) —— 斯大林格勒弹幕期
+//   每发弹对 61 人全表 distSqPointToSegment (V8 慢路径) 是 17.7ms 尖峰的放大器; 绝大多数目标一步跳过。
+const _fkMinX=Math.min(p0x,p1x)-2.6, _fkMaxX=Math.max(p0x,p1x)+2.6;
+const _fkMinZ=Math.min(p0z,p1z)-2.6, _fkMaxZ=Math.max(p0z,p1z)+2.6;
 if(!boom){
 for(const s of combatants){
 if(!s.alive||s.onVehicle||s.team===f.team) continue;
+if(s.pos.x<_fkMinX||s.pos.x>_fkMaxX||s.pos.z<_fkMinZ||s.pos.z>_fkMaxZ) continue;
 const dSq=distSqPointToSegment(s.pos.x,s.pos.y+1.0,s.pos.z,p0x,p0y,p0z,p1x,p1y,p1z);
 if(dSq<1.1*1.1){
 if(typeof markHitCls==='function') markHitCls('shell');
@@ -1497,6 +1502,7 @@ boom=true; break;
 if(!boom){
 for(const t of tanks){
 if(!t.alive||t.team===f.team) continue;
+if(t.pos.x<_fkMinX||t.pos.x>_fkMaxX||t.pos.z<_fkMinZ||t.pos.z>_fkMaxZ) continue;   // ★2026-11-18 卡顿审计: 同上 AABB 快筛
 const cy=Math.max(t.pos.y,Math.min(t.pos.y+2.6,(p0y+p1y)*0.5));
 const dSq=distSqPointToSegment(t.pos.x,cy,t.pos.z,p0x,p0y,p0z,p1x,p1y,p1z);
 if(dSq<2.3*2.3){

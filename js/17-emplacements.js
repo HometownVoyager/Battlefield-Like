@@ -429,7 +429,16 @@ if(l<0.001) return [0,0];
 return [dx/l,dz/l];
 }
 // 候选点位 → lane 列表 (每次调用重建; key 稳定, 供使用热度跨帧识别)
+// ★2026-11-18 卡顿审计: lane 表 0.5s 缓存 —— 重生风暴 (链爆/大爆炸同帧多死) 每个重生者都全量重建
+//   ~67 条 lane 对象再各自全表评分; 缓存后同窗口共享一次建表。FLAGS/SPOTS 表换代 (新局) 即失效;
+//   强点/旗点归属变化最多滞后 0.5s 才进 lane 表 (不可感知)。convoy 车队 lane 随车动且建表消耗
+//   rand 抖动 (RNG 流纪律) ⇒ 该模式直通不缓存。
+const _laneCache=[null,null];
 function spawnLanesOf(team){
+if(GAMEMODE!=='convoy'){
+const _lc=_laneCache[team];
+if(_lc&&_lc.flags===FLAGS&&(typeof SPOTS==='undefined'||_lc.spots===SPOTS)&&nowT-_lc.t<0.5) return _lc.lanes;
+}
 const pts=[];
 if(BASES.length) pts.push({n:'BASE',x:BASES[team].x,z:BASES[team].z,base:true});
 for(const f of FLAGS) if(f.owner===team) pts.push({n:'F'+f.id,x:f.x,z:f.z,flag:f});
@@ -458,6 +467,7 @@ key:p.n+'#'+i, ang, half:SPAWN_ARC/n, r0, r1,
 cx:p.x+Math.cos(ang)*mid, cz:p.z+Math.sin(ang)*mid, spot:p});
 }
 }
+if(GAMEMODE!=='convoy') _laneCache[team]={t:nowT,lanes:out,flags:FLAGS,spots:(typeof SPOTS==='undefined')?null:SPOTS};
 return out;
 }
 // 选 lane: 战略分 (战线近/危险低/热度低) − lane 拥挤 − lane 使用热度 (软天平)

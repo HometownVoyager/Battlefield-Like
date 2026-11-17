@@ -70,16 +70,19 @@ if(!any) return;
 for(const s of SPOTS){
 if(!s.capturable) continue;   // 己方固定出生点: 不参与占领 (永不结算, 与改动前一致)
 let c0=0,c1=0;
+const _sr2=s.r*s.r;   // ★2026-11-18 卡顿审计: hypot→平方距离 (与 updateFlags 同批)
 for(const c of combatants){
 if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入
 if(c.zombie) continue;                                         // 丧尸不计强点占领 (2026-10-06 丧尸模式)
-if(Math.hypot(c.pos.x-s.x,c.pos.z-s.z)<s.r&&Math.abs(c.pos.y-s.gy)<10){
+const _dx=c.pos.x-s.x, _dz=c.pos.z-s.z;
+if(_dx*_dx+_dz*_dz<_sr2&&Math.abs(c.pos.y-s.gy)<10){
 if(c.team===0)c0++; else c1++;
 }
 }
 for(const t of tanks){
 if(!t.alive) continue;
-if(Math.hypot(t.pos.x-s.x,t.pos.z-s.z)<s.r){
+const _tdx=t.pos.x-s.x, _tdz=t.pos.z-s.z;
+if(_tdx*_tdx+_tdz*_tdz<_sr2){   // ★2026-11-18 卡顿审计: 同上平方距离
 if(t.team===0)c0++; else c1++;
 }
 }
@@ -142,10 +145,12 @@ for(const f of FLAGS){
 // (2026-11-10: 瘫舰旗点 fActive 门随大舰子系统下架摘除 —— 大舰不在了, 旗点恒可占)
 // 丧尸机制: 丧尸会在无意中占领无人值守的旗点 (c0===0&&c1===0&&c2>0), 人类在场则阻占/交火
 let c0=0,c1=0,c2=0;
+const _fr2=f.r*f.r;   // ★2026-11-18 卡顿审计: hypot→平方距离 (V8 hypot 慢路径; 旗×全员每帧千次量级)
 for(const c of combatants){
 if(!c.alive||c.onVehicle||(c.isPlayer&&c.spectator)) continue; // 观战者不计入占旗/阻占
 // 高度容差: 见 00-config 的 FLAG_DY_TOL (2026-09-26E 审计 30: 旧值 10m 让桥下泳者能占桥面旗)
-if(Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r&&Math.abs(c.pos.y-f.gy)<FLAG_DY_TOL){
+const _dx=c.pos.x-f.x, _dz=c.pos.z-f.z;
+if(_dx*_dx+_dz*_dz<_fr2&&Math.abs(c.pos.y-f.gy)<FLAG_DY_TOL){
 if(c.zombie) c2++;
 else if(c.team===0) c0++;
 else if(c.team===1) c1++;
@@ -153,7 +158,8 @@ else if(c.team===1) c1++;
 }
 for(const t of tanks){
 if(!t.alive) continue;
-if(Math.hypot(t.pos.x-f.x,t.pos.z-f.z)<f.r){
+const _tdx=t.pos.x-f.x, _tdz=t.pos.z-f.z;
+if(_tdx*_tdx+_tdz*_tdz<_fr2){   // ★2026-11-18 卡顿审计: 同上平方距离
 if(t.team===0)c0++; else if(t.team===1) c1++;
 }
 }
@@ -177,7 +183,7 @@ drawFlagTex(f);
 const teamStr=attacker===2?t('丧尸'):t(TEAM_NAME[attacker]||'阵营');
 addKillMsg(t('{0} 占领了 {1} 点',teamStr,f.id),attacker);
 for(const c of combatants){
-if(c.alive&&c.team===attacker&&Math.hypot(c.pos.x-f.x,c.pos.z-f.z)<f.r){
+if(c.alive&&c.team===attacker&&(c.pos.x-f.x)*(c.pos.x-f.x)+(c.pos.z-f.z)*(c.pos.z-f.z)<_fr2){   // ★2026-11-18 卡顿审计: 同上平方距离
 c.score=(c.score||0)+SCORE_TABLE.flag;
 if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; if(ZOMBIE_MODE) pzGain(ZCFG.zp.flag); } // caps: 结算占领数 (2026-09-13); ZP: 丧尸模式占旗给点 (2026-10-06 裁定④)
 }
@@ -213,6 +219,12 @@ if(f.owner>=0) owned[f.owner]++;
 f.flagMesh.position.y=dampF(f.flagMesh.position.y,f.owner!==-1?f.poleTop-f.cap*2:f.gy+3.2+f.cap*2.4,4,dt);
 // 布料波: 挂边铰接于杆缘(微幅风向偏转) + 沿幅面两轴正弦涟漪 —— 越靠旗尾摆幅越大, 挂边恒贴旗杆
 f.flagMesh.rotation.y=Math.sin(nowT*1.3+f.x)*0.12;
+// ★2026-11-18 卡顿审计: 波形是 nowT 的纯函数 ⇒ 30Hz 采样与逐帧采样在采样帧逐位同值 (波形最高
+//   7.3rad/s≈1.2Hz, 远低于奈奎斯特), 每旗 45 顶点×3 sin + 90 次 set + GPU 上传省一半;
+//   dt<=0 (时停) 自然不推进, needsUpdate 只在真写过顶点的帧置位。旗杆 y 的 dampF (上行) 保持逐帧。
+f._clothT=(f._clothT||0)-dt;
+if(f._clothT<=0){
+f._clothT=1/30;
 {
 const fp=f.flagGeo.attributes.position, fb=f.flagBase;
 for(let i=0;i<fp.count;i++){
@@ -221,6 +233,7 @@ fp.setZ(i,(Math.sin(nowT*4.2+bx*2.6+f.x*0.7)+Math.sin(nowT*7.3+by*4.1+f.z*0.5)*0
 fp.setX(i,bx+Math.sin(nowT*2.2+f.z)*0.07*w*w);
 }
 fp.needsUpdate=true;
+}
 }
 }
 if(!matchOver){

@@ -363,13 +363,23 @@ return _gco;
 //     之前完成, 同槽不跨块存活; mountGunModel / 两处挂点 dampF 均单调用即用。
 const _gaGrip={x:0,y:0,z:0}, _gaFore={x:0,y:0,z:0}, _gaAxis={x:0,y:0,z:0};
 const _gatA={x:0,y:0,z:0}, _gatB={x:0,y:0,z:0}, _gatP={x:0,y:0,z:0};
+// ★2026-11-18 卡顿审计: 单兵单帧 8~31 次锚点求值 (grip+fore+gunAxisPoint×n) 参数完全相同 ⇒
+//   grip/fore 各一槽 memo (交替调用不互踩)。命中路径只做值拷贝进 out —— 不把缓存对象别名出去、
+//   不写任何对外槽 (perfreg T3 槽位契约逐字保持); 被跳过的 _eulerXYZ/_gatP/gunMountOf 均为纯求值,
+//   产物仅在本函数内即时消费。跨兵参数不同自然失效 (每姿态帧首调必 miss)。
+const _gac={grip:{k:null,rx:0,ry:0,rz:0,pp:0,v:{x:0,y:0,z:0}},fore:{k:null,rx:0,ry:0,rz:0,pp:0,v:{x:0,y:0,z:0}}};
 function _gunAnchorTorso(kind,which,rx,ry,rz,pp,out){
+const _c=_gac[which];
+if(_c&&_c.k===kind&&_c.rx===rx&&_c.ry===ry&&_c.rz===rz&&_c.pp===pp){
+const _m=_c.v; out.x=_m.x; out.y=_m.y; out.z=_m.z; return out;
+}
 const st=gunGeomStations(kind), a=(which==='fore')?st.fore:st.grip, co=gunCarryOffset(kind);
 // 模型空间 → gunG 局部: mountGunModel 把模型 rotation.y=PI (x→-x, z→-z) 并加 carryOffset
 _gatP.x=-a.x+co.x; _gatP.y=a.y+co.y; _gatP.z=-a.z+co.z;
 const p=_eulerXYZ(_gatP,rx,ry,rz);
 const mo=gunMountOf(kind,pp);   // 挂点按枪种取 (扛肩式火箭筒挂点不同) + 按躯干俯角取 (趴姿挂点不同, A1)
 out.x=mo.x+p.x; out.y=mo.y+p.y; out.z=mo.z+p.z;
+_c.k=kind; _c.rx=rx; _c.ry=ry; _c.rz=rz; _c.pp=pp; _c.v.x=out.x; _c.v.y=out.y; _c.v.z=out.z;
 return out;
 }
 function gunGripPoint(kind,rx,ry,rz,pp){ return _gunAnchorTorso(kind,'grip',rx,ry,rz,pp,_gaGrip); }   // 握把点 (躯干局部系)

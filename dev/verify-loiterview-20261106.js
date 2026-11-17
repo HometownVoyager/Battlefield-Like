@@ -28,7 +28,7 @@
 //   T2 制导转向只掰弹体 (d.yaw/d.pitch 位移>0.02) + 本体角逐位不动 + 退场保持发射时朝向 (本体角不被退场链触碰)。
 //   T3 弹体可见性单写者: TV 藏 / F 背追显 / 回 TV 再藏 / alive=false (真观战自由视角·死亡镜头) 显 ★。
 //   T5 静态接线: 单行源码钉 + 旧写法绝迹钉 (updateLoiters 无 player.yaw= 写 / updateCamera loiter 分支
-//      无 mesh.visible 写) + 载入清单与 index.html 实载同序对账 + 版本戳 20261118c。
+//      无 mesh.visible 写) + 载入清单与 index.html 实载同序对账 + 版本戳 20261118d。
 // 阴性补丁 (累积应用, 红名↔补丁对认):
 //   N1 = T1 背追档三条红 (ltBack 分支退回相机锚)      N2 = T2 退场污染红 (清账行注回对齐写 = 11-06 病灶复现)
 //   N3 = T2 本体不随转红 (旧跟随行原样插回)           N4a/N4b = T3 背追显+alive=false 显两条红
@@ -311,11 +311,11 @@ assert('T5 绝迹钉: updateCamera loiter 分支无 d.mesh.visible= 写 (单写�
 const htmlScripts=(html.match(/<script src="js\/[^"?]*\?v=[^"]*"/g)||[]).map(x=>x.replace(/<script src="/,'').replace(/"$/,'').split('?')[0]);
 assert('T5 载入清单 = index.html 实载脚本逐条同序 ('+FILES.length+' 个)',JSON.stringify(htmlScripts)===JSON.stringify(FILES));
 // 版本戳
-const stamps=[...html.matchAll(/20261118c/g)];
+const stamps=[...html.matchAll(/20261118d/g)];
 const stampSet=[...new Set(stamps.map(m=>m[0]))];
-assert('T5 版本戳 20261118c 全量唯一 (2026-11-10 海战移除批判据跟码)',stamps.length>40&&stampSet.length===1&&html.includes("window.__sfStyleVer='20261118c';"),'×'+stamps.length);
+assert('T5 版本戳 20261118d 全量唯一 (2026-11-10 海战移除批判据跟码)',stamps.length>40&&stampSet.length===1&&html.includes("window.__sfStyleVer='20261118d';"),'×'+stamps.length);
 const gf=fs.readFileSync(path.join(root,'dev/_game_files.txt'),'utf8');
-assert('T5 dev/_game_files.txt 同步升戳',gf.includes('v=20261118c')&&!gf.includes('20261105b'));
+assert('T5 dev/_game_files.txt 同步升戳',gf.includes('v=20261118d')&&!gf.includes('20261105b'));
 }
 
 t1(); t2(); t3(); t5();

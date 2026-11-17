@@ -1012,7 +1012,7 @@ class NavalCraft {
         const ud=wh.userData||{};
         const wx=this.pos.x+sn2*(ud.lz||0)+cs2*(ud.sx||0);
         const wz=this.pos.z+cs2*(ud.lz||0)-sn2*(ud.sx||0);
-        const wgh=tankSurfH(wx,wz);
+        const wgh=heightAt(wx,wz);   // ★2026-11-18 卡顿审计: 负重轮改纯地形高度 —— 悬挂是纯视觉, 不需要障碍顶面; 每车省 ~10 次 tankSurfH (各含 heightAt+eachBoxNear+eachCylNear)
         const hullY=this.pos.y-this.suspP*(ud.lz||0)+this.suspR*(ud.sx||0);
         const tgtY=(ud.baseY!==undefined?ud.baseY:wh.position.y)+clamp(wgh-hullY,-0.17,0.17);
         ud.vy=(ud.vy||0)+((tgtY-wh.position.y)*70-(ud.vy||0)*9)*dt;

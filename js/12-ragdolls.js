@@ -326,7 +326,11 @@ const v=r.parts[k].body.velocity;
 if(v.x*v.x+v.y*v.y+v.z*v.z>RAG_THAW_V2){ thawRagdoll(r); break; }
 }
 }
-RAG.world.step(1/60,Math.min(dt,0.05),4);
+// ★2026-11-18 卡顿审计: 全员冻结且无散落残骸 ⇒ 整世界 step 跳过 (冻结具 step 后本就钉回快照、
+//   解冻探速读的是外力直写 body.velocity 不经过 step ⇒ 判据不受影响; 有未冻结具或残骸时照旧 step)。
+let _ragLive=false;
+for(let i=0;i<RAG.list.length;i++){ if(!RAG.list[i].frozen){ _ragLive=true; break; } }
+if(_ragLive||DEBRIS.list.length) RAG.world.step(1/60,Math.min(dt,0.05),4);
 for(let i=RAG.list.length-1;i>=0;i--){
 const r=RAG.list[i];
 r.t-=dt;

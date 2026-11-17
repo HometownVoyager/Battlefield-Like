@@ -291,6 +291,7 @@ let _coverAABB={minX:1e9,maxX:-1e9,minZ:1e9,maxZ:-1e9,maxY:-1e9};
 //   非时停 dt>0 时下落/漂移照常叠加在补偿之上, 雨丝头尾 (相差 0.7m) 必须整段搬否则会被拉成长竖线。
 const WX_R=26;
 let _wxLastX=null, _wxLastY=null, _wxLastZ=null;
+let _wxStepAcc=0;   // ★2026-11-18 卡顿审计: 降水粒子 30Hz 步进累加账 (累计 dt 一次性补偿 ⇒ 总位移逐位守恒)
 function wxShiftPrecip(dx,dy,dz){
 if(!precipObj||(!dx&&!dy&&!dz)) return;
 const attr=precipObj.geometry&&precipObj.geometry.attributes&&precipObj.geometry.attributes.position;
@@ -409,11 +410,18 @@ _wxCovers.push(b);
 }
 const pos=precipObj.geometry.attributes.position;
 const arr=pos.array; // 2026-09-06 B6/P3-10: 直写数组替代逐顶点 getter/setter (粒子量大, 纯热路径)
+// ★2026-11-18 卡顿审计: 粒子步进 30Hz 化 —— 累计 dt 一次性补偿 ⇒ 总位移逐位守恒; 相机跟随补偿
+//   wxShiftPrecip 仍每帧跑 (世界对齐不变); 时停 dt=0 自然不步进; needsUpdate 只在步进帧置位。
+//   雨落速 27-36m/s → 1/30s 步长 0.9-1.2m, 相对丝长/视野不可辨; 暴风雪 4000 粒的逐帧 sin×2/盖体判减半。
+_wxStepAcc+=dt;
+if(_wxStepAcc>=1/30){
+const _wxStepDt=_wxStepAcc;
+_wxStepAcc=0;
 if(WX_CFG.precip==='snow'){
 for(let i=0;i<pos.count;i++){
 const i3=i*3;
-let y=arr[i3+1]-dt*WX_CFG.precipFall;   // 落速收编 WX_CFG (细雪/中雪 3.2 = 原校准值; 暴风雪 5.5)
-let x=arr[i3]+Math.sin(nowT*1.4+i*0.7)*dt*0.9;   // 横向漂移各雪档同规 (吹雪漂移=二期候选, 天气设计 §8⑤)
+let y=arr[i3+1]-_wxStepDt*WX_CFG.precipFall;   // 落速收编 WX_CFG (细雪/中雪 3.2 = 原校准值; 暴风雪 5.5)
+let x=arr[i3]+Math.sin(nowT*1.4+i*0.7)*_wxStepDt*0.9;   // 横向漂移各雪档同规 (吹雪漂移=二期候选, 天气设计 §8⑤)
 if(y<0){ y+=24; x=rand(-26,26); arr[i3+2]=rand(-26,26); }
 else if(_wxCovers.length){
 const wx=x+precipObj.position.x, wz=arr[i3+2]+precipObj.position.z, wy=y+precipObj.position.y;
@@ -431,7 +439,7 @@ arr[i3+1]=y; arr[i3]=x;
 const sp=WX_CFG.precipFall;   // 雨落速收编 (小雨 27 / 暴雨 36 = 原校准值)
 for(let i=0;i<pos.count;i+=2){
 const i3=i*3;
-let y=arr[i3+1]-dt*sp;
+let y=arr[i3+1]-_wxStepDt*sp;
 if(y<0){
 y+=26;
 const nx=rand(-24,24),nz=rand(-24,24);
@@ -455,6 +463,7 @@ arr[i3+1]=y; arr[i3+4]=y-0.7;
 }
 }
 pos.needsUpdate=true;
+}
 }
 // 闪电链: 门=WX_CFG.lightning===true (天气设计 §5-4, R4 落点) —— 只给 storm, 暴风雪/雪族任何档恒不触发
 // lightningT/stormFlash 链; 探针判据=verify-weather T5。

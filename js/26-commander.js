@@ -517,7 +517,11 @@ cmdFocusHudTick(drain);
 //   本图可能开指挥地图 (cmdClassAvailable: 丧尸/海战图永不开图, 不白烧每帧 8ms 采样预算) +
 //   玩家不在观战队列 (观战与指挥官互斥 D15, 观战局同样永不开图)。之后每帧 advance, 部署页的
 //   几秒~几十秒足以烘完; 普通局玩成非指挥官时多花的只是一段部署页内的分帧采样 (有上界)。
-if(!CMD.bake&&!CMD._bj&&CMD.orbat&&cmdClassAvailable()){
+// ★2026-11-18 卡顿审计: 补指挥官门 —— 底图只有指挥官能看见 (开图/布势两个入口都以指挥官为前提),
+//   旧写普通玩家也照烧每帧 8-10ms×约1.5s (本门每帧都在跑, "开局一进战斗就卡一阵"的主源之一)。
+//   cmdIsCommander 在兵种卡点下即成立 (布势门判据 player.cls===5&&!player.deployed, 23-deploy),
+//   指挥官的部署页预热不受影响; advance 行不动 (探针钉: verify-commander 锚 cmdBakeAdvance 预算行)。
+if(!CMD.bake&&!CMD._bj&&CMD.orbat&&cmdClassAvailable()&&cmdIsCommander()){
 const _pp=(typeof player!=='undefined')?player:null;
 if(_pp&&!_pp.spectator&&_pp.specWant!==true){ try{ cmdBakeBegin(); }catch(e){} }
 }
@@ -1651,7 +1655,7 @@ if(!cmdMapInit()) return;
 //   (大图 0.7s 级 / 玩家点击快) 一次性把剩余采样跑完, "进布势当帧整帧僵住"原样复发。改为与 cmdMapDraw
 //   同款的"起作业"口径: 底图没就位就让作业在跑, 当帧画"生成中"占位, 由 cmdFrameTick 的预算路径续算
 //   (预热起作业门见 cmdFrameTick 的 ★2026-10-27 块 —— 部署页期间通常早已烘完, 这里只是兜底)。
-if(cmdBakeNeeded()&&!CMD._bj){ try{ cmdBakeBegin(); }catch(e){} }
+if(cmdIsCommander()&&cmdBakeNeeded()&&!CMD._bj){ try{ cmdBakeBegin(); }catch(e){} }   // ★2026-11-18 卡顿审计: 本入口只有指挥官可达, 门与 cmdFrameTick 起作业门同规
 CMD.mapOn=true; CMD.mapDeploy=true; CMD.sel=null;
 CMD._pauseHid=false;
 CMD.deploySeen=true;
@@ -1698,13 +1702,20 @@ if(dep&&dep.classList.contains('hidden')&&typeof showDeploy==='function'&&player
 if(typeof AudioSys!=='undefined'&&AudioSys.click) AudioSys.click(1300,0.3,0.06);
 }
 // ═══════════════ 七、指挥读条 HUD (挂 #ui, 2Hz 文案 + 每帧宽度) ═══════════════
+// ★2026-11-18 卡顿审计: 元素引用模块级缓存 + 显隐/宽度/颜色"变了才写" —— 旧写非指挥官稳态也每帧
+//   getElementById('cmdFocusWrap') 一次, 可见路径每帧再取 3 次 + width/background 每帧裸写。
+let _cfWrap=null,_cfBar=null,_cfLab=null,_cfHidden=null,_cfW=-1,_cfDrain=null;
 function cmdFocusHudTick(drain){
-const wrap=document.getElementById('cmdFocusWrap');
+if(_cfWrap&&_cfWrap.isConnected===false){ _cfWrap=null; _cfBar=null; _cfLab=null; _cfHidden=null; }   // 真 DOM 被摘 (换局/HUD 重建) 时缓存自愈
+const wrap=_cfWrap;   // ★2026-11-18 卡顿审计: 缓存引用 (创建帧由下方补登; 真 DOM 被摘由 isConnected 自愈)
 // ★2026-10-26 排查轮二审 修复: 裸引用 matchOver —— 本文件其余全部站点都写 typeof 守卫 (本文件唯一
 //   一处例外), 单独加载 26-commander 的探针/沙箱里 matchOver 未定义 ⇒ ReferenceError 抛在
 //   每帧的 cmdFrameTick 里 (24-main:196 无 try) ⇒ 整个 loop 中断, 画面与输入全停。守卫化零成本。
 if(!cmdIsCommander()||!player.alive||!player.deployed||(typeof matchOver!=='undefined'&&matchOver)){
-if(wrap) wrap.style.display='none';
+if(_cfHidden!==true){ _cfHidden=true;   // ★2026-11-18 卡顿审计: 隐藏态幂等 —— 稳态零 DOM 写; 首次隐藏仍落一次 (cmdbatch2 ⑥ 契约: 探针读 getElementById 壳元素, 旧写每帧顺带盖章)
+const w=wrap||(_cfWrap=document.getElementById('cmdFocusWrap'));
+if(w) w.style.display='none';
+}
 return;
 }
 // ★2026-10-26 反馈批 (用户需求 1「指挥读条常驻显示, 且与占领读条下方的文字重叠」):
@@ -1715,7 +1726,10 @@ return;
 //     状态文字总高 ~60px, 顶缘 ~170px) 的占领文字上。上移到 bottom:186px, 与 capPanel 顶缘留出空隙。
 const costly=cmdSlowCostly();
 if(!(drain||CMD.slowOn||(costly&&CMD.focus<CMD_TIME.FOCUS_MAX-0.01))){
-if(wrap) wrap.style.display='none';
+if(_cfHidden!==true){ _cfHidden=true;   // ★2026-11-18 卡顿审计: 同上幂等+首落
+const w=wrap||(_cfWrap=document.getElementById('cmdFocusWrap'));
+if(w) w.style.display='none';
+}
 return;
 }
 if(!wrap){
@@ -1728,14 +1742,17 @@ d.innerHTML='<div id="cmdFocusLab" style="font:10px sans-serif;color:#cfe0b8;tex
 +'<div style="height:5px;background:rgba(0,0,0,.55);border:1px solid rgba(210,200,160,.4);border-radius:3px;overflow:hidden;">'
 +'<div id="cmdFocusBar" style="height:100%;width:100%;background:#7fd4c8;"></div></div>';
 ui.appendChild(d);
+_cfWrap=document.getElementById('cmdFocusWrap'); _cfBar=document.getElementById('cmdFocusBar'); _cfLab=document.getElementById('cmdFocusLab');
 }
-const w=document.getElementById('cmdFocusWrap');
-w.style.display='block';
-const bar=document.getElementById('cmdFocusBar');
-const lab=document.getElementById('cmdFocusLab');
+const w=_cfWrap;
+if(!w) return;
+w.style.display='block'; _cfHidden=false;
 const f=clamp(CMD.focus/CMD_TIME.FOCUS_MAX,0,1);
-if(bar) bar.style.width=(f*100).toFixed(1)+'%';
-if(bar) bar.style.background=drain?'#ffd75a':'#7fd4c8';
+const wp=Math.round(f*100);   // ★2026-11-18 卡顿审计: 1% 量化 (130px 条 ≈1.3px 步进, 读条缓变下不可见) —— 写频率降一个量级
+const bar=_cfBar||(_cfBar=document.getElementById('cmdFocusBar'));   // 壳元素按需补登 (沙箱壳/真 DOM 双兼容)
+const lab=_cfLab||(_cfLab=document.getElementById('cmdFocusLab'));
+if(bar&&_cfW!==wp){ _cfW=wp; bar.style.width=wp+'%'; }
+if(bar&&_cfDrain!==drain){ _cfDrain=drain; bar.style.background=drain?'#ffd75a':'#7fd4c8'; }
 if(lab){
 const want=drain?t2('减速中…'):(f>=1?t2('指挥读条'):(CMD_SETTINGS.focusCost?t2('指挥读条 恢复中'):'∞'));   // 键位不在此处重复 (词条单源 = cmdSpecHudKeys / 面板)
 if(lab.textContent!==want) lab.textContent=want;

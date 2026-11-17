@@ -729,6 +729,9 @@ if(typeof console!=='undefined'&&console.log&&SURF_RT.leveled<=64) console.log('
 return {meshes,pairs,leveled,maxL,ms,area:pairArea};
 }
 // 每帧入口: 只处理没见过的单位模型 / 新挂进 world·scene 的子树 (每帧至多 SURF_RT_BUDGET 个根)
+// ★2026-11-18 卡顿审计: 候选数组/推入闭包提为模块级复用 —— 稳态候选恒空, 旧写每帧仍新建数组+闭包
+const _rtCand=[];
+const _rtPush=(root,label)=>{ if(root&&!_rtKnown.has(root)) _rtCand.push([root,label]); };
 function resolveRuntimeSurfaces(){
 let budget=SURF_RT_BUDGET;
 // 建图基线: 第一次调用时把"此刻已存在的 world/scene 子件"整段划掉 (它们已由世界级消解器处理)
@@ -743,8 +746,8 @@ _rtVmGun=VM.gunParts;
 try{ resolveModelSurfaces(VM.root,'视角武器',SURF_RT_VMMINAREA); }catch(e){}
 }
 // 单位模型按"离相机由近到远"排 (先修玩家正看着的), 再取前 budget 个没处理过的
-const cand=[];
-const push=(root,label)=>{ if(root&&!_rtKnown.has(root)) cand.push([root,label]); };
+const cand=_rtCand; cand.length=0;
+const push=_rtPush;
 if(typeof soldiers!=='undefined') for(const s of soldiers) if(s&&s.mesh&&s.mesh.root) push(s.mesh.root,'士兵');
 if(typeof tanks!=='undefined') for(const v of tanks) if(v&&v.grp) push(v.grp,'坦克');
 if(typeof planes!=='undefined') for(const v of planes) if(v&&v.grp) push(v.grp,'飞机');

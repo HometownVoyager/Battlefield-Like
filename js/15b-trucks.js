@@ -165,12 +165,18 @@ if(wy>-1e8&&typeof waterSplash==='function') waterSplash(V3(this.pos.x,wy+0.1,th
 {const _o=_vpsOpts; _o.dt=dt; _o.crusher=this; _o.moving=this.vel>0.8; _o.yMax=2.0; _o.frontalBand=1.4; _o.symmetricFrontal=true; _o.crushDmg=300; _o.pushVel=this.vel; _o.checkSpectator=false;
 vehiclePushSoldiers(this,1.05,3.7,_o);}
 // 护运方补给: 紧贴本车的护运士兵自动补绷带 (运输车是护运方唯一补给来源)
+// ★2026-11-18 卡顿审计: 0.5s 节流 —— 旧写每车每帧全 combatants 表 hypot (~500 次/帧 @8车), 而
+//   命中窗口每兵 9s 才有意义一次; 节流最多让补绷带晚 0.5s, 不可感知。
+this._supT=(this._supT||0)-dt;
+if(this._supT<=0){
+this._supT=0.5;
 for(const s of combatants){
 if(!s.alive||s.team!==this.team||s.onVehicle) continue;
 if(s.bandages>=s.maxBandages||(s.bandRefillT||0)>nowT) continue;
 if(Math.hypot(s.pos.x-this.pos.x,s.pos.z-this.pos.z)<3&&Math.abs(s.pos.y-this.pos.y)<3){
 s.bandages=s.maxBandages;
 s.bandRefillT=nowT+9;
+}
 }
 }
 this.grp.position.copy(this.pos);

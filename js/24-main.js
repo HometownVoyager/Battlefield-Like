@@ -230,7 +230,8 @@ updateSupplyPoints(dt); // 劫道方临时补给点: 限时失效
 // 火焰蔓延/树木燃烧倒伏/倒伏动画 (04b-fire)
 updateFires(dt);
 updateCraters(dt); // 弹坑淡出 (05b CRATER 生命周期账, 2026-11-18 用户裁定: 开局遗迹坑也限时自然消失; dt<=0 时停冻结)
-updateFires(dt);
+// ★2026-11-18 卡顿审计: 摘除 7fb72eb 误插的重复 updateFires —— 火焰蔓延/燃烧账每帧被推进两次
+//   (火池 360s 实跑 180s + updateFires 自身翻倍), 与 updateCraters 插行时的粘贴残留。
 updateTreeBursts(dt); // 环境炮击: 许特根树爆(空爆) / 草原炮火犁地(贴地+点麦田) (04b-fire)
 updateWindRotors(dt); // 草原风车磨坊风叶慢转 (05a, 纯视觉)
 updateFallingTrees(dt);
@@ -290,11 +291,11 @@ const btn=el('deployBtn');
 // 换字代码 —— 部署页每 0.5s 才重刷, 而票数在页开着时也可能归零, 这条保证按钮态即时跟随)。
 if(tickets[player.team]<=0&&!player.specWillBe()){
 btn.disabled=false;
-const _sp=btn.querySelector('[data-i18n]');
+const _sp=btn._spC||(btn._spC=btn.querySelector('[data-i18n]'));   // ★2026-11-18 卡顿审计: 跨帧缓存 span 引用 (死亡期每帧 querySelector → 命中后零查询)
 if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='观 战'){ _sp.setAttribute('data-i18n','观 战'); _sp.textContent=t('观 战'); }
 }else{
 btn.disabled=respawnCd>0&&!(player.spectator||player.specWillBe()); // 己方兵力归零后按钮保持禁用 (2026-09-04); 观战开关开着放行 (2026-10-30, specWillBe 单源见 18-game); 调试模式冷却读数中按钮保持可点 (2026-11-14 用户令, 点击侧 22-hud 同判据 bypass 部署)
-const _sp=btn.querySelector('[data-i18n]');
+const _sp=btn._spC||(btn._spC=btn.querySelector('[data-i18n]'));   // ★2026-11-18 卡顿审计: 跨帧缓存 span 引用 (死亡期每帧 querySelector → 命中后零查询)
 if(_sp&&typeof _sp.getAttribute==='function'&&_sp.getAttribute('data-i18n')!=='部 署'){ _sp.setAttribute('data-i18n','部 署'); _sp.textContent=t('部 署'); }   // 调试观战中途打开 ⇒ 标签从「观 战」还原「部 署」
 }
 }
