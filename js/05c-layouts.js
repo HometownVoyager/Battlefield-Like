@@ -2514,11 +2514,14 @@ if(g) DEPOTS.push({id:f.id,x:f.x,z:f.z,g,destroyed:false});
 CAMPAIGN.bases.forEach((b,t)=>{
 if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='solo'&&t>0) return;   // solo 双基地同点: 营区只画一套 (2026-10-07d)
 const sgn=b.x<0?1:-1;
-// ★2026-11-17 批12 (用户裁定): 三顶帐篷不再各写死一个朝向 (旧 0.3/-0.2/0 恒朝东, 两端基地一顺边),
-// 改为共同朝向营区中心 (基地点 b.x,b.z) 围合。tent 的门在局部 +x 面 (05a wallSeg at:+2.2), 局部 +x
-// 经 yaw ry 后指向 (cos ry, −sin ry) ⇒ 朝 (dx,dz) 方向的 ry = atan2(−dz, dx)。wr 流零消耗 (指纹不漂)。
-const _tf=(tx,tz)=>Math.atan2(-(b.z-tz),b.x-tx);
-tent(b.x+sgn*2,b.z+6,_tf(b.x+sgn*2,b.z+6)); tent(b.x,b.z-6,_tf(b.x,b.z-6)); tent(b.x-sgn*4,b.z,_tf(b.x-sgn*4,b.z));
+// ★2026-11-17 批12 二修 (用户实机截图裁定): 三顶帐篷 = **两间相对开门 + 第三间朝那两间的中间**。
+//   一修的"共同朝营区中心"不合设想, 且门向约定读错 —— tent 的门在局部 **+z** 面 (05a wallSeg
+//   along:'x' at:+2.2, bctx "局部 +z = 建筑正面(门)"), 局部 +z 经 yaw ry 后指向 (sin ry, cos ry)
+//   ⇒ 朝 (dx,dz) 方向的 ry = atan2(dx, dz) (一修误用 +x 面的 atan2(−dz,dx), 差了 90°)。
+//   T1(±2,+6) 与 T2(0,−6) 相对开门 (门各朝对方), T3(∓4,0) 朝 mid(T1,T2)=(±1,0) —— 营区围合感。
+//   wr 流零消耗 (纯 atan2, 布局指纹不漂)。
+const _fd=(tx,tz,px,pz)=>Math.atan2(px-tx,pz-tz);
+tent(b.x+sgn*2,b.z+6,_fd(b.x+sgn*2,b.z+6,b.x,b.z-6)); tent(b.x,b.z-6,_fd(b.x,b.z-6,b.x+sgn*2,b.z+6)); tent(b.x-sgn*4,b.z,_fd(b.x-sgn*4,b.z,b.x+sgn,b.z));
 sandbagWall(b.x+sgn*10,b.z+6,5,HPI); sandbagWall(b.x+sgn*10,b.z-6,5,HPI); sandbagWall(b.x+sgn*8,b.z,5,HPI);
 crate(b.x+sgn*4,b.z+10,1.3,0); barrel(b.x+sgn*5,b.z-9);
 });

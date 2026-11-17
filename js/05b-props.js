@@ -362,15 +362,32 @@ const m=solidBox(MAT.wood,s,s,s,x,fit.y+s/2,z,ry,null,true); // crush: 坦克可
 applyFit(m,ry,fit);
 coverPoints.push({x:x+wr(-1.3,1.3),z:z+wr(-1.3,1.3)});
 }
+// ── 油桶 (2026-11-18 用户实机"现在更像是水泥桩, 重做材质"): 平灰 MAT.metal 圆柱读不出铁桶 ⇒
+//   锈红桶皮 (wkMat 共享, TEX.rust) + 两道真滚箍 (Torus, rotateX 烘平) + 顶盖桶口。**账目/wr 流逐位不动**:
+//   CYLS 仍 1 条 (r0.45 / y0 / y1+1.1 / explosive), 碰撞账零新增; 滚箍颜色用既有 MAT.metalDark;
+//   几何/材质模块级懒建共享 (桶是高频道具, 不逐实例建); 世界子件=1 个 Group (world.children 计数不变,
+//   barrelBlast 的 world.remove(c.mesh) 整组随爆退场, 世界还原按快照整组放回 —— 销毁口径照旧不变)。
+let _BARREL_G=null;   // {body,rib,bung,mat} 懒建 (顶层禁 new THREE, 沙箱/加载序都安全)
 function barrel(x,z){
 if(!propFree(x,z,0.85)) return;
 propTake(x,z,0.85);
 const g0=heightAt(x,z);
-const m=mesh(new THREE.CylinderGeometry(0.42,0.42,1.1,10),MAT.metal,x,g0+0.55,z);
-m.quaternion.setFromUnitVectors(_UP,terrNormal(x,z));
+if(!_BARREL_G){
+const rib=new THREE.TorusGeometry(0.425,0.022,6,14); rib.rotateX(HPI);   // 水平环绕桶身
+_BARREL_G={body:new THREE.CylinderGeometry(0.42,0.42,1.1,10),rib,bung:new THREE.CylinderGeometry(0.09,0.09,0.05,8),mat:wkMat('drum',0x8f3d28,TEX.rust,1.2)};
+}
+const grp=new THREE.Group();
+grp.position.set(x,g0+0.55,z);
+grp.quaternion.setFromUnitVectors(_UP,terrNormal(x,z));
+const body=new THREE.Mesh(_BARREL_G.body,_BARREL_G.mat); body.receiveShadow=true; grp.add(body);
+for(const dy of [-0.27,0.27]){
+const r2=new THREE.Mesh(_BARREL_G.rib,MAT.metalDark); r2.position.y=dy; r2.receiveShadow=true; grp.add(r2);
+}
+const bung=new THREE.Mesh(_BARREL_G.bung,MAT.metalDark); bung.position.y=0.575; bung.receiveShadow=true; grp.add(bung);
+world.add(grp);
 // 2026-09-27N (A3): 挂 mesh + explosive 标记 —— 爆炸/连锁引爆时连视觉一起摘掉并结算小爆。
 // 旧版只登记几何 (x/z/y0/y1), 既无 crush 也无移除路径 ⇒ 挡子弹的油桶永远炸不掉、碾不掉。
-CYLS.push({x,z,r:0.45,y0:g0,y1:g0+1.1,mesh:m,explosive:true});
+CYLS.push({x,z,r:0.45,y0:g0,y1:g0+1.1,mesh:grp,explosive:true});
 }
 function stoneWall(x1,z1,x2,z2,h=1.15){
 const dx=x2-x1,dz=z2-z1;

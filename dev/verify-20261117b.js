@@ -6,8 +6,8 @@
 //   T4 烟雾/燃烧弹烹饪引信 (NADE_COOK_FUSE 真引信, at 保持撞炸)
 //   T5 坦克残骸排斥步兵 (wreckBs 在位时 vehiclePushSoldiers 纯推出)
 //   T6 枯树碾压并入倒伏 (floraTopple 替换 vanishFlora)
-//   T7 非盒几何碎块兜底 (spawnWallDebris Box3.setFromObject 分块)
-//   T8 基地三帐篷共同朝营区中心 (atan2(-dz,dx), wr 流零消耗)
+//   T7 非盒几何兜底回滚 (2026-11-18 用户裁定: 桶/墩炸后消失=既有口径, spawnWallDebris 恢复批前)
+//   T8 基地三帐篷 两间相对开门+第三间朝两间中间 (门在局部 +z 面, ry=atan2(dx,dz); 行为断言 BUILD_REG ry)
 //   T9 指挥官 ESC 按是否已部署决定锁章 (cmdDeployConfirm(esc) + CMD.deployTouched)
 //   T10 坦克本身一律占 3 票 (TICKET_COST.tank, 有人车也收)
 //   T11 i18n: 标题/兵种卡/killfeed 人名转写/词典补键
@@ -126,17 +126,39 @@ const sfb=srcOf('js/04b-fire.js');
 ok(deadBr.includes('floraTopple(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2))')&&!deadBr.includes('vanishFlora(rec,false)'),'T6a ★枯树碾压走 floraTopple 倒伏 (vanishFlora 退场, 不再"原地消失沉入")');
 ok(deadBr.includes('if(rec.alive===false) continue;'),'T6b ★已倒伏不二次登记守卫保留 (防双沉入任务跳变)');}
 
-// ══ T7 非盒几何碎块兜底 ══
-console.log('T7 spawnWallDebris 非盒几何兜底');
+// ══ T7 非盒几何兜底回滚 (2026-11-18 用户裁定: 桶/墩类炸后消失=既有口径, 兜底属负提升) ══
+console.log('T7 spawnWallDebris 非盒兜底回滚');
 const srd=srcOf('js/12-ragdolls.js');
-ok(srd.includes('THREE.Box3().setFromObject(m)')&&srd.includes('批7'),'T7a ★非盒几何按世界包围盒切块兜底 (圆柱/圆锥不再"直接消失")');
+ok(!srd.includes('THREE.Box3().setFromObject')&&srd.includes('参数缺失/桩环境直接跳过'),'T7a ★非盒几何兜底已回滚 (spawnWallDebris 恢复批前口径: 参数缺失直接跳过)');
 ok(G('typeof spawnWallDebris==="function"')===true,'前置: spawnWallDebris 在位');
+const sbp=srcOf('js/05b-props.js');
+ok(sbp.includes("wkMat('drum',0x8f3d28,TEX.rust,1.2)")&&sbp.includes('TorusGeometry(0.425,0.022,6,14)')&&sbp.includes('mesh:grp,explosive:true'),'T7b ★油桶材质重做: 锈红桶皮+两道滚箍+顶盖桶口 (用户: 平灰圆柱读成水泥桩)');
+{const cN=boot(0);
+const GN=s=>vm.runInContext(s,cN);
+GN("document.getElementById('startBtn').onclick();");
+const dr=GN('CYLS.filter(c=>c.explosive&&c.mesh).map(c=>({kids:c.mesh.children?c.mesh.children.length:0,h:+(c.y1-c.y0).toFixed(3),r:c.r}))');
+ok(dr.length>0&&dr.every(d=>d.kids>=4&&d.h===1.1&&d.r===0.45),'T7c ★桶=Group 桶体+滚箍×2+桶口 ('+dr.length+' 只, kids='+dr.map(d=>d.kids).join('/')+') 且 CYLS 账逐位不动 (r0.45/h1.1)');
+}
 
-// ══ T8 基地三帐篷朝营区中心 ══
-console.log('T8 基地帐篷共同朝向中心');
+// ══ T8 基地三帐篷: 两间相对开门 + 第三间朝两间中间 (2026-11-18 用户实机截图裁定) ══
+console.log('T8 基地三帐篷 相对开门+第三朝中间');
 const s5c=srcOf('js/05c-layouts.js');
-ok(s5c.includes('const _tf=(tx,tz)=>Math.atan2(-(b.z-tz),b.x-tx);')&&s5c.includes('_tf(b.x+sgn*2,b.z+6)'),'T8a ★三帐篷 ry=朝营区中心 (atan2(-dz,dx), tent 门向局部 +x)');
-ok(!/tent\(b\.x\+sgn\*2,b\.z\+6,\s*0\.3\)/.test(s5c),'T8b ★旧写死朝向 (0.3/-0.2/0) 退场');
+ok(s5c.includes('const _fd=(tx,tz,px,pz)=>Math.atan2(px-tx,pz-tz);')&&s5c.includes('_fd(b.x+sgn*2,b.z+6,b.x,b.z-6)'),'T8a ★帐篷 ry=atan2(dx,dz) 朝目标 (门在局部 +z 面; 一修的 +x 面约定 atan2(-dz,dx) 退场)');
+ok(!s5c.includes('const _tf=(tx,tz)=>Math.atan2(-(b.z-tz),b.x-tx);'),'T8b ★一修"共同朝营区中心"写法退场');
+{const IDX_M=(()=>{ const c0=boot(0); return vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="moscow")',c0); })();
+const c3=boot(IDX_M);
+const G3=s=>vm.runInContext(s,c3);
+G3("document.getElementById('startBtn').onclick();");
+const tents=G3('(function(){const b=CAMPAIGN.bases[0];return BUILD_REG.filter(e=>e.type==="tent"&&Math.hypot(e.x-b.x,e.z-b.z)<10).map(e=>({x:+(e.x-b.x).toFixed(2),z:+(e.z-b.z).toFixed(2),ry:e.ry})).sort((p,q)=>q.z-p.z);})()');
+ok(tents.length===3,'T8c 前置: 莫斯科基地三帐篷在账 ('+tents.length+')');
+if(tents.length===3){
+const A=tents[0],C=tents[1],D=tents[2];   // z 降序: A=T1(z+6) / C=T3(z0) / D=T2(z-6)
+const fd=(tx,tz,px,pz)=>Math.atan2(px-tx,pz-tz);
+const midx=(A.x+D.x)/2, midz=(A.z+D.z)/2;
+const near=(u,v)=>Math.abs(u-v)<0.02||Math.abs(Math.abs(u-v)-Math.PI*2)<0.02;
+ok(near(A.ry,fd(A.x,A.z,D.x,D.z))&&near(D.ry,fd(D.x,D.z,A.x,A.z)),'T8d ★两间相对开门 (互朝对方: ry[T1]=' +A.ry.toFixed(2)+' ry[T2]='+D.ry.toFixed(2)+')');
+ok(near(C.ry,fd(C.x,C.z,midx,midz)),'T8e ★第三间朝两间中间 (mid=('+midx.toFixed(1)+','+midz.toFixed(1)+'), ry[T3]='+C.ry.toFixed(2)+')');
+}}
 
 // ══ T9 指挥官 ESC 盖章分流 ══
 console.log('T9 指挥官 ESC 按是否已部署锁章');
