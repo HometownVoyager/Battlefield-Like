@@ -25,7 +25,7 @@ constructor(team,i){
 this.kind='truck';
 this.team=team;
 this.name='运输卡车';
-this.hp=(CAMPAIGN.convoy&&CAMPAIGN.convoy.hp)||320;
+this.hp=(CAMPAIGN.convoy&&CAMPAIGN.convoy.hp)||800;   // 2026-11-17 批: 与 00-config convoy.hp 同步升 (320→800)
 this.maxHp=this.hp;
 this.alive=true; this.escaped=false;
 this.pos=V3(); this.yaw=0; this.vel=0;
@@ -44,6 +44,10 @@ this.grp.position.copy(this.pos);
 this.grp.rotation.set(0,this.yaw,0);
 }
 buildMesh(){
+// 2026-11-17 批 (用户实报"太简陋", 与坦克/残骸批风格统一): 11 件 → 21 件 ——
+// 风挡玻璃/散热格栅/保险杠/大灯条/前挡泥板/货厢栏板+尾板/排气立管补齐军卡轮廓;
+// 碰撞/行驶/命中口径零变化 (truckHitCyl 圆柱与 registerDynCollider 残骸盒都不动),
+// 车轮数组与几何 (parameters.radiusTop 供滚动折算) 逐位保留。
 this.grp=new THREE.Group();
 const addM=(g,x,y,z,mat)=>{
 const mm=mat||MAT.metalDark;
@@ -56,11 +60,25 @@ addM(boxGeo(2.1,0.35,6.4),0,0.95,0);
 // 驾驶室
 const cab=addM(boxGeo(1.9,0.85,1.3),0,1.5,1.75,MAT.metal);
 addM(boxGeo(1.9,0.5,1.3),0,1.25,2.02);
-// 货厢 + 帆布
-const bed=addM(boxGeo(2.05,1.1,3.55),0,1.6,-0.85,MAT.woodDark);
-const tarp=new THREE.Mesh(boxGeo(1.85,0.45,3.2),truckTarpMat); tarp.position.set(0,2.05,-0.85); tarp.castShadow=true; this.grp.add(tarp);
-// 引擎盖
+// 风挡玻璃 (贴驾驶室前脸, 微后倾 0.08rad)
+const ws=addM(boxGeo(1.7,0.42,0.08),0,1.72,2.37,MAT.metalDark);
+ws.rotation.x=-0.08;
+// 引擎盖 + 散热格栅 + 前保险杠 + 大灯条
 addM(boxGeo(1.75,0.42,0.9),0,1.28,2.72);
+addM(boxGeo(1.45,0.32,0.07),0,1.30,3.16,MAT.metal);
+addM(boxGeo(1.9,0.18,0.18),0,0.72,3.22,MAT.metal);
+addM(boxGeo(1.35,0.13,0.07),0,1.06,3.19,MAT.metal);
+// 前挡泥板 (骑在前轮上方)
+addM(boxGeo(0.52,0.09,1.35),-1.12,1.06,2.0);
+addM(boxGeo(0.52,0.09,1.35),1.12,1.06,2.0);
+// 排气立管 (驾驶室右后侧, 直上式军卡特征)
+addM(new THREE.CylinderGeometry(0.07,0.07,0.85,8),-0.86,2.02,1.28);
+// 货厢 + 帆布 (栏板高出货厢一截, 帆布罩在栏板之间)
+const bed=addM(boxGeo(2.05,1.1,3.55),0,1.6,-0.85,MAT.woodDark);
+addM(boxGeo(0.09,0.38,3.55),-1.03,2.32,-0.85,MAT.woodDark);
+addM(boxGeo(0.09,0.38,3.55),1.03,2.32,-0.85,MAT.woodDark);
+addM(boxGeo(1.9,0.38,0.09),0,2.32,-2.60,MAT.woodDark);
+const tarp=new THREE.Mesh(boxGeo(1.85,0.45,3.2),truckTarpMat); tarp.position.set(0,2.05,-0.85); tarp.castShadow=true; this.grp.add(tarp);
 // 车轮 (轴沿 X: z 轴旋转 HPI)
 this.wheels=[];
 const wGeo=new THREE.CylinderGeometry(0.45,0.45,0.34,10);

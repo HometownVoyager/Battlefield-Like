@@ -1834,9 +1834,24 @@ if(!silent&&this.team===player.team) announceVehRespawn(this);
 function enemyTankNear(sol,dist){
 // 观战者座驾不被索敌 (2026-09-26H): 判据单源 specRide (13-combat) —— 反装甲兵 (火箭筒/反坦克枪/AT雷)
 // 与水面对舰分支都从这里取"最近的敌方装甲", 一处排除即两条路同时生效。
+let hit=null;
 for(const t of tanks) if(t.alive&&t.team!==sol.team&&Math.hypot(t.pos.x-sol.pos.x,t.pos.z-sol.pos.z)<dist
-&&!(typeof specRide==='function'&&specRide(t))) return t;
-return null;
+&&!(typeof specRide==='function'&&specRide(t))){ hit=t; break; }
+// 劫道模式 (2026-11-17 批, 仅 mode==='convoy' 本图生效): 反装甲索敌纳入运输卡车 ——
+// 用户实报"索敌不太行, 不打卡车"。命中/伤害管线早已就绪 (子弹 truckHitCyl→takeDmg / 火箭·炮弹
+// updateShells hitTruck / 溅射同款), 缺的只是"选它当目标"这一环。坦克仍优先 (hit 先到先得),
+// 无坦克在射程内时取**最近**的敌方卡车; 命中点取 eTank.pos+1.2/1.3m 恰为卡车车体中段。
+// 非劫道图 trucks 为空数组 ⇒ 分支天然不触发, 其他地图零漂移。
+if(!hit&&GAMEMODE==='convoy'&&typeof trucks!=='undefined'&&trucks.length){
+let bd=1e9;
+for(const t of trucks){
+if(!t.alive||t.escaped||t.team===sol.team) continue;
+const dd=Math.hypot(t.pos.x-sol.pos.x,t.pos.z-sol.pos.z);
+if(dd<bd){ bd=dd; hit=t; }
+}
+if(hit&&bd>=dist) hit=null;
+}
+return hit;
 }
 function nearestDepot(x,z){
 let best=null,bd=1e9;

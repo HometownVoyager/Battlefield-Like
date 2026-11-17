@@ -3053,6 +3053,9 @@ s=Math.max(s,0.75*Math.max(0,1-Math.abs(lo-1.3)/2.2));
 return s;
 }
 // 弹药箱: 每个旗点与基地附近 (通用, 避让建筑足迹); 大桥旗点固定放在桥面上, 避免落进河谷
+// 点位周边补给箱数量 (2026-11-17 批): 游戏内容设置 sf_crates '2' ⇒ 每旗两只错开补给箱 (见循环尾段)。
+// 载入期一次性读取 (世界随页面构建, 改档换图/重开生效); 沙箱桩无 localStorage 时安全回落 1。
+const CRATE2=(typeof localStorage!=='undefined'&&localStorage.getItem&&localStorage.getItem('sf_crates')==='2');
 FLAGS.forEach(f=>{
 // (2026-11-10: 甲板旗弹药箱分支随珊瑚海/铁底湾下架摘除 —— 原文见 archive/naval-coral-ironbottom-20261110/)
 // 桥面旗的弹药箱 (2026-10-07e 修): 旧版硬编码**主桥** bridgePt(-4,1.4) —— 两个病: ①procgen 水乡
@@ -3097,6 +3100,34 @@ if(!ok)for(let a=0;a<48;a++){
 const ang=(a%16)*TAU/16, rr=3+Math.floor(a/16)*3;
 const px=f.x+Math.sin(ang)*rr, pz=f.z+Math.cos(ang)*rr;
 if(freeSpot(px,pz,0.5)){ ammoCrate(px,pz,true); break; }
+}
+}
+// ── 第二只补给箱 (2026-11-17 批, sf_crates='2'): 与首箱错开落位 ——
+// 确定性环扫 (不消耗 wr(): 默认 1 布局指纹零漂移; 开 2 只在末尾多一次 ammoCrate 的 ry 取数),
+// 三圈×16 方位贴掩体优选 (crateCoverScore), 首箱落定才补 (距旗 ≤16m 为"落定"判据, 与探针不变量同口径);
+// 桥面旗的第二箱只许落桥面 (onBridge 0.5 余量), 不让箱子掉河谷。
+if(CRATE2){
+const first=AMMO_CRATES[AMMO_CRATES.length-1];
+if(first&&Math.hypot(first.x-f.x,first.z-f.z)<=16){
+const onB=BRIDGES.length&&onBridge(f.x,f.z,4);
+let bx2=null, bz2=0, bs2=-1;
+for(let a=0;a<48;a++){
+const ang=(a%16)*TAU/16+0.196, rr=2.6+Math.floor(a/16)*2.2;   // 2.6/4.8/7.0m 三圈×16方位, 相位错开首箱环
+const px=f.x+Math.sin(ang)*rr, pz=f.z+Math.cos(ang)*rr;
+if(Math.hypot(px-first.x,pz-first.z)<2.6) continue;           // 与首箱错开 (占位 1.1×2 + 余量)
+if(onB&&!onBridge(px,pz,0.5)) continue;
+if(!freeSpot(px,pz,0.5)||!propFree(px,pz,1.1)) continue;
+const s2=crateCoverScore(px,pz);
+if(s2>bs2){ bs2=s2; bx2=px; bz2=pz; }
+}
+if(bx2!==null) ammoCrate(bx2,bz2);
+else for(let a=0;a<48;a++){                                    // 兜底: 只查建筑足迹, 强放绕互斥 (与首箱兜底同纪律)
+const ang=(a%16)*TAU/16+0.196, rr=3+Math.floor(a/16)*3;
+const px=f.x+Math.sin(ang)*rr, pz=f.z+Math.cos(ang)*rr;
+if(Math.hypot(px-first.x,pz-first.z)<2.6) continue;
+if(onB&&!onBridge(px,pz,0.5)) continue;
+if(freeSpot(px,pz,0.5)){ ammoCrate(px,pz,true); break; }
+}
 }
 }
 });

@@ -67,11 +67,20 @@ function hedgehog(x,z){
 if(!propFree(x,z,1.35)) return;
 propTake(x,z,1.35);
 const g0=heightAt(x,z);
+// 逐梁弹道细化 (2026-11-17 批): 圆柱 r=0.85 只挡坦克/士兵/寻路/飞机扫掠 (挡空隙的病根),
+// 弹道改由 rayCyl 的 c.hb 分支测三根梁的实际线段 (rayHedgeBeams) —— 空隙穿弹, 打梁才挡。
+// 梁轴向 = Euler('XYZ', rx,0,rz) 作用于 (0,1,0) = (-sin rz, cos rx·cos rz, sin rx·cos rz)。
+// ★wr() 消耗逐位一致 (每梁 1 次 + coverPoint 1 次) ⇒ 布局指纹零漂移。
+const hb=[];
 for(let i=0;i<3;i++){
+const rv=wr(-0.5,0.5);
+const rx=rv+(i*1.1), rz=0.7+i*0.5;
 const b=mesh(boxGeo(0.22,2.4,0.22),MAT.metalDark,x,g0+0.75,z);
-b.rotation.set(wr(-0.5,0.5)+ (i*1.1), 0, 0.7+i*0.5);
+b.rotation.set(rx, 0, rz);
+const ax2=-Math.sin(rz), ay2=Math.cos(rx)*Math.cos(rz), az2=Math.sin(rx)*Math.cos(rz);
+hb.push(x-ax2*1.2, g0+0.75-ay2*1.2, z-az2*1.2, x+ax2*1.2, g0+0.75+ay2*1.2, z+az2*1.2);
 }
-CYLS.push({x,z,r:0.85,y0:g0,y1:g0+1.5});
+CYLS.push({x,z,r:0.85,y0:g0,y1:g0+1.5,hb});
 coverPoints.push({x:x+wr(-1,1),z:z+wr(-1,1)});
 }
 // 铁丝网 (工程兵建造): 无硬碰撞, 进入者减速+刮伤
@@ -575,13 +584,17 @@ floraHashAdd({kind:'fern',x,z,g0,meshes,alive:true,dead:false});
 // 全部走 propFree/propTake 占位链 + coverPoints (Bot 当掩体用) + 实体碰撞 (挡人挡弹挡寻路)
 // 钢轨街垒: 十字交叉钢轨+枕木底梁+顶横杆 —— 坦克不可碾 (无 crush 标记), 只可绕行或绕击,
 // 街道路喉的经典障碍 (柏林街垒网/斯大林格勒街口共用)
+// 2026-11-17 弹道细化批 (用户实报"带空隙的整体外接盒挡子弹"): 全部碰撞盒挂 bulletPass ——
+// 挡坦克/挡人/挡寻路/挡飞机扫掠照旧, 只有弹道/视线 (raycastWorld 单一口) 穿过空隙。
 function railBarricade(x,z,ry){
 if(!propFree(x,z,1.7)||!freeSpot(x,z,1.7)) return; // freeSpot: 避开建筑足迹
 propTake(x,z,1.7);
 const fit=groundFit(x,z,ry,1.4,0.6);
 const cs=Math.cos(ry), sn=Math.sin(ry);
 // 枕木底梁 (半埋)
+const _sb0=BOXES.length;
 solidBox(MAT.woodDark,2.8,0.28,0.9,x,fit.y+0.10,z,ry);
+for(let _i=_sb0;_i<BOXES.length;_i++) BOXES[_i].bulletPass=true;   // 斜 ry 走 solidBox 链式分件, 逐盒放行弹道
 // 两根钢轨在街垒立面内交叉成 X —— 2026-09-05 用户实机反馈: 旧版倾角 HPI*0.9 几乎平躺
 // (像两根倒落的电线杆, 顶杆悬空)。现从竖直向两侧倾 0.66rad, 全高 2.3m, 下端扎进枕木。
 for(const sgn of [-1,1]){
@@ -599,8 +612,9 @@ bar.position.set(x,fit.y+1.15,z);
 bar.rotation.z=HPI; bar.rotation.y=ry;
 bar.castShadow=true;
 world.add(bar);
-// 碰撞: 实体盒 (坦克不可碾 —— 不挂 crush)
-addBoxCollider(x,fit.y+1.05,z, Math.abs(sn)>0.5?1.1:2.6, 2.1, Math.abs(sn)>0.5?2.6:1.1);
+// 碰撞: 实体盒 (坦克不可碾 —— 不挂 crush; 弹道放行见 bulletPass)
+const _rbB=addBoxCollider(x,fit.y+1.05,z, Math.abs(sn)>0.5?1.1:2.6, 2.1, Math.abs(sn)>0.5?2.6:1.1);
+_rbB.bulletPass=true;
 coverPoints.push({x:x+cs*1.6,z:z-sn*1.6},{x:x-cs*1.6,z:z+sn*1.6});
 }
 // ══════════════════════════════════════════════════════════════════════
@@ -689,8 +703,12 @@ return {tk, hullL:o.hullL!==undefined?o.hullL:base.hullL, barrelL:o.barrelL!==un
 return {tk:o, hullL:base.hullL, barrelL:base.barrelL, col:base.col, colT:base.colT, name:''};
 }
 // 烧毁坦克残骸 (全图最大的单件硬掩体, 不可碾不可毁): 2026-09-20 残骸重做 ——
-//   按 00-config 的 tk 剪影规格出**按国家/车型各异**的残骸 (炮塔档/车体轮廓/负重轮数/侧裙/涂装分档全部同源);
-//   构造: 履带断裂散落 / 负重轮脱落滚离 / 发动机舱盖掀开 / 炮塔座圈错位或整塔翻倒在侧 / 舱门敞开 / 炮管弯折垂落;
+//   按 00-config 的 tk 剪影规格出**按国家/车型各异**的残骸 (炮塔档/车体轮廓/涂装分档全部同源)。
+//   2026-11-17 简化批 (用户实报"太花哨, 简单一些"): 撤散落轮系/侧裙/格栅条/舱盖/指挥塔/同轴机枪/
+//   多片剥漆/迷彩条/多堆焦土 —— 保住车体+炮塔+弯垂炮管+行走机构的车型剪影, 件数 44→约 20;
+//   碰撞口径逐字不动 (见下), 布局指纹不受影响 (残骸视觉不进指纹, PROPS/BOXES 账零变化)。
+//   构造: 车体坐沉 + 首上倾斜板 + 发动机格栅外露 + 残存履带一条 + 主动轮/诱导轮 +
+//         断履带一段 + 炮塔座圈错位或整塔翻倒 + 炮管弯折垂落 + 舱门敞开 + 剥落漆一片 + 焦土一堆;
 //   材质分件: 烧黑钢 + 锈蚀 + **剥落漆露出原涂装一角** + 焦土 (见 wkPaint)。
 // 【空间账 (与改造前同一套口径)】车体实体盒 5.6×1.9×3.0 (ry 交换) + coverPoints 两点 —— 逐字不动;
 //   视觉件全部落在该盒的 XZ 投影内 (立体件) 或为包络外的半埋扁平碎件 (顶面≤0.28m)。
@@ -708,7 +726,6 @@ world.add(grp);
 const R=wkRand(x,z,ry,0x51a7);
 const D=tkIn?wkTankDef(tkIn):wkTankDef(R.pick(wkTankPool()));
 const T=D.tk, M=wkPaint(D.col,D.colT,T.colA);
-const camo=(T.paint==='camo')&&M.camo;         // 涂装分档 camo: 额外迷彩残条
 // ── 尺寸账 (全部由 tk 派生, 不做整体缩放 —— 免得"大车配小炮塔"的剪影错位) ──
 const L=Math.min((D.hullL||5.8)*0.90,5.2);                       // 车体长 (实体盒半长 2.8)
 const HW=clamp((T.hullW!==undefined?T.hullW:2.5)*0.90,1.86,2.55); // 车体宽 (实体盒半宽 1.5)
@@ -728,42 +745,23 @@ wkPart(grp,boxGeo(HW*0.98,0.15,gd),M.burnt,0,CY-HH/2+gd*sa/2+0.03,L/2-gd*ca/2-0.
 wkPart(grp,boxGeo(HW*0.98,HH*0.45,0.5),M.rust,0,CY+HH*0.10,-L/2+0.16,-0.45,0,0,'rearPlate');
 if((T.sponson||0)>0) // 谢尔曼/潘兴: 铸造侧凸宽肩 —— 残骸上也读得出"宽肩车体"
 wkPart(grp,boxGeo(HW+T.sponson*2,HH*0.38,L*0.60),M.rust,0,CY+HH*0.22,-L*0.05,0,0,0,'sponson');
-// ── ② 发动机舱: 格栅外露 + 舱盖掀开折起 (烧毁坦克最好认的一处) ──
+// ── ② 发动机舱: 格栅外露 (2026-11-17 简化批: 撤格栅条/掀盖 —— 残骸读作"烧塌的坦克"即够) ──
 {
 const ehL=L*0.30, ez=-L/2+0.30+ehL/2;
 wkPart(grp,boxGeo(HW*0.84,0.05,ehL),M.steel,0,roof+0.02,ez,0,0,0,'engineGrille');
-for(let i=0;i<3;i++) wkPart(grp,boxGeo(HW*0.66,0.05,0.09),M.steel,0,roof+0.06,ez-ehL*0.30+i*ehL*0.30,0,0,0,'grilleBar');
-const hp=ehL*0.80, ha=1.02+R.r(-0.10,0.10);          // 盖板绕舱口前缘向前上方折起 (整个落在车体长度内)
-const hz=ez+ehL/2, hcz=hz-hp/2*Math.cos(ha), hcy=roof+hp/2*Math.sin(ha);
-wkPart(grp,boxGeo(HW*0.86,0.09,hp),M.rust,0,hcy,hcz,ha,0,0,'engineHatch');
 }
-// ── ③ 行走机构: 残存履带贴车侧 + 断裂履带散落 + 负重轮脱落滚离 ──
+// ── ③ 行走机构 (2026-11-17 简化批): 每侧一条残存履带 + 主动轮/诱导轮, 撤散落轮系/侧裙/滚离轮 ──
 for(const sx of [-1,1]){
 // 轮系外沿必须留在碰撞盒 (±1.5) 内: 轮心 1.16 + 半宽·cos + 半径·sin ≈ 1.37
 const wx=sx*Math.min(HW/2+0.06,WK_IN_X-0.28);
-wkPart(grp,boxGeo(0.30,0.26,L*0.30),M.rust,wx,HB+0.13,-L*0.16,0,0,0,'trackHull');     // 残存履带段
-wkPart(grp,boxGeo(0.30,0.22,L*0.18),M.rust,wx,HB+0.10,L*0.30,0,0,R.r(-0.10,0.10),'trackHull');
+wkPart(grp,boxGeo(0.30,0.26,L*0.62),M.rust,wx,HB+0.13,-L*0.10,0,0,0,'trackHull');     // 残存履带段 (通长一条)
 wkPart(grp,new THREE.CylinderGeometry(whR*0.85,whR*0.85,0.26,10),M.steel,wx,whR*0.86,L/2-0.30,0,0,HPI,'sprocket'); // 主动轮
 wkPart(grp,new THREE.CylinderGeometry(whR*0.75,whR*0.75,0.24,10),M.steel,wx,whR*0.80,-L/2+0.34,0,0,HPI,'idler');   // 诱导轮
-for(let i=0;i<2;i++) // 残存负重轮 (卡在轮位、歪斜)
-wkPart(grp,new THREE.CylinderGeometry(whR,whR,0.30,12),M.steel,wx-R.r(0,0.05),whR*0.88+R.r(-0.05,0.05),
- -L*0.24+i*L*0.36,0,0,HPI+R.r(-0.16,0.16),'wheelFixed');
 }
-for(let i=0;i<2;i++) // 脱落滚离的负重轮: 平躺半埋 (轴向竖直 ⇒ 顶面只有轮胎厚度 = 扁平碎件)
-wkPart(grp,new THREE.CylinderGeometry(whR,whR,0.26,12),M.rust,
- clamp(rotSgn*R.r(1.10,1.75),-2.3,2.3),0.10,clamp(R.r(-2.1,1.7),-2.5,2.5),0,R.r(0,TAU),0,'wheelThrown');
-const nTrk=2+(R.chance(0.5)?1:0);
+const nTrk=1+(R.chance(0.5)?1:0);
 for(let i=0;i<nTrk;i++) // 断裂履带散落地面的段 (半埋: 顶面 0.13)
 wkPart(grp,boxGeo(0.34,0.13,R.r(1.1,2.0)),M.rust,
  clamp((R.chance(0.5)?1:-1)*R.r(1.05,1.55),-2.3,2.3),0.065,clamp(R.r(-2.3,2.3),-2.5,2.5),0,R.r(-0.7,0.7),0,'trackGround');
-if((T.skirt||0)>0){ // 四号/黑豹: 侧裙板 (Schürzen) —— 2~3 片歪挂 + 1 片落地
-const n=Math.min(3,T.skirt|0);
-for(let i=0;i<n;i++){
-const sx=(i%2)?1:-1, sk=Math.min(HW/2+0.15,WK_IN_X-0.08);
-wkPart(grp,boxGeo(0.05,HH*0.70,L*0.22),M.rust,sx*sk,HB+HH*0.52,R.r(-L*0.32,L*0.30),0,0,sx*R.r(0.18,0.42),'skirt');
-}
-wkPart(grp,boxGeo(L*0.24,0.05,HH*0.70),M.rust,clamp(rotSgn*R.r(1.2,1.7),-2.3,2.3),0.06,R.r(-1.8,1.8),0,R.r(0,TAU),0,'skirtFallen');
-}
 // ── ④ 炮塔: 按 tk.tur.shape 走六档 (与 15-vehicles 剪影工厂同一套离散档, 残骸上仍认得出车型) ──
 const TU=T.tur||{};
 const tS=TU.shape||'round', tW=TU.w!==undefined?TU.w:2.2, tL=TU.l!==undefined?TU.l:2.4, tH=TU.h!==undefined?TU.h:0.72;
@@ -778,10 +776,9 @@ const ringY=roof+0.05;                                // 座圈 = 车体顶面 +
 const tg=new THREE.Group(); grp.add(tg);
 const R0=tL/2;
 {
-// 塔体 (六档)
+// 塔体 (六档; 2026-11-17 简化批: 撤指挥塔/塔后配重/塔侧剥漆 —— 塔形档与炮盾保留剪影辨识度)
 if(tS==='round'||tS==='smallRound'){
 wkPart(tg,new THREE.CylinderGeometry(R0*0.86,R0,tH*0.88,14),M.paintT,0,tH*0.44,0,0,0,0,'turret');
-wkPart(tg,new THREE.CylinderGeometry(R0*0.60,R0*0.86,tH*0.14,14),M.paintT,0,tH*0.93,0,0,0,0,'turretCap');
 if(tS==='smallRound') wkPart(tg,boxGeo(tW*0.86,tH*0.46,tL*0.22),M.paintT,0,tH*0.30,-R0*0.92,0,0,0,'turretBustle');
 }else if(tS==='hex'||tS==='hexLong'){
 wkPart(tg,new THREE.CylinderGeometry(R0*0.86,R0,tH,6),M.paintT,0,tH/2,0,0,Math.PI/6,0,'turret');
@@ -789,17 +786,11 @@ if(tS==='hexLong') wkPart(tg,boxGeo(tW*0.72,tH*0.42,0.36),M.paintT,0,tH*0.30,-(R
 }else{ // box (四号/黑豹) 与 vickers (维克斯/T-26) 都由直壁箱体派生, 靠尺寸档区分
 wkPart(tg,boxGeo(tW,tH,tL),M.paintT,0,tH/2,0,0,0,0,'turret');
 wkPart(tg,boxGeo(tW*0.96,tH*0.55,0.40),M.paintT,0,tH*0.42,tL/2-0.05,-0.30,0,0,'turretFront');
-wkPart(tg,boxGeo(tW*0.90,tH*0.44,0.34),M.paintT,0,tH*0.30,-tL/2-0.12,0,0,0,'turretBustle');
 }
-// 指挥塔 (cupH 档)
-const cupR=Math.max(0.20,Math.min(0.34,cupH*1.3));
-wkPart(tg,new THREE.CylinderGeometry(cupR,cupR,cupH,10),M.paintT,tW*0.22,tH+cupH*0.5-0.02,-tL*0.24,0,0,0,'cupola');
 // 炮盾 (谢尔曼/潘兴走铸造圆盾, 其余走方盾 —— 与剪影工厂同判据)
 const mh=Math.max(0.46,tH*0.78);
 if(tS==='round'&&T.shape==='sherman') wkPart(tg,new THREE.CylinderGeometry(mh*0.5,mh*0.5,0.44,12),M.steel,0,tH*0.52,tL/2+0.12,HPI,0,0,'mantlet');
 else wkPart(tg,boxGeo(Math.max(0.62,tW*0.40),mh,0.44),M.paintT,0,tH*0.52,tL/2+0.12,0,0,0,'mantlet');
-// 塔侧剥落漆: 炮塔走 paintT 第二色 ⇒ 露出的漆皮是本车原色 col (涂装分档在残骸上的读法)
-wkPart(tg,boxGeo(0.03,tH*0.46,Math.max(0.30,tL*0.34)),M.paint,-(tW/2+0.015),tH*0.52,-tL*0.16,0,0,0,'paintChipTurret');
 }
 // 炮管: 分段折弯垂落 (根部仍在炮盾上, 前段探出后即低头扎进沙里) —— "弯折垂落"
 // ★ 俯角预算怎么来的: 炮管挂在 tg (座圈高 ringY≈1.2m) 上, 起点世界高 ≈1.6m; 硬掩体盒半长只有 2.8m,
@@ -809,25 +800,35 @@ wkPart(tg,boxGeo(0.03,tH*0.46,Math.max(0.30,tL*0.34)),M.paint,-(tW/2+0.015),tH*0
 const bLen=D.barrelL!==undefined?D.barrelL:3.2, nSeg=bLen>3.8?4:3, segL=bLen/nSeg;
 let bp=[0,tH*0.52,tL/2+0.34], ba=R.r(0.55,0.65);
 if(tOrn){ // 整塔翻倒: 炮管在座圈处折断, 塔上只留一截弯管头
+let tgZBack=0.18;   // 炮塔组纵向预算上界 (非翻倒档由炮管 tip 预算改写; 翻倒档落位另有固定夹取)
 wkPart(tg,new THREE.CylinderGeometry(barR*1.05,barR,0.62,8),M.burnt,0,tH*0.52,tL/2+0.45,HPI+0.55,0,0,'barrelStump');
 }else{
+// 弯折增量先取数 (序列与旧版逐位一致: i=1 一记大弯, i≥2 沿垂向微调), 预测 tip 后落位可整体后移 ——
+// ★2026-11-17 简化批: 简化撤件使本地哈希取数序列位移, 旧版"包络不越界"靠取数运气过, 现改
+//   **逐变体预算夹取** (横向 tOffMax / 纵向 tgZBack), 任意取数序列均不越硬掩体包络。
+const bends=[0]; for(let i=1;i<nSeg;i++) bends.push(i===1?R.r(0.75,0.95):R.r(0.25,0.40));
+let tipZ=bp[2]; { let ba2=ba; for(let i=0;i<nSeg;i++){ tipZ+=segL*Math.cos(ba2); ba2+=bends[i]||0; } }
+tgZBack=WK_IN_Z-0.06-tipZ;   // ≤0 ⇒ 炮塔组整体后移 |tgZBack| (tip 收回包络; 正值=尚有余量, 上界放开)
 for(let i=0;i<nSeg;i++){
 if(bp[1]+ringY<0.05) break;  // 已触地/入土: 后面的段不再建 (埋在地下的圆柱看不见, 只白烧 draw call 且撑大包围盒)
-ba+=(i?(i===1?R.r(0.75,0.95):R.r(0.25,0.40)):0);   // 第 2 段起急剧折下 (弯折点), 之后沿垂向插进沙里
+ba+=bends[i]||0;   // 第 2 段起急剧折下 (弯折点), 之后沿垂向插进沙里
 const dir=[0,-Math.sin(ba),Math.cos(ba)], r0=barR*(1-i*0.07);
 wkPart(tg,new THREE.CylinderGeometry(r0,r0*0.94,segL,8),M.burnt,
  bp[0]+dir[0]*segL/2,bp[1]+dir[1]*segL/2,bp[2]+dir[2]*segL/2,HPI+ba,0,0,'barrel'+(i+1));
 bp=[bp[0]+dir[0]*segL,bp[1]+dir[1]*segL,bp[2]+dir[2]*segL];
 }
-if(T.brake&&bp[1]+ringY>-0.05) wkPart(tg,new THREE.CylinderGeometry(barR*1.45,barR*1.45,0.42,8),M.burnt,bp[0],bp[1],bp[2],HPI+ba,0,0,'muzzleBrake');
-wkPart(tg,new THREE.CylinderGeometry(0.045,0.05,0.9,6),M.steel,Math.min(0.42,tW*0.24),tH*0.42,tL/2+0.42,HPI,0,0,'coax');
+// 2026-11-17 简化批: 撤炮口制退器/同轴机枪 (炮管折弯垂落一件保住剪影即够)
 }
 // 塔的落位: 座圈错位 (常规) 或 **整塔翻倒** (绕 X 翻 180° 倒扣在车体后段甲板上, 再向一侧翻倒压进车体)。
 // ★ 为什么不能"整塔落在车旁沙地上": 硬掩体实体盒只有 3.0m 宽 × 5.6m 长 (半 1.5/2.8),
 //   一台 2.4~2.9m 宽的炮塔横躺在车旁必然伸出盒外 ⇒ 玩家会从炮塔里穿过去。
 //   规则②要求碰撞口径逐字不变, 故"翻倒"必须在盒内落地 —— 倒扣在甲板上 + 侧滚压进车体是唯一的自洽解。
+// ★2026-11-17 简化批: tOff 落位加横向预算夹取 (塔角半宽 = (tW/2)cosθ+(tL/2)sinθ, θ=tYawW;
+//   俯仰/侧倾小角并入 0.06 余量) —— 任意本地哈希序列 turret 角都不越 ±WK_IN_X。
 if(!tOrn){
-tg.position.set(tOff,ringY,(TU.ringZ!==undefined?TU.ringZ:0)+R.r(-0.18,0.18));
+const turHalfX=(tW/2)*Math.cos(Math.abs(tYawW))+(tL/2)*Math.sin(Math.abs(tYawW));
+const tOffMax=Math.max(0.02,WK_IN_X-0.06-turHalfX);
+tg.position.set(clamp(tOff,-tOffMax,tOffMax),ringY,clamp((TU.ringZ!==undefined?TU.ringZ:0)+R.r(-0.18,0.18),Math.min(0,tgZBack),Math.max(0,tgZBack)));
 tg.rotation.set(R.r(-0.05,0.05),tYawW,R.r(-0.09,0.09));
 }else{
 const roll=rotSgn*R.r(0.18,0.30);   // 侧滚上限 0.30rad: 再大塔角就伸出 1.5m 半宽 (见上)
@@ -838,24 +839,19 @@ wkPart(grp,new THREE.CylinderGeometry(barR,barR*0.92,bLen*0.62,8),M.burnt,
  clamp(rotSgn*R.r(0.95,1.25),-WK_IN_X+0.3,WK_IN_X-0.3),barR+0.02,
  clamp(R.r(-2.0,0.3),-2.4,2.4),HPI,0,R.r(-0.45,0.45),'barrelFallen');
 }
-// ── ⑤ 舱门: 掀开 2 处 (驾驶员/车长) + 掀掉落地 1 片 ──
+// ── ⑤ 舱门 (2026-11-17 简化批): 只留驾驶员舱门掀开一件 ──
 {
 const dh=Math.min(0.55,HW*0.30), hp2=dh*1.5;
 wkPart(grp,boxGeo(dh,0.07,hp2),M.rust,-HW*0.28,roof+0.03+hp2/2*Math.sin(1.15),L*0.30,1.15+R.r(-0.15,0.15),0,0,'hatchOpen');
-wkPart(grp,boxGeo(dh,0.07,hp2),M.rust,HW*0.30,roof+0.03+hp2/2*Math.sin(0.55),L*0.18,0.55+R.r(-0.15,0.15),0,R.r(-0.2,0.2),'hatchAjar');
-wkPart(grp,boxGeo(dh*1.2,0.06,dh*1.7),M.burnt,clamp(rotSgn*R.r(1.25,1.85),-2.2,2.2),0.055,
- clamp(R.r(-2.2,2.0),-2.5,2.5),0,R.r(0,TAU),0,'hatchLost');
 }
-// ── ⑥ 剥落漆: 没烧透的那几块露出原涂装 (残骸上"这是哪一国的车"的唯一线索) ──
-for(let i=0;i<3;i++){
-const sx=(i%2)?1:-1;
+// ── ⑥ 剥落漆 (简化批 1 片): 没烧透的那一块露出原涂装 (残骸上"这是哪一国的车"的唯一线索) ──
+{
+const sx=R.chance(0.5)?1:-1;
 wkPart(grp,boxGeo(0.03,HH*R.r(0.30,0.52),L*R.r(0.12,0.22)),M.paint,sx*(HW/2+0.015),CY+R.r(-0.10,0.18),
  R.r(-L*0.34,L*0.28),0,0,0,'paintChip');
 }
-if(camo) for(let i=0;i<2;i++)
-wkPart(grp,boxGeo(0.03,HH*0.30,L*0.10),M.camo,(i?1:-1)*(HW/2+0.015),CY+HH*0.12,R.r(-L*0.3,L*0.2),0,0,0,'camoChip');
-// ── ⑦ 焦土: 爆燃后的灰堆 (低矮土丘, 埋在车体四周地面上; 纯视觉, 与既有弹坑/沙痕同口径: 不设碰撞) ──
-for(let i=0;i<3;i++){
+// ── ⑦ 焦土 (简化批 1 堆): 爆燃后的灰堆 (低矮土丘, 埋在车体侧地面上; 纯视觉, 不设碰撞) ──
+{
 const a=R.r(0,TAU);
 wkPart(grp,boxGeo(R.r(0.55,0.95),0.16,R.r(0.55,0.95)),M.soil,
  clamp(Math.cos(a)*R.r(1.2,1.9),-2.4,2.4),0.02,clamp(Math.sin(a)*R.r(1.4,2.3),-2.6,2.6),0,R.r(0,TAU),0,'ashMound');
@@ -923,22 +919,34 @@ prevArm={x,g:g0};
 }
 }
 // ═══════════ 柏林街道家具 (2026-09-09 加密批次: 用户实机反馈"城内太过于空荡") ═══════════
-// 烧毁轿车残骸: 车体+车厢+四轮 —— 可碾轻掩体 (crush), 城市街道的密度骨架
+// 烧毁轿车残骸: 车体+机盖/尾箱阶梯+车厢(座舱带+车顶)+前后保险杠+歪门+四轮 —— 可碾轻掩体 (crush),
+// 城市街道的密度骨架。2026-11-17 批 (用户实报"有些简陋"): 6 件 → 13 件的三厢轮廓
+// (机盖/尾箱/玻璃带/车顶/保险杠/歪门), 材质仍烧黑+裸钢两档, 与残骸工具箱同调不越档。
+// 碰撞口径逐字不动 (实体盒 1.75×1.24×4.2 ry 交换 + crush + coverPoints)。
 function carWreck(x,z,ry){
 if(!propFree(x,z,2.2)||!freeSpot(x,z,2.1)) return; // freeSpot: 避开建筑足迹
 propTake(x,z,2.2);
 const fit=groundFit(x,z,ry,1.9,1.0);
 const dark=new THREE.MeshLambertMaterial({color:0x3a3229,map:TEX.grime});
+const steel=new THREE.MeshLambertMaterial({color:0x55534d,map:TEX.metalBrush});
 const grp=new THREE.Group();
 grp.position.set(x,fit.y,z);
 grp.rotation.order='YXZ';
 grp.rotation.set(fit.pitch,ry,fit.roll);
 world.add(grp);
-const body=new THREE.Mesh(boxGeo(1.75,0.72,4.2),dark); body.position.y=0.62; grp.add(body);
-const cab=new THREE.Mesh(boxGeo(1.6,0.62,1.9),dark); cab.position.set(0,1.24,-0.25); grp.add(cab);
+const addP=(g,x2,y2,z2,m2,rx,ry2,rz2)=>{ const mm=m2||dark; const p=new THREE.Mesh(g,mm); p.position.set(x2,y2,z2); if(rx||ry2||rz2) p.rotation.set(rx||0,ry2||0,rz2||0); p.castShadow=true; grp.add(p); return p; };
+addP(boxGeo(1.75,0.72,4.2),0,0.62,0);                                   // 下车体 (沿用旧轮廓)
+addP(boxGeo(1.55,0.20,1.20),0,0.98,1.32);                               // 机盖 (前厢阶)
+addP(boxGeo(1.55,0.20,0.90),0,0.98,-1.62);                              // 尾箱盖 (后厢阶)
+addP(boxGeo(1.6,0.34,1.9),0,1.16,-0.25);                                // 座舱下带
+addP(boxGeo(1.62,0.24,1.86),0,1.42,-0.25,steel);                        // 玻璃带 (烧糊车窗, 裸钢档)
+addP(boxGeo(1.52,0.09,1.78),0,1.57,-0.25);                              // 车顶
+addP(boxGeo(1.86,0.15,0.16),0,0.42,2.12,steel);                         // 前保险杠
+addP(boxGeo(1.86,0.15,0.16),0,0.42,-2.12,steel);                        // 后保险杠
+addP(boxGeo(0.05,0.52,1.05),-0.90,0.98,0.42,steel,-0.14);               // 歪开的驾驶侧车门 (烧变形)
 for(const [wx,wz] of [[-0.82,1.35],[0.82,1.35],[-0.82,-1.35],[0.82,-1.35]]){
-const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.22,8),MAT.metalDark);
-wh.position.set(wx,0.34,wz); wh.rotation.z=HPI; grp.add(wh);
+const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.22,10),MAT.metalDark);
+wh.position.set(wx,0.34,wz); wh.rotation.z=HPI; wh.castShadow=true; grp.add(wh);
 }
 grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
 const bb=addBoxCollider(x,fit.y+0.62,z, Math.abs(Math.sin(ry))>0.5?4.2:1.75, 1.24, Math.abs(Math.sin(ry))>0.5?1.75:4.2);

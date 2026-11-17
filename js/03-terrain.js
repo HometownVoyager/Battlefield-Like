@@ -1861,8 +1861,49 @@ _rbR.t=tmin; _rbR.nx=axis===0?sign:0; _rbR.ny=axis===1?sign:0; _rbR.nz=axis===2?
 return _rbR;
 }
 const _rcR={t:0,nx:0,ny:0,nz:0};
+// 拒马逐梁弹道细化 (2026-11-17 批): 拒马的圆柱 (r=0.85) 只供坦克推挤/士兵推挤/寻路/飞机扫掠使用,
+// 弹道 (子弹/炮弹/视线/溅射遮挡全走 raycastWorld 这一条口) 改测三根钢梁的**实际线段** —— 空隙照常穿弹,
+// 打在梁上才挡。c.hb=[ax,ay,az,bx,by,bz]×3 (梁两端点, 05b-props hedgehog 构建时按梁姿态解析式写入),
+// 胶囊半径 = 梁半厚 0.11 + 0.03 采样余量。算法 = Ericson《Real-Time Collision Detection》5.1.9
+// 线段-线段最近点 (射线取 maxD 长线段参与), 零分配 (全标量局部), 取最小 s = 最近命中。
+const HEDGE_R2=0.14*0.14;
+function rayHedgeBeams(o,dir,c,maxD){
+const p2x=o.x+dir.x*maxD, p2y=o.y+dir.y*maxD, p2z=o.z+dir.z*maxD;
+const hb=c.hb;
+let bt=-1, bnx=0, bny=0, bnz=0;
+for(let i=0;i<hb.length;i+=6){
+const q1x=hb[i], q1y=hb[i+1], q1z=hb[i+2], q2x=hb[i+3], q2y=hb[i+4], q2z=hb[i+5];
+const d1x=p2x-o.x, d1y=p2y-o.y, d1z=p2z-o.z;
+const d2x=q2x-q1x, d2y=q2y-q1y, d2z=q2z-q1z;
+const rx=o.x-q1x, ry=o.y-q1y, rz=o.z-q1z;
+const a=d1x*d1x+d1y*d1y+d1z*d1z;
+const e=d2x*d2x+d2y*d2y+d2z*d2z;
+const f=d2x*rx+d2y*ry+d2z*rz;
+let s, u;
+if(a<=1e-12){ s=0; u=e>1e-12?clamp(f/e,0,1):0; }
+else if(e<=1e-12){ u=0; s=clamp(-(d1x*rx+d1y*ry+d1z*rz)/a,0,1); }
+else{
+const cc2=d1x*rx+d1y*ry+d1z*rz;
+const b2=d1x*d2x+d1y*d2y+d1z*d2z;
+const den=a*e-b2*b2;
+s=den>1e-12?clamp((b2*f-cc2*e)/den,0,1):0;
+u=(b2*s+f)/e;
+if(u<0){ u=0; s=clamp(-cc2/a,0,1); }
+else if(u>1){ u=1; s=clamp((b2-cc2)/a,0,1); }
+}
+const t=s*maxD;
+if(t<=0.0001||t>maxD) continue;
+const dx=(o.x+d1x*s)-(q1x+d2x*u), dy=(o.y+d1y*s)-(q1y+d2y*u), dz=(o.z+d1z*s)-(q1z+d2z*u);
+if(dx*dx+dy*dy+dz*dz>HEDGE_R2) continue;
+if(bt<0||t<bt){ bt=t; const dl2=dx*dx+dy*dy+dz*dz; const il=dl2>1e-12?1/Math.sqrt(dl2):0; bnx=dx*il; bny=dy*il; bnz=dz*il; }
+}
+if(bt<0) return null;
+_rcR.t=bt; _rcR.nx=bnx; _rcR.ny=bny; _rcR.nz=bnz;
+return _rcR;
+}
 function rayCyl(o,dir,c,maxD){
 if(c.dead) return null; // 已倒伏/烧毁的树等: 碰撞体即杀 (r=0 防御 + 显式跳过)
+if(c.hb) return rayHedgeBeams(o,dir,c,maxD);   // 拒马: 弹道逐梁判定 (2026-11-17 批, 挡坦克挡人圆柱口径不动)
 const ox=o.x-c.x, oz=o.z-c.z;
 const a=dir.x*dir.x+dir.z*dir.z;
 if(a<1e-9) return null;
@@ -2127,6 +2168,34 @@ mark(c.x-rr,c.z-rr,c.x+rr,c.z+rr,(x,z)=>((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z))<=rr*rr
 	for(const b of CAMPAIGN.bases) clear(b.x,b.z,26);
 	// 莫斯科: 垭口走廊强制打通 (passes 语义表)
 	if(ALPINE&&ALPINE.passes) for(const p of ALPINE.passes) clear(p.x,p.z,p.r);
+	}
+	// 断崖公路: 崖顶伏击点走廊强制打通 (2026-11-17 批, 出生点自半山腰上移崖顶) ——
+	// OCC_GEO 把 h>15 且 rd>20 的岩脊带记占用 (Bot 不翻最顶岩脊), 崖顶出生若不开走廊, Bot 会
+	// 生在"孤岛"上 (能射击不能移动/换位/寻补给)。每队0点开一条 出生点→最近道路点 的 3m 走廊,
+	// 与莫斯科垭口同款 clear 手法 (OCC_GEO 叠加之后直接写活体网格, 顺序在叠加块之后不可上移)。
+	if(CAMPAIGN.id==='canyon'){
+	const clear=(x,z,r)=>{
+	const i0=clamp(Math.floor((x-r+off)/res),0,N-1), i1=clamp(Math.ceil((x+r+off)/res),0,N-1);
+	const j0=clamp(Math.floor((z-r+off)/res),0,N-1), j1=clamp(Math.ceil((z+r+off)/res),0,N-1);
+	for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+	const xx=i*res-off, zz=j*res-off;
+	if((xx-x)*(xx-x)+(zz-z)*(zz-z)<=r*r) d[j*N+i]=0;
+	}
+	};
+	const escT=(CAMPAIGN.convoy&&CAMPAIGN.convoy.escortTeam!==undefined)?CAMPAIGN.convoy.escortTeam:1;
+	for(const s of (CAMPAIGN.spawns||[])){
+	if(s.team===escT) continue;   // 护运方谷口集结地在谷底 (rd<20), 不在岩脊带, 无需走廊
+	// 最近道路点: 逐段投影取最近 (roads 12 段, 布局期一次性开销)
+	let bx=0,bz=0,bd=1e9;
+	for(const r of CAMPAIGN.roads){
+	const dx=r[2]-r[0], dz=r[3]-r[1], L2=dx*dx+dz*dz||1e-9;
+	let t=((s.x-r[0])*dx+(s.z-r[1])*dz)/L2; t=clamp(t,0,1);
+	const px=r[0]+dx*t, pz=r[1]+dz*t, dd=Math.hypot(s.x-px,s.z-pz);
+	if(dd<bd){ bd=dd; bx=px; bz=pz; }
+	}
+	const l=Math.hypot(bx-s.x,bz-s.z)||1;
+	for(let u=0;u<=1;u+=2.5/l) clear(s.x+(bx-s.x)*u, s.z+(bz-s.z)*u, 3);
+	}
 	}
 	// 百团沟壑 (2026-09-12 立体化重写): 沟壁带(talus..w)记占用 —— Bot 不翻崖不穿壁;
 	// 沟底(gd<bottom)留白=可通行 (坡道网络+渡口把沟底变成渗透路线, 与坡度物理同口径);

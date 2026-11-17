@@ -104,6 +104,9 @@ const I18N_EN={
 '<b>瞄准吸附</b>(游戏内容设置内, 默认「轻度」): 差一点点打中的那一枪会被轻轻掰向目标 —— 普通瞄准/开镜/载具火力(主炮·机枪·炮位)都生效, 明显打偏时不起作用, 隔墙或穿过队友一律不吸; 已瞄着头或身体时绝不掰动 (不抢爆头)。':'<b>AIM ASSIST</b> (in Game Content Settings, default "Light"): a shot that <i>just</i> misses bends slightly toward the target — hip-fire, ADS and vehicle fire (main gun, machine guns, emplacements) alike. Big misses are unaffected, and it never pulls through walls or teammates; a shot already aimed at the head or body is never touched (headshots stay yours).',
 // ── 部署 ──
 '兵种':'CLASS','出生点':'SPAWN POINT','战场态势':'TACTICAL MAP',
+// 点位周边补给箱数量 (2026-11-17 批): 游戏内容设置单钮循环 1↔2 + 说明整串 (data-i18n-html 键=innerHTML)
+'点位周边补给箱数量':'SUPPLY CRATES PER POINT',
+'每个据点（旗点）周边摆放的弹药补给箱数量：1（默认）或 2。选 2 时每据点周边会有两只错开的补给箱（首只箱位不变，第二只按贴掩体优选另行落位）。换图或重开一局后生效。':'Ammo crates placed around each capture point: 1 (default) or 2. At 2, every point gets a second staggered crate (the first crate keeps its spot; the second picks a covered spot of its own). Applies after changing maps or restarting a match.',
 '你被 {0} 击杀了':'You were killed by {0}',
 '本次存活 {0} · 击杀 {1} · 获得 +{2} 分':'Survived {0} · {1} kills · +{2} pts',
 '本局总计 {0} 杀 / {1} 死 / {2} 分':'Match: {0} kills / {1} deaths / {2} pts',

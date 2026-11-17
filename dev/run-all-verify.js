@@ -113,10 +113,11 @@ const SANDBOX=[
 ['dev/verify-mapfix-20261115.js',[],'多图修批 (2026-11-15 用户实报, 含 --neg; 地铁项随地铁站删除摘除)+莫斯科残墙迁位(M1 不压教堂/不骑墙·M1b 教堂旗净空·M2 工厂旗 132m)+百团 R10 南移 27.3m/前哨拉距 59m+胡康水态门/河道过界/水位 0.44+草原水塔腿 1.909 — NEG2: 摘墙足迹/摘水态门 全部转红'],
 ['dev/verify-conecollide-20261115.js',[],'2026-11-15 锥体碰撞批: 国会穹顶 7 档/教堂尖顶 45° 转位加大三档/水塔锥顶两档 noNav 分层近似圆柱 + OCC 烘焙 noNav 豁免 (悬空饰件不占地面格, 行为测试+对照组) + 钟塔接缝 h7.05→7.2 (含 --neg)'],
 ['dev/verify-waterentry-20261115.js',[],'2026-11-15 入水特效批: waterSplash 五参 (spd=入水速度) 粒子档位 6/14/24 + AudioSys.splash 四参透传 + Bot dry→wet 边沿 (14-bots moveDir, 大落差 scale 2.2/big) + 坦克 3.4/卡车 2.6 车体级跃迁账 + 飞机触水先溅后毁 (含 --neg)'],
-['dev/verify-audio3-20261115c.js',[],'2026-11-15c 音效完全推倒重写批: 契约面 (bypass Set/naval 段三写点/splash 四参/引擎 pitch 写法) + 四档案表 (每枪 sid 全覆盖/炮 13 条/爆 18 kind/引擎 9 档+旧档别名) + 逐阵营坦克/飞机引擎档实spawn (normandy+songhu+baituan, 权重档读 tk.wc) + identity 接线锚 (sid/mgSid 四 style/坦克炮三档/planeMG/flak20/naval_*/battery/loiter/truck) + 行为 (每发变奏/未知回落/旧数字口径/tankJp saw pitch1.35/truck square/radial vs inline) + 远枪限流 (含 --neg)'],
+['dev/verify-audio3-20261117a.js',[],'2026-11-15c 音效完全推倒重写批: 契约面 (bypass Set/naval 段三写点/splash 四参/引擎 pitch 写法) + 四档案表 (每枪 sid 全覆盖/炮 13 条/爆 18 kind/引擎 9 档+旧档别名) + 逐阵营坦克/飞机引擎档实spawn (normandy+songhu+baituan, 权重档读 tk.wc) + identity 接线锚 (sid/mgSid 四 style/坦克炮三档/planeMG/flak20/naval_*/battery/loiter/truck) + 行为 (每发变奏/未知回落/旧数字口径/tankJp saw pitch1.35/truck square/radial vs inline) + 远枪限流 (含 --neg)'],
 ['dev/verify-crater-20261115.js',[],'2026-11-15 自适应弹坑批 (二轮修黑弧): terrainSurfaceY 单源 (渲染弦面同格同对角) + 顶点贴地不变式 (≥弦面+0.04) + 绕向翻正法线朝上 + 125 顶点 BufferGeometry/贴花档材质/36 上限账/无 Torus rim (桩补真 setIndex/computeVertexNormals; 含 --neg)'],
 ['dev/verify-bamboo-20261115.js',[],'2026-11-15 竹子批: BAMBOO_IM 实例批+燃烧倒伏碾压链+淞沪竹带 (含 --neg 摘碾压转红)'],
 ['dev/verify-fieldfix2-20261116.js',[],'2026-11-16 八项批+11-17 返修: 树篱三链路/Bot 坦克修理/撞机规避/掉雷开关/主动优化/布娃娃背包/时停关灯 (含 --neg 14 补丁)'],
+['dev/verify-20261117.js',[],'2026-11-17 四项批: 模型重做(残骸简化44→19件·轿车6→13件·卡车11→21件, 碰撞口径逐字不动)+弹道细化(钢轨街垒 bulletPass 弹道穿透·拒马 cyl.hb 三梁逐梁判定空隙穿弹)+断崖公路(出生半山腰→崖顶 rd>28/h>13·OCC 崖顶走廊打通·enemyTankNear 劫道纳入卡车·convoy.hp 320→800)+游戏内容设置 点位周边补给箱数量 sf_crates 1/2 (第二箱确定性环扫零 wr 漂移) (含 --neg 四补丁)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

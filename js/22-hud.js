@@ -2507,6 +2507,20 @@ syncMenuButtons();
 		};
 		}
 		}
+		// 点位周边补给箱数量 (2026-11-17 批): 单钮循环 1↔2 —— 05c-layouts 弹药箱旗点循环读取 sf_crates,
+		// 补给箱随世界在页面载入期一次性建账 ⇒ 改档不即时生效, 换图/重开一局 (页面重载) 后生效 (desc 已注明)。
+		{
+		const scb=el('supplyCrateBtn');
+		if(scb){
+		const syncSc=()=>{ const c2=localStorage.getItem('sf_crates')==='2'; scb.textContent='📦 '+t('点位周边补给箱数量')+': '+(c2?'2':'1'); scb.classList.toggle('sel',c2); };
+		syncSc();
+		scb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		localStorage.setItem('sf_crates',(localStorage.getItem('sf_crates')==='2')?'1':'2');
+		syncSc();
+		};
+		}
+		}
 		// 成就弹窗位置 (2026-11-11 数据批): 单钮循环 右上↔正下 —— 27-achievements achToastPump 每次弹出现读 sf_ach_pos, 改档即时生效不重载
 		{
 		const pb=el('achPosBtn');

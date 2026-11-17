@@ -126,12 +126,12 @@ assert('22 附身投掷物行带宿主雷账 (旧"只显绷带"口径已扩)',
 assert('20a 玩家迫击炮位逐帧蹲姿兜底 (updatePlayerMortar)',
  srcOf('js/20a-seats.js').includes('p.crouch=true; p.prone=false;   // 命中体 parity (2026-11-03)'));
 
-// 版本戳 (随批升 20261115c: index.html 全量 + __sfStyleVer + _game_files 全行)
+// 版本戳 (随批升 20261117a: index.html 全量 + __sfStyleVer + _game_files 全行)
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261115c/g)].length;
-assert('版本戳 20261115c: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
- stamps>=44&&idx.includes("window.__sfStyleVer='20261115c';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261115c')).length===45
+const stamps=[...idx.matchAll(/20261117a/g)].length;
+assert('版本戳 20261117a: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
+ stamps>=44&&idx.includes("window.__sfStyleVer='20261117a';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261117a')).length===45
  &&!idx.includes('20261102b')&&!gf.includes('20261102b'));
 }
 

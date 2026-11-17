@@ -80,6 +80,10 @@ const bi=bl[k];
 if(bi>=BOXES.length) continue;   // ★2026-11-14 重开局批: 脏下标守卫 (同 eachBoxNear; rayBox 读 b.minX 对 undefined 必炸)
 if(stampB[bi]===gen) continue;
 stampB[bi]=gen;
+// bulletPass (2026-11-17 弹道细化批): 带空隙的整体外接盒 (钢轨街垒等) 不再吃弹道 ——
+// 挡坦克/挡人/挡寻路/挡飞机扫掠照旧 (那些消费点不读本标记), 只有 raycastWorld 这条
+// 子弹/炮弹/视线/溅射遮挡的单一弹道口放行。
+if(BOXES[bi].bulletPass) continue;
 const r=rayBox(o,dir,BOXES[bi],best);
 if(r){ best=r.t; bn=r; kind='box'; }
 }
@@ -89,6 +93,7 @@ const cy2=cl[k];
 if(cy2>=CYLS.length) continue;   // ★2026-11-14 重开局批: 同上脏下标守卫
 if(stampC[cy2]===gen) continue;
 stampC[cy2]=gen;
+if(CYLS[cy2].bulletPass) continue;   // 同上标记 (本批拒马圆柱未用此标记, 走 rayCyl 内 hb 逐梁细化)
 const r=rayCyl(o,dir,CYLS[cy2],best);
 if(r){ best=r.t; bn=r; kind='cyl'; }
 }
@@ -99,8 +104,8 @@ if(tMaxX<tMaxZ){ t=tMaxX; tMaxX+=tDX; ci+=stepI; }
 else { t=tMaxZ; tMaxZ+=tDZ; cj+=stepJ; }
 }
 } else {
-for(const b of BOXES){ const r=rayBox(o,dir,b,best); if(r){ best=r.t; bn=r; kind='box'; } }
-for(const c of CYLS){ const r=rayCyl(o,dir,c,best); if(r){ best=r.t; bn=r; kind='cyl'; } }
+for(const b of BOXES){ if(b.bulletPass) continue; const r=rayBox(o,dir,b,best); if(r){ best=r.t; bn=r; kind='box'; } }
+for(const c of CYLS){ if(c.bulletPass) continue; const r=rayCyl(o,dir,c,best); if(r){ best=r.t; bn=r; kind='cyl'; } }
 }
 if(dir.y<0.35){
 // 2026-11-13 性能批 C: 地面行军自适应步长 —— AI 视线/弹道射线 (dir.y<0.35) 旧版固定 1.8m 步进,
