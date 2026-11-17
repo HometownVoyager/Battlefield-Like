@@ -183,6 +183,21 @@ if(!s) return;
 const i=FIRE_SOURCES.indexOf(s);
 if(i>=0) FIRE_SOURCES.splice(i,1);
 }
+// ===== 严寒取暖查询 (2026-11-18 寒冷批②): 火焰驱寒 —— 判点是否处在任一持续火源的取暖半径内 =====
+// 取暖半径 = 火源灼烧半径 r + pad 余量 (调用方默认 1.5m —— 比灼烧圈宽松, 站火边也暖); 竖向门 |dy|≤2.5m
+// (桥下火不暖桥上人, 楼上楼下不串温)。只读 FIRE_SOURCES 活账 (follow 火源已由 updateFires 每帧重投影),
+// 纯查询不写任何账 —— 玩家 (20-player) 与 Bot (14-bots) 失温链同调。cfg.cold 地图专用, 其余图零调用零开销。
+function nearWarmFire(x,y,z,pad){
+const p=(pad===undefined)?1.5:pad;
+for(let i=0;i<FIRE_SOURCES.length;i++){
+const s=FIRE_SOURCES[i];
+if(s.ttl<=0) continue;
+if(Math.abs((y||0)-(s.y||0))>2.5) continue;
+const dx=x-s.x, dz=z-s.z, rr=s.r+p;
+if(dx*dx+dz*dz<=rr*rr) return true;
+}
+return false;
+}
 // ===== 载具残血起火 (2026-11-09 批): hp<maxHp×VEH_BURN_FRAC 时点火; 燃烧掉血账在载具自己的 update 里走 =====
 // 地面/舰艇载具带 follow 火源, dps=0 —— 火源只做视觉+点燃植被, 车体伤害走燃烧账 (update 每 tick 直扣 hp),
 // 不与火源圈的灼烧结算叠加。follow 锚走 capAnchorWorld 通用位姿换算 (本文件上方, 只读 pos+yaw, 对坦克/卡车/

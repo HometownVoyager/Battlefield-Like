@@ -488,6 +488,19 @@ function coldHudHide(){
 const elm=document.getElementById('coldTip');
 if(elm&&elm._line){ elm._line=null; elm.style.display='none'; }
 }
+// 严寒受冻特效 (#coldFx 全屏结霜+冷晕, 2026-11-18 寒冷批②): 透明度单源驱动 —— 每帧向目标值缓动,
+// 变化超 0.01 才写 DOM (与 coldHudShow 同一"变了才写"纪律); 失温掉血期挂 .freezing 走 CSS 脉冲
+// (亮度呼吸在 CSS 动画里跑, JS 只管透明度, 时停/暂停下动画随 document 隐 —— #ui 菜单期整层隐藏)。
+let _coldFxO=0,_coldFxW=0,_coldFxC=null;
+function coldFxDrive(dt,target,freezing){
+const elm=document.getElementById('coldFx');
+if(!elm){ _coldFxO=0; return; }
+_coldFxO=dampF(_coldFxO,clamp(target,0,0.85),4,dt);
+const o=Math.round(_coldFxO*100)/100;
+if(_coldFxW!==o){ _coldFxW=o; elm.style.opacity=o.toFixed(2); }
+const fc=!!freezing;
+if(_coldFxC!==fc){ _coldFxC=fc; if(elm.classList) elm.classList.toggle('freezing',fc); }
+}
 // 观战飞行双模式 (2026-09-01 用户指定, 两者是不同东西):
 //  创造悬停(flyAero=false): MC创造式 —— 无重力可悬停, WASD水平 + 空格升/Shift降, 松键缓停
 //  气动飞行(flyAero=true):  复用巡飞弹飞行动作 —— 始终沿视线方向前飞不可停, 空格加速(13→40m/s), 俯冲触地落地 (2026-11-06 右键→空格)
@@ -827,6 +840,9 @@ if(typeof navalHudTick==='function') navalHudTick(dt);
 // 本段只读 15d 的公开字段, **队友文件零改动**; 静默闸门在 AudioSys 的 api 包装里已挡, 这里只做 typeof 守卫。
 // 2026-09-27M: 两参 = (世界帧长, 本体链帧长) —— 逐艇该用哪个由 01-audio 按 specRide 判定。
 if(typeof AudioSys!=='undefined'&&AudioSys.navalAudioTick) AudioSys.navalAudioTick(wdt,dt);
+// 严寒收尾 (2026-11-18 寒冷批②): 冷块在地面分支内, 而阵亡 (!alive 早退)/观战 (spec 分支) 都到不了那 ⇒
+// 在生死早退**之前**把提示条与结霜特效收干净 —— 旧版死亡后残留到重部署 (#ui 整层隐藏前 killcam/死亡镜头窗口期可见)。
+if(CAMPAIGN.cold&&(player.spectator||!player.alive)){ coldHudHide(); coldFxDrive(dt,0,false); }
 if(!player.alive){ return; }
 const p=player;
 // ★2026-11-01 附身中冻结门 (调试观战附身, specViewTick 钉位): 本体只读 —— 移动/开火/交互/读条全停,
@@ -1194,21 +1210,36 @@ playerFireTick(dt,!p.sprinting&&p.bandaging<=0&&!p.swim);
 // "仍会自雷": 按住 G/3/4/6 举雷瞄准是**必须**的瞄准动作, 举满 3.8s 必炸自己且无处可躲。
 // 现在举多久都不会炸手 —— 只是手里那颗雷越来越"即时" (出手后第一次碰到什么就炸什么)。
 if(p.nadeHeld) p.nadeFuse=Math.max(0,p.nadeFuse-dt);
-// ── 严寒失温 (2026-09-05 城市组·斯大林格勒, 严厉版): 露天静止 COLD_OFF 秒起每秒 COLD_DMG (可冻死);
-//    移动/进建筑(头顶有遮蔽)/载具/固定火力位/跳伞/巡飞弹制导 即中断 —— Bot 同判定 (一视同仁) ──
+// ── 严寒失温 (2026-09-05 城市组·斯大林格勒, 严厉版): 露天静止达阈值秒起按档掉血 (可冻死);
+//    移动/进建筑(头顶有遮蔽)/载具/固定火力位/跳伞/巡飞弹制导 即中断 —— Bot 同判定 (一视同仁);
+//    2026-11-18 寒冷批②: 阈值/掉血按天气分级 (WX_CFG.coldOff/coldDmg, R7 口径), 近火取暖快速驱寒
+//    (nearWarmFire, 04b-fire), 掉血期显示"冻僵倒计时" (sf_coldcd 可关, 游戏内容设置), #coldFx 结霜特效 ──
 if(CAMPAIGN.cold&&!p.spectator){
+const _wx=(typeof WX_CFG!=='undefined'&&WX_CFG)?WX_CFG:null;
+const cOff=(_wx&&_wx.coldOff)||COLD_OFF;
+const cDmg=(_wx&&_wx.coldDmg)||COLD_DMG;
 const coldMoved=Math.hypot(p.vel.x,p.vel.z)>0.6;
-const coldBusy=p.onVehicle||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.chute||p.flying||p.loiter||p.useCast;
+const coldBusy=p.onVehicle||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery||p.chute||p.flying||p.loiter||p.useCast;   // 载具/炮位内不积寒 (用户令②: 车内免严寒)
 if(coldMoved||coldBusy||coldSheltered(p.pos.x,p.pos.y,p.pos.z)){
 coldHudHide();
 p._coldT=0; p._coldAcc=0;
+coldFxDrive(dt,0,false);
+}else if(typeof nearWarmFire==='function'&&nearWarmFire(p.pos.x,p.pos.y,p.pos.z)){
+// 火焰驱寒 (2026-11-18 批②): 已积寒意 4 倍速消退且不再积累, 结霜随寒意退散
+p._coldT=Math.max(0,(p._coldT||0)-dt*4); p._coldAcc=0;
+coldHudShow(p._coldT>0.5?'🔥 近火取暖 · 寒意消退':'🔥 近火取暖 · 驱散严寒');
+coldFxDrive(dt,Math.min(0.4,(p._coldT/cOff)*0.6),false);
 }else{
 p._coldT=(p._coldT||0)+dt;
-if(p._coldT>COLD_OFF-8) coldHudShow(`❄ 严寒 · 露天静止 ${Math.min(COLD_OFF,Math.ceil(p._coldT))}/${COLD_OFF}s — 移动或进入建筑`);
-if(p._coldT>COLD_OFF){
-p._coldAcc=(p._coldAcc||0)+COLD_DMG*dt;
-if(p._coldAcc>=1){ const d=Math.floor(p._coldAcc); p._coldAcc-=d; p.damage(d,null,false); }
-coldHudShow('❄ <b>失温中</b> -'+COLD_DMG+'/秒 · 快移动或进屋!');
+if(p._coldT>cOff-8) coldHudShow(`❄ 严寒 · 露天静止 ${Math.min(cOff,Math.ceil(p._coldT))}/${cOff}s — 移动/进屋/近火取暖`);
+if(p._coldT>cOff){
+p._coldAcc=(p._coldAcc||0)+cDmg*dt;
+if(p._coldAcc>=1){ const d=Math.floor(p._coldAcc); p._coldAcc-=d; p.damage(d,null,false); }   // damage() 自带受击闪红/震屏/痛呼 (2026-09-05 严厉版既有口径)
+if(COLD_CD_SHOW) coldHudShow(`❄ <b>失温中</b> -${cDmg}/秒 · <span class="ccd">⏱ 冻僵倒计时 ${Math.max(1,Math.ceil(Math.max(0,p.hp)/cDmg))}s</span> · 快移动/进屋/近火取暖!`);
+else coldHudShow('❄ <b>失温中</b> -'+cDmg+'/秒 · 快移动/进屋/近火取暖!');
+coldFxDrive(dt,0.55,true);   // 掉血期: 结霜定值+CSS 呼吸脉冲
+}else{
+coldFxDrive(dt,0.16+0.3*Math.min(1,p._coldT/cOff),false);   // 积寒渐冻 → 四角结霜渐起
 }
 }
 }

@@ -1037,13 +1037,13 @@ var WEATHER_EFF=calcWeatherEff(CAMPAIGN.id);
 //   sunMul/hemiMul 2026-10-05 口追⑧ 重调: 原 阴/暴 hemiMul 1.15 反而提亮环境光, 与"暴雨白天发暗"
 //   相悖 —— 全非晴档压暗 (阴 0.5/0.9, 雨 0.55/0.85, 暴 0.42/0.72, 细雪 0.55/0.95, 中雪 0.85/0.9, 暴雪 0.45/0.8)。
 const WEATHER_CFG={
-clear:        {sunMul:1.00,hemiMul:1.00,fogFarMul:1.00,fogNearMul:1.00,precip:'none',precipN:0,   precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:1,   aimMul:1,   hearGunMul:1,   rangeMul:1,   fallEMul:1,  fireMul:1,  fireDmgMul:1.00,burnDur:3.5,burnRateMul:1.00,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:1,  moonVis:1,  starVis:1,  skyGrey:0,   skyLum:1,   fogDim:1.00,expoMul:1.00,cloudN:9, cloudOpMul:1},
-overcast:     {sunMul:0.22,hemiMul:0.62,fogFarMul:0.90,fogNearMul:0.90,precip:'none',precipN:0,   precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:1,  fireDmgMul:1.00,burnDur:3.5,burnRateMul:1.00,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.25,starVis:0.15,skyGrey:0.55,skyLum:1,   fogDim:0.80,expoMul:0.88,cloudN:20,cloudOpMul:1.15},
-rain:         {sunMul:0.06,hemiMul:0.42,fogFarMul:0.28,fogNearMul:0.25,precip:'rain',precipN:680, precipFall:27, lightning:false,audioLevel:0.055,wind:false,viewDMul:0.75,aimMul:0.8, hearGunMul:0.8, rangeMul:0.8, fallEMul:0.75,fireMul:0.6,fireDmgMul:0.70,burnDur:1.8,burnRateMul:0.65,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.1,starVis:0,  skyGrey:0.7,  skyLum:0.85,fogDim:0.58,expoMul:0.76,cloudN:30,cloudOpMul:1.25},
-storm:        {sunMul:0.00,hemiMul:0.24,fogFarMul:0.16,fogNearMul:0.15,precip:'rain',precipN:3200,precipFall:36, lightning:true, audioLevel:0.08, wind:false,viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,fireDmgMul:0.45,burnDur:0.8,burnRateMul:0.45,stormExtinguish:0.16,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.55,fogDim:0.42,expoMul:0.62,cloudN:42,cloudOpMul:1.4},
-snowLight:    {sunMul:0.35,hemiMul:0.78,fogFarMul:0.85,fogNearMul:0.75,precip:'snow',precipN:420, precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:0.75,fireDmgMul:0.85,burnDur:2.6,burnRateMul:0.85,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0.5,moonVis:0.5,starVis:0.5,skyGrey:0.3,  skyLum:1.05,fogDim:0.88,expoMul:0.92,cloudN:16,cloudOpMul:1.05},
-snowMid:      {sunMul:0.20,hemiMul:0.65,fogFarMul:0.65,fogNearMul:0.60,precip:'snow',precipN:900, precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.85,aimMul:0.9, hearGunMul:0.9, rangeMul:0.85,fallEMul:0.85,fireMul:0.6,fireDmgMul:0.70,burnDur:1.8,burnRateMul:0.65,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0.3,moonVis:0.25,starVis:0.2,skyGrey:0.45,skyLum:1,   fogDim:0.82,expoMul:0.85,cloudN:24,cloudOpMul:1.15},
-snowBlizzard: {sunMul:0.03,hemiMul:0.32,fogFarMul:0.18,fogNearMul:0.20,precip:'snow',precipN:4000,precipFall:5.5,lightning:false,audioLevel:0.05,wind:true, viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,fireDmgMul:0.45,burnDur:0.8,burnRateMul:0.45,stormExtinguish:0.16,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.9, fogDim:0.60,expoMul:0.65,cloudN:42,cloudOpMul:1.4},
+clear:        {sunMul:1.00,hemiMul:1.00,fogFarMul:1.00,fogNearMul:1.00,precip:'none',precipN:0,   precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:1,   aimMul:1,   hearGunMul:1,   rangeMul:1,   fallEMul:1,  fireMul:1,  fireDmgMul:1.00,burnDur:3.5,burnRateMul:1.00,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:1,  moonVis:1,  starVis:1,  skyGrey:0,   skyLum:1,   fogDim:1.00,expoMul:1.00,cloudN:9, cloudOpMul:1,coldOff:40,coldDmg:1},
+overcast:     {sunMul:0.22,hemiMul:0.62,fogFarMul:0.90,fogNearMul:0.90,precip:'none',precipN:0,   precipFall:0,  lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:1,  fireDmgMul:1.00,burnDur:3.5,burnRateMul:1.00,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.25,starVis:0.15,skyGrey:0.55,skyLum:1,   fogDim:0.80,expoMul:0.88,cloudN:20,cloudOpMul:1.15,coldOff:25,coldDmg:2},
+rain:         {sunMul:0.06,hemiMul:0.42,fogFarMul:0.28,fogNearMul:0.25,precip:'rain',precipN:680, precipFall:27, lightning:false,audioLevel:0.055,wind:false,viewDMul:0.75,aimMul:0.8, hearGunMul:0.8, rangeMul:0.8, fallEMul:0.75,fireMul:0.6,fireDmgMul:0.70,burnDur:1.8,burnRateMul:0.65,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0,  moonVis:0.1,starVis:0,  skyGrey:0.7,  skyLum:0.85,fogDim:0.58,expoMul:0.76,cloudN:30,cloudOpMul:1.25,coldOff:25,coldDmg:2},
+storm:        {sunMul:0.00,hemiMul:0.24,fogFarMul:0.16,fogNearMul:0.15,precip:'rain',precipN:3200,precipFall:36, lightning:true, audioLevel:0.08, wind:false,viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,fireDmgMul:0.45,burnDur:0.8,burnRateMul:0.45,stormExtinguish:0.16,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.55,fogDim:0.42,expoMul:0.62,cloudN:42,cloudOpMul:1.4,coldOff:25,coldDmg:2},
+snowLight:    {sunMul:0.35,hemiMul:0.78,fogFarMul:0.85,fogNearMul:0.75,precip:'snow',precipN:420, precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.9, aimMul:0.95,hearGunMul:0.95,rangeMul:0.9, fallEMul:0.9,fireMul:0.75,fireDmgMul:0.85,burnDur:2.6,burnRateMul:0.85,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0.5,moonVis:0.5,starVis:0.5,skyGrey:0.3,  skyLum:1.05,fogDim:0.88,expoMul:0.92,cloudN:16,cloudOpMul:1.05,coldOff:30,coldDmg:1},
+snowMid:      {sunMul:0.20,hemiMul:0.65,fogFarMul:0.65,fogNearMul:0.60,precip:'snow',precipN:900, precipFall:3.2,lightning:false,audioLevel:0,   wind:false,viewDMul:0.85,aimMul:0.9, hearGunMul:0.9, rangeMul:0.85,fallEMul:0.85,fireMul:0.6,fireDmgMul:0.70,burnDur:1.8,burnRateMul:0.65,stormExtinguish:0,   mapNearR:0, mapFireT:0,sunVis:0.3,moonVis:0.25,starVis:0.2,skyGrey:0.45,skyLum:1,   fogDim:0.82,expoMul:0.85,cloudN:24,cloudOpMul:1.15,coldOff:25,coldDmg:2},
+snowBlizzard: {sunMul:0.03,hemiMul:0.32,fogFarMul:0.18,fogNearMul:0.20,precip:'snow',precipN:4000,precipFall:5.5,lightning:false,audioLevel:0.05,wind:true, viewDMul:0.55,aimMul:0.65,hearGunMul:0.65,rangeMul:0.65,fallEMul:0.6, fireMul:0.35,fireDmgMul:0.45,burnDur:0.8,burnRateMul:0.45,stormExtinguish:0.16,mapNearR:90,mapFireT:2.5,sunVis:0,  moonVis:0,  starVis:0,  skyGrey:0.8,  skyLum:0.9, fogDim:0.60,expoMul:0.65,cloudN:42,cloudOpMul:1.4,coldOff:15,coldDmg:3},
 };
 var WX_CFG=WEATHER_CFG[WEATHER_EFF];
 // 河流 (进入地形生成); d=下切深度, d>2 视为深谷激流(占用格阻挡寻路+徒涉伤害)
@@ -1952,11 +1952,19 @@ const START_TICKETS=330;
 const STAM_SPRINT_MUL=2.5; // 冲刺体力倍率: 冲刺耗速降为 1/2.5 (0.22→0.088/s, 满条冲刺约4.5s→11.3s), 屏息/跳跃消耗不变; 观战模式体力恒满
 const FALL_SAFE_V=9;       // 摔落安全冲击速度 m/s (≈3.1m 内自由落体无伤; 普通跳跃≈4.6 / 跳伞·跳机限速3.2 均无伤)
 const FALL_DMG_MUL=10;     // 超出安全速度每 1 m/s 扣血 (标准档: 5米-24 / 8米-54 / 10米-71 / 约13米致死); 落入河道水面免伤
-// ===== 严寒失温 (2026-09-05 城市组·斯大林格勒 用户指定"严厉版") =====
-// 战役条目 cold:true 启用 (目前仅斯大林格勒): 露天+非载具+非工事位 持续静止 COLD_OFF 秒 → 每秒掉 COLD_DMG 血 (可冻死);
-// 移动(>0.6m/s)/进入建筑/载具/操作固定火力点 即中断冻结计时; 玩家与 Bot 同判定 (一视同仁)
-const COLD_OFF=25;  // 露天静止阈值秒数
-const COLD_DMG=2;   // 起冻后每秒扣血 (严厉版: 可冻死, 反蹲坑)
+// ===== 严寒失温 (2026-09-05 城市组·斯大林格勒 用户指定"严厉版"; 2026-11-18 寒冷批天气分级) =====
+// 战役条目 cold:true 启用 (斯大林格勒/莫斯科): 露天+非载具+非工事位 持续静止失温阈值秒 → 起冻后按档掉血 (可冻死);
+// 移动(>0.6m/s)/进入建筑/载具/操作固定火力点 即中断冻结计时; 近火取暖 (nearWarmFire, 04b-fire) 快速驱寒;
+// 玩家与 Bot 同判定 (一视同仁)。
+// 天气分级 (2026-11-18 批②): 失温参数进 WEATHER_CFG 的 coldOff/coldDmg 字段 (R7 单源纪律: 消费点读
+// WX_CFG.coldOff/coldDmg, 禁新增字符串比较)。雪图四级阶梯: 晴 40/1 < 细雪 30/1 < 中雪 25/2 (本图缺省档,
+// =现行值零回归) < 暴风雪 15/3 (冻得快·掉血狠); 非雪档取 25/2 = 现行值 (冷图若非雪族不突变)。
+// COLD_OFF/COLD_DMG 保留为兜底缺省 (桩/旧档无字段时回落, 语义=中雪档)。
+const COLD_OFF=25;  // 露天静止阈值秒数 (缺省=中雪档; 实际按 WX_CFG.coldOff 分级)
+const COLD_DMG=2;   // 起冻后每秒扣血 (严厉版: 可冻死, 反蹲坑; 实际按 WX_CFG.coldDmg 分级)
+// 失温掉血期的"冻僵倒计时"显隐 (2026-11-18 批②, 游戏内容设置"严寒倒计时"卡): 默认开;
+// 关=只留失温提示文字与受冻特效, 不再显示距冻死的秒数。改档即时生效 (22-hud coldCdBtn 写盘)。
+let COLD_CD_SHOW=localStorage.getItem('sf_coldcd')!=='0';
 // ===== 树爆 (2026-09-13 许特根雾林 woodline 专属环境机制) =====
 // 许特根森林战役的标志性杀伤: 环境炮击在林冠高度空爆, 弹片/木刺自上而下泼洒 —— 林下暴露=危险,
 // 顶盖内(建筑/碉堡/掩体, coldSheltered 同判定)或壕沟内(低于炸点地面 deep 米)=安全;

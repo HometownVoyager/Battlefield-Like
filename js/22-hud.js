@@ -1086,7 +1086,8 @@ hudText('wname',player.onMG?t2('MG42 通用机枪'):t2(w.def.name));
 hudText('wmode',player.onMG?t2('全自动'):w.def.mode);
 hudText('magN',player.onMG?'∞':String(w.mag));
 hudText('resN',player.onMG?'':'/ '+w.reserve);
-hudStyle('magN','color',(!player.onMG&&w.mag<=Math.max(2,w.def.mag*0.25))?'#ff7060':'#eee');
+// 低弹变红 (2026-11-18 批①用户令): 现有子弹数 ≤ 弹匣总容量/2 (向下取整) 即红 —— 旧 25% 阈值作废
+hudStyle('magN','color',(!player.onMG&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee');
 hudText('nadeN',_hv?(t2('绷带[H] ×{0}',_hv.bandages||0)   // ★2026-11-03: 宿主有雷账 (弹药账对齐后随补给消耗/补充), 随绷带一并显示
 +(_hv.nades>0?' · '+t2('手雷 ×{0}',_hv.nades):'')+(_hv.atn>0?' · '+t2('AT雷 ×{0}',_hv.atn):''))   // 附身: 宿主读数 (真附身批 2026-11-01)
 :(t2('手雷 ×{0}',player.nadeCount)+' · '+t2('绷带[H] ×{0}',player.bandages)
@@ -2545,6 +2546,21 @@ syncMenuButtons();
 		AudioSys.resume&&AudioSys.resume();
 		localStorage.setItem('sf_crates',(localStorage.getItem('sf_crates')==='2')?'1':'2');
 		syncSc();
+		};
+		}
+		}
+		// 严寒倒计时 (2026-11-18 寒冷批②): 失温掉血期"冻僵倒计时"的显隐开关, 默认开。
+		// 关=只留失温提示文字与受冻结霜特效 —— 20-player 失温链每帧读 COLD_CD_SHOW ⇒ 改档即时生效不重载 (同 nadeMapMark 口径)。
+		{
+		const ccb=el('coldCdBtn');
+		if(ccb){
+		const syncCc=()=>{ const off=localStorage.getItem('sf_coldcd')==='0'; ccb.textContent='🌡 '+t('严寒倒计时')+': '+t(off?'关':'开'); ccb.classList.toggle('sel',!off); };
+		syncCc();
+		ccb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		COLD_CD_SHOW=!COLD_CD_SHOW;
+		localStorage.setItem('sf_coldcd',COLD_CD_SHOW?'1':'0');
+		syncCc();
 		};
 		}
 		}

@@ -1745,9 +1745,14 @@ this.coverPt=null; this.state='combat'; this.man='hold'; this.manT=rand(0.8,1.4)
 this.crouch=false; this.prone=false;
 }
 }
-// ── 严寒失温 (2026-09-05 城市组·斯大林格勒, 玩家/Bot 同判定): 露天静止 COLD_OFF 秒起掉血,
-//    冻僵后强迫重抽机动 (起身挪窝) —— 掩体驻留/驻停作废, 与火情逃命同款打断; 室内/载具/工事位豁免 ──
+// ── 严寒失温 (2026-09-05 城市组·斯大林格勒, 玩家/Bot 同判定): 露天静止达阈值秒起掉血,
+//    冻僵后强迫重抽机动 (起身挪窝) —— 掩体驻留/驻停作废, 与火情逃命同款打断; 室内/载具/工事位豁免;
+//    2026-11-18 寒冷批②: 阈值/掉血按天气分级 (WX_CFG.coldOff/coldDmg, 与玩家同参) + 近火取暖驱寒
+//    (nearWarmFire, 04b-fire) —— Bot 火边同样回暖, 阈值沿用本档 (冻僵反应判据随 cOff 缩放) ──
 if(CAMPAIGN.cold&&!this.onVehicle){
+const _wx=(typeof WX_CFG!=='undefined'&&WX_CFG)?WX_CFG:null;
+const cOff=(_wx&&_wx.coldOff)||COLD_OFF;
+const cDmg=(_wx&&_wx.coldDmg)||COLD_DMG;
 this.coldScanT=(this.coldScanT||0)-dt;
 if(this.coldScanT<=0){
 this.coldScanT=0.3;
@@ -1757,14 +1762,17 @@ const coldBusy=this.mgUse||this.empUse||this.mortUse||this.emCast||this.chuting;
 const coldMoved=Math.hypot(this.vel.x,this.vel.z)>0.6;
 if(coldMoved||coldBusy||this.coldShelt){
 this.coldT=0; this.coldAcc=0;
+}else if(typeof nearWarmFire==='function'&&nearWarmFire(this.pos.x,this.pos.y,this.pos.z)){
+// 火焰驱寒 (2026-11-18 批②): 火边寒意 4 倍速消退且不再积累 (玩家同参)
+this.coldT=Math.max(0,(this.coldT||0)-dt*4); this.coldAcc=0;
 }else{
 this.coldT=(this.coldT||0)+dt;
-if(this.coldT>COLD_OFF){
-this.coldAcc=(this.coldAcc||0)+COLD_DMG*dt;
+if(this.coldT>cOff){
+this.coldAcc=(this.coldAcc||0)+cDmg*dt;
 if(this.coldAcc>=1){ const d=Math.floor(this.coldAcc); this.coldAcc-=d; this.damage(d,null,false); }
 // 冻僵反应: 原地驻停超过阈值 → 作废掩体驻留, 强迫侧移/跃进取暖 (部分重置计时防连冻)
-if(this.coldT>COLD_OFF+2&&(this.state==='cover'||this.man==='hold')){
-this.coldT=COLD_OFF-4;
+if(this.coldT>cOff+2&&(this.state==='cover'||this.man==='hold')){
+this.coldT=cOff-4;
 if(this.state==='cover'){ this.lastCover=this.coverPt; this.coverCd=rand(3.5,6); this.coverPt=null; this.state='combat'; }
 this.man='slide'; this.manT=rand(1.2,2); this.slideDir=Math.random()<0.5?-1:1;
 this.crouch=false; this.prone=false;

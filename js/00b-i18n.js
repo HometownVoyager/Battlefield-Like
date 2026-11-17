@@ -107,6 +107,9 @@ const I18N_EN={
 // 点位周边补给箱数量 (2026-11-17 批): 游戏内容设置单钮循环 1↔2 + 说明整串 (data-i18n-html 键=innerHTML)
 '点位周边补给箱数量':'SUPPLY CRATES PER POINT',
 '每个据点（旗点）周边摆放的弹药补给箱数量：1（默认）或 2。选 2 时每据点周边会有两只错开的补给箱（首只箱位不变，第二只按贴掩体优选另行落位）。换图或重开一局后生效。':'Ammo crates placed around each capture point: 1 (default) or 2. At 2, every point gets a second staggered crate (the first crate keeps its spot; the second picks a covered spot of its own). Applies after changing maps or restarting a match.',
+// 严寒倒计时 (2026-11-18 寒冷批): 游戏内容设置显隐开关 + 说明整串 (data-i18n-html 键=innerHTML)
+'严寒倒计时':'FREEZE COUNTDOWN',
+'严寒地图失温掉血时显示的“冻僵倒计时”（按当前血量与掉血速度估算距冻死的秒数，随天气分级变化）。隐藏后仅保留失温提示文字与受冻结霜特效。改档即时生效。':'The freeze countdown shown while losing HP to the cold on winter maps (seconds until you freeze to death, estimated from your HP and the drain rate, which scales with the weather). Hiding it keeps the hypothermia warning text and the frost overlay only. Applies instantly.',
 '你被 {0} 击杀了':'You were killed by {0}',
 '本次存活 {0} · 击杀 {1} · 获得 +{2} 分':'Survived {0} · {1} kills · +{2} pts',
 '本局总计 {0} 杀 / {1} 死 / {2} 分':'Match: {0} kills / {1} deaths / {2} pts',
