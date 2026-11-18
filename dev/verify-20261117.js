@@ -68,7 +68,7 @@ function ok(cond,label){
 if(cond){ PASS.push(label); console.log('  ✔ '+label); }
 else { FAILN++; console.log('  ✘ '+label); }
 }
-ok(html.includes("__sfStyleVer='20261118d'"),'前置: 版本戳 20261118d 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261118e'"),'前置: 版本戳 20261118e 在位 (index.html 内联)');
 
 // ── 场地: 断崖公路 ──
 const IDX_C=(()=>{ const c0=boot(0); return vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="canyon")',c0); })();

@@ -3621,7 +3621,7 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 
 **坦克感知两段式**: tankPerceive 评分段（视距×雾×夜×天气/大灯暴露/前向视锥/集火分/残血/粘滞，无射线）收进模块级复用槽 _tkPerC → 按分降序 _tkPerIdx.sort 逐个 LOS 复核（raycastWorld/烟幕/庄稼/植被）取第一个过线者——与旧"逐候选 LOS+评分取最高分通过者"完全同果（评分与 LOS 无关+Array.sort 稳定保序=平分先见先得），常态车长射线 ~候选数→~1 发。**感知相位出生打散**: _tkPhaseSeq 8 槽确定性序号 aiPerT=(_tkPhaseSeq++)%8*(TANK_PER_T/8)——旧写全员同相位，每 0.14s 全场坦克同帧全量感知+LOS=尖峰成簇主源；**不走 rand（RNG 流纪律）**: rand 错峰首版令 tankai 车道搜索/交战时序漂移 1/21 红，A/B worktree 定位后改序号。**底盘碰撞 pass2 跳过**: 第一遍零接触 ⇒ 位姿未变第二遍必然零接触，省一半底盘邻域查询（推挤回调顺序敏感不动）。
 
-**updateFlak AABB 快筛**: 逐弹先做线段 AABB（余量 2.6>坦克判半径 2.3）——斯大林格勒弹幕期每发 61 人全表 distSqPointToSegment（V8 慢路径）是 17.7ms 尖峰放大器。**旗/强点**: updateFlags/updateSpots hypot→平方距离（_fr2/_sr2 预存平方半径）+旗布 30Hz 节流（波形=nowT 纯函数，采样帧逐位同值；needsUpdate 只在真写过顶点的帧置位；旗杆 y dampF 保持逐帧=worldrestore 钉）。**降水 30Hz**: _wxStepAcc 累计 dt 一次性补偿（总位移逐位守恒；wxShiftPrecip 每帧照跑=fixbatch 源文本钉；时停 dt=0 自然不步进；needsUpdate 只在步进帧置位）。**布娃娃**: 全员冻结且无散落残骸 ⇒ RAG.world.step 整步跳过（冻结具 step 后本就钉回快照、解冻探速读外力直写 body.velocity 不经 step ⇒ 判据不变；ragCollide 自带速度早退故散落残骸不另冻结）。
+**updateFlak AABB 快筛**: 逐弹先做线段 AABB（余量 2.6>坦克判半径 2.3）——斯大林格勒弹幕期每发 61 人全表 distSqPointToSegment（V8 慢路径）是 17.7ms 尖峰放大器。**旗/强点**: updateFlags/updateSpots hypot→平方距离（_fr2/_sr2 预存平方半径）+旗布 30Hz 节流（波形=nowT 纯函数，采样帧逐位同值；needsUpdate 只在真写过顶点的帧置位；旗杆 y dampF 保持逐帧=worldrestore 钉）。**降水 30Hz**: _wxStepAcc 累计 dt 一次性补偿（总位移逐位守恒；wxShiftPrecip 每帧照跑=fixbatch 源文本钉；时停 dt=0 自然不步进；needsUpdate 只在步进帧置位；★实机雨雪时间混叠抖动，已回滚见 一.119）。**布娃娃**: 全员冻结且无散落残骸 ⇒ RAG.world.step 整步跳过（冻结具 step 后本就钉回快照、解冻探速读外力直写 body.velocity 不经 step ⇒ 判据不变；ragCollide 自带速度早退故散落残骸不另冻结）。
 
 **杂项十二**: Tank threatYaw setTimeout→threatYawT dt 账（弹幕刮血期每次受击挂 6s 定时器闭包+暂停/时停照走=11-01 雷链同族病）；卡车绷带补给 0.5s 节流；两栖负重轮 tankSurfH→heightAt（纯视觉悬挂）；resolveRuntimeSurfaces 候选数组/闭包模块级复用（_rtCand/_rtPush，稳态恒空仍每帧新建）；_gunAnchorTorso grip/fore 双槽 memo（单兵单帧 8~31 次同参求值；命中只值拷贝进 out 不把缓存别名出去=perfreg T3 槽位契约逐字保持；被跳过的 _eulerXYZ/_gatP/gunMountOf 均为纯求值）；spawn lane 表 0.5s 缓存 _laneCache（FLAGS/SPOTS 表换代即失效；convoy 车队 lane 随车动+建表消耗 rand 抖动 ⇒ 直通不缓存保 RNG 流）；cmdFocusHudTick 元素缓存+_cfHidden 幂等+宽度 1% 量化（**隐藏首调仍落一次 display='none'**——探针读 getElementById 壳元素=cmdbatch2 ⑥ 契约，并行会话把该红归因本批的判据跟码义务就地兑现；bar/lab 壳元素按需补登）；24-main 部署按钮 span 跨帧缓存（btn._spC）。
 
@@ -3630,4 +3630,18 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 **前后对照**（沙箱 JS 900 帧）: camp0 mean 4.60→4.08ms、p99 15.45→9.49ms、>8ms 帧 7.7%→2.7%（-65%）；camp5 mean 3.30→2.35ms、>8ms 0.2%；tankPerceive 尖峰 6.3→1.6ms、updateFires -35%、updateFlags -37%（143.9→91.3µs）、updateWeather 暴雨档约减半（330→153µs）；剩余尖峰=14-bots 域（Bot.update 20ms 重生风暴帧，并行会话占用）与偶发事件帧（旗点占领 drawFlagTex/NAV 脏区重建）。
 
 **回归**: 靶向 31 支+新支全绿——cmdbatch2 35/0（判据跟码：隐藏首落 display='none' 满足壳元素契约）、tankai 21/0（RNG 流回正）、verify-20261118a 74/0（戳断言随扫）、verify-20261118c 48/0；**run-all r1 107/129 + r2 108/132**（稳定红 5=probe-bots/phase2/phase3/willow/nade-trigger 在案同名零新增；偶发 botai/timestopfix/killattr 复跑绿/_audit-foliage-ref 复跑绿）；预存红 A/B 双树同签名清账（strongpoint ②③④⑤ BUILD_REG/island SPOTS=预存、wipe craterMat.clone 桩缺、daynight ironbottom 夜档、frameperf-terrain baituan 违例1=采样偶发、zombie2 7 失败在案待 triage）。升戳 20261118c→**20261118d**（index.html 49 处+__sfStyleVer+_game_files.txt 45 行+戳钉探针 28 支同扫，负向断言保 .js 文件名引用不误伤）。实机验收清单见 finished-docs/批-全局卡顿审计修复-2026-11-18.md。
+
+## 一.119 雨雪抖动返修 × 降水 30Hz 步进回滚 (2026-11-18, 待实机验收)
+
+**用户报**: "现在天气效果的雨滴/雪粒会严重抖动，而且显得'帧率很低'。请完成修复，修复不了就回滚相应的部分。"（并行会话两笔穿墙修 b24b340/2f7e7d3 不涉 08-effects.js ⇒ 病根锁定 一.118 第⑥项）。
+
+**根因=时间混叠**: 雨落速 27-36m/s，30Hz 步进=60fps 下隔帧才更新位置（每步 0.9-1.2m），快速运动小物体半帧率更新是经典时间混叠——一.118 声称的"位移总量逐位守恒"救不了采样欠步；且 _wxStepAcc 累计器的步进节奏随帧时长波动（隔 2 帧与步长突变交替）节拍差加重抖动；雪粒横向漂移 sin 项同理。"逐帧插值补救"不成立：保持 30Hz 物理仍需每帧写全部粒子位置=成本没省（本项收益本就只有 330→153µs≈0.18ms/帧，vs 视觉损伤不值）。
+
+**处置=整体回滚**: js/08-effects.js 摘 _wxStepAcc 累加账、恢复 dt 直乘逐帧步进+needsUpdate 每帧置位——与 538d537^（2c5a954 版）**逐位一致**（diff 验证 BITEXACT）。旗布 30Hz 节流（慢速大曲面=真不可辨）不动保留；其余 15 项修复不受影响。
+
+**判据跟码**（verify-frameperf2-20261118）: T10b 改钉"降水逐帧步进——60 帧写 60 次（30Hz 节流=30 即红）"；T17 改钉"_wxStepAcc 不得复活+dt 直乘两行在位"；N5 阴性补丁换"写入隔帧跳过"（`pos._nuT=!pos._nuT; pos.needsUpdate=pos._nuT`）→写入数<60 红。正向 **34/0** + **--neg 9/9 对认**；verify-weather exit=0、verify-fixbatch 28/0（wxShiftPrecip 每帧调用钉原样）。
+
+**回归**: run-all r1 **105/132**——稳定红 6=在案 5（probe-bots/phase2/phase3/willow/nade-trigger）+ **tankai（新红，非本批）**：A/B 三连 3/3 稳红，且 HEAD 不含本批回滚时同签名 1/21 红（"新兵档双方都开了火 (延迟可测)"）——窗口 538d537→2f7e7d3 内只有并行会话两笔穿墙修，其 14-bots 改动（botSafeStand 自动蹲/趴落位+collideMove 第三参姿态高+安全落位提前到横推前）直接改 Bot 站位/推挤口径，新兵档交战延迟判据出窗，待实机验收/后续批裁定；偶发 timestopfix(1/1/0)/botai(0/0/1)=在案偶发族。
+
+**教训入档**: 快速运动的小物体（雨/雪/曳光/碎片）不得降采样步进——30Hz 节流只适用于慢速大曲面（旗布/布料）与纯逻辑账；"总位移守恒"≠视觉连续（时间混叠）。升戳 20261118d→**20261118e**（index.html 49 处+__sfStyleVer+_game_files.txt 45 行+戳钉探针 28 支同扫）。实机验收清单见 finished-docs/批-雨雪抖动返修-2026-11-18.md。
 

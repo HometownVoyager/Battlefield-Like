@@ -10,22 +10,22 @@
 //   T7 底盘碰撞 pass2 跳过 (第一遍零接触 ⇒ 位姿未变第二遍必然零接触)
 //   T8 旗布 30Hz + 平方距离 (波形=nowT 纯函数, 采样帧逐位同值; needsUpdate 只在步进帧置位)
 //   T9 强点扫描平方距离 (updateSpots 与 updateFlags 同批)
-//   T10 降水粒子 30Hz 步进 (累计 dt 一次性补偿 ⇒ 总位移逐位守恒; needsUpdate 只在步进帧置位;
-//       wxShiftPrecip 每帧照跑 = fixbatch 源文本钉保持)
+//   T10 降水粒子逐帧步进 (★2026-11-18 实机返修回滚 30Hz: 雨落速 27-36m/s 半帧率更新=时间混叠,
+//       实机观感"雨雪严重抖动/帧率很低"; 位移总量守恒救不了采样欠步; wxShiftPrecip 每帧照跑 = fixbatch 源文本钉保持)
 //   T11 布娃娃整世界 step 跳过 (全员冻结且无散落残骸 ⇒ step 跳过; 冻结具钉回快照/解冻探速不经 step ⇒ 判据不变)
 //   T12 cmdFocusHudTick 缓存 (非指挥官稳态零 getElementById; 可见路径元素缓存+变了才写)
 //   T13 spawn lane 表 0.5s 缓存 (重生风暴共享建表; FLAGS/SPOTS 换代失效; convoy 直通保 RNG 流)
 //   T14 resolveRuntimeSurfaces 候选复用 (稳态零数组/闭包分配)
 //   T15 _gunAnchorTorso memo (grip/fore 各一槽; 命中只值拷贝进 out 不碰对外槽; 参数切换后正确重算)
 //   T16 24-main 部署按钮 span 跨帧缓存 (死亡期每帧 querySelector → 命中后零查询)
-//   T17 降水步进累加账在位 (源码钉 _wxStepAcc / >=1/30)
+//   T17 降水逐帧步进在位 (源码钉: _wxStepAcc 累加账不得复活 + dt 直乘两行在位)
 // 用法: node dev/verify-frameperf2-20261118.js [--neg]
 //   --neg = 阴性对照 (单跑逐补丁应用, 目标判据必须报红, 对认按红名):
 //     N1 摘烘焙指挥官门 → T3 红 (非指挥官烘焙复发)
 //     N2 24-main 复插重复 updateFires → T1 红
 //     N3 tankPerceive 摘 LOS 复核守卫 → T5 红 (高分被挡目标被选中 = 旧病复活)
 //     N4 旗布节流阈值归零 → T8 红 (逐帧重写 45 顶点)
-//     N5 降水步进门恒真 → T10 红 (逐帧推进)
+//     N5 降水写入隔帧跳过 (节流复发模拟) → T10 红 (写入数<60)
 //     N6 布娃娃 step 门摘除 → T11 红 (全员冻结仍整世界 step)
 //     N7 摘锚点 memo 登记行 → T15 源码钉红
 //     N8 lane 缓存 TTL 恒假 → T13 红 (每次重建)
@@ -69,8 +69,8 @@ const NEG_PATCHES=[
 ['js/15-vehicles.js','if(hit&&hit.dist<hl-1.2) continue;',';'],
 // N4 旗布节流阈值归零 → T8 红 (逐帧重写)
 ['js/21-match.js','f._clothT=1/30;','f._clothT=0;'],
-// N5 降水步进门恒真 → T10 红
-['js/08-effects.js','if(_wxStepAcc>=1/30){','if(true){'],
+// N5 降水写入隔帧跳过 (节流复发模拟) → T10 红
+['js/08-effects.js','pos.needsUpdate=true;','pos._nuT=!pos._nuT; pos.needsUpdate=pos._nuT;'],
 // N6 布娃娃 step 门摘除 → T11 红
 ['js/12-ragdolls.js','if(_ragLive||DEBRIS.list.length) RAG.world.step(1/60,Math.min(dt,0.05),4);','RAG.world.step(1/60,Math.min(dt,0.05),4);'],
 // N7 摘锚点 memo 登记行 → T15 源码钉红
@@ -117,7 +117,7 @@ ok(s15.includes('if(pass===1&&!hitObstacle) break;'),'T7 底盘 pass2 零接触�
 ok(s15.includes('_tkPerIdx.sort(_tkPerCmp)')&&s15.includes('const hit=raycastWorld(V3(ex,ey,ez),V3(hx,hy,hz),hl);'),'T5a tankPerceive 两段式结构在位 (评分槽+降序复核)');
 ok(s21.includes('_fr2=f.r*f.r')&&s21.includes('f._clothT=1/30'),'T8a 旗布平方距离+30Hz 节流在位');
 ok(s21.includes('_sr2=s.r*s.r')&&!s21.includes('Math.hypot(c.pos.x-s.x'),'T9 强点扫描平方距离在位 (hypot 已摘)');
-ok(s08.includes('_wxStepAcc')&&s08.includes('if(_wxStepAcc>=1/30){'),'T17 降水步进累加账在位');
+ok(!s08.includes('_wxStepAcc')&&s08.includes('let y=arr[i3+1]-dt*WX_CFG.precipFall;')&&s08.includes('let y=arr[i3+1]-dt*sp;'),'T17 降水逐帧步进在位 (_wxStepAcc 30Hz 累加账已回滚=实机雨雪抖动)');
 ok(s08.includes('wxShiftPrecip(ddx,ddy,ddz)'),'T10a wxShiftPrecip 每帧调用行原样 (fixbatch 源文本钉)');
 ok(s12.includes('if(_ragLive||DEBRIS.list.length) RAG.world.step'),'T11a 布娃娃整步跳过门在位');
 ok(s11.includes('_c.k=kind; _c.rx=rx; _c.ry=ry; _c.rz=rz; _c.pp=pp;'),'T15a 锚点 memo 登记行在位');
@@ -191,13 +191,13 @@ const nu=Number(G('window.__nuW'));
 ok(nu>=20&&nu<=35,'T8b 旗布顶点重写 30Hz 化 (60 帧写入 '+nu+' 次, 旧写=60)');
 }else{ ok(false,'T8b 场地无旗点 (canyon 布局变更?)'); }
 
-// T10 降水 30Hz (行为钉): canyon 原档可能无降水, 就地切 rain 档重建
+// T10 降水逐帧步进 (行为钉, 2026-11-18 实机回滚 30Hz: 快速运动粒子半帧率更新=时间混叠抖动): canyon 原档可能无降水, 就地切 rain 档重建
 G('WX_CFG.precip="rain"; WX_CFG.precipFall=27; initWeather();');
 if(G('!!precipObj')){
 G('(function(){const pp=precipObj.geometry.attributes.position;window.__pw=0;Object.defineProperty(pp,"needsUpdate",{get(){return this._nu;},set(v){if(v)window.__pw++;this._nu=v;},configurable:true});})()');
 for(let i=0;i<60;i++) G('updateWeather(1/60)');
 const pw=Number(G('window.__pw'));
-ok(pw>=25&&pw<=35,'T10b 降水粒子步进 30Hz 化 (60 帧写入 '+pw+' 次, 旧写=60)');
+ok(pw===60,'T10b 降水粒子逐帧步进 (60 帧写入 '+pw+' 次; 30Hz 节流=30 → 实机雨雪抖动已回滚)');
 }else{ ok(false,'T10b initWeather 未建降水对象 (rain 档)'); }
 
 // T11 布娃娃整步跳过 (行为钉)
@@ -287,11 +287,10 @@ negCheck('N3',()=>{ const c=negBoot(),g=negStart(c); const r=g(T5SETUP); return 
 // N4 旗布阈值归零 → 逐帧重写 (红=写入数>35)
 negCheck('N4',()=>{ const c=negBoot(),g=negStart(c); g('(function(){const fp=FLAGS[0].flagGeo.attributes.position;window.__nuW=0;Object.defineProperty(fp,"needsUpdate",{get(){return this._nu;},set(v){if(v)window.__nuW++;this._nu=v;},configurable:true});})()');
 for(let i=0;i<60;i++) g('updateFlags(1/60)'); const n=Number(g('window.__nuW')); return n>35; },'T8b (逐帧重写=红)');
-// N5 降水步进门恒真 → 60 帧写 60 次
-// N5 降水步进门恒真 → 逐帧推进 (红=写入数>35)
+// N5 降水写入隔帧跳过 (节流复发模拟) → 写入数<60 (红=节流复活)
 negCheck('N5',()=>{ const c=negBoot(),g=negStart(c); g('WX_CFG.precip="rain"; WX_CFG.precipFall=27; initWeather();'); if(!g('!!precipObj')) return false;
 g('(function(){const pp=precipObj.geometry.attributes.position;window.__pw=0;Object.defineProperty(pp,"needsUpdate",{get(){return this._nu;},set(v){if(v)window.__pw++;this._nu=v;},configurable:true});})()');
-for(let i=0;i<60;i++) g('updateWeather(1/60)'); const n=Number(g('window.__pw')); return n>35; },'T10b (逐帧推进=红)');
+for(let i=0;i<60;i++) g('updateWeather(1/60)'); const n=Number(g('window.__pw')); return n<60; },'T10b (写入数<60=节流复发=红)');
 // N6 布娃娃 step 门摘除 → 全员冻结仍 step
 negCheck('N6',()=>{ const c=negBoot(),g=negStart(c); g('(function(){if(!RAG.world) RAG.world={step:function(){}};const ws=RAG.world.step;window.__stepN=0;RAG.world.step=function(){window.__stepN++;return ws.apply(this,arguments);};window.__rag={frozen:true,t:9,parts:[{body:{velocity:{x:0,y:0,z:0},angularVelocity:{x:0,y:0,z:0},position:{x:50,y:2,z:50},quaternion:{x:0,y:0,z:0,w:1}}}],snap:[{x:50,y:2,z:50,qx:0,qy:0,qz:0,qw:1}]};RAG.list.push(window.__rag);updateRagdolls(1/60);})()');
 return Number(g('window.__stepN'))>0; },'T11b (冻结仍整世界 step=红)');
