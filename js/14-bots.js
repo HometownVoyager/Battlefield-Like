@@ -17,16 +17,18 @@ const dx=x-self.pos.x, dz=z-self.pos.z, l=Math.hypot(dx,dz);
 if(l<1) return 0;
 return Math.max(0,(dx*self.laneDx+dz*self.laneDz)/l)*46;
 }
-// ★2026-11-18 顶头穿墙通用修: Bot/僵尸 (Zombie extends Bot) 与玩家同源的抬脚安全落位。
+// ★2026-11-18 顶头穿墙通用修 / 11-18c 姿态真变矮: Bot/僵尸 (Zombie extends Bot) 与玩家同源。
 // Bot 竖直走 dampF 贴地永不跳跃, 但 standHeight 瞬间抬到砖顶同样会让头探进楼板被横推弹出墙 ——
-// 这里在 standHeight 落位后过一遍顶头净空, 顶头就自动蹲 (沿用现有 crouch 动画/命中体), 只改 y。
-const _botSafeOut={y:0,crouch:false};
+// 这里在 standHeight 落位后过一遍顶头净空, 按 站→蹲→趴 压下 (沿用现有 crouch/prone 动画/命中体)。
+const _botSafeOut={y:0,crouch:false,prone:false};
 function botSafeStand(bot,newY,oldY){
 const s=standHeightSafe(bot.pos.x,bot.pos.z,newY,oldY);
-if(s.crouch){ bot.crouch=true; bot.prone=false; }
-_botSafeOut.y=s.y; _botSafeOut.crouch=s.crouch;
+if(s.prone){ bot.prone=true; bot.crouch=false; }
+else if(s.crouch){ bot.crouch=true; bot.prone=false; }
+_botSafeOut.y=s.y; _botSafeOut.crouch=s.crouch; _botSafeOut.prone=s.prone;
 return _botSafeOut;
 }
+function botHeadH(bot){ return bot.prone?0.6:bot.crouch?1.25:1.7; }
 // ── Bot「闪现」修复参数 (2026-09-20 · task-3 根因排查型) ─────────────────────────
 // 根因 (逐帧位移取证, dev/probe-botflash.js): 唯一"玩家真的看得见"的 >3m 单帧位移来自**固定火力点上机链路** ——
 // 旧版 decide() 只要 bot 落在炮位 14~18m 内就立刻起 0.9s 前摇 (玩家同规前摇, 但玩家必须先走到 2.6~3m 内按 F),
@@ -2583,7 +2585,13 @@ else{
 const mvS=slopeGateMove(this.pos,this.vel.x*dt,this.vel.z*dt);
 this.pos.x+=mvS[0]; this.pos.z+=mvS[1];
 }
-collideMove(this.pos,0.4);
+if(!swimming){
+// ★2026-11-18b: Bot/僵尸安全落位/自动蹲提前到横推**之前** (与玩家同口径: 先解嵌定脚位, 再横推)
+const _bFoot=this.pos.y;   // 抬脚前脚底 (safeStand 兜底"连蹲都放不下就不抬脚")
+const gh=botSafeStand(this,standHeight(this.pos.x,this.pos.z,this.pos.y+0.6),_bFoot).y;
+this.pos.y=dampF(this.pos.y,gh,20,dt);
+}
+collideMove(this.pos,0.4,botHeadH(this));   // ★11-18c 横推随姿态变矮 (蹲1.25/趴0.6)
 if(swimming){
 // 浮于水面下 0.95m (头露出水面), 受海床限制; 不穿水面也不穿水底
 const bed=heightAt(this.pos.x,this.pos.z,true);
@@ -2591,10 +2599,6 @@ const wy=waterYAt(this.pos.x,this.pos.z);
 // 2026-09-26E (审计 37): 与玩家同一支波场 (一视同仁)
 const wvB=(typeof navalWaveAt==='function')?navalWaveAt(this.pos.x,this.pos.z):0;
 this.pos.y=dampF(this.pos.y,Math.max(wy-FLOAT_PAD+wvB,bed+0.12),8,dt);
-}else{
-const _bFoot=this.pos.y;   // ★2026-11-18: 抬脚前脚底 (safeStand 兜底"连蹲都放不下就不抬脚")
-const gh=botSafeStand(this,standHeight(this.pos.x,this.pos.z,this.pos.y+0.6),_bFoot).y;   // ★2026-11-18 顶头安全落位
-this.pos.y=dampF(this.pos.y,gh,20,dt);
 }
 // 憋气/溺水 (与玩家同一支规则; AI 不主动下潜 → 常态不触发, 规则同源以备日后两栖载具/被击落水)
 {

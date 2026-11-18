@@ -63,7 +63,9 @@ assert('20 旧"观战飞行保持机动"分支绝迹',!s20.includes('{ p.stamina
 assert('20 _ltSpace 清零上提帧首 (全文恰 1 处, 且在 meleeCd 行之后)',
  cnt(s20,/if\(!keys\.Space\) p\._ltSpace=false;/g)===1
  &&s20.indexOf('if(!keys.Space) p._ltSpace=false;')>s20.indexOf('p.meleeCd-=dt; p.resupplyCd-=dt;'));
-assert('20 跳跃门含 !p._ltSpace (★2026-11-14 跟码: 门尾含批③ !headGrazeBlocked)',s20.includes('if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)'));
+assert('20 跳跃门含 !p._ltSpace (★2026-11-14 跟码; 11-18b 起姿态分流: 站姿 headGrazeBlocked / 蹲趴 headJumpBlocked)',
+  s20.includes('if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&_jumpOkay)')
+  &&/headGrazeBlocked\(p\.pos\)/.test(s20)&&/headJumpBlocked\(p\.pos,_jumpHH/.test(s20));
 assert('20 悬停升门含 !p._ltSpace (两处: 悬停+自由飞行)',cnt(s20,/if\(keys\.Space&&!p\._ltSpace\) ty\+=1;/g)===2);
 assert('20 气动加速门含 !p._ltSpace',s20.includes('((keys.Space&&!p._ltSpace)?40:13)'));
 assert('13 fireLoiter 气动→悬停切换在 (清速度+_aeroSpd)',

@@ -55,8 +55,8 @@ section('① 源码防回退 (碰撞门 + 塔台抬顶 + 护栏判据)');
 {
 const s04=SRC('js/04-collision.js'), s05a=SRC('js/05a-buildings.js'), s20=SRC('js/20-player.js');
 assert('04-collision: 横推双门眼线 skip (盒+柱) + 旧压回分支已删 + HEAD_GRAZE 留名',
- s04.includes('if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;')
- &&s04.includes('if(pos.y+1.5<c.y0||pos.y+0.2>c.y1)')
+ /if\(pos\.y\+(?:hh-0\.2|1\.5)<b\.minY\|\|pos\.y\+0\.25>b\.maxY\) return;/.test(s04)
+ &&/if\(pos\.y\+(?:hh-0\.2|1\.5)<c\.y0\|\|pos\.y\+0\.2>c\.y1\)/.test(s04)
  &&s04.includes('const HEAD_GRAZE=0.06;')
  &&!s04.includes('pos.y=b.minY-1.7;')   // 带分号 = 代码形态; 注释引述 "(pos.y=b.minY-1.7)," 不含
  &&!s04.includes('pos.y=c.y0-1.7;'));

@@ -32,7 +32,7 @@ document.querySelector=(s)=>patchStyle(q(s));
 // ── 阴性对照 (一律单行锚) ──
 const PATCHES=[
  // N1 病灶还原: 步行分支头顶钳制接线摘除 (头探进楼板纵带, 横推接管 ⇒ 穿模穿墙复现)
- ['js/20-player.js','if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: 上升段头探进底面就地停住','// NEG N1'],
+ ['js/20-player.js','if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt,_pHeadH)) p.vel.y=0;','// NEG N1'],
  // N2 病灶还原: 横推盒门眼线 (1.5) 还原为头顶线 (1.7) —— 擦碰天花板那帧横推仍接管 (★2026-11-14 跟码)
  ['js/04-collision.js','if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;','if(pos.y+1.7<b.minY||pos.y+0.25>b.maxY) return; // NEG N2'],
  // N3 病灶还原: OSD 驱动块摘除 (遮罩退回光秃扫描线)。单行锚 (22-hud CRLF, 多行锚必失配)
@@ -54,18 +54,18 @@ section('① 源码防回退 (修好的写法在 / 旧写法不在)');
 const s04=SRC('js/04-collision.js'), s20=SRC('js/20-player.js'), s22=SRC('js/22-hud.js'),
       s13=SRC('js/13-combat.js'), s18=SRC('js/00b-i18n.js'), ih=srcOf('index.html'), css=SRC('css/style.css');
 assert('04-collision: headCeilClamp 单源 + 穿越窗判据 + 双回调 + 零分配槽',
- s04.includes('function headCeilClamp(pos,rise){')
+ /function headCeilClamp\(pos,rise(?:,stanceH)?\)/.test(s04)
  &&s04.includes('if(b.minY<s.prevHead||b.minY>s.head) return;')
  &&s04.includes('if(c.y0<s.prevHead||c.y0>s.head) return;')
  &&s04.includes('const _hcS={pos:null,r:0.42,prevHead:0,head:0,hit:0};')
- &&s04.includes('pos.y=_hcS.hit-1.7;'));
+ &&/pos\.y=_hcS\.hit-(?:1\.7|hh);/.test(s04));
 assert('04-collision: 横推双门眼线以上不作为 (盒+柱, 2026-11-14 批③改窗)',
  s04.includes('const HEAD_GRAZE=0.06;')
- &&s04.includes('if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;')
- &&s04.includes('if(pos.y+1.5<c.y0||pos.y+0.2>c.y1) return;')
+ &&/if\(pos\.y\+(?:hh-0\.2|1\.5)<b\.minY\|\|pos\.y\+0\.25>b\.maxY\) return;/.test(s04)
+ &&/if\(pos\.y\+(?:hh-0\.2|1\.5)<c\.y0\|\|pos\.y\+0\.2>c\.y1\) return;/.test(s04)
  &&s04.includes('_hcS.prevHead=pos.y+1.5;'));
 assert('20-player: 两条步兵积分路径都接线 (步行 + TV制导本体)',
- (s20.match(/if\(p\.vel\.y>0&&headCeilClamp\(p\.pos,p\.vel\.y\*dt\)\) p\.vel\.y=0;/g)||[]).length===2);
+ (s20.match(/if\(p\.vel\.y>0&&headCeilClamp\(p\.pos,p\.vel\.y\*dt(?:,_pHead(?:H|Tv))?\)\) p\.vel\.y=0;/g)||[]).length===2);
 assert('index.html: tvOv OSD 子元素齐 (四角标/顶栏REC+时钟+LINK/分划/开镜标/底栏双读数/存续条)',
  ih.includes('<div id="tvOv"><i class="tvC tvTL"></i><i class="tvC tvTR"></i><i class="tvC tvBL"></i><i class="tvC tvBR"></i>')
  &&ih.includes('<span id="tvRec"></span><span id="tvTag">TV制导 · TV GUIDANCE</span><span id="tvClock"></span>')

@@ -217,7 +217,7 @@ fn(CYLS[ci]);
 // 两函数都是每帧每移动单位调用, 旧版每次分配 2/1 个捕获闭包 (~120-160 个/帧 稳态)。
 // 循环上下文经模块槽 _cmS/_shS 传递; 复用前提 (逐处已核): 两个回调体内不再进入 collideMove/
 // standHeight (无重入路径), eachBoxNear/eachCylNear 独占传 fn, 不存在交叉迭代持有。
-const _cmS={pos:null,radius:0};
+const _cmS={pos:null,radius:0,headH:1.7};
 // 横推纵带上界 = **眼线** pos.y+1.5 (2026-11-14 批③改, 原 2026-11-10 批为 头下0.06=HEAD_GRAZE):
 // 底面在眼线以上的盒/柱一律按"头顶件"对待, 横推永不接管 —— 底面落在 (眼线, 头顶] 档的盒 (低梁/门楣/
 // 站上护栏后头顶已探进的楼板) 若仍横推, 人在其 footprint 正中 (d≈0) 会走"最近边"分支被整只横向弹射
@@ -227,27 +227,34 @@ const _cmS={pos:null,radius:0};
 //   探进盒带的场景每帧被压下→落地块拉回→起跳当帧被吃 = 人被钉死在地面 (②-1/②-5/②-7 全红 +
 //   collideMove 单帧实锤 pos.y 被瞬移 -0.95m) —— 压回语义作废, 横推对头顶件只应"不作为"。
 const HEAD_GRAZE=0.06;   // 留名: 2026-11-10 批擦碰带宽度, 现仅注释/判据引用, 横推双门已改眼线 1.5
-// ★2026-11-18 顶头穿墙通用修 (用户实报"走或者跳上有判定的砖, 代码瞬间上去没有过程", 图1→图2):
-//   横推的"最近边"分支 (人体中心落进盒/柱 footprint, d≈0) 是穿墙元凶 —— 站护栏/上砖后头顶探进
-//   楼板/屋顶, 双门只对"底面高于眼线"的件放行; 一旦探入超过 0.2m (底面落到眼线以下) 横推接管,
-//   d≈0 ⇒ 就近整只弹射出墙外。这里给"最近边"分支加一道门: 若该件是个"头顶笼罩件" (底面在肩线以上
-//   pos.y+0.6, 顶面在头顶附近), 人正被它从上罩住 ⇒ **不弹射, 只留给竖直解嵌** (standHeightSafe)。
-//   只动 d≈0 分支 —— 侧面正常接近 (d>0) 的推挤一律保留, 桌子/窗台等抬高障碍照常挡人, 零回归。
+// ★2026-11-18 顶头穿墙通用修 / 2026-11-18b 泛化 (用户实报"自动蹲跳仍严重穿墙", 屋顶带内起步也弹):
+//   横推的"最近边"分支 (人体中心落进盒 footprint, d≈0) 是穿墙元凶 —— 人一旦初始就整只落在某个
+//   高于脚、低于头的盒体 footprint 正中 (站上砖后头顶探进楼板/屋顶, 或人本就在屋顶阶梯带内部),
+//   d≈0 ⇒ "最近边"分支就近整只弹射出墙外。11-18 首版只豁免"头顶笼罩件" (_cmCeilingLike, 底面在
+//   肩以上且厚度<1.2) ⇒ 屋顶碰撞带 (05-world.js pitchedRoof, 底面 y0-0.35, 可低于肩) 不受豁免、
+//   蹲下时头顶高度更低也不在豁免带内、跳跃上升中头顶已在盒内也不在豁免带内 —— 用户实报三连穿墙。
+//   b 版改为**泛化豁免**: d≈0 且该盒纵带与"脚以上身体"重叠 ⇒ 判定为"初始重叠", 横推一律不作为,
+//   竖直解嵌全权交给 standHeightSafe (抬脚/落地) + headCeilClamp (上升) 单源处理。
+//   只动 d≈0 分支 —— 侧面正常接近 (d>0) 的推挤一律保留, 桌子/窗台/胸墙照常挡人, 零回归。
 //   圆柱没有 d≈0 分支 (圆心里推为 0), 其 embed 由 standHeightSafe 在抬升点拦截, 此处不改。
-function _cmCeilingLike(b,pos){
-return b.minY>pos.y+0.6 && b.minY<=pos.y+1.7 && b.maxY-b.minY<1.2;
+// ★2026-11-18c 姿态真实碰撞体: headH = 当前姿态头顶高 (站 1.7 / 蹲 1.25 / 趴 0.6)。
+//   蹲/趴时身体真的变矮 —— 低顶棚下的横梁/阶梯碰撞带不再把蹲着的人当站立的人挡住 (用户实报"上砖后无法移动")。
+//   横推纵带上界随之从 眼线1.5 降到 头顶-0.2 (蹲 1.05 / 趴 0.4); 上界用 headH-0.2 与旧 1.5 在站姿近似
+//   (旧 1.5, 新 1.5 完全一致), 保证站姿零回归。
+function _cmEmbeddedBody(b,pos,headH){
+return b.maxY>pos.y+0.56 && b.minY<pos.y+headH;
 }
 function _cmBoxCb(b){
-const pos=_cmS.pos, radius=_cmS.radius;
+const pos=_cmS.pos, radius=_cmS.radius, hh=_cmS.headH;
 if(b.dead) return;
-if(pos.y+1.5<b.minY||pos.y+0.25>b.maxY) return;
+if(pos.y+hh-0.2<b.minY||pos.y+0.25>b.maxY) return;   // 纵带上界随姿态降低 (站 hh=1.7 ⇒ 1.5 不变)
 if(b.maxY-pos.y<=0.56) return;
 const cx=clamp(pos.x,b.minX,b.maxX), cz=clamp(pos.z,b.minZ,b.maxZ);
 let dx=pos.x-cx, dz=pos.z-cz;
 const d2=dx*dx+dz*dz;
 if(d2<radius*radius){
 if(d2<1e-8){
-if(_cmCeilingLike(b,pos)) return;   // ★2026-11-18: 头顶笼罩件不弹射 (竖直解嵌单源)
+if(_cmEmbeddedBody(b,pos,hh)) return;   // ★2026-11-18b/c: 初始重叠不弹射 (竖直解嵌单源), 随姿态变矮
 const l=Math.min(pos.x-b.minX,b.maxX-pos.x), rgt=Math.min(pos.z-b.minZ,b.maxZ-pos.z);
 if(l<rgt) pos.x = (pos.x-b.minX<b.maxX-pos.x)? b.minX-radius : b.maxX+radius;
 else pos.z = (pos.z-b.minZ<b.maxZ-pos.z)? b.minZ-radius : b.maxZ+radius;
@@ -258,8 +265,8 @@ pos.x+=dx*push; pos.z+=dz*push;
 }
 }
 function _cmCylCb(c){
-const pos=_cmS.pos, radius=_cmS.radius;
-if(pos.y+1.5<c.y0||pos.y+0.2>c.y1) return;   // ★2026-11-14 批③改: 上界 HEAD_GRAZE线→眼线 (与 _cmBoxCb 同规)
+const pos=_cmS.pos, radius=_cmS.radius, hh=_cmS.headH;
+if(pos.y+hh-0.2<c.y0||pos.y+0.2>c.y1) return;   // 纵带上界随姿态 (站 hh=1.7 ⇒ 1.5 不变)
 // ★2026-11-05 实机反馈批 (用户实报"很多圆柱体的顶端无法站立, 一上去就被挤开"): 顶面跨步豁免, 与
 //   _cmBoxCb 的 `b.maxY-pos.y<=0.56` 同规 —— 顶面在跨步档内不横推, 由 standHeight 的圆柱支撑抬上顶面。
 //   旧版圆柱只有纵重叠门没有跨步豁免: 跳上桶/草垛/筒仓顶后脚下沉 0.2m 横推立即接管 = 被侧面挤飞。
@@ -271,10 +278,11 @@ const d=Math.sqrt(d2), push=(rr-d)/d;
 pos.x+=dx*push; pos.z+=dz*push;
 }
 }
-function collideMove(pos, radius){
+// ★2026-11-18c: 第三参 headH = 当前姿态头顶高 (站 1.7 / 蹲 1.25 / 趴 0.6), 缺省 1.7 兼容旧调用。
+function collideMove(pos, radius, headH){
 // 查询半径=碰撞半径 (推挤只作用于表面距 pos<radius 的盒/柱, 候选矩形再留 0.02 采样余量)
 const m=0.02;
-_cmS.pos=pos; _cmS.radius=radius;
+_cmS.pos=pos; _cmS.radius=radius; _cmS.headH=headH||1.7;
 eachBoxNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,_cmBoxCb);
 eachCylNear(pos.x-radius-m,pos.z-radius-m,pos.x+radius+m,pos.z+radius+m,_cmCylCb);
 // (2026-11-10: 旧"大舰舰体硬墙"capPushBody 钩随大舰子系统下架摘除 —— 珊瑚海/铁底湾已归档)
@@ -351,15 +359,18 @@ let dx=s.pos.x-c.x, dz=s.pos.z-c.z;
 const rr=c.r+s.r;
 if(dx*dx+dz*dz<rr*rr&&c.y0<s.hit) s.hit=c.y0;
 }
-// rise=本帧上升位移 (调用点 vel.y*dt, 须 vel.y>0); 命中返回 true 并把 pos.y 钳到 底面-1.7
+// rise=本帧上升位移 (调用点 vel.y*dt, 须 vel.y>0); 命中返回 true 并把 pos.y 钳到 底面-头顶高度。
 // (命中多个底面取最低者 —— 先撞到的就是最低天花板)。XZ 判定用与 collideMove 同一身体半径
 // 0.42 (擦着楼板边缘起跳同样算"头碰到了", 与横推判定同口径)。
-function headCeilClamp(pos,rise){
-_hcS.pos=pos; _hcS.head=pos.y+1.7; _hcS.prevHead=_hcS.head-rise; _hcS.hit=Infinity;
+// ★2026-11-18b: stanceH = 当前姿态头顶高 (站 1.7 / 蹲 1.25) —— 蹲跳时头顶更低, 不能拿 1.7m 的
+//   幽灵头顶去钳脚 (否则蹲跳会在离天花板 0.45m 处被错误钉住)。默认 1.7 兼容旧调用。
+function headCeilClamp(pos,rise,stanceH){
+const hh=stanceH||1.7;
+_hcS.pos=pos; _hcS.head=pos.y+hh; _hcS.prevHead=_hcS.head-rise; _hcS.hit=Infinity;
 eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcBoxCb);
 eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcCylCb);
 if(_hcS.hit===Infinity) return false;
-pos.y=_hcS.hit-1.7;
+pos.y=_hcS.hit-hh;
 return true;
 }
 // ★2026-11-13b 批③ / 2026-11-14 改窗: 起跳预检 (只探不钳) —— 站立时头部**已探进**某个头顶盒/柱的
@@ -373,6 +384,16 @@ return true;
 //   本窗管"已在里面别再跳")。
 function headGrazeBlocked(pos){
 _hcS.pos=pos; _hcS.head=pos.y+1.7; _hcS.prevHead=pos.y+1.5; _hcS.hit=Infinity;
+eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcBoxCb);
+eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcCylCb);
+return _hcS.hit!==Infinity;
+}
+// ★2026-11-18b 跳跃净空预检: 起跳后头顶最高点 = pos.y + curHeadH + rise, 若该高度内 (从当前
+//   头顶到最高头顶) 有天花板底面落进身体 footprint ⇒ 这次跳会顶头 ⇒ 禁跳。curHeadH 取当前姿态
+//   (蹲 1.25 / 站 1.7), rise 取该次跳跃的理论最大上升量 (玩家 4.6²/(2·13)≈0.81m, 留 0.02 余量)。
+//   与 headGrazeBlocked 区别: 后者只查"站立头顶 6~20cm 擦碰带", 本函数查整段上升轨迹且随姿态变化。
+function headJumpBlocked(pos,curHeadH,rise){
+_hcS.pos=pos; _hcS.head=pos.y+curHeadH+rise+0.02; _hcS.prevHead=pos.y+curHeadH; _hcS.hit=Infinity;
 eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcBoxCb);
 eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcCylCb);
 return _hcS.hit!==Infinity;
@@ -411,24 +432,35 @@ eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcClearBoxCb);
 eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcClearCylCb);
 return _hcClearS.min===Infinity?Infinity:_hcClearS.min-_hcClearS.head;
 }
-// 把"脚抬到 newY"这一步过一遍顶头净空: 返回**实际可用的脚底高度**与是否需蹲。
-// 语义 (用户裁定 2026-11-18): 顶头就**强行压下到蹲姿** (沿用 C 键动画), 不改 x/z; 用户按 C
-//   手动站起也会被下一帧顶回蹲下 (不是禁止站起, 是站起来瞬间又顶头自动蹲回去)。
-//   三级判定: ①新位站姿净空够 → 原样站; ②新位蹲姿够 → 上砖但蹲; ③连蹲姿都放不下 → **不抬脚**
-//   (留在 oldY 砖侧面, 绝不把脚压进砖里/把人压进地面); 此时若 oldY 蹲姿够得着也强制蹲。
-// 调用方据 .crouch 只置 true (自动蹲), 不在此改姿态旗, 也不自动清 crouch (手动 C 才能起)。
+// 把"脚抬到 newY"这一步过一遍顶头净空: 返回**实际可用的脚底高度**与姿态 (站/蹲/趴)。
+// 语义 (用户裁定 2026-11-18): 顶头就**强行压下** (沿用 C 蹲 / Z 趴 动画), 不改 x/z; 用户手动
+//   站起也会被下一帧顶回 (不是禁止站起, 是站起来瞬间又顶头自动压回去)。
+//   四级判定: ①站姿净空够 → 站; ②蹲姿够 → 蹲; ③趴姿够 → 趴; ④连趴都放不下 → **不抬脚**
+//   (留在 oldY 砖侧面, 绝不把脚压进砖里/地面); 此时原脚位按 蹲→趴 顺序取能放下的最大姿态。
+// 输出 .crouch/.prone 互斥 (趴优先), 调用方据此置自动姿态; 不在此改旗, 也不自动清 (手动键才能起)。
 // 零分配: 共享 _hcsPos/_hcsOut 槽 (各自即时消费, 无重入)。
 const _hcsPos={x:0,y:0,z:0};
-const _hcsOut={y:0,crouch:false};
+const _hcsOut={y:0,crouch:false,prone:false};
 function standHeightSafe(x,z,newY,oldY){
-_hcsOut.y=newY; _hcsOut.crouch=false;
+_hcsOut.y=newY; _hcsOut.crouch=false; _hcsOut.prone=false;
 _hcsPos.x=x; _hcsPos.z=z; _hcsPos.y=newY;
-if(headClearance(_hcsPos,1.7)>=0) return _hcsOut;                          // ① 站姿放得下
-if(headClearance(_hcsPos,1.25)>=0){ _hcsOut.crouch=true; return _hcsOut; } // ② 蹲姿放得下
-// ③ 连蹲姿都放不下: 保持原脚位, 不抬上砖。原脚位若蹲姿放得下也强制蹲 (头顶有低梁)。
-_hcsOut.y=oldY;
-_hcsPos.y=oldY;
-_hcsOut.crouch=headClearance(_hcsPos,1.7)<0&&headClearance(_hcsPos,1.25)>=0;
+// ★11-18c: 新脚位 (standHeight) 与旧脚位 (身体实际所在) **都要**过净空, 取更严格的姿态。
+//   旧版只看 newY: 玩家从高砖横移出的那几帧 standHeight 已掉到地面 (newY 低), 判"站姿放得下"
+//   ⇒ 立刻站起, 但身体 y 还在高处顶着屋顶 ⇒ 以 1.7m 站姿碰撞体卡死 (用户实报"上去就无法移动")。
+// 返回 0=站够 1=需蹲 2=需趴 3=连趴都放不下; 取 newY/oldY 两者中更严格者。
+const _probe=(yy)=>{
+ _hcsPos.y=yy;
+ if(headClearance(_hcsPos,1.7)>=0) return 0;
+ if(headClearance(_hcsPos,1.25)>=0) return 1;
+ if(headClearance(_hcsPos,0.6)>=0) return 2;
+ return 3;
+};
+const nLvl=_probe(newY);
+const oLvl=newY!==oldY?_probe(oldY):nLvl;
+const lvl=Math.max(nLvl,oLvl);
+if(lvl===3){ _hcsOut.y=oldY; }             // 新脚位连趴都放不下 → 不抬脚 (留在 oldY)
+else if(lvl===2){ _hcsOut.prone=true; }
+else if(lvl===1){ _hcsOut.crouch=true; }
 return _hcsOut;
 }
 // 坡度物理 (步兵, 2026-09-12 百团改版, 全战役生效; 玩家/Bot 同规则 —— 纲领第 2 条):

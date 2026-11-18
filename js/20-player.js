@@ -826,17 +826,26 @@ const dmg=(-p.vel.y-FALL_SAFE_V)*FALL_DMG_MUL;
 p.damage(dmg,null,false);
 showScorePop('⚠ 摔落 -'+Math.round(dmg));
 }
-// ★2026-11-18 顶头穿墙通用修: 抬脚落定后的安全净空 + 自动蹲 (走/跳上砖不再被横推弹出墙)。
-// 只在地面/落地链调用; 返回可站脚高, 顶头时据 needCrouch 自动切蹲 (沿用 C 键动画/眼位/命中体),
-// 手动按 C 站起也会被下一帧顶回蹲 (不禁止站起, 是站起瞬间又顶头自动蹲回去)。零分配共享槽。
-const _pSafeOut={y:0,crouch:false};
+// ★2026-11-18 顶头穿墙通用修 / 11-18c 姿态真变矮: 抬脚落定后的安全净空 + 自动蹲/趴。
+// 站/蹲/趴三档沿用 C/Z 键动画、眼位、命中体; 顶头按 站→蹲→趴 逐级压下, 离场自动恢复。
+// 手动按 C/Z 站起也会被下一帧顶回 (不禁止站起, 是站起来瞬间又顶头自动压回去)。零分配共享槽。
+const _pSafeOut={y:0,crouch:false,prone:false};
 function playerSafeStand(p,newY,oldY){
 const s=standHeightSafe(p.pos.x,p.pos.z,newY,oldY);
-if(s.crouch){ p.crouch=true; p.prone=false; p._autoCrouch=true; }   // 顶头强制蹲 (自动账置 true)
-else if(p._autoCrouch){ p.crouch=false; p._autoCrouch=false; }       // 离开低矮处自动恢复 (手动 C 会清 _autoCrouch, 故不误清手动蹲)
-_pSafeOut.y=s.y; _pSafeOut.crouch=s.crouch;
+// 自动姿态旗: _autoCrouch/_autoProne 记"这一档是被顶头压出来的", 手动 C/Z 会清掉相应旗。
+if(s.prone){ p.prone=true; p.crouch=false; p._autoProne=true; p._autoCrouch=false; }
+else if(s.crouch){ p.crouch=true; p.prone=false; p._autoCrouch=true; p._autoProne=false; }
+// ★11-18b/c: 腾空时不自动站起 (蹲/趴跳全程保持姿态, 落地后再按净空判); 离场才恢复。
+else if(p.onGround&&(p._autoCrouch||p._autoProne)){
+  // 只在"没有任何自动姿态"时恢复站姿; 手动 C/Z 已清旗故不误清。
+  if(p._autoCrouch){ p.crouch=false; p._autoCrouch=false; }
+  if(p._autoProne){ p.prone=false; p._autoProne=false; }
+}
+_pSafeOut.y=s.y; _pSafeOut.crouch=s.crouch; _pSafeOut.prone=s.prone;
 return _pSafeOut;
 }
+// 当前姿态头顶高 (站 1.7 / 蹲 1.25 / 趴 0.6) —— 传给 collideMove / headCeilClamp / 跳跃门。
+function playerHeadH(p){ return p.prone?0.6:p.crouch?1.25:1.7; }
 function updatePlayer(dt,wdt){
 // wdt = **世界**帧长 (可选第二实参, 缺省 = dt; 由 24-main 传 dt): 本函数收的第一实参是**本体链**帧长 pdt
 // (时停下 = 真实时间), 而海战音频 (发动机/破水/履带/搁浅/进水) 属**战场** —— 只有观察者正在开的那条艇
@@ -930,10 +939,11 @@ p.vel.z=dampF(p.vel.z,0,8,dt);
 p.vel.y-=13*dt;
 if(p.chute&&p.vel.y<-3.2) p.vel.y=-3.2;
 p.pos.x+=p.vel.x*dt; p.pos.y+=p.vel.y*dt; p.pos.z+=p.vel.z*dt;
-if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: TV制导中跳跃出膛的本体仍在上升, 同口径防顶穿楼板
-collideMove(p.pos,0.42);
-const _pFootTv=p.pos.y;   // ★2026-11-18: 抬脚前脚底 (safeStand 用它兜底"连蹲都放不下就不抬脚")
-const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFootTv).y;   // ★2026-11-18 顶头安全落位
+const _pFootTv=p.pos.y;   // ★2026-11-18b: 抬脚前脚底 (safeStand 兜底"连趴都放不下就不抬脚")
+const _pHeadTv=playerHeadH(p);   // ★11-18c 随姿态头顶高
+if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt,_pHeadTv)) p.vel.y=0;   // 上升段头顶钳制 (随姿态)
+const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFootTv).y;   // ★2026-11-18b 解嵌提前到横推前
+collideMove(p.pos,0.42,_pHeadTv);   // ★11-18c 横推随姿态变矮
 // 海图水面地板 (★2026-10-03, 与步行块同批): TV制导坠落触深水水面即收伞入水, 不再沉到海床
 if(!p.swim&&typeof waterYAt==='function'){
 const wy=waterYAt(p.pos.x,p.pos.z);
@@ -1134,7 +1144,13 @@ p.vel.y=0;
 p.pos.y=dampF(p.pos.y,targetY,7,dt);
 p.onGround=false;
 }else{
-if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&!headGrazeBlocked(p.pos)){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }   // cmdLock: 指挥地图定身不跳 (2026-10-26); !p._ltSpace: 巡飞弹操控退场吞边沿 —— 按住空格进操控再退场, 松开前不起跳 (2026-11-07 实机反馈批 "在地上不停跳跃"); !headGrazeBlocked: 头顶贴天花板禁跳 (2026-11-13b 批③ "护栏站上再跳穿墙出去" —— 起跳第一帧冲出 HEAD_GRAZE 擦碰带后楼板横推弹射穿墙, 与 04-collision 天花板态兜底双保险)
+// ★2026-11-18b/c 姿态跳修: 站姿沿用 headGrazeBlocked + headCeilClamp 穿越窗 (既有行为, 护栏顶照常钳位);
+//   蹲/趴 (自动压低) 头顶净空不足时 headJumpBlocked 禁跳 (用户裁定), 净空够则全程保持当前姿态 (不再强制站起)。
+const _jumpHH=playerHeadH(p);
+const _jumpOkay=_jumpHH<1.7
+  ? !headJumpBlocked(p.pos,_jumpHH,4.6*4.6/(2*13))
+  : !headGrazeBlocked(p.pos);
+if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&_jumpOkay){ p.vel.y=4.6; p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.prone=false; p.braced=false; }   // cmdLock: 指挥地图定身不跳 (2026-10-26); !p._ltSpace: 巡飞弹操控退场吞边沿 —— 按住空格进操控再退场, 松开前不起跳 (2026-11-07 实机反馈批 "在地上不停跳跃"); !headGrazeBlocked: 头顶贴天花板禁跳 (2026-11-13b 批③ "护栏站上再跳穿墙出去" —— 起跳第一帧冲出 HEAD_GRAZE 擦碰带后楼板横推弹射穿墙, 与 04-collision 天花板态兜底双保险)
 p.vel.y-=13*dt;
 }
 if(p.chute){
@@ -1153,10 +1169,14 @@ const mv=slopeGateMove(p.pos,p.vel.x*dt,p.vel.z*dt);
 p.pos.x+=mv[0]; p.pos.z+=mv[1];
 }else{ p.pos.x+=p.vel.x*dt; p.pos.z+=p.vel.z*dt; }
 p.pos.y+=p.vel.y*dt;
-if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt)) p.vel.y=0;   // ★2026-11-10 批 头顶钳制: 上升段头探进底面就地停住 (配合 _cmBoxCb/_cmCylCb 头部擦碰容差, 楼板下跳跃不再被横推挤出穿墙)
-collideMove(p.pos,0.42);
-const _pFoot=p.pos.y;   // ★2026-11-18: 抬脚前脚底 (safeStand 用它兜底"连蹲都放不下就不抬脚")
-const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot).y;   // ★2026-11-18 顶头安全落位 (走/跳上砖头探顶不再被横推弹出墙)
+const _pFoot=p.pos.y;   // ★2026-11-18b: 抬脚前脚底 (safeStand 兜底"连趴都放不下就不抬脚")
+const _pHeadH=playerHeadH(p);   // ★11-18c 当前姿态头顶高 (站 1.7/蹲 1.25/趴 0.6)
+if(p.vel.y>0&&headCeilClamp(p.pos,p.vel.y*dt,_pHeadH)) p.vel.y=0;   // 上升段头顶钳制 (随姿态)
+// ★2026-11-18b: 安全落位/自动蹲趴提前到横推**之前** —— 先把顶头解嵌定好脚位与姿态, 再让横推跑;
+//   旧顺序 (collideMove 在前) 会在 safeStand 想救之前就把人整只弹出墙外 (用户实报"触发了也未必能避免")。
+const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot).y;
+// ★11-18c: 横推用当前姿态头顶高 —— 真正变矮, 低顶下能移动。
+collideMove(p.pos,0.42,_pHeadH);
 // 海图水面地板 (★2026-10-03 修"跳伞下到海底才解除伞"): 深水上空触水面=落地即入水 —— 收伞转游泳,
 //   不再一路沉到海床才触发接地 (海图 standHeight=海床, 伞兵要坠 40m+)。水面承接免摔伤; 入水扑通
 //   由水态跃迁单源播 (wPrev dry→swim)。wy>gh+0.6 门挡掉旱地/浅涉水; p.swim 门挡掉主动下潜。

@@ -28,10 +28,13 @@ document.querySelector=(s)=>patchStyle(q(s));
 
 // ── 阴性对照 (单行锚) ──
 const PATCHES=[
-  // N1: 摘掉横推"最近边"的头顶笼罩件兜底 ⇒ 旧横推穿墙复现
-  ['js/04-collision.js','if(_cmCeilingLike(b,pos)) return;   // ★2026-11-18: 头顶笼罩件不弹射 (竖直解嵌单源)',''],
+  // N1: 摘掉横推"最近边"的初始重叠兜底 ⇒ 旧横推穿墙复现 (11-18b 泛化后函数名/锚变化)
+  ['js/04-collision.js','if(_cmEmbeddedBody(b,pos,hh)) return;',''],
   // N2: 玩家步行路径摘掉 standHeightSafe ⇒ 头探顶不再自动蹲/不抬脚
-  ['js/20-player.js','const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot).y;   // ★2026-11-18 顶头安全落位 (走/跳上砖头探顶不再被横推弹出墙)','const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);'],
+  ['js/20-player.js','const gh=playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot).y;','const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);'],
+  // N3: 起跳恢复"强制站起" ⇒ 蹲跳穿顶复现 (11-18b 修掉的旧行为)
+  ['js/20-player.js','p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.prone=false; p.braced=false; }',
+   'p.onGround=false; p.stamina-=0.08; p.stamUseT=nowT; p.crouch=false; p.prone=false; p.braced=false; }'],
 ];
 const PATCH_MAP={};
 if(NEG) for(const [f,from,to] of PATCHES){
@@ -45,15 +48,22 @@ const srcOf=f=>(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:SRC(f));
 section('① 源码防回退 (顶头横推兜底 + standHeightSafe + 三方接线)');
 {
 const s04=SRC('js/04-collision.js'), s20=SRC('js/20-player.js'), s14=SRC('js/14-bots.js');
-assert('04-collision: 横推最近边头顶笼罩件兜底 + 顶头净空 + standHeightSafe 单源',
-  s04.includes('if(_cmCeilingLike(b,pos)) return;')
+assert('04-collision: 横推 d≈0 初始重叠泛化兜底 + 顶头净空 + 蹲跳净空预检 + standHeightSafe 单源',
+  s04.includes('if(_cmEmbeddedBody(b,pos,hh)) return;')
   &&s04.includes('function headClearance(')
   &&s04.includes('function standHeightSafe(')
-  &&s04.includes('function _cmCeilingLike('));
-assert('20-player: 步行路径 + TV制导本体 两条都接 standHeightSafe + 自动蹲离场恢复',
-  s20.includes('playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot)')
-  &&s20.includes('playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFootTv)')
-  &&s20.includes('p._autoCrouch=true')&&s20.includes('else if(p._autoCrouch){ p.crouch=false; p._autoCrouch=false; }'));
+  &&s04.includes('function _cmEmbeddedBody(')
+  &&s04.includes('function headJumpBlocked(')
+  &&s04.includes('function headCeilClamp(pos,rise,stanceH)')
+  &&s04.includes('function collideMove(pos, radius, headH)'));
+assert('20-player: 两条 safeStand 路径解嵌在横推前 + 随姿态头顶钳制 + 蹲跳净空门 + 自动蹲离场恢复',
+  s20.indexOf('playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFoot)')>=0
+  &&s20.indexOf('playerSafeStand(p,standHeight(p.pos.x,p.pos.z,p.pos.y+0.6),_pFootTv)')>=0
+  &&/const gh=playerSafeStand\(p,standHeight\(p\.pos\.x,p\.pos\.z,p\.pos\.y\+0\.6\),_pFoot\)\.y;[\s\S]{0,200}?collideMove\(p\.pos,0\.42,_pHeadH\);/.test(s20)
+  &&s20.includes('headJumpBlocked(p.pos,_jumpHH,4.6*4.6/(2*13))')
+  &&s20.includes('headCeilClamp(p.pos,p.vel.y*dt,_pHeadH)')
+  &&s20.includes('p._autoCrouch=true')&&s20.includes('p._autoProne=true')
+  &&s20.includes('function playerHeadH(p)'));
 assert('19-input: 手动 C 夺回姿态控制 (清 _autoCrouch)',
   SRC('js/19-input.js').includes('player._autoCrouch=false;'));
 assert('14-bots: Bot/僵尸共用 moveDir 接 botSafeStand',
@@ -200,5 +210,87 @@ assert('③-7 探针卫生: 测试盒全摘',G('BOXES.length')===G('_n0'),`盒=$
 }
 
 console.log('\n──────────────────────────────');
+// ── ④ 2026-11-18b 追加: 屋顶带内部 / 蹲跳 / 净空禁跳 ──
+section('④ 屋顶带内部 d≈0 零横推 + 蹲跳保持蹲姿 + 净空不足禁跳');
+{
+// ③ 收尾把 RGRID_OFF 复回 false; 新摆的合成盒未注册进空间索引 ⇒ 本段重开全量路径。
+G("window.RGRID_OFF=true;");
+// 复用 ③ 的净空点 _jx/_jz/_p0。摆一个"屋顶阶梯带"型盒: 底面低于肩 (p0+0.45 < p0+0.6),
+// 顶面 p0+2.2 —— 11-18 首版 _cmCeilingLike 要求底面>肩, 故不会豁免; b 版 _cmEmbeddedBody 会豁免。
+G("globalThis._roofBand={minX:_jx-3,maxX:_jx+3,minZ:_jz-3,maxZ:_jz+3,minY:_p0+0.45,maxY:_p0+2.2,dead:false};"
+  +"globalThis._nearWall={minX:_jx+0.8,maxX:_jx+1.0,minZ:_jz-3,maxZ:_jz+3,minY:_p0,maxY:_p0+2.2,dead:false};"
+  +"BOXES.push(_roofBand,_nearWall);"
+  +"globalThis._pb2={x:_jx,y:_p0+0.5,z:_jz}; collideMove(_pb2,0.42);");
+assert('④-1 屋顶带内部 (底面低于肩) d≈0: 零横推 (旧版整只弹射穿墙)',
+  Math.abs(G('_pb2.x-_jx'))<=1e-6&&Math.abs(G('_pb2.z-_jz'))<=1e-6,
+  `dx=${G('_pb2.x-_jx').toFixed(3)} dz=${G('_pb2.z-_jz').toFixed(3)}`);
+
+// ④-2 蹲跳净空够: 顶棚底面 p0+2.8 ⇒ 蹲姿头顶 p0+1.75 + 跳高 0.81 = p0+2.56 < 2.8, 放得下;
+//   站姿头顶 p0+2.2 + 0.81 = p0+3.01 > 2.8 顶头。验证: 蹲姿按空格起跳成功且全程保持 crouch。
+G("BOXES.splice(BOXES.indexOf(_roofBand),1); BOXES.splice(BOXES.indexOf(_nearWall),1);"
+  +"globalThis._hiRoof={minX:_jx-3,maxX:_jx+3,minZ:_jz-3,maxZ:_jz+3,minY:_p0+2.8,maxY:_p0+3.0,dead:false};"
+  +"BOXES.push(_hiRoof);"
+  +"player.pos.set(_jx,_p0,_jz); player.vel.set(0,0,0); player.onGround=true; player.crouch=true; player.prone=false; player._autoCrouch=true;"
+  +"keys.Space=true; player._ltSpace=false; updatePlayer(1/60); keys.Space=false;"
+  +"globalThis._jumped=player.vel.y>0; globalThis._stillCrouch=player.crouch;");
+assert('④-2 蹲姿跳跃: 净空够时起跳成功且保持蹲姿 (不再强制站起)',
+  G('_jumped')===true&&G('_stillCrouch')===true,
+  `vy=${G('player.vel.y').toFixed(2)} crouch=${G('_stillCrouch')}`);
+
+// ④-3 蹲姿净空不足禁跳: 蹲头顶 p0+1.25, 顶棚底 p0+1.8 ⇒ 蹲跳最高 p0+2.06 顶头 ⇒ headJumpBlocked=true
+//   (站姿档仍走 headGrazeBlocked + headCeilClamp 穿越窗, 既有护栏顶起跳行为不变 —— 见 railclip 回归)
+G("player.pos.set(_jx,_p0,_jz); player.vel.set(0,0,0); player.onGround=true; player.crouch=true; player._autoCrouch=false;"
+  +"BOXES.splice(BOXES.indexOf(_hiRoof),1);"
+  +"globalThis._lowRoof={minX:_jx-3,maxX:_jx+3,minZ:_jz-3,maxZ:_jz+3,minY:_p0+1.8,maxY:_p0+2.0,dead:false};"
+  +"BOXES.push(_lowRoof);"
+  +"keys.Space=true; player._ltSpace=false; updatePlayer(1/60); keys.Space=false;"
+  +"globalThis._blockedVy=player.vel.y;");
+assert('④-3 蹲姿净空不足: 起跳预检拦截 (vel.y ≤ 0)',
+  G('_blockedVy')<=0.0001,
+  `vy=${G('_blockedVy').toFixed(3)}`);
+
+// ④-4 卫生
+G("BOXES.splice(BOXES.indexOf(_lowRoof),1); window.RGRID_OFF=false;"
+  +"player.pos.set(_jx,_p0,_jz); player.vel.set(0,0,0); player.onGround=true; player.crouch=false; player._autoCrouch=false;");
+assert('④-4 探针卫生',G('BOXES.length')===G('_n0'),`盒=${G('BOXES.length')}/${G('_n0')}`);
+}
+
+// ── ⑤ 11-18c: 蹲/趴碰撞体真变矮 + 高地砖低顶下能移动 ──
+section('⑤ 姿态真碰撞体: 蹲/趴变矮 + 高砖低顶可移动 + 自动趴');
+{
+G("window.RGRID_OFF=true;");
+// ⑤-1 蹲姿头顶 1.25: 盒底在 pos.y+1.3 (站姿 1.7 会挡, 蹲姿 1.25 不该挡) ⇒ 蹲姿 collideMove 不横推
+G("globalThis._beam={minX:_jx-3,maxX:_jx+3,minZ:_jz-0.2,maxZ:_jz+0.2,minY:_p0+1.3,maxY:_p0+1.5,dead:false};"
+  +"BOXES.push(_beam);"
+  +"globalThis._pStand={x:_jx,y:_p0,z:_jz+0.35};const sz=_pStand.z;collideMove(_pStand,0.42,1.7);globalThis._pushStand=Math.abs(_pStand.z-sz);"
+  +"globalThis._pCrouch={x:_jx,y:_p0,z:_jz+0.35};const cz0=_pCrouch.z;collideMove(_pCrouch,0.42,1.25);globalThis._pushCrouch=Math.abs(_pCrouch.z-cz0);");
+assert('⑤-1 蹲姿碰撞体变矮: 齐胸低梁站姿挡、蹲姿放行',
+  G('_pushStand')>0.1&&G('_pushCrouch')<=1e-6,
+  `stand=${G('_pushStand').toFixed(3)} crouch=${G('_pushCrouch').toFixed(3)}`);
+
+// ⑤-2 趴姿头顶 0.6: 盒底在 pos.y+0.9 (蹲姿 1.25 会挡, 趴姿 0.6 不该挡)
+G("BOXES.splice(BOXES.indexOf(_beam),1);"
+  +"globalThis._beam2={minX:_jx-3,maxX:_jx+3,minZ:_jz-0.2,maxZ:_jz+0.2,minY:_p0+0.9,maxY:_p0+1.1,dead:false};"
+  +"BOXES.push(_beam2);"
+  +"globalThis._pCr2={x:_jx,y:_p0,z:_jz+0.35};const c2z=_pCr2.z;collideMove(_pCr2,0.42,1.25);globalThis._pushCr2=Math.abs(_pCr2.z-c2z);"
+  +"globalThis._pProne={x:_jx,y:_p0,z:_jz+0.35};const p2z=_pProne.z;collideMove(_pProne,0.42,0.6);globalThis._pushProne=Math.abs(_pProne.z-p2z);");
+assert('⑤-2 趴姿碰撞体变矮: 低梁蹲姿挡、趴姿放行',
+  G('_pushCr2')>0.1&&G('_pushProne')<=1e-6,
+  `crouch=${G('_pushCr2').toFixed(3)} prone=${G('_pushProne').toFixed(3)}`);
+
+// ⑤-3 站/蹲/趴都放不下的高砖 ⇒ standHeightSafe 返回 prone? 否: 连趴都放不下 ⇒ 不抬脚 (y=oldY)
+G("BOXES.splice(BOXES.indexOf(_beam2),1);"
+  +"globalThis._tight={minX:_jx-3,maxX:_jx+3,minZ:_jz-3,maxZ:_jz+3,minY:_p0+0.4,maxY:_p0+1.0,dead:false};"
+  +"BOXES.push(_tight);"
+  +"globalThis._tightSafe=standHeightSafe(_jx,_jz,_p0+0.5,_p0);");
+assert('⑤-3 连趴都放不下: 不抬脚 (留在 oldY)',
+  Math.abs(G('_tightSafe.y')-G('_p0'))<1e-6,
+  `y=${G('_tightSafe.y').toFixed(3)}`);
+
+G("BOXES.splice(BOXES.indexOf(_tight),1); window.RGRID_OFF=false;"
+  +"player.pos.set(_jx,_p0,_jz); player.vel.set(0,0,0); player.onGround=true; player.crouch=false; player.prone=false; player._autoCrouch=false; player._autoProne=false;");
+assert('⑤-4 姿态探针卫生',G('BOXES.length')===G('_n0'),`盒=${G('BOXES.length')}/${G('_n0')}`);
+}
+
 console.log(`  ${NEG?'NEG':'正向'} ${OK.length} 绿 / ${BAD.length} 红`);
 if(BAD.length){ console.log('  红名: '+BAD.join(' · ')); process.exitCode=1; }
