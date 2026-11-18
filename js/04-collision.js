@@ -227,6 +227,16 @@ const _cmS={pos:null,radius:0};
 //   探进盒带的场景每帧被压下→落地块拉回→起跳当帧被吃 = 人被钉死在地面 (②-1/②-5/②-7 全红 +
 //   collideMove 单帧实锤 pos.y 被瞬移 -0.95m) —— 压回语义作废, 横推对头顶件只应"不作为"。
 const HEAD_GRAZE=0.06;   // 留名: 2026-11-10 批擦碰带宽度, 现仅注释/判据引用, 横推双门已改眼线 1.5
+// ★2026-11-18 顶头穿墙通用修 (用户实报"走或者跳上有判定的砖, 代码瞬间上去没有过程", 图1→图2):
+//   横推的"最近边"分支 (人体中心落进盒/柱 footprint, d≈0) 是穿墙元凶 —— 站护栏/上砖后头顶探进
+//   楼板/屋顶, 双门只对"底面高于眼线"的件放行; 一旦探入超过 0.2m (底面落到眼线以下) 横推接管,
+//   d≈0 ⇒ 就近整只弹射出墙外。这里给"最近边"分支加一道门: 若该件是个"头顶笼罩件" (底面在肩线以上
+//   pos.y+0.6, 顶面在头顶附近), 人正被它从上罩住 ⇒ **不弹射, 只留给竖直解嵌** (standHeightSafe)。
+//   只动 d≈0 分支 —— 侧面正常接近 (d>0) 的推挤一律保留, 桌子/窗台等抬高障碍照常挡人, 零回归。
+//   圆柱没有 d≈0 分支 (圆心里推为 0), 其 embed 由 standHeightSafe 在抬升点拦截, 此处不改。
+function _cmCeilingLike(b,pos){
+return b.minY>pos.y+0.6 && b.minY<=pos.y+1.7 && b.maxY-b.minY<1.2;
+}
 function _cmBoxCb(b){
 const pos=_cmS.pos, radius=_cmS.radius;
 if(b.dead) return;
@@ -237,6 +247,7 @@ let dx=pos.x-cx, dz=pos.z-cz;
 const d2=dx*dx+dz*dz;
 if(d2<radius*radius){
 if(d2<1e-8){
+if(_cmCeilingLike(b,pos)) return;   // ★2026-11-18: 头顶笼罩件不弹射 (竖直解嵌单源)
 const l=Math.min(pos.x-b.minX,b.maxX-pos.x), rgt=Math.min(pos.z-b.minZ,b.maxZ-pos.z);
 if(l<rgt) pos.x = (pos.x-b.minX<b.maxX-pos.x)? b.minX-radius : b.maxX+radius;
 else pos.z = (pos.z-b.minZ<b.maxZ-pos.z)? b.minZ-radius : b.maxZ+radius;
@@ -365,6 +376,60 @@ _hcS.pos=pos; _hcS.head=pos.y+1.7; _hcS.prevHead=pos.y+1.5; _hcS.hit=Infinity;
 eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcBoxCb);
 eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcCylCb);
 return _hcS.hit!==Infinity;
+}
+// ── 顶头净空探测 + 安全解嵌入 (2026-11-18 走/跳上砖穿墙通用修) ──
+// 病根 (用户图): standHeight 走/跳上砖是**瞬间抬脚**, 没有"抬上去头放不放得下"的过程 —— 头探进
+// 楼板/屋顶纵带后 collideMove 横推把人整只弹射出墙。headGrazeBlocked 只管起跳, headCeilClamp 只管
+// 上升穿越窗, 都管不到"脚抬升后头已在顶里"这一帧。这里补一段与横推同源 (半径 0.42, 身体带
+// [y+0.25,y+1.7]) 的查询, 只回答"当前站姿/蹲姿下, 头顶离最近天花板还有多少净空":
+//   stanceH  = 站姿头顶 1.7 / 蹲姿头顶 1.25 (与 13-combat 命中体 +1.25、11/20 动画蹲档同高)
+//   返回值  = 头顶到最近底面 (盒/柱) 的空隙 (可为负 = 已经顶进去); 头顶上方 LOOK 内无天花板返回 Infinity。
+//   查询窗 [脚+0.25, 头顶+LOOK] —— 下端排除脚下砖/台阶自身 (它们的底面远低于身体带), 上端留 1.2m
+//   前瞻 (跳跃净空档), 天花板底面落在 [头顶-探入, 头顶+1.2] 里都算数。
+// 零分配: 复用 _hcClearS 槽 (与 headCeilClamp/headGrazeBlocked 不重入 —— 各自即时消费完)。
+const HC_LOOK=1.2;
+const _hcClearS={pos:null,r:0.42,head:0,lo:0,hi:0,min:Infinity};
+function _hcClearBoxCb(b){
+const s=_hcClearS;
+if(b.dead) return;
+if(b.minY<=s.lo||b.minY>s.hi) return;
+const cx=clamp(s.pos.x,b.minX,b.maxX), cz=clamp(s.pos.z,b.minZ,b.maxZ);
+const dx=s.pos.x-cx, dz=s.pos.z-cz;
+if(dx*dx+dz*dz<s.r*s.r&&b.minY<s.min) s.min=b.minY;
+}
+function _hcClearCylCb(c){
+const s=_hcClearS;
+if(c.y0<=s.lo||c.y0>s.hi) return;
+const dx=s.pos.x-c.x, dz=s.pos.z-c.z, rr=c.r+s.r;
+if(dx*dx+dz*dz<rr*rr&&c.y0<s.min) s.min=c.y0;
+}
+function headClearance(pos,stanceH){
+_hcClearS.head=pos.y+(stanceH||1.7);
+_hcClearS.lo=pos.y+0.25; _hcClearS.hi=_hcClearS.head+HC_LOOK; _hcClearS.min=Infinity;
+_hcClearS.pos=pos;
+eachBoxNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcClearBoxCb);
+eachCylNear(pos.x-0.44,pos.z-0.44,pos.x+0.44,pos.z+0.44,_hcClearCylCb);
+return _hcClearS.min===Infinity?Infinity:_hcClearS.min-_hcClearS.head;
+}
+// 把"脚抬到 newY"这一步过一遍顶头净空: 返回**实际可用的脚底高度**与是否需蹲。
+// 语义 (用户裁定 2026-11-18): 顶头就**强行压下到蹲姿** (沿用 C 键动画), 不改 x/z; 用户按 C
+//   手动站起也会被下一帧顶回蹲下 (不是禁止站起, 是站起来瞬间又顶头自动蹲回去)。
+//   三级判定: ①新位站姿净空够 → 原样站; ②新位蹲姿够 → 上砖但蹲; ③连蹲姿都放不下 → **不抬脚**
+//   (留在 oldY 砖侧面, 绝不把脚压进砖里/把人压进地面); 此时若 oldY 蹲姿够得着也强制蹲。
+// 调用方据 .crouch 只置 true (自动蹲), 不在此改姿态旗, 也不自动清 crouch (手动 C 才能起)。
+// 零分配: 共享 _hcsPos/_hcsOut 槽 (各自即时消费, 无重入)。
+const _hcsPos={x:0,y:0,z:0};
+const _hcsOut={y:0,crouch:false};
+function standHeightSafe(x,z,newY,oldY){
+_hcsOut.y=newY; _hcsOut.crouch=false;
+_hcsPos.x=x; _hcsPos.z=z; _hcsPos.y=newY;
+if(headClearance(_hcsPos,1.7)>=0) return _hcsOut;                          // ① 站姿放得下
+if(headClearance(_hcsPos,1.25)>=0){ _hcsOut.crouch=true; return _hcsOut; } // ② 蹲姿放得下
+// ③ 连蹲姿都放不下: 保持原脚位, 不抬上砖。原脚位若蹲姿放得下也强制蹲 (头顶有低梁)。
+_hcsOut.y=oldY;
+_hcsPos.y=oldY;
+_hcsOut.crouch=headClearance(_hcsPos,1.7)<0&&headClearance(_hcsPos,1.25)>=0;
+return _hcsOut;
 }
 // 坡度物理 (步兵, 2026-09-12 百团改版, 全战役生效; 玩家/Bot 同规则 —— 纲领第 2 条):
 // 上坡 FOOT_SLOPE_SLOW(40°)起减速"手脚并用", FOOT_SLOPE_MAX(65°)以上不可登攀 ——

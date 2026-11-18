@@ -17,6 +17,16 @@ const dx=x-self.pos.x, dz=z-self.pos.z, l=Math.hypot(dx,dz);
 if(l<1) return 0;
 return Math.max(0,(dx*self.laneDx+dz*self.laneDz)/l)*46;
 }
+// ★2026-11-18 顶头穿墙通用修: Bot/僵尸 (Zombie extends Bot) 与玩家同源的抬脚安全落位。
+// Bot 竖直走 dampF 贴地永不跳跃, 但 standHeight 瞬间抬到砖顶同样会让头探进楼板被横推弹出墙 ——
+// 这里在 standHeight 落位后过一遍顶头净空, 顶头就自动蹲 (沿用现有 crouch 动画/命中体), 只改 y。
+const _botSafeOut={y:0,crouch:false};
+function botSafeStand(bot,newY,oldY){
+const s=standHeightSafe(bot.pos.x,bot.pos.z,newY,oldY);
+if(s.crouch){ bot.crouch=true; bot.prone=false; }
+_botSafeOut.y=s.y; _botSafeOut.crouch=s.crouch;
+return _botSafeOut;
+}
 // ── Bot「闪现」修复参数 (2026-09-20 · task-3 根因排查型) ─────────────────────────
 // 根因 (逐帧位移取证, dev/probe-botflash.js): 唯一"玩家真的看得见"的 >3m 单帧位移来自**固定火力点上机链路** ——
 // 旧版 decide() 只要 bot 落在炮位 14~18m 内就立刻起 0.9s 前摇 (玩家同规前摇, 但玩家必须先走到 2.6~3m 内按 F),
@@ -2582,7 +2592,8 @@ const wy=waterYAt(this.pos.x,this.pos.z);
 const wvB=(typeof navalWaveAt==='function')?navalWaveAt(this.pos.x,this.pos.z):0;
 this.pos.y=dampF(this.pos.y,Math.max(wy-FLOAT_PAD+wvB,bed+0.12),8,dt);
 }else{
-const gh=standHeight(this.pos.x,this.pos.z,this.pos.y+0.6);
+const _bFoot=this.pos.y;   // ★2026-11-18: 抬脚前脚底 (safeStand 兜底"连蹲都放不下就不抬脚")
+const gh=botSafeStand(this,standHeight(this.pos.x,this.pos.z,this.pos.y+0.6),_bFoot).y;   // ★2026-11-18 顶头安全落位
 this.pos.y=dampF(this.pos.y,gh,20,dt);
 }
 // 憋气/溺水 (与玩家同一支规则; AI 不主动下潜 → 常态不触发, 规则同源以备日后两栖载具/被击落水)

@@ -251,7 +251,7 @@ return;
 //   X 键取消 (readBarActive 已含 vehRepair, 下面的 KeyX 分支照常覆盖)。
 if(e.code==='KeyR'&&player.onVehicle&&player.onVehicle.kind==='tank'&&typeof player.tryVehRepair==='function'){ player.tryVehRepair(); return; }
 if(e.code==='KeyR') tryReload(true);
-if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else { player.crouch=!player.crouch; player.prone=false; } }   // !player.loiter: 操控巡飞弹本体定身 (2026-11-07 裁定③ "无法行动")
+if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else { player.crouch=!player.crouch; player.prone=false; player._autoCrouch=false; } }   // !player.loiter: 操控巡飞弹本体定身 (2026-11-07 裁定③ "无法行动"); ★2026-11-18: 手动 C 夺回姿态控制权 (顶头自动蹲下帧再顶回)
 if(e.code==='KeyZ'&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.prone=!player.prone; if(player.prone){ player.crouch=false; player.braced=false; } }   // !player.loiter: 操控定身 (2026-11-07)
 if(e.code==='KeyX'&&!player.loiter){   // !player.loiter: 操控定身 (2026-11-07) — 撑枪/收枪是身体动作; 读条取消在操控中不可能激活 (读条键全被 loiter 门挡)
 // ★2026-10-12 用户提议② → 2026-10-25 扩容: 读条 (包扎/拆除回收/前摇/举雷待发/换弹) 中 X = 取消读条
