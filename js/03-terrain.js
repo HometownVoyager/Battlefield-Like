@@ -1807,9 +1807,16 @@ return n;
 }
 const BOXES=[];
 const CYLS=[];
+var _occAddSeq=0, _occAddSyncN=0;   // ★2026-11-19 卡顿审计批二: 碰撞盒追加计数 / 其中已直写收编数 ——
+                    // addBoxCollider 只入 BOXES 表不写 OCC.data (占用要等下一次 buildOccupancy 全量重建
+                    // 从表里收编); registerDynCollider 则入表后同时直写 OCC.data+occTouch (=已收编)。
+                    // NAV.refresh 直写时代快路径据此门控 (07-nav): 追加数==收编数 ⇒ 现有占用账与表账
+                    // 齐平, 快路径放心跳过全量; 有未收编的表级追加 (探针/合成摆件直调 addBoxCollider)
+                    // ⇒ 回退全量。全量重建后两计数清零 (07-nav refresh 尾部)。
 function addBoxCollider(cx,cy,cz,w,h,d){
 const b={minX:cx-w/2,minY:cy-h/2,minZ:cz-d/2,maxX:cx+w/2,maxY:cy+h/2,maxZ:cz+d/2,gh:heightAt(cx,cz)};
 BOXES.push(b);
+_occAddSeq++;
 // 2026-09-06 B5/P0-2: 索引建立后新增的碰撞盒增量注册进 RGRID —— 工程兵建造/残骸/探针摆件即时可见。
 // (旧全量扫描时代无感; RGRID 化后移动碰撞/射线都依赖此即时性, 否则要等下一次 NAV.refresh)
 if(RGRID.boxCells){
@@ -2300,6 +2307,7 @@ const i0=clamp(Math.floor((b.minX-0.6+OCC.off)/OCC.res),0,OCC.N-1),i1=clamp(Math
 const j0=clamp(Math.floor((b.minZ-0.6+OCC.off)/OCC.res),0,OCC.N-1),j1=clamp(Math.ceil((b.maxZ+0.6+OCC.off)/OCC.res),0,OCC.N-1);
 for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=1;
 occTouch(b.minX-0.6,b.minZ-0.6,b.maxX+0.6,b.maxZ+0.6);
+_occAddSyncN++;   // 本盒已直写收编 (占用账与 BOXES 表账齐平) —— 直写时代快路径门 (07-nav) 据此放行
 }
 return b;
 }

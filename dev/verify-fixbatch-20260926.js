@@ -374,7 +374,7 @@ if(!wires.length) return {err:'本图无铁丝网'};
 const w=wires[0];
 const blocked0=!!NAV.blocked2D(w.x,w.z), hit0=!!isWire(w.x,w.z);
 w.alive=false; if(w.grp) w.grp.visible=false;
-NAV.refresh();
+markNavDirty(true); NAV.refresh();   // ★2026-11-19 判据跟码 (快路径契约): 真碾平链路 (15-vehicles)=旗翻+markNavDirty(true) 强制全量 —— 旗翻无占用直写, 裸 NAV.refresh() 在快路径下看不见它 (N 登记簇为空即整段跳过), 探针须照真链路驱动
 return {blocked0, hit0, blocked1:!!NAV.blocked2D(w.x,w.z), hit1:!!isWire(w.x,w.z), alive:w.alive, len:wires.length};
 })()`);
 if(r.err) assert('铁丝网 alive 语义', false, r.err);

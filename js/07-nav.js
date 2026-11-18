@@ -145,6 +145,8 @@ const allocCompId=()=>(compFreeList.length>0?compFreeList.pop():compNext++);
 const _seedList=[], _idList=[];
 const REBAKE_FULL_FRAC=0.04; // 脏格数 > NN×此值 ⇒ 全量
 const _navRects=[]; // 簇级增量 (2026-11-11): 脏矩形簇换算成 NAV 格坐标的复用槽 (refresh 内装载, 簇数≤登记端 CAP)
+let _navFastN=0;    // 直写时代快路径 (2026-11-19): 连续快刷计数, 3 次后回插一次全量重建 (盲清角案收敛, 1全:3快)
+// 门控计数对 (_occAddSeq/_occAddSyncN) 在 03-terrain: 追加数==直写收编数 ⇒ 表账与占用账齐平 (2026-11-19)
 function fullBakeGrid(){ bakeGrid(); bakeComponents(); baked=true; }
 // 被波及的连通分量重标 (清空 → 同一套 BFS 重跑); 范围同"边表重算范围" [i0..i1]×[j0..j1] (闭区间)
 function relabelRegion(i0,j0,i1,j1){
@@ -539,6 +541,48 @@ navStats.refreshMs=0; navStats.fullBakes=0; navStats.partBakes=0; navStats.skipB
 //     (640 图 128~143ms = "每隔几秒定帧一次"的病根)。簇级增量下各自小区域照旧走 bakeRegion,
 //     兜底: 任一簇面积超阈值 / 簇数超登记端 CAP (已退化单矩形) / forceFull ⇒ 一次全量。
 refresh(forceFull){
+// ★2026-11-19 卡顿审计批二: 直写时代快路径 —— 运行期占用改动全走直写四路 (registerDynCollider/
+// killDynCollider/killOne/occMarkFire: 直接写 OCC.data + occTouch 登记簇, 契约见 03-terrain),
+// 稳态 refresh 里的 buildOccupancy 全量重建 (全图清零 + 数千 BOX/CYL 重标 + 静态层叠加 + 全图差分,
+// camp0 实测 ~2.6-7.4ms/次) 对这些改动是纯冗余: OCC.data 已正确、全图差分恒空, 真正要烘的只有
+// occTouch 登记的簇。快路径跳过全量重建、按登记簇直接烘焙 (火情期每 5s 一帧的 2.6-7.4ms → 亚毫秒);
+// 每 3 次快刷回插一次全量重建, 收敛两类角案: killOne 盲置 0 可能擦掉共格标记 (重建是唯一纠正者),
+// 以及旗翻型改动 (碾铁丝网 w.alive=false / 玩家拆除拒马 CYLS.splice —— 无直写, 由 markNavDirty(true)
+// 强制下一次全量)。★门控还认 03-terrain 的双计数 (_occAddSeq/_occAddSyncN): addBoxCollider 只入
+// BOXES 表不写 OCC.data, registerDynCollider 在入表后同时直写收编 —— 追加数==收编数 ⇒ 表账齐平放行;
+// 有未收编的表级追加 (探针/合成摆件直调 addBoxCollider) ⇒ 回退全量 (计数对在本次全量尾部清零)。
+// build-time 链 (工程/工事直调 buildOccupancy 后接 refresh) 不受影响: 其账已在
+// dirtyList, 快路径同样消费; 世界还原/换图 forceFull 照旧全量。
+if(!forceFull&&baked&&OCC.data&&_navFastN<3&&!_navFullReq&&_occAddSeq===_occAddSyncN){
+if(_colIdxDirty){ buildSpatialIndex(); _colIdxDirty=false; }
+const src=(OCC.dirtyList&&OCC.dirtyList.length)?OCC.dirtyList:((OCC.pendList&&OCC.pendList.length)?OCC.pendList:null);
+if(src){
+const t0f=Date.now();
+const {res,off}=OCC;
+let cellsSum=0, over=false;
+for(let q=0;q<src.length;q++){
+const r=src[q];
+const x0=r.i0*res-off, x1=r.i1*res-off, z0=r.j0*res-off, z1=r.j1*res-off;
+const nr=_navRects[q]||(_navRects[q]={gi0:0,gj0:0,gi1:0,gj1:0,cells:0});
+nr.gi0=clamp(Math.floor((x0+OFF)/SP)-1,0,N-1); nr.gi1=clamp(Math.floor((x1+OFF)/SP)+1,0,N-1);
+nr.gj0=clamp(Math.floor((z0+OFF)/SP)-1,0,N-1); nr.gj1=clamp(Math.floor((z1+OFF)/SP)+1,0,N-1);
+nr.cells=(nr.gi1-nr.gi0+1)*(nr.gj1-nr.gj0+1);
+cellsSum+=nr.cells;
+if(nr.cells>NN*REBAKE_FULL_FRAC) over=true;
+}
+navStats.lastDirty=cellsSum;
+if(over){ fullBakeGrid(); navStats.fullBakes++; }
+else for(let q=0;q<src.length;q++){ const nr=_navRects[q]; bakeRegion(nr.gi0,nr.gj0,nr.gi1,nr.gj1); navStats.partBakes++; }
+navStats.refreshMs=Date.now()-t0f;
+navStats.fastBakes=(navStats.fastBakes||0)+1;
+_navFastN++;
+}
+else{ navStats.skipBakes++; navStats.lastDirty=0; } // 无登记簇 ⇒ OCC.data 未被直写过, 导航输入未变
+if(typeof occDirtyClear==='function') occDirtyClear();
+OCC.pendList=null;
+return;
+}
+_navFullReq=false;
 buildOccupancy();
 if(_colIdxDirty||forceFull){ buildSpatialIndex(); _colIdxDirty=false; }
 const t0=Date.now();
@@ -567,15 +611,20 @@ else for(let q=0;q<rects.length;q++){ const nr=_navRects[q]; bakeRegion(nr.gi0,n
 // 清账: 脏矩形只由本函数消费 (03-terrain occDirtyClear) —— 清早了会漏改动, 清晚了只是多算几格
 if(typeof occDirtyClear==='function') occDirtyClear();
 navStats.refreshMs=Date.now()-t0;
+_navFastN=0;   // 全量重建后重新放开快路径配额 (1全:3快)
+_occAddSeq=0; _occAddSyncN=0;   // 表级追加已全部收编, 门控计数对清零 (快路径重新武装; 03-terrain var 计数)
 }
 };
 })();
 // 工事建造后延迟刷新导航/占用网格 (合批, 避免连放多件时重复重建)
-let _navDirtyT=0;
-function markNavDirty(){ _navDirtyT=0.6; }
+// ★2026-11-19: markNavDirty(true) = 本次改动绕过了占用直写 (碾铁丝网旗翻/拆拒马 splice, 无 occTouch
+// 配套直写) ⇒ 下次 refresh 强制全量重烘; 兼修旧漏报 —— 玩家拆除 (updateDemolish) 从不 markNavDirty,
+// 拆完的工事在 NAV 里留陈旧格直到下一次无关事件。
+let _navDirtyT=0, _navFullReq=false;
+function markNavDirty(forceFull){ if(forceFull) _navFullReq=true; _navDirtyT=0.6; }
 function updateNavDirty(dt){
 if(_navDirtyT>0){
 _navDirtyT-=dt;
-if(_navDirtyT<=0) NAV.refresh();
+if(_navDirtyT<=0){ NAV.refresh(_navFullReq); _navFullReq=false; }
 }
 }

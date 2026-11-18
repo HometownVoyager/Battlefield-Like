@@ -184,6 +184,10 @@ if(dx*dx+dz*dz<r2) cnt++;
 }
 return cnt;
 }
+// ★2026-11-19 卡顿审计批二: 防守支 coverCrowdAt 反转收账槽 (decide 一次 soldiers 扫, 逐点查小表)
+// 与掩体候选有界插入槽 —— 模块级复用, 勿存跨帧状态
+const _clmS=[];
+const _fcD=[],_fcP=[];
 // ── 反舰炮台瞄准解算 (★2026-09-26E 审计 8 抽出的**单源**) ──────────────────────────────
 // 实机唯一在用的那一套限界: 回旋 ±BATTERY_YAW_MAX + 俯角下限 batteryPitchFloor(当前回旋角)。
 // 背景: 15f 自带一份 `Battery.aim`(旧口径: 无回旋限界 + 俯角定角 -0.42) 与 `batteryAI`/`batteryAim`
@@ -226,6 +230,11 @@ return {relY:relY,wantYaw:wantYaw,wantPit:wantPit,pitLo:PITLO,aligned:aligned,ey
 // enemyPlaneAlive 仍是"是否有敌机"存在性判据单源 (归队/退炮位等消费点不动), 火控分派从这里走。
 function aaSpreadTarget(team,self,gx,gz){
 if(self._aaTgt&&self._aaTgt.alive&&self._aaTgt.team!==team) return self._aaTgt; // 粘滞续认
+// ★2026-11-19 卡顿审计批二: 选Target 结果 0.25s 缓存 (batteryTargetFor 同款新鲜度) —— 无粘滞档时
+// 本函数被炮上操作者 60Hz 调用, 每帧 planes×combatants 双重全表; 收敛后 ~4Hz, 选目标切换延迟
+// ≤0.25s 与 15f 炮位缓存同一口径。缓存有效性含 alive 门: 认领目标亡 ⇒ 缓存即失效, 下一帧调用
+// 就重投账本重算 (R3 重派语义不变, 不吃 0.25s 延迟)
+if(self._aaScT!==undefined&&nowT-self._aaScT<0.25&&self._aaScC&&self._aaScC.alive) return self._aaScC;
 let best=null,bn=1e9,bd=0;
 for(const p of planes){
 if(!p||!p.alive||p.team===team) continue;
@@ -237,6 +246,7 @@ if(b._aaTgt===p) n++;
 const d=Math.hypot(p.pos.x-gx,p.pos.z-gz);
 if(n<bn||(n===bn&&d<bd)){ best=p; bn=n; bd=d; }
 }
+self._aaScT=nowT; self._aaScC=best;
 return best;
 }
 // 出生朝向单源 (2026-10-06 生成平衡批): 返回"面朝最近存活敌人"的 yaw —— 玩家部署 (23-deploy) 与 Bot
@@ -1190,7 +1200,10 @@ this.mesh.armR.sh.userData.swing=0.4;
 if(this.nades>0&&this.nadeCd<=0&&distT>9&&distT<30){
 const hidden=nowT-this.lastSeenT>1.2;
 let cluster=0;
-for(const e of combatants) if(e.alive&&e.team!==this.team&&e.pos.distanceTo(this.target.pos)<7) cluster++;
+// ★2026-11-19 卡顿审计批二: 3D distanceTo→平方比较 (1.000001 相对裕量=本文件 875 行同款, 吸收
+// sqrt 边界舍入差); distanceTo 含 y 项, 三轴平方同口径
+const _tp=this.target.pos;
+for(const e of combatants) if(e.alive&&e.team!==this.team){ const _dx=e.pos.x-_tp.x,_dy=e.pos.y-_tp.y,_dz=e.pos.z-_tp.z; if(_dx*_dx+_dy*_dy+_dz*_dz<7*7*1.000001) cluster++; }
 if((hidden&&Math.random()<0.5)||(cluster>=2&&Math.random()<0.4)){
 this.state='nade'; this.nadeAnimT=0.8;
 return;
@@ -1331,6 +1344,12 @@ if(empInReach(mg,this.pos.x,this.pos.y,this.pos.z,14)&&this.emplMount(mg,'mg')) 
 }
 }
 if(!this.defendPt||Math.random()<0.3){
+// ★2026-11-19 卡顿审计批二: 占用账收账反转 —— coverCrowdAt 的 soldiers 全表扫从"逐点一遍"改为
+// "每 decide 一遍收账 + 逐点查小表" (旗圈数十候选 × 60 人全表 → 1×60 收账; 计数语义 = 四坐标任一
+// 近即计一次, 与原链式 continue 的"至多计一次"逐位同值; coverCrowdAt 单源保留给 findCover 系消费)
+let _cn=0;
+for(const s of soldiers){ if(s!==this&&s.alive&&s.team===this.team&&!s.onVehicle) _clmS[_cn++]=s; }
+const r2c=1.7*1.7;
 let best=null,bd=1e9;
 for(const cp of coverPoints){
 const d=Math.hypot(cp.x-f.x,cp.z-f.z);
@@ -1340,7 +1359,16 @@ const d=Math.hypot(cp.x-f.x,cp.z-f.z);
 if(d>=f.r*0.85) continue;
 if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 驻守点避开火线/树爆弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
 // ★2026-11-03 驻点占用账 (F 修): 同队已有人占/将占的点加罚, 全队不再评出同一个最优解叠成一坨
-const dd=d+rand(0,14)+coverCrowdAt(this,cp.x,cp.z)*9;
+let crowd=0;
+for(let ci=0;ci<_cn;ci++){
+const s=_clmS[ci]; let hm=false;
+if(s.coverPt){ const dx=s.coverPt.x-cp.x, dz=s.coverPt.z-cp.z; if(dx*dx+dz*dz<r2c) hm=true; }
+if(!hm&&s.defendPt){ const dx=s.defendPt.x-cp.x, dz=s.defendPt.z-cp.z; if(dx*dx+dz*dz<r2c) hm=true; }
+if(!hm&&s.pushPt){ const dx=s.pushPt.x-cp.x, dz=s.pushPt.z-cp.z; if(dx*dx+dz*dz<r2c) hm=true; }
+if(!hm){ const dx=s.pos.x-cp.x, dz=s.pos.z-cp.z; if(dx*dx+dz*dz<r2c) hm=true; }
+if(hm) crowd++;
+}
+const dd=d+rand(0,14)+crowd*9;
 if(dd<bd){ bd=dd; best=cp; }
 }
 this.defendPt=best||{x:f.x+rand(-6,6),z:f.z+rand(-6,6)};
@@ -1383,21 +1411,29 @@ if(this.coverCd>0&&this.hp>=32) return null;
 return this.findCover();
 }
 // 掩体评分: 挡弹(硬性) + 可探头还击(加分) + 距离; 候选评估设上限防 raycast 超支 (按30v30预算)
+// ★2026-11-19 卡顿审计批二: 候选槽化 —— 旧版每候选 push [d,cp] 二元数组 + 全量 sort(闭包比较器),
+// 改为有界插入 top-12 槽 (严格小于才前插 ⇒ 同距保持 coverPoints 扫描序 = 稳定全排序取前 12 同果);
+// threat 端 heightAt+org 每调用不变 ⇒ 外提出射线循环 (原每候选重算一遍 + 新建一枚 V3)。
+// 评分压制事件窗 (弹幕压制全小队同帧涌入) 每调用省 ~百次二元分配 + 一次全排序。
 findCoverFrom(threat){
-const cands=[];
+const cands=_fcD, candsP=_fcP;
+cands.length=0; candsP.length=0;
 for(const cp of coverPoints){
 const d=Math.hypot(cp.x-this.pos.x,cp.z-this.pos.z);
 if(d<2.2||d>26) continue;
 if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 火线/弹着圈上的掩体不进 (2026-09-02 火情规避 / 2026-09-13 树爆)
-cands.push([d,cp]);
+let pos=cands.length;
+while(pos>0&&cands[pos-1]>d) pos--;
+if(pos>=12) continue;
+cands.splice(pos,0,d); candsP.splice(pos,0,cp);
+if(cands.length>12){ cands.pop(); candsP.pop(); }
 }
 if(!cands.length) return null;
-cands.sort((a,b)=>a[0]-b[0]);
-let best=null,bd=1e9,n=0;
-for(const [d,cp] of cands){
-if(++n>12) break;
-const dist=Math.hypot(cp.x-threat.x,cp.z-threat.z);
 const org=V3(threat.x,Math.max(threat.y,heightAt(threat.x,threat.z))+1.5,threat.z);
+let best=null,bd=1e9;
+for(let qi=0;qi<cands.length;qi++){
+const d=cands[qi], cp=candsP[qi];
+const dist=Math.hypot(cp.x-threat.x,cp.z-threat.z);
 const dir=V3(cp.x-threat.x,(heightAt(cp.x,cp.z)+0.9)-org.y,cp.z-threat.z).normalize();
 const hit=raycastWorld(org,dir,dist);
 if(!hit||hit.dist>dist-0.8) continue; // 挡不住威胁视线的不算掩体
@@ -1412,21 +1448,25 @@ return best;
 // 前出掩体: 位于自己与威胁之间、显著更接近威胁且可挡弹 —— 掩体间跃进的落脚点
 findCoverToward(tx,tz){
 const dMe=Math.hypot(tx-this.pos.x,tz-this.pos.z);
-const cands=[];
+const cands=_fcD, candsP=_fcP;
+cands.length=0; candsP.length=0;
 for(const cp of coverPoints){
 const d=Math.hypot(cp.x-this.pos.x,cp.z-this.pos.z);
 if(d<6||d>22) continue;
 if(Math.hypot(tx-cp.x,tz-cp.z)>dMe-4) continue;
 if(fireThreat(cp.x,cp.z,2.8)||tbThreat(cp.x,cp.z,2.8)) continue; // 跃进落点不选火线/弹着圈 (2026-09-02 火情规避 / 2026-09-13 树爆)
-cands.push([d,cp]);
+let pos=cands.length;
+while(pos>0&&cands[pos-1]>d) pos--;
+if(pos>=10) continue;
+cands.splice(pos,0,d); candsP.splice(pos,0,cp);
+if(cands.length>10){ cands.pop(); candsP.pop(); }
 }
 if(!cands.length) return null;
-cands.sort((a,b)=>a[0]-b[0]);
-let best=null,bd=1e9,n=0;
-for(const [d,cp] of cands){
-if(++n>10) break;
-const dist=Math.hypot(cp.x-tx,cp.z-tz);
 const org=V3(tx,heightAt(tx,tz)+1.5,tz);
+let best=null,bd=1e9;
+for(let qi=0;qi<cands.length;qi++){
+const d=cands[qi], cp=candsP[qi];
+const dist=Math.hypot(cp.x-tx,cp.z-tz);
 const dir=V3(cp.x-tx,(heightAt(cp.x,cp.z)+0.9)-org.y,cp.z-tz).normalize();
 const hit=raycastWorld(org,dir,dist);
 if(!hit||hit.dist>dist-0.8) continue;

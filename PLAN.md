@@ -3684,3 +3684,15 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 **回归**: 全量 -j10 = **109/117 exit=0 墙钟 93.4s** (一波 97.0s→, 基线 ≈25min≈15×→≈16×); 稳定红 6 = 在案签名逐支对认 (tankai 1/21 同签名), 偶发 loiterview 复核 3/3 过, timestopfix solo 2 绿 1 红 = 在案偶发族原样 (本批零触碰)。零 js/ 游戏代码改动; 新登 3 支全绿。
 
 **待裁定遗留**: probe-bots 同款 rotateY 桩缺口=在案红真身, 修桩可解锁更深断言但改变裁定红语义 (未动); timestopfix/killattr/botai/loiterview 偶发族确定性三件套推广 (各自验证轮); nightgear/fixes-20261010 过期钉跟码; LC 二三档 ~12 支 (单支省 0.08-0.4s 收益递减)。
+
+## 一.122 卡顿审计三案收尾: NAV 直写时代快路径 × 14-bots 重生风暴手术 (2026-11-19, 待实机验收)
+
+11-18 审计批 (一.118 前身「全局卡顿审计修复」) 点名的"本批未动"三案收尾; 用户令边界=天气雨雪保持逐帧步进回滚态 (08-effects 零触碰, 探针 T10 批纪律钉)。drawFlagTex 捕获帧**归因撤回** (3 轮新抓帧 updateFlags ≤630µs=事件帧/GC 噪声误登账)。
+
+**①NAV 直写时代快路径** (07-nav+03-terrain): 稳态 refresh 跳过 buildOccupancy 全量重建 (2.6-7.4ms/次 → 按登记簇直接烘焙=亚毫秒; 运行期占用改动自 2026-11-11 起全走直写四路 ⇒ OCC.data 已正确+全图差分恒空, 全量重建对这些改动纯冗余)。**1全:3快 配额** (killOne 盲置 0 角案收敛, 全量后重武装)。**门控双计数** _occAddSeq/_occAddSyncN (03-terrain): addBoxCollider 只入 BOXES 表 (裸直调=探针/合成摆件, 要等全量收编 ⇒ 回退全量=A/B 实锤回归案专项闸), registerDynCollider 入表后同时直写收编 ⇒ 追加数==收编数放行; 全量尾部清零。★首版单计数把 registerDynCollider (载具/飞机/卡车残骸, 坦克战高频) 也误判未收编=快路径永不 engage——写探针时发现, 改双计数。**旗翻型强制全量**: 碾铁丝网 (15-vehicles alive 翻无直写) markNavDirty(true) + **兼修旧漏报** (玩家拆除 updateDemolish 旧版从不报 NAV)。mutator 审计: 运行期直写四路全覆盖, 裸 addBoxCollider 全在构建期。
+
+**②14-bots SAFE 集六项**: F1.2 出生链融合 (pickSpawnFor lane 循环+pickSpawnPoint tryRings 两遍 combatants 全表扫各融一遍; nearestEnemy=min/eCnt=序无关/crowd 同队原序 ⇒ 逐位同值) / F1.3 枪模缓存 _wgCache (kind|team|key, clone 出货=真 Object3D.copy 深递归子件共享几何材质, _bootstub clone 忠实化配套) / F3bc 掩体候选有界插入 top-12/top-10 槽 (严格小于前插=稳定全排序取前 K 同果)+threat 端 heightAt/org 外提 / F4 defend crowd 反转 (decide 一次扫进 _clmS 槽, r2c=1.7*1.7 局部保 FP, ×9 权重不动) / F7 AA 选Target 0.25s 缓存 (**含 alive 门**=认领目标亡下一帧即重投账本——首版无门被 phase4-7d R3 当场抓红) / F8 手雷聚拢三轴平方 (7*7*1.000001 相对裕量=875 行同款)。**跳过** (设计判断): _soldierSep 网格/perceive 两段式/lane 分帧缓存/风暴错峰/cover 射线预算/tankSurfH 信封/heightAt memo (前批已裁定)。**新登账候选**: updateNades 3.3-10.4ms 尖峰、GC 大停顿 ~每 300 帧 (最慢帧系统间游走=GC 被记到当时在跑的系统头上)。
+
+**探针**: dev/verify-frameperf3-20261119 正 **52/52**+NEG **7/7** (buildOccupancy 裸名重绑计数=「全量重建是否发生」唯一判据出口; ★NEG 逐补丁隔离 boot——本探针三支 07-nav 补丁互斥, frameperf2"全部同跑"模式只适用互不相干补丁组); 判据跟码四处: verify-botai T7 (defend 内联化改钉 crowd*9 新源行, 54/0) / verify-fixbatch ②-k (铁丝网探针改走真碾平链路: 裸 NAV.refresh() 在快路径下看不见旗翻) / verify-phase4-7d R3 (11/11) / frameperf2 戳钉正则随升戳。
+
+**回归**: run-all #1 116/127 抓到 2 真回归 (探针跟码+AA alive 门, 修后全绿) + frameperf3 T7b 偶发 (复核 3/3 过); #2 108/115=6 支在案红逐支对认+loiterview (**A/B 定罪: clean HEAD worktree solo 6 跑 3 红 PASS33/FAIL1 同签名=预存偶发族非本批引入**)。**前后对照** (probe-framespike camp0 900 帧): updateNavDirty 均值 16.2µs (改前每次 refresh 2.6-7.4ms), 最慢 12 帧仅 1 帧见 NAV (配额全量 6.6ms, 频率≈1/4), 其余=GC/事件帧游走同改前。升戳 20261118e→**20261119a** (index.html 49+__sfStyleVer+_game_files.txt 45+戳钉探针 28 支同扫)。详档 finished-docs/批-卡顿审计三案收尾-2026-11-19.md。

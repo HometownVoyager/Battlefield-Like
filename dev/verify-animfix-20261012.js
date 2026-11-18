@@ -141,9 +141,9 @@ assert('i18n 新增读条文案全部有英文键',
 const sh=SRC('index.html');
 const stamps=[...sh.matchAll(/\?v=([0-9a-z]+)/g)].map(m=>m[1]);
 const stampSet=[...new Set(stamps)].sort();
-assert('index.html 版本戳全量唯一 20261118e',
- stamps.length>40&&stampSet.join(',')==='20261118e'
- &&stamps.filter(s=>s==='20261118e').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
+assert('index.html 版本戳全量唯一 20261119a',
+ stamps.length>40&&stampSet.join(',')==='20261119a'
+ &&stamps.filter(s=>s==='20261119a').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
 }
 
 // ── 沙箱装载 (真 three) ───────────────────────────────────────

@@ -23,7 +23,17 @@ coat:new THREE.MeshLambertMaterial({color:F.coat, map:TEX.cloth}), pants:new THR
 helm:new THREE.MeshLambertMaterial({color:F.helm, map:TEX.cloth}), skin:new THREE.MeshLambertMaterial({color:F.skin}),
 };
 });
+// ★2026-11-19 卡顿审计批二: 枪模按 (kind|team|key) 缓存原型, 出货走 clone —— 重生风暴每次 respawn
+// 都整套新建 Group + 数枚 Box/CylinderGeometry (launcher 分支还 new 一枚材质) = 成批阵亡后的老生代
+// 几何分配尖峰 (GC 大停顿主源之一)。clone 共享几何/材质 (THREE Object3D.copy 语义), 每 respawn 只剩
+// Mesh 壳分配; 组合有界 (kind×team×key) ⇒ 缓存会话内常驻, **卸载处一律不 dispose** (几何归原型所有,
+// 15-vehicles/14-bots 各卸载点因此保持只 remove 不 dispose 的旧形态)。挂载路径只写组变换、量几何路径
+// (gunGeomStations) 只读共享几何 ⇒ 共享无串扰。
+const _wgCache=new Map();
 function worldGunModel(kind,team,key){
+const ck=kind+'|'+team+'|'+(key||'');
+const hit=_wgCache.get(ck);
+if(hit) return hit.clone();
 const g=new THREE.Group();
 const gm=vmMats.gun, wd=vmMats.wood;
 const wg=key&&WPN_DEFS[key]?WPN_DEFS[key].wg:null;
@@ -106,7 +116,8 @@ cyl(gm,0.012,0.012,0.3,0,0.02,-0.55,g);
 bx(wd,0.05,0.09,0.2,0,-0.05,0.32,g);
 }
 g.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
-return g;
+_wgCache.set(ck,g);
+return g.clone();
 }
 function gunKindOf(key){
 let d=WPN_DEFS[key];

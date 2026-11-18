@@ -1084,7 +1084,7 @@ if(!w.alive) continue;                            // 已碾过的: 条目还在�
 w.alive=false;
 if(w.grp) w.grp.visible=false;
 for(let k=0;k<3;k++) spawnP(PT.dirt,w.x+rand(-1,1),heightAt(w.x,w.z)+0.3,w.z+rand(-1,1),rand(-1,1),rand(0.5,1.2),rand(-1,1),rand(0.25,0.4),0.6,rand(0.4,0.7),0.8,2);
-markNavDirty();
+markNavDirty(true); // ★2026-11-19 卡顿审计批二: 旗翻型改动 (只置 alive=false 无占用直写) ⇒ 下次 refresh 强制全量重烘, 否则快路径下碾平的铁丝网在 NAV 里长期留陈旧格
 }
 }
 }

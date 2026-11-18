@@ -486,13 +486,15 @@ for(const L of lanes){
 let sc=rand(0,22);
 // 战线偏好: 距离当前战斗焦点越近越好 (与原口径一致)
 if(fl) sc-=Math.hypot(fl.x-L.cx,fl.z-L.cz)*0.85;
-// 危险评估: 附近敌人
-let nearestEnemy=1e9,eCnt=0;
+// 危险评估 + ① lane 活人拥挤: ★2026-11-19 卡顿审计批二 两遍 combatants 全表扫融合为一遍
+// (重生风暴每 bot 一次 pickSpawnFor × ~28-67 lane × 2 全表 = 单帧上万次迭代的主项;
+//  nearestEnemy 取 min / eCnt 计数与序无关, crowd 加法保持同队原序 ⇒ 逐位同值)
+let nearestEnemy=1e9,eCnt=0,crowd=0;
 for(const c of combatants){
-if(!c.alive||c.team===team) continue;
+if(!c.alive) continue;
 const d=Math.hypot(c.pos.x-L.cx,c.pos.z-L.cz);
-if(d<nearestEnemy) nearestEnemy=d;
-if(d<45) eCnt++;
+if(c.team===team){ if(d<28) crowd+=1-d/28; }
+else { if(d<nearestEnemy) nearestEnemy=d; if(d<45) eCnt++; }
 }
 if(nearestEnemy<16) sc-=280; else if(nearestEnemy<30) sc-=100;
 sc-=eCnt*16;
@@ -505,12 +507,6 @@ for(const f of FLAGS){ if(f.capTeam===team) sc+=40-Math.hypot(f.x-L.cx,f.z-L.cz)
 // 基地保底安全分
 if(L.kind==='base') sc+=14;
 // ① lane 活人拥挤 (软天平): 同队存活 + 本帧已认领落点
-let crowd=0;
-for(const c of combatants){
-if(!c.alive||c.team!==team) continue;
-const d=Math.hypot(c.pos.x-L.cx,c.pos.z-L.cz);
-if(d<28) crowd+=1-d/28;
-}
 for(const p of SPAWN_CLAIMS){ const d=Math.hypot(p.x-L.cx,p.z-L.cz); if(d<28) crowd+=1-d/28; }
 sc-=crowd*LANE_CROWD_W;
 // ② lane 使用热度 (软天平主项): 最近用过的 lane 自动让位, 同一批人因此分头出发
@@ -605,26 +601,22 @@ if(tbThreat&&tbThreat(px,pz,1.6)){ _spawnDiag.rejFire++; continue; }    // 树�
 const distC=Math.hypot(px-spot.x,pz-spot.z);
 // 拥挤度评分: 对 22m 内**每一个**同队单位求和 —— 只惩罚"最近邻"会让 4m 间隔的一整片人堆照样拿满分。
 // 权重刻意低于最近邻项 (0.85 < 2.4): 它只负责"往空处推", 绝不盖过"别叠人"这条硬指标。
-let crowd=0;
-const crowdAt=(ax,az)=>{
-const d=Math.hypot(ax-px,az-pz);
-if(d<22) crowd+=1-Math.exp(-d/4.5);
-};
-for(const c of combatants){ if(c.alive&&c.team===team) crowdAt(c.pos.x,c.pos.z); }
-for(const p of SPAWN_CLAIMS) crowdAt(p.x,p.z);
+// ★2026-11-19 卡顿审计批二: 同队拥挤 + 敌情两遍 combatants 全表扫融合为一遍 (每候选 2×60→60),
+// crowdAt 闭包改内联 (原每候选新建一个闭包); crowd 加法保持同队原序 ⇒ 逐位同值
+let crowd=0,eNear=1e9,eCnt=0;
+for(const c of combatants){
+if(!c.alive) continue;
+const d=Math.hypot(c.pos.x-px,c.pos.z-pz);
+if(c.team===team){ if(d<22) crowd+=1-Math.exp(-d/4.5); }
+else { if(d<eNear) eNear=d; if(d<45) eCnt++; }
+}
+for(const p of SPAWN_CLAIMS){ const d=Math.hypot(p.x-px,p.z-pz); if(d<22) crowd+=1-Math.exp(-d/4.5); }
 const cl=Math.min(spawnClearance(px,pz,team),26);
 // 敌情/死亡热度软惩罚 (2026-10-06 生成平衡批): 旧版这条评分**完全不看敌人** —— 玩家部署路径直接调本函数,
 //   旗点被围时照样往敌人脸上落人, 落地/拿补给即被秒 (用户实报)。现在两条路径单源共享:
 //   <16m 重罚 / <30m 中罚 / 45m 内按敌兵数扣 + 死亡热度 (25s 内死过人的地方回避), 数值与 pickSpawnFor
 //   的 lane 层惩罚同款 (16/280、30/100、45/16、24m/32) —— Bot 路径 lane 层粗判 + 落点层精判两级叠加,
 //   软惩罚不设硬门 (整圈都被围时相对排序仍会挑最不坏的一个, 不会拒绝出生)。
-let eNear=1e9,eCnt=0;
-for(const c of combatants){
-if(!c.alive||c.team===team) continue;
-const d=Math.hypot(c.pos.x-px,c.pos.z-pz);
-if(d<eNear) eNear=d;
-if(d<45) eCnt++;
-}
 const ePen=(eNear<16)?280:((eNear<30)?100:0);
 let dHeat=0;
 for(const h of DEATH_HEAT){ if(nowT-h.t<25&&Math.hypot(h.x-px,h.z-pz)<24) dHeat++; }

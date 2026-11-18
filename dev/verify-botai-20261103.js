@@ -517,9 +517,15 @@ assert('T7 人挪远不计',r.far===true);
 assert('T7 敌队不计 (只数同队)',r.enemySkip===true);
 }
 assert('T7 ★ 消费点三处在场 (defendPt×9 / findCoverFrom×5 / findCoverToward×5)',
- s14.includes('const dd=d+rand(0,14)+coverCrowdAt(this,cp.x,cp.z)*9;')
+ s14.includes('const dd=d+rand(0,14)+crowd*9;')
  &&s14.includes('sc+=coverCrowdAt(this,cp.x,cp.z)*5;')
  &&s14.includes('const sc=d+rand(0,3)+coverCrowdAt(this,cp.x,cp.z)*5;'));
+// 2026-11-19 卡顿审计批二判据跟码: defend 分支 F4 内联化 (队友意向 crowd 预扫代替逐点 coverCrowdAt
+// 调用) —— 权重 9 不变, 语义等价 (同一人三字段同点只计一次由 T7 行为断言继续钉), 改钉新源行。
+assert('T7 ★ defend 内联 crowd 账在位 (权重×9 / 1.7m 半径平方 / 只数同队)',
+ s14.includes('const dd=d+rand(0,14)+crowd*9;')
+ &&s14.includes('const r2c=1.7*1.7;')
+ &&s14.includes('if(hm) crowd++;'));
 }
 
 // ═══ T8 目标粘滞 (H修) ═══

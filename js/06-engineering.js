@@ -147,6 +147,10 @@ else if(b.type==='medkit'){ if(b.crate) removeMedkit(b.crate); }
 for(let i=PROPS.length-1;i>=0;i--){ const e=PROPS[i]; if(Math.hypot(e.x-b.tx,e.z-b.tz)<1.2) PROPS.splice(i,1); }
 pl.buildCount=(pl.buildCount||0)+b.cost;
 if(pl.isPlayer){ showScorePop(t2('{0} · 已拆除 (退还 {1} 点)',t2(BUILD_NAMES[b.type]),b.cost)); AudioSys.click(600,0.25,0.06); }
+// ★2026-11-19 卡顿审计批二: 拆除完成必须报 NAV —— 旧版从不 markNavDirty, 拆掉的拒马(CYLS.splice 无
+// 占用直写)/铁丝网(旗翻)/沙袋(killOne 直写但盲置 0)在 NAV 里留陈旧格直到下一次无关事件; 拒马/铁丝
+// 两类无直写 ⇒ forceFull=true 走全量重烘 (07-nav 快路径契约)
+if(typeof markNavDirty==='function') markNavDirty(true);
 }
 // 迫击炮落点指示圈
 const mortarMarker=(()=>{

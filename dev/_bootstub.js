@@ -73,7 +73,12 @@ lookAt(){return this;}
 rotateX(){return this;}
 rotateY(){return this;}
 rotateZ(){return this;}
-clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry;if(this.material)c.material=this.material;c.position=new V3(this.position.x,this.position.y,this.position.z);c.rotation=new Euler();if(this.rotation.x||this.rotation.y||this.rotation.z)c.rotation.set(this.rotation.x,this.rotation.y,this.rotation.z);c.scale=new V3(this.scale.x,this.scale.y,this.scale.z);c.visible=this.visible;c.castShadow=this.castShadow;c.name=this.name;return c;}};
+clone(){const c=new this.constructor();if(this.geometry)c.geometry=this.geometry;if(this.material)c.material=this.material;c.position=new V3(this.position.x,this.position.y,this.position.z);c.rotation=new Euler();if(this.rotation.x||this.rotation.y||this.rotation.z)c.rotation.set(this.rotation.x,this.rotation.y,this.rotation.z);c.scale=new V3(this.scale.x,this.scale.y,this.scale.z);c.visible=this.visible;c.castShadow=this.castShadow;c.receiveShadow=this.receiveShadow;c.renderOrder=this.renderOrder;c.name=this.name;
+// 2026-11-19: children 深拷贝 (真 THREE.Object3D.copy 递归语义: this.add(child.clone()), 子件共享
+// geometry/material) —— 枪模缓存原型 clone 出货 (11-soldiers worldGunModel, 卡顿审计批二) 依赖子件
+// 齐备; 旧浅拷贝在沙箱里产空壳组 = 与真浏览器不符的桩不忠实 (isMesh/rotateY 同规)。
+c.children.length=0; for(const ch of this.children){ if(ch&&ch.clone) c.add(ch.clone()); else c.add(ch); }
+return c;}};
 // ★ 2026-09-28: 补 groups/clearGroups/addGroup —— 真 THREE.BufferGeometry 上这三个是标配
 //   (确切的语义: groups 是 [{start,count,materialIndex}], clearGroups 清空, addGroup 追加)。
 //   15-vehicles 的行走机构 (tbBuilder.build / 旧 trackBoxPrep) 用 **原生 BufferGeometry** 自建履带带环,
