@@ -651,7 +651,7 @@ const cands=[process.env.EDGE_EXE,
 for(const p of cands) if(fs.existsSync(p)) return p;
 return null;
 }
-const BROWSER_TMP=path.join(require('os').tmpdir(),'sf-specthird');
+const BROWSER_TMP=path.join(require('os').tmpdir(),'sf-specthird-'+process.pid); // 2026-11-18 效率批: 加 pid 后缀——run-all 并行化后同探针重跑/手工并发不再互踩 Edge profile 锁
 function browserPrep(){
 fs.rmSync(BROWSER_TMP,{recursive:true,force:true});
 fs.mkdirSync(BROWSER_TMP,{recursive:true});

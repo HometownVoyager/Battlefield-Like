@@ -3645,3 +3645,21 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 
 **教训入档**: 快速运动的小物体（雨/雪/曳光/碎片）不得降采样步进——30Hz 节流只适用于慢速大曲面（旗布/布料）与纯逻辑账；"总位移守恒"≠视觉连续（时间混叠）。升戳 20261118d→**20261118e**（index.html 49 处+__sfStyleVer+_game_files.txt 45 行+戳钉探针 28 支同扫）。实机验收清单见 finished-docs/批-雨雪抖动返修-2026-11-18.md。
 
+
+## 一.120 验证套件并行化瘦身: run-all 并行执行器 × 9 支重探针热点手术 × 14 件过期/临时探针归档 (2026-11-19, 待实机验收)
+
+**用户令**: 每轮施工跑探针占 75%~90% 时间、任何任务都超一小时——对验证脚本做低效审计+修复+切除不必要部分。
+
+**基线实测**: Σ单跑 1208.8s (113 项并行 12 路实测累计; 旧 run-all 顺序执行 ≈20 分钟+失败复核×3 顺序 ≈25 分钟)。瓶颈分解: 单次全链 boot ≈1.5s (读盘 26ms+编译 56ms 均可缓存, 执行 ~1.4s 是世界构建本体); 重探针=多 boot (destruct 17/nav 15/navspots 14/boot 14/fixbatch 10/specbatch 11)+模拟推演; run-all 旧执行器对失败探针顺序重跑 3 次 (6 支稳定红每轮纯浪费 40-60s)。
+
+**run-all-verify.js 执行器重写** (SANDBOX/BROWSER 清单逐字节不动): ①沙箱段 execFile 异步池并行 (默认 -j10; 每探针独立进程互不共享状态, 并行安全性逐一核对: verify-strongpoint 不在套件、specthird 写 os.tmpdir 且本批加 pid 后缀防并发互踩) ②失败稳定性复核并行发车+**在案稳定红台账 RED_LEDGER** (probe-bots/phase2/phase3/willow/nade-trigger/tankai 失败即报在案跳复核, 转绿照常显示=修复仍能被发现; 新红仍走复核通道) ③--only 名字过滤 (施工期定向跑) + --rerun N (0=跳过) ④红名关键输出优选 (✘/FAIL/堆栈行优先, 不再被 [HUD] 自检样板行顶掉——probe-bots 红的真身 barrelWreck grp.rotateY 缺失由此首见) ⑤SIGINT 回收子进程。浏览器段保持顺序 (随机端口+独立 userDir, 保守)。
+
+**9 支重探针手术** (共享桩 dev/_loadcache.js: 读盘 memo+vm.Script 编译缓存, runInContext 逐 ctx 语义逐位等价): procgen (编译缓存+biome 分类改轻 ctx=纯种子哈希免整图生成×15+种子不回写提出循环 12→1+跨段 (seed,size) 上下文 memo, 确定性对照块保 fresh build 侧; **75.7→36.7s**; 535 通过逐字一致) / boot (14→13 boot, i=0 复用探序号 pristine ctx) / nav (补丁版 07-nav 只编一次+ci=0 与⑦复用探序号 ctx, 15→13 boot; 判定 9✓/1✗ 一致) / navspots (14→13; 333/30/2 一致) / destruct (17 boot 缓存; 50/0 一致) / fixbatch-20260926 (SRC memo+PATCH_MAP 文本只编一次; 55/0 一致) / vehburn (**真 THREE 解析 3→1**+序号查询轻量化 3→2 真 boot; **13.6→6.5s**; 39 绿一致) / tankai (缓存; **20.7→12.0s**; 1/21 在案红签名原样; lane() 缓存主动放弃=同 ctx 只调一次零收益, 跨 ctx 复用不安全因各 boot 未播种 rand 世界不同) / sink (14→13 boot+**偶发根治三件套**: sf_pseed='424242' 钉 procgen 种子——旧 ?seed=42 钉不住 procgen 战役 ⇒ PG.rnd=true 每局随机抽种子 ⇒ 精确计数断言随抽签翻红=偶发真凶; +Math.random mulberry32 播种 (先例 roofghost); 3 连跑全绿, 14 行判定一致)。**全部只改探针输入与缓存, 零 js/ 游戏代码改动**。★方法教训: 探针输出含运行间随机量的 (nav 逐图统计/procgen 群系抽签), 等价验证必须取判定行 (✓/✗+合计) 而非全文 diff——原版自身两次跑即不同。
+
+**切除 14 件** 归档 archive/dev-probes-cleanup-20261118/: _dbg-7c/_spec-audit (陈旧快照判据已漂移) + fix-deathcam-anchor/fix-perfquick (一次性 patcher 已消费) + _spawnflat/_steppe-pocket/_tankspawn (-tmp) /_vegwater/_dbg-nademap-tmp/_navleg-diag/_navcap (自称临时件, 死袋判据已由在册探针接管)。★盘点子智能体误报 _structbase.js 孤儿——复核发现 verify-uvscale.js:22 活依赖, 保留 (grep 漏报人工兜住)。
+
+**回归**: 全量 -j10 **108/117 exit=0 墙钟 97.0s** (对比改造前 ≈25 分钟 = **≈15×**); 稳定红 6=在案台账逐支对认; 偶发 3 (matseam woodDark 明度抖动/loiterview T3/botprox S6 边界) 复核 3/3 全过=本批未引入任何新红。★ specthird 固定 tmp 路径加 pid 后缀 (并行隐患顺手修)。
+
+**文档**: README §七·4 补新用法与红账口径 + §八本批行; 交付文档 finished-docs/批-验证套件并行化瘦身-2026-11-19.md (含给用户的五项裁定清单: 漏登补登 3 绿 2 需跟码/语义类提速选项/二三档切除候选/偶发族确定性化推广/戳钉判据改读 _game_files.txt 结构性改造)。
+
+**实机验收**: 全量跑一轮墙钟量级; --only 定向秒级反馈; --rerun 0 快速档; 红名输出病灶可读。

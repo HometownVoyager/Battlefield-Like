@@ -179,7 +179,8 @@ sandbox.globalThis=sandbox;
 sandbox.THREE=THREE;
 sandbox.window=window;
 // ── 逐脚本加载 ──
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘+编译进程级缓存 (本探针 14 次 boot 原先每次重读全链 ≈82ms)
+function load(ctx,file){ LC.run(ctx,root,file); }
 function boot(campIdx){
 const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
@@ -196,7 +197,7 @@ const all=Array.from({length:total},(_,k)=>k);
 const range=idx>=0&&idx<total?[idx]:all;
 for(const i of range){
 try{
-const ctx=boot(i);
+const ctx=(i===0?probe:boot(i)); // 效率批: i=0 复用探序号的 pristine ctx (只读过 CAMPAIGNS.length), 省 1 次全链 boot
 console.log(`#${i} LOAD OK`);
 // 模拟点击"进入战场"
 const hook=vm.runInContext(`(()=>{

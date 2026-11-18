@@ -1,11 +1,16 @@
 // ─────────────────────────────────────────────
-// dev/run-all-verify.js —— 全量验收套件 (2026-09-20 本批)
+// dev/run-all-verify.js —— 全量验收套件 (2026-09-20 本批; 2026-11-18 并行化重写执行器)
 // 逐条跑本仓库全部沙箱探针/验证脚本 + 真浏览器探针, 汇总退出码与关键末行。
 // 用途: 交付前一次跑完, 避免"逐个手敲命令漏掉某个回归"。
-// 用法: node dev/run-all-verify.js            # 只跑沙箱 (不需要外网/浏览器)
-//       node dev/run-all-verify.js --browser  # 追加真浏览器探针 (需要 Edge; CDN 走 dev/vendor 离线桩)
+// 2026-11-18 效率批: 沙箱段全部并行执行 (每探针=独立进程, 互不共享状态; 32核机默认 10 并发,
+//   Σ单跑≈16min → 墙钟≈2-3min)。失败稳定性复核 3 连跑改并行+首过即停 (判定语义不变: 任意一次过=偶发)。
+// 用法: node dev/run-all-verify.js            # 只跑沙箱 (不需要外网/浏览器), 默认 10 并发
+//       node dev/run-all-verify.js -j 16      # 并发数覆盖
+//       node dev/run-all-verify.js --only verify-frameperf2,verify-weather   # 只跑名字命中的探针 (施工期快速迭代)
+//       node dev/run-all-verify.js --rerun 0  # 失败不做稳定性复核 (全量红账已知时省时)
+//       node dev/run-all-verify.js --browser  # 追加真浏览器探针 (需要 Edge; CDN 走 dev/vendor 离线桩; 浏览器段保持顺序)
 'use strict';
-const {execFileSync}=require('child_process');
+const {execFile}=require('child_process');
 const fs=require('fs');
 const path=require('path');
 const root=path.resolve(__dirname,'..');
@@ -133,60 +138,109 @@ const BROWSER=[
 ['dev/probe-inmenu-watch.js',[],'inMenu 时间线'],
 ];
 
-const results=[];
-function run(rel,args,note){
-const f=path.join(root,rel);
-if(!fs.existsSync(f)){ results.push({rel,note,code:'MISSING',tail:''}); return; }
-let code=0,out='';
-try{
-out=execFileSync(process.execPath,[f,...args],{cwd:root,encoding:'utf8',timeout:20*60*1000,stdio:['ignore','pipe','pipe']});
-}catch(e){
-code=(e.status===undefined||e.status===null)?('ERR:'+(e.signal||'?')):e.status;
-out=(e.stdout||'')+(e.stderr||'');
-}
-const lines=String(out).split(/\r?\n/).filter(l=>l.trim());
-results.push({rel,note,code,tail:lines.slice(-2).join(' | ').slice(0,140)});
-}
+// ── 执行器 (2026-11-18 并行化) ─────────────────────────
+const jIdx=process.argv.indexOf('-j');
+const CONC=(jIdx>=0?parseInt(process.argv[jIdx+1],10):0)||parseInt(process.env.SF_RV_CONC||'',10)||10;
+const onlyIdx=process.argv.indexOf('--only');
+const ONLY=onlyIdx>=0?process.argv[onlyIdx+1].split(',').filter(Boolean):null;
+const rrIdx=process.argv.indexOf('--rerun');
+const RERUN=rrIdx>=0?parseInt(process.argv[rrIdx+1],10):3;
+const want=rel=>!ONLY||ONLY.some(n=>rel.includes(n));
+// 在案稳定红台账 (2026-11-18 编入): 已裁定为稳定失败、待修/待裁定的探针。
+// 失败时跳过 3 连跑复核 (裁定已有结论, 重跑=纯浪费 ~40-60s/轮); 转绿照常显示 (修复能被发现)。
+// 新稳定红仍走复核通道 → 裁定后登记到本表。偶发族不登记 (判定偶发需要复核数据)。
+const RED_LEDGER={
+'dev/probe-bots.js':'在案稳定红 (2026-11-14e 起, 新兵档交战延迟待裁定)',
+'dev/verify-phase2-20260928.js':'在案稳定红',
+'dev/verify-phase3-20260928.js':'在案稳定红',
+'dev/verify-willow-20261110.js':'在案稳定红',
+'dev/verify-nade-trigger-20260930.js':'在案稳定红 (86过2红)',
+'dev/verify-tankai.js':'在案稳定红 (2026-11-18 新红, A/B 定位并行会话 14-bots 改动, 待裁定)',
+};
+const children=new Set();
+process.on('SIGINT',()=>{ for(const c of children){try{c.kill();}catch(_){}} process.exit(130); });
 
+const results=[]; // 与旧版同构: {rel,note,code,tail} (rerun 结果也追加进来, 合计数口径不变)
+function runP(rel,args){
+return new Promise(res=>{
+const f=path.join(root,rel);
+if(!fs.existsSync(f)){ res({rel,note:'',code:'MISSING',tail:'',ms:0}); return; }
+const t0=Date.now();
+const ch=execFile(process.execPath,[f,...args],{cwd:root,encoding:'utf8',timeout:20*60*1000,maxBuffer:16*1024*1024},(err,stdout,stderr)=>{
+children.delete(ch);
+const code=err?((err.code===undefined||err.code===null)?('ERR:'+(err.signal||'?')):err.code):0;
+const out=String((stdout||'')+(stderr||''));
+const lines=out.split(/\r?\n/).filter(l=>l.trim());
+// 红名时优先挑失败特征行 (✘/FAIL/失败/异常/堆栈), 否则尾部样板行 ([HUD] 自检) 会顶掉真正有用的线索
+let tail;
+if(code===0) tail=lines.slice(-2).join(' | ');
+else{
+const hit=lines.filter(l=>/✘|✗|FAIL|失败|异常|Error|at /.test(l)&&!/全部通过|0 失败/.test(l));
+tail=(hit.length?hit.slice(-2):lines.slice(-2)).join(' | ');
+}
+res({rel,note:'',code,tail:String(tail).slice(0,200),ms:Date.now()-t0});
+});
+children.add(ch);
+});
+}
+// 并行池: 逐个铺开, 每完成一个立刻打印一行 (顺序不保证, 汇总段按清单原序)
+async function runPool(list,label){
+const jobs=list.filter(([rel])=>want(rel)&&!(rel==='dev/probe-menu-hud.js'&&!WITH_BROWSER));
 console.log('===== 全量验收套件 =====');
-for(const [rel,args,note] of SANDBOX){
-if(rel==='dev/probe-menu-hud.js'&&!WITH_BROWSER) continue;
-process.stdout.write(('  '+rel).padEnd(42));
-run(rel,args,note);
-const r=results[results.length-1];
-console.log(String(r.code).padStart(4)+'   '+note+(r.code!==0?'   ← 关键输出: '+r.tail:''));
+if(ONLY) console.log('  (--only 过滤: '+ONLY.join(', ')+')');
+console.log('  并发 '+CONC+' · 任务 '+jobs.length+' 项'+(label?' · '+label:''));
+let idx=0,done=0; const out=[];
+async function worker(){
+while(idx<jobs.length){
+const [rel,args,note]=jobs[idx++];
+const r=await runP(rel,args);
+r.note=note; done++;
+results.push(r);
+console.log('  ['+String(r.code).padStart(4)+'] '+((r.ms/1000).toFixed(1)+'s').padStart(7)+'  '+rel+(note?'  '+note.slice(0,52):'')+(r.code!==0?'   ← '+r.tail:''));
+out.push(r);
 }
+}
+const ws=[]; for(let i=0;i<Math.min(CONC,Math.max(jobs.length,1));i++) ws.push(worker());
+await Promise.all(ws);
+return out;
+}
+(async()=>{
+const wall0=Date.now();
+await runPool(SANDBOX,'沙箱');
 if(WITH_BROWSER){
-console.log('  --- 真浏览器 (Edge + CDP, CDN 走 dev/vendor 离线桩) ---');
-for(const [rel,args,note] of BROWSER){
-process.stdout.write(('  '+rel).padEnd(42));
-run(rel,args,note);
-const r=results[results.length-1];
-console.log(String(r.code).padStart(4)+'   '+note+(r.code!==0?'   ← 关键输出: '+r.tail:''));
+console.log('  --- 真浏览器 (Edge + CDP, CDN 走 dev/vendor 离线桩) · 顺序 ---');
+for(const [rel,args,note] of BROWSER.filter(([rel])=>want(rel))){
+const t0=Date.now();
+const r=await runP(rel,args);
+r.note=note; results.push(r);
+console.log('  ['+String(r.code).padStart(4)+'] '+((r.ms/1000).toFixed(1)+'s').padStart(7)+'  '+rel+(r.code!==0?'   ← '+r.tail:''));
 }
 }
-console.log('\n===== 明细 (末两行) =====');
-for(const r of results) console.log('  ['+String(r.code).padStart(4)+'] '+r.rel+'\n         '+r.tail);
-// 失败的用例连跑 3 次做稳定性判定 (排除 CPU/IO 抖动造成的偶发, 而不是直接把偶发当成回归)
-const bad=results.filter(r=>r.code!==0);
-if(bad.length){
-console.log('\n===== 失败项稳定性复核 (各连跑 3 次) =====');
+console.log('\n===== 明细 (末两行, 清单原序) =====');
+for(const r of results){
+if(r.rerun) continue; // rerun 追加项不重复进明细
+console.log('  ['+String(r.code).padStart(4)+'] '+r.rel+'\n         '+r.tail);
+}
+// 失败的用例并行连跑 RERUN 次做稳定性判定 (首过即停=偶发, 判定语义与旧顺序版一致)
+const bad=[...new Set(results.filter(r=>r.code!==0).map(r=>r.rel))].map(rel=>results.find(r=>r.rel===rel&&!r.rerun));
+if(bad.length&&RERUN>0){
+console.log('\n===== 失败项稳定性复核 (各并行 '+RERUN+' 次; 任意一次过=偶发, 与旧版判定一致) =====');
 for(const b of bad){
+if(RED_LEDGER[b.rel]){ console.log('  '+b.rel+'  → **在案稳定红** (台账: '+RED_LEDGER[b.rel]+'), 跳过复核'); continue; }
 const args=(b.rel.includes('_audit-foliage-ref')?['11','20000']:(b.rel.includes('probe-bots')?['0']:(b.rel.includes('probe-planes')?['0']:[])));
-let stable=0, tails=[];
-for(let i=0;i<3;i++){
-run(b.rel,args,b.note);
-const last=results[results.length-1];
-tails.push(last.code);
-if(last.code===0) stable++;
-else if(last.tail) tails.push(last.tail);
-}
-console.log('  '+b.rel+'  → 3 次结果: '+tails.filter(t=>typeof t!=='string').join('/')
-+(stable?'   ⇒ **偶发** (单次失败+'+stable+'次通过), 需人工判断是否环境抖动':'   ⇒ **稳定失败**, 是回归'));
+const rs=await Promise.all(Array.from({length:RERUN},()=>runP(b.rel,args)));
+for(const r of rs){ r.rerun=true; results.push(r); }
+const stable=rs.filter(r=>r.code===0).length;
+const codes=rs.map(r=>String(r.code));
+const tails=rs.filter(r=>r.code!==0&&r.tail).map(r=>r.tail);
+console.log('  '+b.rel+'  → 复核 '+codes.join('/')+(stable?'   ⇒ **偶发** ('+stable+'次通过), 需人工判断是否环境抖动':'   ⇒ **稳定失败**, 是回归'));
+if(!stable&&tails.length) console.log('         复核仍红关键输出: '+tails[tails.length-1]);
 if(stable) console.log('         失败那次的关键输出: '+b.tail);
 }
 }
-const finalBad=results.filter(r=>r.code!==0);
-console.log('\n===== 合计: '+(results.length-finalBad.length)+'/'+results.length+' 次运行 exit=0 =====');
-if(finalBad.length){ console.log('最终仍未通过:'); finalBad.forEach(b=>console.log('  ✗ '+b.rel+'  exit='+b.code)); process.exitCode=1; }
+const finalBad=[...new Set(results.filter(r=>r.code!==0).map(r=>r.rel))];
+const wall=((Date.now()-wall0)/1000).toFixed(1);
+console.log('\n===== 合计: '+(results.length-finalBad.length)+'/'+results.length+' 次运行 exit=0 · 墙钟 '+wall+'s =====');
+if(finalBad.length){ console.log('最终仍未通过:'); finalBad.forEach(rel=>console.log('  ✗ '+rel)); process.exitCode=1; }
 else console.log('全部通过 ✔');
+})().catch(e=>{ console.error('run-all 执行器异常:',e); process.exitCode=2; });

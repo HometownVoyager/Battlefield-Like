@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘+编译缓存 (17 boot 原先每次重读重编全链)
 const stub=require('./_bootstub.js');
 const root=path.resolve(__dirname,'..');
 const THREE=stub.THREE;
@@ -40,7 +41,7 @@ for(const k in stub.byId) delete stub.byId[k];
 const ctx=vm.createContext(Object.assign({},stub.sandbox));
 ctx.document=stub.document; ctx.window=stub.window; ctx.CANNON=CANNON_STUB;
 ctx.localStorage={_s:{sf_campaign:String(i)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-for(const f of FILES) vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{filename:f});
+for(const f of FILES) LC.script(root,f).runInContext(ctx);
 return ctx;
 }
 let PASS=0, FAILS=0;

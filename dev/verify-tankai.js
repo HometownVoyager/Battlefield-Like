@@ -15,6 +15,7 @@
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批
 const root=path.resolve(__dirname,'..');
 // 共享桩 (dev/_bootstub.js): THREE/DOM/WebAudio 最小桩, 与 verify-padground/uvscale 同源
 const {sandbox,document,window}=require('./_bootstub.js');
@@ -157,7 +158,7 @@ function boot(diff){
 	// 开局加载期世界会往 stdout 打进度 (如 "[地形] 建筑地基平台: 重刷 N 个顶点") —— 探针只需要自己的断言输出,
 	// 过滤掉这类加载期噪音, 让"真实 stdout"一眼可读 (warn/error 原样保留)
 	ctx.console={log:(...a)=>{ const s=a.map(x=>String(x)).join(' '); if(!/^\[(地形|HUD|NAV|世界)/.test(s)) console.log(...a); }, warn:console.warn.bind(console), error:console.error.bind(console)};
-	for(const f of FILES) vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{filename:f});
+	for(const f of FILES) LC.script(root,f).runInContext(ctx); // 2026-11-19 效率批: 读盘+编译缓存 (6 boot 原先每次重读重编)
 	// 难度的显式落定: 00-config 读 localStorage 时 `parseInt('0')||1` 会把新兵(0)吃成老兵(1), 故直接写 SETTINGS.diff
 	vm.runInContext('SETTINGS.diff='+diff,ctx);
 	const st=vm.runInContext(`(()=>{ try{ const b=document.getElementById('startBtn'); if(b&&b.onclick){ b.onclick(); return 'ok'; } return 'no-button'; }catch(e){ return 'ERR '+String(e&&e.stack||e); } })()`,ctx);

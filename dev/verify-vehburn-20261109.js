@@ -21,7 +21,8 @@ const NEG=process.argv.includes('--neg');
 const OK=[],BAD=[];
 function assert(name,cond,detail){ (cond?OK:BAD).push(name); console.log(`  ${cond?'✓':'✗'} ${name}${detail?'  '+detail:''}`); }
 function section(t){ console.log('\n══ '+t+' ══'); }
-const SRC=f=>fs.readFileSync(path.join(root,f),'utf8');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘 memo
+const SRC=f=>LC.src(root,f);
 
 const patchStyle=(el)=>{ if(el&&el.style&&typeof el.style.setProperty!=='function') el.style.setProperty=function(k,v){ this[k]=v; }; return el; };
 const _stub=require('./_bootstub.js');
@@ -152,8 +153,9 @@ function loadRealTHREE(){
 }
 const html=SRC('index.html');
 const FILES=[...html.matchAll(/src="(js\/[^"?]+)/g)].map(m=>m[1]);
+const REAL_THREE=loadRealTHREE(); // 效率批: three.min.js 解析只做一次 (per-boot 补丁幂等, 复用同一实例)
 function boot(campIdx){
-	const T=loadRealTHREE();
+	const T=REAL_THREE;
 	T.WebGLRenderer=class{ constructor(){ this.domElement=Object.assign(document.createElement('canvas'),{width:0,height:0}); this.shadowMap={enabled:false,type:0,autoUpdate:true};
 		this.setSize=()=>{}; this.setPixelRatio=()=>{}; this.render=()=>{}; this.clear=()=>{}; this.clearDepth=()=>{};
 		this.outputColorSpace=''; this.setClearColor=()=>{}; this.setAnimationLoop=()=>{}; } };
@@ -193,11 +195,15 @@ function boot(campIdx){
 	ctx.setTimeout=(f)=>{ try{ f(); }catch(e){ console.log('  [异步桩] '+String(e&&e.stack||e).split('\n').slice(0,2).join(' | ')); } return 0; };
 	ctx.clearTimeout=()=>{};
 	ctx.localStorage={_s:{sf_campaign:String(campIdx),sf_exp:'0',sf_pseed:'424242'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-	for(const f of FILES){ vm.runInContext(srcOf(f),ctx,{filename:f}); }
+	const SCR_OF=boot._scr||(boot._scr={}); // 效率批: 编译缓存 (PATCH_MAP 阴性文本同样只编一次; NEG 补丁在 boot 前就位)
+	for(const f of FILES){ let sc=SCR_OF[f]; if(!sc){ sc=new vm.Script(srcOf(f),{filename:f}); SCR_OF[f]=sc; } sc.runInContext(ctx); }
 	return ctx;
 }
 let IDX=-1;
-{ const c0=boot(0); IDX=vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="normandy")',c0); }
+{ // 效率批: 只查战役序号 → 轻量 ctx 只载 00-config (先例 verify-roofghost idxOf), 免一次真 THREE 全链 boot
+const c0=vm.createContext({console:{log(){},warn(){},error(){}},location:{search:''},localStorage:{_s:{},getItem:()=>null,setItem(){},removeItem(){}},window:{},navigator:{},Math,JSON,Object,Array,Number,String,Boolean,Date,parseInt,parseFloat});
+LC.script(root,'js/00-config.js').runInContext(c0);
+IDX=vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="normandy")',c0); }
 const ctx=boot(IDX);
 const G=s=>vm.runInContext(s,ctx,{timeout:300000});
 let err=null;

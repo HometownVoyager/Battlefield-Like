@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 00-config/00c-procgen 只读+编译一次 (原 ~346 次 makeCtx × 2 文件重复读编)
 const root=path.resolve(__dirname,'..');
 let pass=0,fail=0;const fails=[];
 function ck(name,cond,extra){ if(cond){pass++;} else {fail++;fails.push(name+(extra?(' :: '+extra):'')); console.log('  ✗ '+name+(extra?(' :: '+extra):''));} }
@@ -30,9 +31,32 @@ function makeCtx(seed,campIdx,size){
   Math,JSON,Object,Array,Number,String,Boolean,Date,parseInt,parseFloat,isFinite,isNaN,
  });
  for(const f of ['js/00-config.js','js/00c-procgen.js']){
-  vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),ctx,{filename:f});
+  LC.script(root,f).runInContext(ctx);
  }
  return ctx;
+}
+// 2026-11-19 效率批: biome 是纯种子哈希 (00-config 载入即算完, 与 00c 无关) —— 分类用轻 ctx 免整图生成
+function biomeOf(seed){
+ const ctx=vm.createContext({
+  console:{log(){},warn(){},error(){}},
+  location:{search:''},
+  localStorage:{_s:{sf_campaign:String(PGIDX),sf_pseed:String(seed)},getItem(k){return (k in this._s)?this._s[k]:null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}},
+  window:{},navigator:{maxTouchPoints:0},matchMedia:()=>({matches:false}),
+  document:{createElement:()=>({getContext:()=>null,style:{},setAttribute(){}}),addEventListener(){},body:{classList:{add(){},remove(){}}}},
+  Math,JSON,Object,Array,Number,String,Boolean,Date,parseInt,parseFloat,isFinite,isNaN,
+ });
+ LC.script(root,'js/00-config.js').runInContext(ctx);
+ return vm.runInContext('PG.biome',ctx);
+}
+// 效率批: 同 (seed,size) 的 PG 世界各只读段共享一份 (断言全部只读, 已逐段核对);
+// key 对"未传 size"与"显式 380"分列 (跨规模对照块用显式键, 不跨默认/显式边界共享);
+// L286 同种子全同块仍取 fresh build 作对照侧, 确定性断言语义不变。
+const CTX_MEMO=new Map();
+function makeCtxM(seed,size){
+ const key=seed+'@'+(size===undefined?'default':size);
+ let c=CTX_MEMO.get(key);
+ if(!c){ c=makeCtx(seed,PGIDX,size); CTX_MEMO.set(key,c); }
+ return c;
 }
 // 探针侧几何助手 (与 00c 同口径复写: 跨河/贴路/岸别判据必须与生成端一致)
 const segDist=(px,pz,ax,az,bx,bz)=>{ const abx=bx-ax,abz=bz-az,L2=abx*abx+abz*abz||1e-9;
@@ -78,16 +102,18 @@ const FARM_GRAIN=['wheat','corn','pasture','till'];
 // ── 群系种子池: 既有 7 种子 + 连号补齐每群系 ≥4 ─────────────────────────────────
 const baseSeeds=[12345,777,90210,424242,555555,1,999999];
 const byBiome={farm:[],town:[],water:[]};
-for(const s of baseSeeds){ const b=vm.runInContext('PG.biome',makeCtx(s,PGIDX)); byBiome[b].push(s); }
+for(const s of baseSeeds){ const b=biomeOf(s); byBiome[b].push(s); }
 for(let s=100001;(byBiome.farm.length<4||byBiome.town.length<4||byBiome.water.length<4)&&s<101200;s++){
- const b=vm.runInContext('PG.biome',makeCtx(s,PGIDX));
+ const b=biomeOf(s);
  if(byBiome[b].length<4) byBiome[b].push(s);
 }
 
 // ── A. 通用 + 群系专属断言 (380 主档 × 三群系) ──────────────────────────────────
+// 效率批: "种子不回写"断言与外层 (bm,sd) 无关 (fresh ctx 无 seed, 逐次恒同) → 提出循环只算一次
+const SEED_NO_REWRITE=(()=>{ const c2=makeCtx(null,PGIDX); const v=vm.runInContext('localStorage.getItem("sf_pseed")',c2); return v===null||v===''; })();
 for(const bm of ['farm','town','water']){
  for(const sd of byBiome[bm]){
-  const ctx=makeCtx(sd,PGIDX);
+  const ctx=makeCtxM(sd);
   const g=expr=>vm.runInContext(expr,ctx);
   console.log('── [seed '+sd+'] '+bm+' ──');
   const FLAGS=g('CAMPAIGN.flags'), BASES=g('CAMPAIGN.bases'), ROADS=g('CAMPAIGN.roads'),
@@ -248,7 +274,7 @@ for(const bm of ['farm','town','water']){
      &&SETT.every(s=>Math.hypot(p.x-s.x,p.z-s.z)>=s.r+13)); })(), DL.ponds.length);
    ck('['+sd+'] 地块不落水 (中心距主河 ≥w+0.4)', LOTS.every(l=>riverDist(RD,l.x,l.z)>=RD.w+0.4));
   }
-  ck('['+sd+'] 种子不回写 (sf_pseed 未被改写)', (()=>{ const c2=makeCtx(null,PGIDX); const v=vm.runInContext('localStorage.getItem("sf_pseed")',c2); return v===null||v===''; })());
+  ck('['+sd+'] 种子不回写 (sf_pseed 未被改写)', SEED_NO_REWRITE);
  }
 }
 
@@ -257,7 +283,7 @@ for(const sz of [300,480]){
  const T=SZTAB[sz], GN=Math.round(sz/5);                   // 00c: GN=Math.round(HALF*2/5)=sz/5
  for(const bm of ['farm','town','water']){
   for(const sd of byBiome[bm]){
-   const ctx=makeCtx(sd,PGIDX,sz);
+   const ctx=makeCtxM(sd,sz);
    const g=expr=>vm.runInContext(expr,ctx);
    const FLAGS=g('CAMPAIGN.flags'), BASES=g('CAMPAIGN.bases'), FIELDS=g('CAMPAIGN.fields'),
          LOTS=g('PGDATA.lots'), H=g('PGDATA.hgrid');
@@ -283,7 +309,7 @@ for(const sz of [300,480]){
 // 同种子同规模全同 (三群系全部样本种子各两次运行逐位一致)
 ck('同种子同规模全同 (三群系两次运行逐位一致)', (()=>{
  for(const bm of ['farm','town','water']) for(const sd of byBiome[bm]){
-  const a=makeCtx(sd,PGIDX), b=makeCtx(sd,PGIDX);
+  const a=makeCtxM(sd), b=makeCtx(sd,PGIDX); // 效率批: a 侧取 A 段缓存 build (同为独立生成), b 侧 fresh build —— 仍是两次独立生成逐位比对
   const ga=vm.runInContext('JSON.stringify({F:CAMPAIGN.flags,B:CAMPAIGN.bases,R:CAMPAIGN.roads,Fd:CAMPAIGN.fields,L:PGDATA.lots,P:PGDATA.polys,S:PGDATA.settles,W:PGDATA.woods,SG:PGDATA.singles,r:CAMPAIGN.river,b:CAMPAIGN.bridges,d:CAMPAIGN.delta})',a);
   const gb=vm.runInContext('JSON.stringify({F:CAMPAIGN.flags,B:CAMPAIGN.bases,R:CAMPAIGN.roads,Fd:CAMPAIGN.fields,L:PGDATA.lots,P:PGDATA.polys,S:PGDATA.settles,W:PGDATA.woods,SG:PGDATA.singles,r:CAMPAIGN.river,b:CAMPAIGN.bridges,d:CAMPAIGN.delta})',b);
   if(ga!==gb) return false;
@@ -294,7 +320,7 @@ ck('同种子同规模全同 (三群系两次运行逐位一致)', (()=>{
 ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
  for(const bm of ['farm','town','water']){
   const sd=byBiome[bm][0];
-  const a=makeCtx(sd,PGIDX,380), b=makeCtx(sd,PGIDX,480);
+  const a=makeCtxM(sd,380), b=makeCtxM(sd,480);
   const ga=vm.runInContext('JSON.stringify({F:CAMPAIGN.flags,Fd:CAMPAIGN.fields,L:PGDATA.lots})',a);
   const gb=vm.runInContext('JSON.stringify({F:CAMPAIGN.flags,Fd:CAMPAIGN.fields,L:PGDATA.lots})',b);
   if(ga===gb) return false;
@@ -313,7 +339,7 @@ ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
   for(const [sd,rec] of Object.entries(base.seeds)){
    if(rec.biome!=='farm') continue;
    n++;
-   const c=makeCtx(parseInt(sd,10),PGIDX,(rec.size||380));
+   const c=makeCtxM(parseInt(sd,10),(rec.size||380));
    if(vm.runInContext(FP,c)===rec.fp) same++; else drift.push(sd);
   }
   ck('farm 基线逐位零漂移 ('+n+' 种子@380)', same===n, 'drift: '+drift.join(','));
@@ -327,7 +353,7 @@ ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
   town:{n:0,flags:{},sk:{},fields:0},
   water:{n:0,flags:{},sk:{},cross:0,bridge:{},ford:0,pond:0,chan:0,rice:0}};
  for(let s=100001;s<100241;s++){
-  const c=makeCtx(s,PGIDX), gg=e=>vm.runInContext(e,c);
+  const c=makeCtxM(s), gg=e=>vm.runInContext(e,c);
   const bm=gg('PG.biome'); const S=stat[bm]; if(!S) continue; S.n++;
   const F=gg('CAMPAIGN.flags.length');
   S.flags[F]=(S.flags[F]||0)+1;

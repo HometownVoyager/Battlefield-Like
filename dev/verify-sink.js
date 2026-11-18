@@ -169,12 +169,19 @@ sandbox.THREE=THREE;
 sandbox.window=window;
 sandbox.CANNON=window.CANNON;
 // ── 逐脚本加载 ──
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘+编译缓存 (14 boot 原先每次重读重编全链)
+function load(ctx,file){ LC.script(root,file).runInContext(ctx); }
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; } // 2026-11-19 效率批
 function boot(campIdx){
 const byIdx={};for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));
 ctx.document=document;ctx.window=window;
-ctx.localStorage={_s:{sf_campaign:String(campIdx)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
+// 2026-11-19 效率批 (偶发根治三件套之一/之二): ①钉 procgen 种子 —— 旧版 ?seed=42 钉不住 procgen 战役
+// (00-config 只认 sf_pseed/?pseed, 未命中 ⇒ PG.rnd=true ⇒ 每局随机抽种子 ⇒ 群系/布局每局不同,
+// 精确计数断言随抽签偶发翻红); ②播种 Math.random (先例 verify-roofghost) —— 装饰/残骸 restT 等
+// 逐位可复现, 运行间方差归零。两者只改探针输入, 不改被测游戏代码。
+const M=Object.create(Math); M.random=mulberry32(424242); ctx.Math=M;
+ctx.localStorage={_s:{sf_campaign:String(campIdx),sf_pseed:'424242'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
 // window 桩跨 boot 共享: 真页每次载入都是新 window, 这里必须手工复位对局期全局,
 // 否则上一战役 startMatch 写的 __sfMatchWorldStart 泄漏进下一战役 —— procgen 世界比旧边界大时,
 // 首次 retireMatchActors 台账清扫会按陈旧边界整段摘掉本世界的后段网格 (2026-10-24g 偶发红根因)。
@@ -399,8 +406,11 @@ return out;
 })()`,ctx);
 }
 const idx=process.argv[2]!==undefined?parseInt(process.argv[2]):-1;
-const probe=boot(0);
-const total=vm.runInContext('CAMPAIGN.n?1:1',probe)&&vm.runInContext('CAMPAIGNS.length',probe);
+// 效率批: 只取战役数 → 轻量 ctx 只载 00-config (先例 verify-roofghost idxOf), 免一次全链 boot;
+// 原 'CAMPAIGN.n?1:1' 恒为 1 (两分支同值), 纯冗余守卫, 删去不改变 total 语义。
+const probe=vm.createContext({console:{log(){},warn(){},error(){}},location:{search:''},localStorage:{_s:{},getItem:()=>null,setItem(){},removeItem(){}},window:{},navigator:{},Math,JSON,Object,Array,Number,String,Boolean,Date,parseInt,parseFloat});
+LC.script(root,'js/00-config.js').runInContext(probe);
+const total=vm.runInContext('CAMPAIGNS.length',probe);
 const all=Array.from({length:total},(_,k)=>k);
 const range=idx>=0&&idx<total?[idx]:all;
 let bad=0;

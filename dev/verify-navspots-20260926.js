@@ -10,7 +10,8 @@
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
 const root=path.resolve(__dirname,'..');
-const SRC=f=>fs.readFileSync(path.join(root,f),'utf8');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘 memo + 编译缓存 (14 次 boot 原先每次重读重编全链)
+const SRC=f=>LC.src(root,f);
 const HEAD=['js/00-config.js','js/00b-i18n.js','js/00c-procgen.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js',
 'js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js',
 'js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js',
@@ -21,6 +22,7 @@ const {sandbox,document,window}=require('./_bootstub.js');
 require('./_bootpatch.js').patch(sandbox);
 // 07-nav 内部表 (open/comp/csize) 不在导出表里 → 文本补一个只读 dbg 导出 (对源码语义零改动)
 const NAVSRC=SRC('js/07-nav.js').replace('return { findPath, blocked2D:','return { dbg:{open,N,SP,OFF,idx,toW,comp,csize}, findPath, blocked2D:');
+let _navScr=null; const navScript=()=>_navScr||(_navScr=new vm.Script(NAVSRC,{filename:'js/07-nav.js'})); // 补丁版只编译一次
 function boot(campIdx){
 	const ctx=vm.createContext(Object.assign({},sandbox));
 	ctx.document=document; ctx.window=window; ctx.globalThis=ctx;
@@ -29,7 +31,7 @@ function boot(campIdx){
 	ctx.console={log(){},warn(){},error(){}};
 	const errs=[];
 	for(const f of HEAD){
-		try{ vm.runInContext(f==='js/07-nav.js'?NAVSRC:SRC(f),ctx,{filename:f}); }
+		try{ (f==='js/07-nav.js'?navScript():LC.script(root,f)).runInContext(ctx); }
 		catch(e){ errs.push(f+': '+String(e&&e.message||e)); }
 	}
 	try{ vm.runInContext('document.getElementById("startBtn").onclick();',ctx); }catch(e){ errs.push('startBtn: '+String(e&&e.message||e)); }
@@ -37,13 +39,14 @@ function boot(campIdx){
 }
 const DUMP=process.argv.includes('--dump');
 const N=(ctx,code)=>vm.runInContext(code,ctx);
-const nCamp=N(boot(0).ctx,'CAMPAIGNS.length');
+const probe0=boot(0); // 效率批: 只读 CAMPAIGNS.length 的 pristine ctx, 下方 ci=0 循环复用, 省 1 次全链 boot
+const nCamp=N(probe0.ctx,'CAMPAIGNS.length');
 const camps=process.argv.slice(2).filter(a=>/^\d+$/.test(a)).map(Number);
 
 let bad=0, soft=0, ok=0, bootErr=[];
 if(!camps.length) for(let ci=0;ci<nCamp;ci++) camps.push(ci);
 for(const ci of camps){
-	const {ctx,errs}=boot(ci);
+	const {ctx,errs}=(ci===0?probe0:boot(ci)); // ci=0 查询全只读, 复用 pristine ctx
 	if(errs.length) bootErr=bootErr.concat(errs.map(e=>`[图${ci}] `+e));
 	const r=N(ctx,`(()=>{
 const b0=(typeof BASES!=='undefined'&&BASES)?BASES[0]:null, b1=(typeof BASES!=='undefined'&&BASES)?BASES[1]:null;

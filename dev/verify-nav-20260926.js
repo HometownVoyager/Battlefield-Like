@@ -21,7 +21,8 @@ const root=path.resolve(__dirname,'..');
 const OK=[],BAD=[];
 function assert(name,cond,detail){ (cond?OK:BAD).push(name); console.log(`  ${cond?'✓':'✗'} ${name}${detail?'  '+detail:''}`); }
 function section(t){ console.log('\n══ '+t+' ══'); }
-const SRC=f=>fs.readFileSync(path.join(root,f),'utf8');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘 memo + vm.Script 编译缓存 (15 次 boot 原先每次重读重编全链)
+const SRC=f=>LC.src(root,f);
 
 const NEG=process.argv.includes('--neg');
 const capArg=(()=>{ const a=process.argv.find(s=>s.indexOf('--cap=')===0); return a?parseInt(a.slice(6)):0; })();
@@ -48,6 +49,7 @@ function navSource(){
 	return s;
 }
 const NAVSRC=navSource();
+let _navScr=null; const navScript=()=>_navScr||(_navScr=new vm.Script(NAVSRC,{filename:'js/07-nav.js'})); // 补丁版源码也只编译一次
 const HEAD=['js/00-config.js','js/00b-i18n.js','js/00c-procgen.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js',
 'js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js',
 'js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js',
@@ -64,7 +66,7 @@ function boot(campIdx){
 	ctx.console={log(){},warn(){},error(){}};
 	const errs=[];
 	for(const f of HEAD){
-		try{ vm.runInContext(f==='js/07-nav.js'?NAVSRC:SRC(f),ctx,{filename:f}); }
+		try{ (f==='js/07-nav.js'?navScript():LC.script(root,f)).runInContext(ctx); }
 		catch(e){ errs.push(f+': '+String(e&&e.message||e)); }
 	}
 	// 开局 (世界布景/NAV.refresh 在这一步完成); 桩里没这个按钮也不许把探针搞死
@@ -77,7 +79,8 @@ function boot(campIdx){
 const N=(ctx,code,vars)=>{ if(vars) for(const k of Object.keys(vars)) ctx[k]=vars[k]; return vm.runInContext(code,ctx); };
 
 // ── 逐战役判据 ──
-const campTotal=N(boot(0).ctx,'CAMPAIGNS.length');
+const probe0=boot(0); // 效率批: 此 ctx 只读 CAMPAIGNS.length, 下方 ci=0 查询与 ⑦ 合成对照均复用它, 省 2 次全链 boot
+const campTotal=N(probe0.ctx,'CAMPAIGNS.length');
 const camps=campArg.length?campArg:Array.from({length:campTotal},(_,i)=>i);
 
 let gMismatch=0, gFalseNull=0, gSegFail=0, gSegBridge=0, gClipped=0, gQueries=0, gPaths=0, gPairs=0, gCleanPaths=0;
@@ -87,7 +90,7 @@ const problems=[], islandProbs=[];
 let bootErrs=[];
 
 for(const ci of camps){
-	const {ctx,errs}=boot(ci);
+	const {ctx,errs}=(ci===0?probe0:boot(ci)); // ci=0 查询全只读 (findPath/表读), 复用 pristine ctx 语义不变
 	if(errs.length) bootErrs=bootErrs.concat(errs.map(e=>`[图${ci}] `+e));
 	const title=N(ctx,'CAMPAIGNS['+ci+'].title');
 	const q=N(ctx,`(()=>{
@@ -237,7 +240,7 @@ if(islandProbs.length>40) console.log(`   · …(其余 ${islandProbs.length-40}
 // 所以"点状"到底多小才算点状, 只能实测 (下面逐档列出), 不当成想当然。
 section('⑦ 判据的合成对照 (真几何: 墙必须被拒 / 点状道具逐档量出可绕行上限)');
 {
-	const z=boot(0);   // 诺曼底: 图心一带是开阔农田, 便于找净空带
+	const z=probe0;   // 诺曼底: 图心一带是开阔农田, 便于找净空带 (效率批: 复用探序号 ctx; ⑦ 的变异在全部战役查询之后)
 	const r=N(z.ctx,`(()=>{
 const clearLine=(x1,z1,x2,z2,off)=>{ const dx=x2-x1,dz=z2-z1,d=Math.hypot(dx,dz)||1,px=-dz/d*off,pz=dx/d*off,steps=Math.max(1,Math.ceil(d/0.9));
  for(let s=0;s<=steps;s++){ const t=s/steps; if(NAV.blocked2D(x1+dx*t+px,z1+dz*t+pz)) return false; } return true; };
