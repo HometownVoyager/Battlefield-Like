@@ -12,11 +12,12 @@
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批: 读盘 memo (10 boot 原先每次重读; 编译缓存见 scrOf)
 const root=path.resolve(__dirname,'..');
 const OK=[],BAD=[];
 function assert(name,cond,detail){ (cond?OK:BAD).push(name); console.log(`  ${cond?'✓':'✗'} ${name}${detail?'  '+detail:''}`); }
 function section(t){ console.log('\n══ '+t+' ══'); }
-const SRC=f=>fs.readFileSync(path.join(root,f),'utf8');
+const SRC=f=>LC.src(root,f); // 2026-11-19 效率批
 const has=(src,needle)=>src.indexOf(needle)>=0;
 
 const NEG=process.argv.includes('--neg');
@@ -28,7 +29,7 @@ const PATCHES=[
  {f:'js/16-aircraft.js', from:'const PLANE_PILOT_WAIT_MAX=10;', to:'const PLANE_PILOT_WAIT_MAX=1e9;'},
  {f:'js/13-combat.js', from:'const nv=navalRayQuery(origin,dir,wallD,shooter);', to:'const nv=null;'},
  {f:'js/13-combat.js', from:'if(block&&block.dist<d-0.5) dmg*=0.25;\n}\ns.damage(dmg,attacker,false);', to:'}\ns.damage(dmg,attacker,false);'},
- {f:'js/15-vehicles.js', from:'const feedName=driver?(this.name+\' · 乘员×3\'):this.name;', to:'const feedName=this.name+\' · 乘员×3\';'},
+ {f:'js/15-vehicles.js', from:'const feedName=(driver&&!spec)?(t(this.name)+\' · \'+t(\'乘员×3\')):t(this.name);', to:'const feedName=t(this.name)+\' · \'+t(\'乘员×3\');'}, // 2026-11-19 判据跟码: 2026-11-17 批1 战报名走词典+观战豁免, 锚点同步 (语义不变: 摘条件=空车/观战也吹乘员×3 的坏状态)
  {f:'js/06-engineering.js', from:'if(occBlocked(x,z)){ if(owner.isPlayer) showScorePop(t2(\'此处无法架设\')); return false; }', to:''},
  {f:'js/15d-naval.js', from:'if(n.kind===\'amph\') topY=(typeof VEH_HIT_TOP===\'number\')?VEH_HIT_TOP:2.6;', to:'if(false&&n.kind===\'amph\') topY=2.6;'},
 ];
@@ -37,6 +38,7 @@ if(NEG) for(const p of PATCHES){ const s=PATCH_MAP[p.f]!==undefined?PATCH_MAP[p.
 	if(s.indexOf(p.from)<0) throw new Error('阴性对照锚点未找到: '+p.f+' :: '+p.from.slice(0,40));
 	PATCH_MAP[p.f]=s.replace(p.from,p.to); }
 const srcOf=f=>(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:SRC(f));
+const SCR={}; // 2026-11-19 效率批: 按 f memo 编译 (srcOf(f) 每进程恒定 ⇒ 键 f 安全)
 
 // ══════════════════════════════════════════════════════════════════════════
 // ① 源码防回退断言
@@ -136,7 +138,7 @@ function boot(campIdx,extraLocal,start){
 	ctx.localStorage={_s:Object.assign({sf_campaign:String(campIdx)},extraLocal||{}),getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
 	ctx.console={log(){},warn(){},error(){}};
 	const errs=[];
-	for(const f of HEAD){ try{ vm.runInContext(srcOf(f),ctx,{filename:f}); }catch(e){ errs.push(f+': '+String(e&&e.message||e)); } }
+	for(const f of HEAD){ try{ (SCR[f]||(SCR[f]=new vm.Script(srcOf(f),{filename:f}))).runInContext(ctx); }catch(e){ errs.push(f+': '+String(e&&e.message||e)); } } // 2026-11-19 效率批: PATCH_MAP 文本模块载入期定死, 按文件名 memo 编译安全
 	if(start!==false){
 		try{ vm.runInContext('document.getElementById("startBtn").onclick();',ctx); }catch(e){ errs.push('startBtn: '+String(e&&e.message||e)); }
 	}

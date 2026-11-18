@@ -5,7 +5,7 @@
 //           同一批判据必须报红 —— 证明判据真的在测那两条修复, 不是"修复前后都绿"的空断言。
 //
 // 判据 (逐战役 + 汇总):
-//   ① 纯函数    : 同一 (起点,终点) 连跑 4 次, 结果必须完全一致 (路径逐点相同; null↔路径 也算不一致)
+//   ① 纯函数    : 同一 (起点,终点) 连跑 2 次, 结果必须完全一致 (路径逐点相同; null↔路径 也算不一致) (2026-11-19 效率批 4→2: 用户令减少重复验证, 保留 1 组对照仍抓"残留状态污染本次"主病灶)
 //   ② 无假失败  : 起终点同连通分量 (即没被分量表剪枝) 的查询不许返回 null
 //   ③ 路标可核验: 端点干净的查询, 输出路径相邻两路标必须段段过 NAV.lineClear
 //                 (端点被 fix() 外推的查询单列 —— 那段桥接本就无从核验, 不计入判据)
@@ -117,8 +117,8 @@ for(const q of QUERIES){
  const sameComp=(cs>=0&&ct>=0&&cs===ct);
  const crossComp=(cs>=0&&ct>=0&&cs!==ct);
  const runs=[], pops=[], stl=[];
- for(let k=0;k<4;k++){ const p=NAV.findPath(q.x,q.z,q.tx,q.tz); pops.push(NAV.stats.lastNodes); stl.push(NAV.stats.lastSettles); runs.push(p?p.map(a=>[Math.round(a[0]*1e4)/1e4,Math.round(a[1]*1e4)/1e4]):null); }
- let same=true; for(let k=1;k<4;k++) if(JSON.stringify(runs[k])!==JSON.stringify(runs[0])) same=false;
+ for(let k=0;k<2;k++){ const p=NAV.findPath(q.x,q.z,q.tx,q.tz); pops.push(NAV.stats.lastNodes); stl.push(NAV.stats.lastSettles); runs.push(p?p.map(a=>[Math.round(a[0]*1e4)/1e4,Math.round(a[1]*1e4)/1e4]):null); } // 2026-11-19 效率批: 4→2
+ let same=true; for(let k=1;k<2;k++) if(JSON.stringify(runs[k])!==JSON.stringify(runs[0])) same=false;
  const p=runs[0];
  // 路标核验: 只对"端点干净 + 非同行同格早退"的路径判罪; 其余段只计桥接 (起点/终点被 fix() 外推, 无从核验)
  // 判据口径 = NAV.edgeOK (中线全通 或 ±NAV_EDGE_PAD 平行线全通) —— 与 A* 扩展/分量 BFS 同一条;
@@ -210,8 +210,8 @@ return {rows, pops:NAV.stats.nodes, calls:NAV.stats.calls, ok:NAV.stats.ok, fail
 
 section('① 沙箱装载');
 assert(`全链 ${HEAD.length} 文件 × ${camps.length} 战役零错误`, bootErrs.length===0, bootErrs.slice(0,3).join(' | '));
-section('② 纯函数 (同入参 4 次同结果)');
-assert(`findPath 是纯函数 (${gQueries} 个查询 × 4 次)`, gMismatch===0, gMismatch?`${gMismatch} 处不一致; 例: ${problems.find(p=>p.includes('非纯'))}`:'');
+section('② 纯函数 (同入参 2 次同结果)');
+assert(`findPath 是纯函数 (${gQueries} 个查询 × 2 次)`, gMismatch===0, gMismatch?`${gMismatch} 处不一致; 例: ${problems.find(p=>p.includes('非纯'))}`:'');
 section('③ 无假失败 (分量表说可达就不许 null)');
 assert(`同分量查询无一返回 null`, gFalseNull===0, gFalseNull?`${gFalseNull} 处:`:'');
 for(const p of problems.filter(s=>s.includes('同分量却 null')).slice(0,20)) console.log('   · '+p);
@@ -223,7 +223,7 @@ assert(`干净端点路径零穿墙段`, gCleanSegFail===0,
 console.log(`  附: 严格中线 (lineClear) 不过但走廊可通的段 ${gStrictFail} 段` +
 	(gStrictFail?` (最小可通侧移 ${gMinOffs.length?Math.min.apply(null,gMinOffs)+'~'+Math.max.apply(null,gMinOffs):'?'}m, ≤NAV_EDGE_PAD=1.5 即判据放行的界; 逐段量测见 dev/_navleg-diag.js)`:''));
 section('⑤ 代价 (未被硬上限截断 / 无重复弹出)');
-assert(`无查询撞 SEARCH_NODES 硬上限`, gClipped===0, `成功 ${gOk} / null ${gNull} / 分量剪枝 ${gPruned}; 平均弹出 ${Math.round(gPops/Math.max(1,gQueries*4))} 最大 ${gMaxPops}`);
+assert(`无查询撞 SEARCH_NODES 硬上限`, gClipped===0, `成功 ${gOk} / null ${gNull} / 分量剪枝 ${gPruned}; 平均弹出 ${Math.round(gPops/Math.max(1,gQueries*2))} 最大 ${gMaxPops}`);
 assert('无重复弹出 (索引式堆: 弹出数 == 落定数, 最多差 1)', gDupPop===0,
 	gDupPop?`${gDupPop} 个查询弹出>落定; 例: ${problems.find(p=>p.includes('重复弹出'))}`:'索引式堆每格每方向仅一项, 堆内不存在陈旧副本');
 

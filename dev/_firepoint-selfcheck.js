@@ -15,7 +15,7 @@
 //   沙箱 heightAt=0 (平地) ⇒ groundFit={y:0,pitch:0,roll:0} ⇒ 世界系 = 模型局部系 + grp 平移,
 //   于是"炮口沿 face 距炮位中心"可直接与 emplATFire 的 2.7 / emplMGFire 的 1.35 对账。
 //
-// 判据 (与 15e 炮艇自检同规, 见 dev/_naval-model-selfcheck.js 文件头):
+// 判据 (与 15e 炮艇自检同规, 见 archive/dev-probes-cleanup-20261118/_naval-model-selfcheck.js (2026-11-19 效率批归档) 文件头):
 //   ① 浮件 = 与**任何**其他件都无正体积相交, 且 AABB 最近距离 >0.02m ⇒ 命中即 FAIL;
 //   ② 接合深度 = 两件 AABB 三轴重叠长度的最小值; 非薄片件(自身最薄处 ≥JOINT)必须 ≥JOINT=0.06m,
 //      薄片件(<0.06) 豁免深度但**仍须正体积相交** (口径"薄板件另说");
@@ -33,7 +33,7 @@ const OK=[],BAD=[];
 function assert(name,cond,detail){ (cond?OK:BAD).push(name); console.log(`  ${cond?'✓':'✗'} ${name}${detail?'  '+detail:''}`); }
 const f2=v=>(Math.round(v*100)/100).toFixed(2), f3=v=>(Math.round(v*1000)/1000).toFixed(3);
 
-// ══════════════ 真 three.js r152 (与 dev/_naval-model-selfcheck.js 同一支装法) ══════════════
+// ══════════════ 真 three.js r152 (与 archive/dev-probes-cleanup-20261118/_naval-model-selfcheck.js (2026-11-19 效率批归档) 同一支装法) ══════════════
 function loadRealTHREE(){
 	const s={console,Math,JSON,Date,String,Number,Object,Array,Set,Map,Error,TypeError,isNaN,parseFloat,parseInt,
 		self:null,globalThis:null,

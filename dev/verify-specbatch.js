@@ -182,7 +182,7 @@ sandbox.confirm=()=>true;   // 默认“确定”; 需要“取消”的用例�
 sandbox.globalThis=sandbox;
 sandbox.THREE=THREE;
 sandbox.window=window;
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+function load(ctx,file){ require('./_loadcache.js').script(root,file).runInContext(ctx); } // 2026-11-19 效率批: 读盘+编译缓存 (11 boot 原先每次重读重编)
 function boot(campIdx){
 for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));

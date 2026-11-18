@@ -188,7 +188,7 @@ AudioContext:AC,
 sandbox.globalThis=sandbox;
 sandbox.THREE=THREE;
 sandbox.window=window;
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+function load(ctx,file){ require('./_loadcache.js').script(root,file).runInContext(ctx); } // 2026-11-19 效率批: 读盘+编译缓存 (9 boot)
 const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/23-deploy.js','js/24-main.js'];
 // pinRandom=true: 让 rand(a,b) 恒取区间中点 (Math.random=0.5) ⇒ 弹道散布/后坐抖动全部归零, 断言可复现。
 // 用 Object.create(Math) 的浅层代理, 只在沙箱内影子化 random, 不影响宿主脚本自己的 Math。

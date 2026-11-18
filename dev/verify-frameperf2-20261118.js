@@ -86,14 +86,16 @@ if(SRC[f].indexOf(from)<0){ console.log('✗ NEG 锚缺失: '+f+' :: '+from.slic
 PATCH_MAP[f]=(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:SRC[f]).split(from).join(to);
 }
 if(NEG) console.log('NEG 载入补丁键: '+Object.keys(PATCH_MAP).join(', ')+' | 24-main updateFires 计数='+((PATCH_MAP['js/24-main.js']||'').match(/updateFires\(dt\);/g)||[]).length);
-const srcOf=f=>(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:fs.readFileSync(path.join(root,f),'utf8'));
+const LC=require('./_loadcache.js'); // 2026-11-19 效率批
+const srcOf=f=>(PATCH_MAP[f]!==undefined?PATCH_MAP[f]:LC.src(root,f));
+const SCR={}; // 按 f memo 编译 (srcOf(f) 每进程恒定: PATCH_MAP 模块载入期定死 ⇒ 键 f 安全)
 
 function boot(campIdx,extraLs){
 for(const k in stub.byId)delete stub.byId[k];
 const ctx=vm.createContext(Object.assign({},stub.sandbox));
 ctx.document=stub.document; ctx.window=stub.window; ctx.CANNON=CANNON;
 ctx.localStorage={_s:Object.assign({sf_campaign:String(campIdx)},extraLs||{}),getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
-for(const f of FILES) vm.runInContext(srcOf(f),ctx,{filename:f});
+for(const f of FILES) (SCR[f]||(SCR[f]=new vm.Script(srcOf(f),{filename:f}))).runInContext(ctx); // 2026-11-19 效率批: 编译缓存 (8 boot)
 return ctx;
 }
 const PASS=[];let FAILN=0;

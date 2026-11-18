@@ -34,7 +34,7 @@ function loadRealTHREE(){
 	return T;
 }
 const THREE=loadRealTHREE();
-// ══════════════ 沙箱: 00-config + 15e (与 dev/_naval-model-selfcheck.js 同一套) ══════════════
+// ══════════════ 沙箱: 00-config + 15e (与 archive/dev-probes-cleanup-20261118/_naval-model-selfcheck.js (2026-11-19 效率批归档) 同一套) ══════════════
 const texStub=()=>({__stub:true});
 const sandbox={
 	console,Math,JSON,Date,Array,Object,Set,Map,isNaN,parseInt,parseFloat,String,Number,Boolean,Error,THREE,

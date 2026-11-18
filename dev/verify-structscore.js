@@ -172,7 +172,7 @@ AudioContext:AC,
 sandbox.globalThis=sandbox;
 sandbox.THREE=THREE;
 sandbox.window=window;
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+function load(ctx,file){ require('./_loadcache.js').script(root,file).runInContext(ctx); } // 2026-11-19 效率批: 读盘+编译缓存 (10 boot)
 function boot(campIdx){
 for(const k in byId)delete byId[k];
 const ctx=vm.createContext(Object.assign({},sandbox));

@@ -119,10 +119,11 @@ function loadRealTHREE(){
 	vm.runInContext(fs.readFileSync(path.join(root,'dev/vendor/three.min.js'),'utf8'),s,{filename:'dev/vendor/three.min.js'});
 	return m.exports;
 }
+const REAL_THREE=loadRealTHREE(); // 2026-11-19 效率批: three.min.js 解析只做一次 (per-boot 补丁幂等, 先例 verify-vehburn-20261109)
 const html=SRC('index.html');
 const FILES=[...html.matchAll(/src="(js\/[^"?]+)/g)].map(m=>m[1]);
 function boot(campIdx){
-	const T=loadRealTHREE();
+	const T=REAL_THREE; // 效率批: 解析去重
 	T.WebGLRenderer=class{ constructor(){ this.domElement=Object.assign(document.createElement('canvas'),{width:0,height:0}); this.shadowMap={enabled:false,type:0,autoUpdate:true};
 		this.setSize=()=>{}; this.setPixelRatio=()=>{}; this.render=()=>{}; this.clear=()=>{}; this.clearDepth=()=>{};
 		this.outputColorSpace=''; this.setClearColor=()=>{}; this.setAnimationLoop=()=>{}; } };

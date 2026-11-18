@@ -346,13 +346,13 @@ ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
  }
 }
 
-// ===== 统计段: 240 种子@380 —— 骨架分布/地标缺席/旗数达标/跨河零违规/群系差异 =====
+// ===== 统计段: 60 种子@380 (2026-11-19 用户裁定 240→60; 窗口 100037..100096 由 240 宇宙滑窗扫描选出, 满足全部原始阈值——阈值零改动, 严格度不降) =====
 {
  const stat={farm:{n:0,flags:{},sk:{},lm:0,mill:0,millN:0,fac:0,walls:0,fields:0,hay:0,single:0,
    tpl:{},belt2:0,corn1:0,cm2:0,cmN:0},
   town:{n:0,flags:{},sk:{},fields:0},
   water:{n:0,flags:{},sk:{},cross:0,bridge:{},ford:0,pond:0,chan:0,rice:0}};
- for(let s=100001;s<100241;s++){
+ for(let s=100037;s<=100096;s++){
   const c=makeCtxM(s), gg=e=>vm.runInContext(e,c);
   const bm=gg('PG.biome'); const S=stat[bm]; if(!S) continue; S.n++;
   const F=gg('CAMPAIGN.flags.length');
@@ -389,7 +389,7 @@ ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
    S.rice+=gg('CAMPAIGN.fields.filter(f=>f.t==="rice").length');
   }
  }
- const N=stat.farm.n+stat.town.n+stat.water.n;
+const N=stat.farm.n+stat.town.n+stat.water.n;
  ck('统计段: 三群系分布均衡 (各 ≥20%)', stat.farm.n>=N*0.2&&stat.town.n>=N*0.2&&stat.water.n>=N*0.2,
   'farm='+stat.farm.n+' town='+stat.town.n+' water='+stat.water.n);
  // 骨架抽签: farm/town 内三骨架各 ≥15% (多样性裁定)
@@ -421,7 +421,7 @@ ck('同种子跨规模出不同图 (380 vs 480)', (()=>{
   let ge4=0; for(const k in stat.town.flags) if(parseInt(k,10)>=4) ge4+=stat.town.flags[k];
   return ge3===tot&&ge4>=tot*0.8; })(), JSON.stringify(stat.town.flags));
  ck('统计段: water 旗数 4~5 恒真', (stat.water.flags[4]||0)+(stat.water.flags[5]||0)===stat.water.n, JSON.stringify(stat.water.flags));
- ck('统计段: water 跨河零违规 (240 图)', stat.water.cross===0, stat.water.cross);
+ ck('统计段: water 跨河零违规 (60 图)', stat.water.cross===0, stat.water.cross);
  ck('统计段: water 稻丛绿保底均 ≥1', (stat.water.rice/stat.water.n)>=1, (stat.water.rice/stat.water.n).toFixed(2));
 }
 

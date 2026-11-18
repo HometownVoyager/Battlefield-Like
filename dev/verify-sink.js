@@ -72,6 +72,7 @@ applyAxisAngle(){return this;}setFromMatrixColumn(){return this;}lerpVectors(){r
 class Euler{constructor(){this.x=0;this.y=0;this.z=0;this.order='XYZ';}set(x,y,z,o){this.x=x;this.y=y;this.z=z;if(o)this.order=o;return this;}}
 class Obj3{constructor(){this.position=new V3();this.rotation=new Euler();this.scale=new V3(1,1,1);this.quaternion={setFromUnitVectors(){return this;}};this.children=[];this.visible=true;this.castShadow=false;this.receiveShadow=false;this.renderOrder=0;this.matrix={};this.userData={};this.material=null;this.geometry=null;}
 add(m){this.children.push(m);m.parent=this;return this;}remove(m){const i=this.children.indexOf(m);if(i>=0){this.children.splice(i,1);m.parent=null;}}
+rotateX(){return this;}rotateY(){return this;}rotateZ(){return this;} // 2026-11-19 效率批: 忠实化桩 (与 _bootstub 2026-11-18 同款) —— 05b barrelWreck 在 setFromUnitVectors 倾地后调 grp.rotateY 自旋, 桩上缺它=建残骸即抛 (moscow 坠机段偶发红真身, 非 game 断言失败)
 traverse(fn){fn(this);for(const c of this.children)if(c&&c.traverse)c.traverse(fn);}
 updateMatrix(){const e=this.matrix.elements||(this.matrix.elements=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]));e[12]=this.position.x;e[13]=this.position.y;e[14]=this.position.z;return this;}
 lookAt(){return this;}

@@ -85,6 +85,10 @@ try{ for(const k of trucks) k.alive=false; trucks.length=0; }catch(e){}
 shells.length=0; gunEvents=[];
 try{ SMOKES.length=0; }catch(e){}
 try{ matchOver=false; }catch(e){}
+// 2026-11-19 效率批 (6boot→1 单世界合并): 世界还原单源复位 —— 上段对决的残骸/火源/弹坑/沉没账/
+// 植被倒伏不再泄进下段 (23b 快照 boot 期已拍, restorePristineWorld 就地回初始; 各段 lane 用的是
+// 预搜 memo, 与本复位无交互)。try/catch: 子集沙箱没有 23b 时退回旧行为。
+try{ if(typeof restorePristineWorld==='function') restorePristineWorld(); }catch(e){}
 }
 	// 车道搜索: 长 L 直线, 两端 OCC 空 + 双向通视 (与 tankPerceive 同一套口径: 眼高 1.9 → 目标 +1.3) + 沿线可行驶
 	// 2026-11-14 缩图批 640→360: 图幅缩小后布景密度相对升高, 旧 10m 中线单线采样会漏掉车道中段的占用格/树
@@ -151,10 +155,15 @@ return {step,clear,lane,mk,crew,bearing,foot};
 let checks=0, failures=0;
 const chk=(c,m)=>{ checks++; console.log((c?'  ✓ ':'  ✗ ')+m); if(!c) failures++; };
 
+// 2026-11-19 效率批: 确定性三件套之播种 (先例 verify-roofghost / verify-sink) —— 装饰/抖动逐位可复现
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
 function boot(diff){
 	const ctx=vm.createContext(Object.assign({},sandbox));
 	ctx.document=document; ctx.window=window; ctx.globalThis=ctx;
-	ctx.localStorage={_s:{sf_campaign:String(CAMP_STEPPE)},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
+	// 2026-11-19 效率批: 钉 procgen 种子 (sf_pseed; 旧版只钉战役不钉种子 ⇒ 世界每局随机抽签) + 播种 Math.random。
+	// 这是"6 boot→1 单世界"合并的前提: 一张图要同时放下 200/120/160 三条车道, 必须把"抽到坏图"变成确定性可验。
+	ctx.localStorage={_s:{sf_campaign:String(CAMP_STEPPE),sf_pseed:'424242'},getItem(k){return this._s[k]??null;},setItem(k,v){this._s[k]=String(v);},removeItem(k){delete this._s[k];}};
+	const M=Object.create(Math); M.random=mulberry32(424242); ctx.Math=M;
 	// 开局加载期世界会往 stdout 打进度 (如 "[地形] 建筑地基平台: 重刷 N 个顶点") —— 探针只需要自己的断言输出,
 	// 过滤掉这类加载期噪音, 让"真实 stdout"一眼可读 (warn/error 原样保留)
 	ctx.console={log:(...a)=>{ const s=a.map(x=>String(x)).join(' '); if(!/^\[(地形|HUD|NAV|世界)/.test(s)) console.log(...a); }, warn:console.warn.bind(console), error:console.error.bind(console)};
@@ -168,11 +177,12 @@ function boot(diff){
 }
 
 // ── 受控对决: 两辆敌对坦克沿通视车道对置 L 米, 记录"锁上对方"(tVehTgt) 与"首次开火"时刻 ──
-function duel(b,diff,L,seconds,turretOff,hp,note){
+// 2026-11-19 效率批: laneJSON 传入预搜车道 memo (单世界合并; 缺省回退现场搜索)
+function duel(b,diff,L,seconds,turretOff,hp,note,laneJSON){
 	if(b.diff!==diff){ vm.runInContext('SETTINGS.diff='+diff,b.ctx); b.diff=diff; }
 	const r=vm.runInContext(`(()=>{
 const T=__T; T.clear();
-const ln=T.lane(${L});
+const ln=${laneJSON||('T.lane('+L+')')};
 if(!ln) return {ok:false,err:'未找到 ${L}m 通视车道'};
 const bay=T.bearing(ln.ax,ln.az,ln.bx,ln.bz);
 // 诊断 (2026-09-20 I5 联动): 车道本身是否被植被软遮蔽 —— 灌木若恰好落在测试走廊上, 会让"锁定/开火"变慢;
@@ -216,11 +226,21 @@ d:+endDist().toFixed(1),hpA:Math.round(A.hp),hpB:Math.round(B.hp),manA,manB};
 
 console.log('== I1 坦克车组 AI 交战层 验证 (2026-09-20) ==');
 
+// ── 2026-11-19 效率批: 6 boot→1 单世界合并 ──
+// 旧版每段独立 boot(同战役同图, 唯一差异 SETTINGS.diff, 而难度档本就支持运行期热切 —— tankAITune 按 diff
+// 现算+分档缓存, 15-vehicles 函数注释即为此设计; duel() 一直就在热切)。合并后六段共享一张钉种世界:
+// 三条车道 (200/120/160) 在**任何场景 mutate 世界之前**一次性预搜存表 (lane 同世界几何确定性, 同 L 必同结果),
+// 各段取用 memo —— 消掉 9 次重复车道搜索 (旧 lane() 全程实跑 9 次: 120×5/160×1/200×3)。
+const B=boot(1);
+const LN=(()=>{ const r=vm.runInContext(`(()=>{ const T=__T; T.clear(); return JSON.stringify({l200:T.lane(200),l120:T.lane(120),l160:T.lane(160)}); })()`,B.ctx); return JSON.parse(r); })();
+if(!LN.l200||!LN.l120||!LN.l160){ console.log('  ✗ 钉种世界车道不齐 (200/120/160): '+JSON.stringify(LN)); process.exit(1); }
+const LNJ={l200:JSON.stringify(LN.l200),l120:JSON.stringify(LN.l120),l160:JSON.stringify(LN.l160)};
+
 // ── 断言 ①: 200m 直线对置, N 秒内双方进入交战 ──
 console.log('\n[①] 敌车感知 → 进入交战 (200m 直线对置, 老兵档, 车组在车)');
-const b0=boot(1);
+const b0=B; // 效率批: 单世界合并 (下同; 原 6 boot 各自建世界)
 console.log('    难度档: '+(b0.tune||'').replace(/"/g,'')+' | 开局='+b0.start);
-const A1=duel(b0,1,200,12,0,0,'200m');
+const A1=duel(b0,1,200,12,0,0,'200m',LNJ.l200);
 if(!A1.ok) chk(false,'场景建立失败: '+A1.err);
 else{
 	console.log(`    车道 A(${A1.lane.ax},${A1.lane.az}) → B(${A1.lane.bx},${A1.lane.bz}) 起伏${A1.lane.relief}m 车道被植被遮蔽=${A1.lane.fol===null?'无 foliageBlocksLOS':A1.lane.fol}`);
@@ -234,10 +254,10 @@ else{
 
 // ── 断言 ②: 新兵 vs 精英 首次开火延迟 ──
 console.log('\n[②] 难度分档削弱: 首次开火延迟 (120m 对置, 初始塔偏 ±1.2rad, 双方血量拉高避免中途弃车)');
-const bR=boot(0), bV=boot(2);
-console.log('    新兵档: '+vm.runInContext('JSON.stringify(tankAITune())',bR.ctx).replace(/"/g,''));
-console.log('    精英档: '+vm.runInContext('JSON.stringify(tankAITune())',bV.ctx).replace(/"/g,''));
-const R=duel(bR,0,120,10,1.2,9000,'新兵'), V=duel(bV,2,120,10,1.2,9000,'精英');
+const bR=B, bV=B; // 效率批: 单世界 (难度档由 duel/spreadOf 热切, 不再各 boot)
+console.log('    新兵档: '+vm.runInContext('SETTINGS.diff=0; JSON.stringify(tankAITune())',bR.ctx).replace(/"/g,''));
+console.log('    精英档: '+vm.runInContext('SETTINGS.diff=2; JSON.stringify(tankAITune())',bV.ctx).replace(/"/g,''));
+const R=duel(bR,0,120,10,1.2,9000,'新兵',LNJ.l120), V=duel(bV,2,120,10,1.2,9000,'精英',LNJ.l120);
 if(!R.ok||!V.ok) chk(false,'场景建立失败: '+(R.err||V.err));
 else{
 	const dR=Math.min(R.fireA===null?99:R.fireA,R.fireB===null?99:R.fireB);
@@ -253,10 +273,11 @@ else{
 
 // ── ②b 命中削弱直接量化: 同一姿态连打 240 发, 量弹向与 aimDir 的角偏差 (散布) ──
 console.log('    散布实测 (同姿态 240 发, 弹向与 aimDir 角偏差, rad):');
-const spreadOf=(bd,lbl)=>{
+const spreadOf=(bd,lbl,diff,laneJSON)=>{
+	vm.runInContext('SETTINGS.diff='+diff,bd.ctx); bd.diff=diff; // 效率批: 热切 (单世界)
 	const s=vm.runInContext(`(()=>{
 const T=__T; T.clear();
-const ln=T.lane(120);
+const ln=${laneJSON||'T.lane(120)'};
 const bay=T.bearing(ln.ax,ln.az,ln.bx,ln.bz);
 const A=T.mk(0,0,ln.ax,ln.az,bay);
 const errs=[];
@@ -274,17 +295,17 @@ return {mean,sd,max:Math.max.apply(null,errs)};
 	console.log(`      ${lbl}: 平均 ${s.mean.toFixed(5)} / 标准差 ${s.sd.toFixed(5)} / 最大 ${s.max.toFixed(5)}`);
 	return s;
 };
-const sR=spreadOf(bR,'新兵'), sV0=spreadOf(b0,'老兵'), sE=spreadOf(bV,'精英');
+const sR=spreadOf(bR,'新兵',0,LNJ.l120), sV0=spreadOf(b0,'老兵',1,LNJ.l120), sE=spreadOf(bV,'精英',2,LNJ.l120);
 chk(sR.sd>sV0.sd&&sV0.sd>sE.sd,`三档散布严格递减 (${sR.sd.toFixed(5)} > ${sV0.sd.toFixed(5)} > ${sE.sd.toFixed(5)})`);
 chk(sR.sd>1.8*sE.sd,`新兵散布 ≥1.8× 精英 (实测 ${(sR.sd/sE.sd).toFixed(2)}×; 代码口径 0.0234→0.0056, 理论 4.2×)`);
 chk(sE.sd>0,`精英仍有散布 (标准差 ${sE.sd.toFixed(5)} > 0: 不修成"零误差狙击手")`);
 
 // ── 断言 ③: 车体不穿模 (正面挤压 + 侧面切撞) ──
 console.log('\n[③] 坦克↔坦克车体分离 (无乘员手驱, 每帧喂 vel=7 硬挤)');
-const bP=boot(1);
+const bP=B; // 效率批: 单世界
 const P=vm.runInContext(`(()=>{
 const T=__T; T.clear();
-const ln=T.lane(160);
+const ln=${LNJ.l160};
 if(!ln) return {ok:false,err:'未找到车道'};
 const bay=T.bearing(ln.ax,ln.az,ln.bx,ln.bz);
 const dx=Math.sin(bay), dz=Math.cos(bay);
@@ -325,10 +346,10 @@ else{
 
 // ── 断言 ④: 互不误伤 (友方坦克 / 友方步兵 压在弹道上) ──
 console.log('\n[④] 友军弹道预检 (AI 坦克 90m 外有敌车; 友军车/友军步兵 压线 vs 让开, A/B 对照)');
-const bF=boot(1);
+const bF=B; // 效率批: 单世界
 const F=vm.runInContext(`(()=>{
 const T=__T; T.clear();
-const ln=T.lane(200);
+const ln=${LNJ.l200};
 if(!ln) return {ok:false,err:'未找到车道'};
 const bay=T.bearing(ln.ax,ln.az,ln.bx,ln.bz);
 const dx=Math.sin(bay), dz=Math.cos(bay);
@@ -379,10 +400,10 @@ else{
 
 // ── 旁证 ⑤⑥: 玩家驾驶路径不被改动 ──
 console.log('\n[⑤⑥] 玩家路径旁证 (isAI=false 不吃 AI 散布 / 玩家车不被 AI 推)');
-const bL=boot(1);
+const bL=B; // 效率批: 单世界
 const PL=vm.runInContext(`(()=>{
 const T=__T; T.clear();
-const ln=T.lane(200);
+const ln=${LNJ.l200};
 if(!ln) return {ok:false,err:'未找到车道'};
 const bay=T.bearing(ln.ax,ln.az,ln.bx,ln.bz);
 const P=T.mk(0,0,ln.ax,ln.az,bay);

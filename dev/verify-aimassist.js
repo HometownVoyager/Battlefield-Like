@@ -68,7 +68,7 @@ sandbox.AudioContext=ACStub; sandbox.window.AudioContext=ACStub; sandbox.window.
 sandbox.confirm=()=>true;
 // ── 全链文件表 (与 index.html 同序; 含 15c/15d/15e/15f 与 22b) ──
 const FILES=['js/00-config.js','js/00b-i18n.js','js/01-audio.js','js/02-scene.js','js/03-terrain.js','js/04-collision.js','js/04b-fire.js','js/05-world.js','js/05a-buildings.js','js/05b-props.js','js/05c-layouts.js','js/06-engineering.js','js/07-nav.js','js/08-effects.js','js/09a-defs.js','js/09-weapons.js','js/10-viewmodel.js','js/11-soldiers.js','js/12-ragdolls.js','js/13-combat.js','js/14-bots.js','js/15-vehicles.js','js/15b-trucks.js','js/15c-specveh.js','js/15e-navmodels.js','js/15d-naval.js','js/15f-battery.js','js/16-aircraft.js','js/17-emplacements.js','js/18-game.js','js/19-input.js','js/20-player.js','js/20a-seats.js','js/21-match.js','js/22-hud.js','js/22a-menuart.js','js/22b-speclayer.js','js/23-deploy.js','js/23b-worldrestore.js','js/24-main.js'];
-function load(ctx,file){ vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file}); }
+function load(ctx,file){ require('./_loadcache.js').script(root,file).runInContext(ctx); } // 2026-11-19 效率批: 读盘+编译缓存 (7 boot)
 // 沙箱内小工具 (与 _finalaudit-tankai 同风格: 只在沙箱内定义一次)
 // ★ 用顶层 `var` 而不是 `globalThis.__AA`: 桩里的 globalThis 指向**共享的 sandbox 对象** (跨 boot 污染),
 //   写 globalThis.x 会落到共享对象上而不进本 context 的全局 —— 首个 boot 里读不到的坑就是这么来的。

@@ -3663,3 +3663,24 @@ explodeAt 同式」（frameperf 并行批在案预存，正向+稳定性复核 3
 **文档**: README §七·4 补新用法与红账口径 + §八本批行; 交付文档 finished-docs/批-验证套件并行化瘦身-2026-11-19.md (含给用户的五项裁定清单: 漏登补登 3 绿 2 需跟码/语义类提速选项/二三档切除候选/偶发族确定性化推广/戳钉判据改读 _game_files.txt 结构性改造)。
 
 **实机验收**: 全量跑一轮墙钟量级; --only 定向秒级反馈; --rerun 0 快速档; 红名输出病灶可读。
+
+## 一.121 验证套件瘦身二波: 三裁定落地 × 「减少重复验证」新令手术 (2026-11-19, 待实机验收)
+
+**用户令①**: 一波交付文档五项裁定批复 = 补登 3 支全绿 / procgen 扫掠 240→60 / 二档切除全归档。
+
+**用户令②**: 「我希望各个脚本可以减少重复验证的次数，并且能省则省。」
+
+**裁定落地**: ①procgen 统计段 60 种子窗 **100037..100096** (240 宇宙滑窗扫描选定, **阈值零改动**——拒绝按 60 样本重校准, 严格度不降; farm=24/town=20/water=16 三群系最均衡窗) 535/0 ×3 连跑, 单跑 36.7→**15.9s**。②3 支全绿补登 SANDBOX (verify-tvosd-headbonk-20261110 / verify-frameperf-fx-20261113 / verify-walkstep-ceiling-20261118, 清单 108→111, 诊断工具 probe-renderstat 仍居尾)。③二档 8 件归档 archive/dev-probes-cleanup-20261118/ (_naval-selfcheck/_naval-model-selfcheck/_navalai-selfcheck/_navalcrew-selfcheck/probe-naval/_zfight-naval 海战自检残件 + verify-fixes.js + _fkey-selfcheck.js; 引用核查: _naval-model-selfcheck 仅被 _firepoint-selfcheck/_modelview **注释**提及=历史溯源指针, 归档后已把 3 处注释同步改指 archive 路径)。
+
+**「减少重复验证」手术** (全部判定行等价法逐一验证):
+
+- **tankai 6 boot→1 单世界** (23.3→**3.8s**, 套件最大头): 六段同战役同图仅差 SETTINGS.diff (本就支持运行期热切=tankAITune 按 diff 现算+分档缓存, duel() 一直热切)。合并三前提: ①确定性三件套 (sf_pseed='424242'+mulberry32 播种, sink 同款) ②三车道 (200/120/160) 在任何 mutate 之前**预搜存表** (lane 同世界几何确定性; 全程实搜 9 次→3 次) ③PRELUDE clear() 接 **restorePristineWorld() 单源** (23b 快照 boot 期已拍——残骸/火源/弹坑/沉没账/植被倒伏段间不再互泄)。红账语义原样: 1/21「新兵档双方都开了火」签名逐字一致; 确定性实证=两次运行断言行逐字节一致 (仅加载期 ms 日志漂移)。
+- **nav 纯函数检验 4→2**: 同入参连跑 4 次改 2 次 (保留 1 组对照仍抓「残留状态污染本次」主病灶; 统计分母 gQueries×4→×2 跟码), 判定 8✓/0✗ 与 HEAD 逐字一致。
+- **LC 接线 +6**: specbatch(11 boot)/structscore(10)/spec(9)/specthird(9)/aimassist(7) load 换 LC.script + frameperf2 (srcOf→LC.src + 按 f 编译 memo)。
+- **真 THREE 解析去重 +6**: dynreload 6→1 次 / willow·achieve·parity·vehburnfix 各 3→1 (per-boot WebGLRenderer/prototype 补丁幂等, vehburn 先例) / phase2 LC 接线 (633KB 只解析一次; 类构建必须逐 ctx 不省)。
+- **sink 桩忠实化**: 自带 THREE 桩 Obj3 补 rotateX/Y/Z no-op (与 _bootstub 2026-11-18 同款) —— 05b barrelWreck grp.rotateY 缺失 = moscow 坠机段偶发红真身 (桩不足假红非断言失败; 消掉后套件不再为其烧 3×31.8s 复核 CPU), solo 2 连跑全绿。
+- **fixbatch 补线+过期锚跟码**: ★一波交付文档/提交信息称 fixbatch 已接线——**实为虚报** (git show e8b67ae 文件清单无此文件, 本波子智能体审计对照发现), 本波真正落地 (LC.src + 按 f 编译 memo, 正向 55/0); NEG 过期锚判据跟码 (feedName 2026-11-17 批走词典+观战豁免), --neg 复活 (46✓/6✗ 按设计报红)。
+
+**回归**: 全量 -j10 = **109/117 exit=0 墙钟 93.4s** (一波 97.0s→, 基线 ≈25min≈15×→≈16×); 稳定红 6 = 在案签名逐支对认 (tankai 1/21 同签名), 偶发 loiterview 复核 3/3 过, timestopfix solo 2 绿 1 红 = 在案偶发族原样 (本批零触碰)。零 js/ 游戏代码改动; 新登 3 支全绿。
+
+**待裁定遗留**: probe-bots 同款 rotateY 桩缺口=在案红真身, 修桩可解锁更深断言但改变裁定红语义 (未动); timestopfix/killattr/botai/loiterview 偶发族确定性三件套推广 (各自验证轮); nightgear/fixes-20261010 过期钉跟码; LC 二三档 ~12 支 (单支省 0.08-0.4s 收益递减)。
