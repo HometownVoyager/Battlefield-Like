@@ -1206,10 +1206,10 @@ hudSlowT=0.1;
 	let modeLine='';
 	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE) modeLine='';
 	else if(GAMEMODE==='assault') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('攻防战 · 攻方占超一半且守方仅余1点→守方兵力流失 · 任意一方占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜{0}',CAMPAIGN.id==='songhu'?t(' · <span style="color:#9fd4e8">浅滩涉水减速 · 深水主河须过石桥</span>'):(CAMPAIGN.sea?t(' · <span style="color:#9fd4e8">礁盘涉水 · 深水游泳[Shift下潜] · 水下憋气有限</span>'):''))}</div>`;
-	else if(GAMEMODE==='demolition') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('破袭战 · 剩余补给库: {0}/{1}',DEPOTS.filter(d=>!d.destroyed).length,DEPOTS.length)}</div>`;
+	else if(GAMEMODE==='demolition') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('破袭战 · 剩余补给库: {0}/{1} · 兵力打空后须占满全部点位+歼灭残兵方可判胜',DEPOTS.filter(d=>!d.destroyed).length,DEPOTS.length)}</div>`;
 	else if(GAMEMODE==='conquest') modeLine=`<div style="font-size:11px;color:#ffd77a">${CAMPAIGN.bridge?t('拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉'):t('征服战 · 一方占超一半且对方仅余1点→对方兵力流失 · 占满全部旗点→敌方兵力归零 · 全旗+歼灭残兵两条件齐备才判胜')}</div>`;
-	else if(GAMEMODE==='clash') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('遭遇战 · 夺取强点推进战线 · 兵力打空后需清场残敌方胜')}</div>`;
-	else if(GAMEMODE==='convoy'){ const cs=(typeof CONVOY_STATE!=='undefined'&&CONVOY_STATE)?t(' · 剩余 {0} 辆 · 已突围 {1}',CONVOY_STATE.left,CONVOY_STATE.esc):''; modeLine=`<div style="font-size:11px;color:#ffd77a">${t('劫道战 · 毁车过半→劫道方胜, 突围过半→护运方胜 · 劫道方补给 {0} 分钟后失效 · 护运方贴车补{1}',Math.round(((CAMPAIGN.convoy&&CAMPAIGN.convoy.supplyLife)||600)/60),cs)}</div>`; }
+	else if(GAMEMODE==='clash') modeLine=`<div style="font-size:11px;color:#ffd77a">${t('遭遇战 · 夺取强点推进战线 · 兵力打空后需占满全部强点+清场残敌方胜')}</div>`;
+	else if(GAMEMODE==='convoy'){ const cs=(typeof CONVOY_STATE!=='undefined'&&CONVOY_STATE)?t(' · 剩余 {0} 辆 · 已突围 {1}',CONVOY_STATE.left,CONVOY_STATE.esc):''; modeLine=`<div style="font-size:11px;color:#ffd77a">${t('劫道战 · 毁车过半→劫道方胜, 突围过半→护运方胜 · 兵力打空后须占满全部点位+歼灭残兵方可判胜 · 劫道方补给 {0} 分钟后失效 · 护运方贴车补{1}',Math.round(((CAMPAIGN.convoy&&CAMPAIGN.convoy.supplyLife)||600)/60),cs)}</div>`; }
 	// 详细操作开关 (2026-11-09 批): 关=隐藏顶部模式说明 ("……任意一方占满全部旗点……"等局外说明);
 	// wipeLine 是实时战况 (兵力归零/清场倒计时), 不属"局外说明", 保留。
 	if(!SHOW_CTL_HINTS) modeLine='';
@@ -1229,9 +1229,9 @@ hudSlowT=0.1;
 	}else{
 		for(const z of [0,1]){
 			if(tickets[z]<=0){
-				// 同归零局旗权条件豁免 (2026-10-06, 与 21-match 清场判定同口径): 对方也归零时不再要求占满全旗
-				const gl=(tickets[1-z]<=0)?0:flagsLostOf(1-z);
-				wipeLine+=`<div style="font-size:11px;color:#ff9c8a">${t('⚠ {0} 兵力归零 · {1} 需{2}消灭其场上残兵(剩 {3} 人)方可获胜{4}',t(TEAM_NAME[z]),t(TEAM_NAME[1-z]),gl>0?t('占满全部旗点(余 {0} 点)+',gl):'',fieldCount(z),wipeT[z]!==null?`<b style="color:#ffe08a">${t(' · ⏳ 最后一人清场倒计时 {0} 秒',Math.ceil(wipeT[z]))}</b>`:'')}</div>`;
+				// ★2026-11-19 全模式统一双条件: 点位门槛恒显示 (旧版"对方票尽即豁免显示"已随 21-match 清场判定收紧; 双清空=平局出口, 本行随结算页消失)
+				const gl=flagsLostOf(1-z);
+				wipeLine+=`<div style="font-size:11px;color:#ff9c8a">${t('⚠ {0} 兵力归零 · {1} 需{2}消灭其场上残兵(剩 {3} 人)方可获胜{4}',t(TEAM_NAME[z]),t(TEAM_NAME[1-z]),gl>0?t('占满全部点位(余 {0} 处)+',gl):'',fieldCount(z),wipeT[z]!==null?`<b style="color:#ffe08a">${t(' · ⏳ 最后一人清场倒计时 {0} 秒',Math.ceil(wipeT[z]))}</b>`:'')}</div>`;
 			}
 		}
 	}

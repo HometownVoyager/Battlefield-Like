@@ -112,9 +112,15 @@ if(prev!==-1&&prev!==attacker) addKillMsg(t('⚠ 强点「{0}」失守',s.name),
 }
 }
 }
-function flagsLostOf(team){ // 攻防/征服: 胜方须占满全部旗点; 无旗模式忽略该条件
-if(GAMEMODE==='assault'||GAMEMODE==='conquest') return FLAGS.filter(f=>f.owner!==team).length;
-return 0;
+function flagsLostOf(team){ // 终局点位门槛 (2026-11-19 用户裁定·全模式统一): 一方人数归零后, 对方须占满全部点位才判胜
+// 有旗图数旗点 (原只认 攻防/征服 → 现扩到 破袭/劫道; 破袭炸库/劫道护送的目标胜利路径不加此条件, 只门槛"归零结算");
+// 强点按 initSpots 的 capturable 数据声明计 (2026-09-21 WS3 同款哲学: 遭遇战全点/岛礁中立点可争,
+//   baituan/canyon 己方固定出生点不可争=不计); 两者皆无 → 0 (图上没有可占点位, 条件自然豁免=旧"无旗模式忽略"口径)。
+// 循环写法兼省旧 filter 的每帧分配 (本函数 10Hz HUD + 结算帧双消费)。
+let n=0;
+for(const f of FLAGS) if(f.owner!==team) n++;
+for(const s of SPOTS) if(s.capturable&&s.own!==team) n++;
+return n;
 }
 function fieldCount(team){ // 在场人数: 存活地面士兵(含坦克乘员/跳伞/未登机飞行员) + 存活玩家 (观战者不计)
 let n=0;
@@ -281,9 +287,10 @@ if(!matchOver){
 		}
 		return;
 	}
-	// 清场判定: 兵力归零方封重生, 对方须 占满全旗(攻防/征服)+歼灭场上全部残兵 才判胜 (2026-09-05: 坦克不再计入);
-	// 双方同归零时旗权条件豁免 (2026-10-06 用户实机反馈"双方0剩余无法结束战局": 两边都封重生了,
-	// 没人有票力去完成占满全旗, 再要求它=死局), 以场上残余为准: 先被清空者负, 同帧清空=平局
+	// 清场判定: 兵力归零方封重生, 对方须 占满全部点位+歼灭场上全部残兵 两条件齐备才判胜
+//   (2026-11-19 用户裁定·全模式统一: 点位=旗点+可争夺强点, 单源在 flagsLostOf; 2026-09-05: 坦克不再计入);
+//   双方同归零的旧旗权豁免 (2026-10-06"双方0剩余无法结束战局"死局出口) 已按新规收紧 —— 幸存方仍有人在场上,
+//   占满点位恒可完成, 不再死局; 唯一真死局 = 双方都被清空 (无人能占旗) → 平局出口保留: 先被清空者负, 同帧清空=平局
 	const z0=tickets[0]<=0, z1=tickets[1]<=0;
 	if(z0&&!wipeAnnounced[0]){
 		wipeAnnounced[0]=true;
@@ -291,7 +298,7 @@ if(!matchOver){
 			if(ZOMBIE_MODE==='solo') addKillMsg(t('⚠ 兵力耗尽 · 全灭即出局'),1);
 			else addKillMsg(t('⚠ {0} 兵力耗尽 · 消灭其场上残兵方可获胜',t(TEAM_NAME[0])),1);
 		}else{
-			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),(z1?0:flagsLostOf(1))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(1)):''),1);
+			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[0]),t(TEAM_NAME[1]),flagsLostOf(1)>0?t('须占领全部点位(余 {0} 处)+ ',flagsLostOf(1)):''),1);
 		}
 	}
 	if(z1&&!wipeAnnounced[1]){
@@ -299,7 +306,7 @@ if(!matchOver){
 		if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE){
 			addKillMsg(t('⚠ {0} 兵力耗尽 · 消灭其场上残兵方可获胜',t(TEAM_NAME[1])),0);
 		}else{
-			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),(z0?0:flagsLostOf(0))>0?t('须占领全部旗点(余 {0} 点)+ ',flagsLostOf(0)):''),0);
+			addKillMsg(t('⚠ {0} 兵力耗尽 · {1} {2}消灭其场上残兵方可获胜',t(TEAM_NAME[1]),t(TEAM_NAME[0]),flagsLostOf(0)>0?t('须占领全部点位(余 {0} 处)+ ',flagsLostOf(0)):''),0);
 		}
 	}
 	if(z0&&z1){
@@ -308,8 +315,8 @@ if(!matchOver){
 	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='teams'){
 		// 丧尸双队对抗: 单方全灭不立即宣告胜利, 存活队仍需撑过10分钟由 25-zombies 判定
 	}else{
-		if(f0===0){ requestEnd(1); return; }
-		if(f1===0){ requestEnd(0); return; }
+		if(f0===0&&flagsLostOf(1)===0){ requestEnd(1); return; }   // ★2026-11-19 双条件 (旧版同归零旗权豁免已收紧): 胜方还须占满全部点位 — 幸存方有人在场⇒占满恒可完成
+		if(f1===0&&flagsLostOf(0)===0){ requestEnd(0); return; }
 	}
 	}else if(z0){
 	if(typeof ZOMBIE_MODE!=='undefined'&&ZOMBIE_MODE==='teams'){
@@ -322,14 +329,17 @@ if(!matchOver){
 	}else if(ZOMBIE_MODE){ if(fieldCount(1)===0){ requestEnd(0); return; } }
 	else if(fieldCount(1)===0&&flagsLostOf(0)===0){ requestEnd(0); return; }
 	}
-	// 最后一人清场倒计时 (2026-09-04 用户指定; 2026-09-05 加触发门槛: 须对方已占满全部旗点[无旗模式忽略]才启动,
-	// 旗权未占满时对方须先完成占旗; 倒计时期间旗权被翻回 → 倒计时复位, 重新占满后从 30s 重来)
-	// 2026-10-06 同归零豁免+对齐 (用户裁定): 双方都归零时旗权门槛豁免 (同上, 已无意义);
-	//   双方同处最后1人 (1v1) 时后启动者把双方计时都重置为 30s —— 先剩1人的一方不再"先跑完先输",
-	//   对齐后双方同帧到点 ⇒ 平局 (单侧到点仍判对方胜, 旧口径不变)。
-	//   启动/对齐与扣减拆成两段: 对齐若发生在扣减之后, 会被本帧扣减弄出 1 帧错位 (先到点方被误判负)。
+	// 最后一人清场倒计时 (2026-09-04 用户指定; 2026-09-05 加触发门槛: 须对方已占满全部点位[全模式统一, 单源 flagsLostOf]才启动,
+//   点位未占满时对方须先完成占领; 倒计时期间点位被翻回 → 倒计时复位, 重新占满后从 30s 重来)
+// 2026-10-06 对齐 (用户裁定, 保留): 双方同处最后1人 (1v1) 时后启动者把双方计时都重置为 30s —— 先剩1人的一方
+//   不再"先跑完先输", 对齐后双方同帧到点 ⇒ 平局 (单侧到点仍判对方胜, 旧口径不变)。
+// 2026-11-19 新规收窄: 同归零豁免从"双方都归零即豁免"收窄为"对称 1v1 才豁免" —— 非对称同归零局 (一方已清空)
+//   幸存方仍须先占满全部点位再启动倒计时 (否则到期会把胜利判给已清空/未占满的一方, 与新双条件矛盾);
+//   并加 fieldCount(1-zt)>0 门: 对方已被清空时无人可猎、也无人能完成占满, 倒计时启动即悖论 (旧版在单侧归零
+//   且归零方攥着全部旗点时可触发"清空方反而判胜", 本门兼修)。
+//   启动/对齐与扣减拆成两段: 对齐若发生在扣减之后, 会被本帧扣减弄出 1 帧错位 (先到点方被误判负)。
 	for(let zt=0;zt<2;zt++){
-	if(tickets[zt]<=0&&fieldCount(zt)===1&&((z0&&z1)||flagsLostOf(1-zt)===0)){
+	if(tickets[zt]<=0&&fieldCount(zt)===1&&fieldCount(1-zt)>0&&((z0&&z1&&fieldCount(1-zt)===1)||flagsLostOf(1-zt)===0)){
 	if(wipeT[zt]===null){
 	wipeT[zt]=WIPE_GRACE;
 	if(wipeT[1-zt]!==null){

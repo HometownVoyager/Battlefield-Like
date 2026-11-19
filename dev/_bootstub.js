@@ -47,7 +47,7 @@ set(x,y,z){this.x=x;this.y=y;this.z=z;return this;}setScalar(s){this.x=s;this.y=
 copy(v){this.x=v.x;this.y=v.y;this.z=v.z;return this;}clone(){return new V3(this.x,this.y,this.z);}
 add(v){this.x+=v.x;this.y+=v.y;this.z+=v.z;return this;}sub(v){this.x-=v.x;this.y-=v.y;this.z-=v.z;return this;}
 addScaledVector(v,s){this.x+=v.x*s;this.y+=v.y*s;this.z+=v.z*s;return this;}
-multiplyScalar(s){this.x*=s;this.y*=s;this.z*=s;return this;}
+multiplyScalar(s){this.x*=s;this.y*=s;this.z*=s;return this;}addScalar(s){this.x+=s;this.y+=s;this.z+=s;return this;}   // ★2026-11-19: 真 Vector3 既有方法 (08-effects updateSmokes 云团 g*dt 增长消费), 桩忠实化
 normalize(){const l=Math.hypot(this.x,this.y,this.z)||1;this.x/=l;this.y/=l;this.z/=l;return this;}
 length(){return Math.hypot(this.x,this.y,this.z);}lengthSq(){return this.x*this.x+this.y*this.y+this.z*this.z;}
 distanceTo(v){return Math.hypot(this.x-v.x,this.y-v.y,this.z-v.z);}distanceToSquared(v){return (this.x-v.x)**2+(this.y-v.y)**2+(this.z-v.z)**2;}
@@ -150,6 +150,15 @@ _Color.prototype.lerp=function(target,a){
 const c0=_hex2rgb(this.c), c1=_hex2rgb(target&&target.c!==undefined?target.c:target);
 const mix=c0.map((v,i)=>Math.round(v+(c1[i]-v)*a));
 this.c=(mix[0]<<16)|(mix[1]<<8)|mix[2];
+return this;
+};
+}
+// ★2026-11-19 火焰重做批: 08-effects updateParticles 火苗色带走 material.color.setRGB (真 THREE.Color
+// 本就有); 桩只补到 set/setHex ⇒ 火苗分支一跑即抛 —— 忠实化补齐 (存 hex, getHex 口径不变)。
+if(!_Color.prototype.setRGB){
+_Color.prototype.setRGB=function(r,g,b){
+const q=v=>Math.max(0,Math.min(255,Math.round(v*255)));
+this.c=(q(r)<<16)|(q(g)<<8)|q(b);
 return this;
 };
 }

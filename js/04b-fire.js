@@ -111,7 +111,7 @@ function updateCreaturesBurning(dt){
     }
     if(typeof camera!=='undefined'&&camera&&Math.hypot(s.pos.x-camera.position.x,s.pos.z-camera.position.z)<70&&Math.random()<0.55&&fireFxOK()){
       const gy=s.pos.y||(typeof heightAt==='function'?heightAt(s.pos.x,s.pos.z):0);
-      spawnP(PT.flash,s.pos.x+rand(-0.2,0.2),gy+rand(0.4,1.2),s.pos.z+rand(-0.2,0.2),rand(-0.15,0.15),rand(1.0,1.8),rand(-0.15,0.15),rand(0.3,0.5),1.0,rand(0.2,0.35),0.85,-1,true);
+      spawnFlame(s.pos.x+rand(-0.2,0.2),gy+rand(0.4,1.2),s.pos.z+rand(-0.2,0.2),rand(-0.15,0.15),rand(1.0,1.8),rand(-0.15,0.15),rand(0.3,0.5),1.0,rand(0.2,0.35),0.85,-1);   // ★2026-11-19 火焰重做批
       if(Math.random()<0.25&&fireFxOK()) spawnP(PT.dark,s.pos.x,gy+rand(0.8,1.4),s.pos.z,rand(-0.1,0.1),rand(0.8,1.4),rand(-0.1,0.1),0.6,1.2,rand(0.8,1.3),0.4,0.08);
     }
   }
@@ -902,7 +902,7 @@ if(tr.fT<=0){
 tr.fT=rand(0.1,0.2);
 if(crown.y!==undefined&&Math.hypot(crown.x-camera.position.x,crown.z-camera.position.z)<110&&fireFxOK()){
 // 树冠火同样加大火头 (与地面植被火焰观感一致)
-spawnP(PT.flash,crown.x+rand(-0.8,0.8)*tr.s,crown.y+rand(-0.4,0.6),crown.z+rand(-0.8,0.8)*tr.s,rand(-0.4,0.4),rand(1.2,2.4),rand(-0.4,0.4),rand(1.0,1.7),1.7,rand(0.3,0.55),0.85,-1,true);
+spawnFlame(crown.x+rand(-0.8,0.8)*tr.s,crown.y+rand(-0.4,0.6),crown.z+rand(-0.8,0.8)*tr.s,rand(-0.4,0.4),rand(1.2,2.4),rand(-0.4,0.4),rand(1.0,1.7),1.7,rand(0.3,0.55),0.85,-1);   // ★2026-11-19
 if(Math.random()<0.4&&fireFxOK()) spawnP(PT.dark,crown.x,crown.y+1,crown.z,rand(-0.4,0.4),rand(1,2),rand(-0.4,0.4),1.0,1.7,rand(1.2,2),0.5,0.1);
 }
 }
@@ -1071,7 +1071,7 @@ if(s.acc<=0){
 s.acc=rand(0.08,0.16);
 const dCam=Math.hypot(s.x-camera.position.x,s.z-camera.position.z);
 if(dCam<130&&fireFxOK()){
-spawnP(PT.flash,s.x+rand(-0.8,0.8),s.y+rand(0,0.6),s.z+rand(-0.8,0.8),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1,true);
+spawnFlame(s.x+rand(-0.8,0.8),s.y+rand(0,0.6),s.z+rand(-0.8,0.8),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1);   // ★2026-11-19
 if(Math.random()<0.5&&fireFxOK()) spawnP(PT.dark,s.x+rand(-0.7,0.7),s.y+0.8,s.z+rand(-0.7,0.7),rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),0.9,1.7,rand(1.2,2.2),0.55,0.1);
 if(SETTINGS.quality>=1&&Math.random()<0.5&&fireFxOK()) spawnP(PT.spark,s.x,s.y+0.4,s.z,rand(-2,2),rand(2,5),rand(-2,2),0.1,-0.03,rand(0.3,0.7),1,4,true);
 }
@@ -1168,7 +1168,7 @@ fireFlameN++;
 const gy=heightAt(cx,cz);
 const inten=clamp(FUEL[ci],0.25,1);
 // 2026-09-02 植被火焰加大: 火头体积/蹿升速度/滞空提升, 燃烧观感更醒目 (与燃烧弹缩短存在时间配合)
-if(fireFxOK()) spawnP(PT.flash,cx+rand(-1.1,1.1),gy+rand(0.15,0.8),cz+rand(-1.1,1.1),rand(-0.3,0.3),rand(1.2,2.6)*inten+0.6,rand(-0.3,0.3),rand(0.8,1.3)*inten+0.4,1.6,rand(0.32,0.55),0.85,-1.4,true);
+if(fireFxOK()) spawnFlame(cx+rand(-1.1,1.1),gy+rand(0.15,0.8),cz+rand(-1.1,1.1),rand(-0.3,0.3),rand(1.2,2.6)*inten+0.6,rand(-0.3,0.3),rand(0.8,1.3)*inten+0.4,1.6,rand(0.32,0.55),0.85,-1.4);   // ★2026-11-19
 if(Math.random()<0.3&&fireFxOK()) spawnP(PT.dark,cx,gy+0.8,cz+rand(-0.5,0.5),rand(-0.3,0.3),rand(0.8,1.6),rand(-0.3,0.3),0.95,1.7,rand(1,1.8),0.45,0.1);
 else if(SETTINGS.quality>=1&&Math.random()<0.35&&fireFxOK()) spawnP(PT.spark,cx,gy+0.4,cz,rand(-1.5,1.5),rand(1.5,4),rand(-1.5,1.5),0.09,-0.03,rand(0.25,0.55),1,3,true);
 }

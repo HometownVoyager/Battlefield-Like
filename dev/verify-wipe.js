@@ -36,6 +36,11 @@ this.parameters={radius:r,widthSegments:ws,heightSegments:hs};
 //   T11 坦克越野跨越: 矮盒/油桶可跨不阻挡+底盘爬升+悬挂俯仰弹起, 1.6m 高墙仍阻挡;
 //   T12 击杀来源标签: 播报/玩家死亡显示载具/火力点名, 乘员身份反推载具名;
 //   T14 击杀记分单源: 玩家杀普通Bot=100/爆头=125 (onPlayerKill 唯一入口), Bot杀Bot=100 (2026-09-06 P0-1)。
+//   T16 同归零双条件 (2026-11-19 用户裁定·全模式统一): 一方清空+对方未占满全部点位 → 不判胜, 占满后判胜 (旧 2026-10-06 旗权豁免收紧);
+//   T17 1v1 对齐保留但收窄: 非对称同归零须胜方先占满点位才启动倒计时, 对称 1v1 对峙豁免保留 (对齐/平局口径不变);
+//   T19 破袭(baituan): 归零+旗点未占满 → 不判胜, 占满后判胜 (非旗权模式首次接入点位门槛);
+//   T20 遭遇(steppe): 归零+强点未占满 → 不判胜 (flagsLostOf 强点口径, 无旗图), 占满全部强点后判胜;
+//   T21 劫道(canyon): 无点位图 (无旗点+固定出生点不可争) ⇒ flagsLostOf≡0 归零即结 — 自然豁免口径回归护栏; 车队判定不受干扰。
 // ─────────────────────────────────────────────
 'use strict';
 const fs=require('fs'),path=require('path'),vm=require('vm');
@@ -102,7 +107,7 @@ setY(i,v){if(this.array)this.array[i*this.itemSize+1]=v;}
 setZ(i,v){if(this.array)this.array[i*this.itemSize+2]=v;}}
 class _Color{constructor(c){this.c=c;}set(){return this;}}
 const _wrapColor=c=>(typeof c==='number'||typeof c==='string')?{set(v){this.v=v;}}:(c&&typeof c==='object')?c:{set(){}};
-const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}dispose(){}}; };
+const _mat=cls=>{ return class extends cls{constructor(o){super();Object.assign(this,o||{});this.color=_wrapColor(this.color);}clone(){const c=new this.constructor(Object.assign({},this));return c;}dispose(){}}; };
 class _Fog{constructor(c,n,f){this.color=new _Color(c);this.near=n;this.far=f;}}
 class _FogExp2{constructor(c,d){this.color=new _Color(c);this.density=d;}}
 const THREE={
@@ -855,11 +860,11 @@ ok(/streakBuff\.refillT/.test(hud)&&/'\s*refill'/.test(hud),'T15 22-hud 读 refi
 ok(/#streakBuff\.refill\s*\{/.test(css)&&/@keyframes sbRefill/.test(css),'T15 CSS 提供 #streakBuff.refill + @keyframes sbRefill 脉冲');
 }
 
-// T16: 同归零旗权豁免 (2026-10-06 用户实机反馈"双方0剩余无法结束战局") —— 双方都归零后,
-//      一方残兵被清空 → 对方立即判胜, 不再要求"占满全部旗点" (旧版此处无出口=死局);
-//      同帧清空=平局 (T3 既有口径不受影响)。
+// T16: 同归零双条件 (2026-11-19 用户裁定·全模式统一) —— 双方都归零后, 一方残兵被清空 → 对方还须
+//      占满全部点位才判胜 (旧版 2026-10-06 旗权豁免"立即判胜"已收紧: 幸存方有人在场上, 占满恒可完成, 不再死局);
+//      双方都被清空 → 平局 (T3 既有口径不受影响)。
 function t16(){
-console.log('T16 同归零: 一方清空→对方立即胜, 旗权豁免 (淞沪 征服)');
+console.log('T16 同归零: 一方清空+旗权未占满→不判胜, 占满后判胜 (淞沪)');
 const ctx=boot(3);
 const err=vm.runInContext(`${HOOK}
 (()=>{
@@ -872,52 +877,76 @@ for(const s of soldiers){ if(!s.alive) continue;
 if(s.team===0) s.die(null,false);
 else if(!keep){ keep=s; s.pos.set(-140,0,-140); } else s.die(null,false); }
 for(const t of tanks){ if(t.alive) t.die(null); }
-// 旗权保持开局混合归属 (不占满) → 证明旗权条件在同归零局被豁免
+// 旗权保持开局混合归属 → 新规: 不判胜, 等胜方占满
 updateFlags(0.05);
-return {p:matchEndPending,w:__m.reason&&__m.reason.w,keepAlive:keep&&keep.alive,f0:fieldCount(0),f1:fieldCount(1)};
+const p1=matchEndPending;
+const flEarly=flagsLostOf(1);   // ★占满前采样 (旗权保持开局混合归属)
+const w1=wipeT[1];   // 对方(队0)已清空: 无人可猎/无人能占满 → 倒计时不启动 (2026-11-19 fieldCount 门)
+for(let i=0;i<100&&!matchOver;i++) updateFlags(0.05);
+const pLate=matchEndPending, overLate=matchOver, wLate=wipeT[1];
+// 占满全部旗点 → 判队1胜
+FLAGS.forEach(f=>{ f.owner=1; f.cap=0; f.capTeam=-1; });
+updateFlags(0.05);
+const p2=matchEndPending;
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);
+return {p1,w1,pLate,overLate,wLate,p2,over:matchOver,w:__m.winner,
+fl:flEarly,f0:fieldCount(0),f1:fieldCount(1)};
 }catch(e){ return 'ERR:'+String(e&&e.stack||e); }
 })()`,ctx);
 if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T16 '+(err||'')); return; }
 ok(err.f0===0&&err.f1===1,'T16 场面: 队0清空/队1剩1人 (实测 '+err.f0+'/'+err.f1+')');
-ok(err.p===1&&err.w===1,'T16 同归零+一方清空 → 对方立即判胜, 旗权未占满也放行 (旧版死局)');
+ok(err.fl>0,'T16 前置: 旗权未占满 (flagsLostOf(1)='+err.fl+')');
+ok(err.p1===null,'T16 同归零+一方清空+旗权未占满 → 不判胜 (旧版旗权豁免立即判胜已收紧, 2026-11-19)');
+ok(err.w1===null&&err.wLate===null,'T16 被清空局倒计时不启动 (对方无人可猎/无人能占满, fieldCount 门)');
+ok(err.pLate===null&&err.overLate===false,'T16 快进5秒仍不结算 (等胜方占满点位)');
+ok(err.p2===1&&err.over===true&&err.w===1,'T16 胜方占满全部旗点后 → 判队1胜');
 }
 
-// T17: 1v1 倒计时对齐 (2026-10-06 用户裁定) —— 同归零局双方都只剩1人时, 后启动者把双方计时
-//      都重置为 30s (先剩1人的一方不再"先跑完先输"); 同归零局旗权门槛豁免 (未占满也启动)。
+
+// T17: 1v1 倒计时对齐 (2026-10-06 用户裁定, 保留) + 2026-11-19 收窄 —— 非对称同归零 (对方还有多人) 时
+//      幸存方须先占满全部点位才启动倒计时; 对称 1v1 (双方各剩最后1人) 的豁免保留: 后启动者把双方计时
+//      都重置为 30s, 同帧到点=平局 (T18)。
 function t17(){
-console.log('T17 1v1 倒计时对齐+同归零门槛豁免 (淞沪 征服)');
+console.log('T17 1v1 对齐: 非对称同归零须先占满点位; 对称 1v1 豁免保留 (淞沪)');
 const ctx=boot(3);
 const err=vm.runInContext(`${HOOK}
 (()=>{
 try{
 document.getElementById('startBtn').onclick();
 tickets[0]=0; tickets[1]=0;
-// 队0留1人, 队1留2人 (挪远角), 其余全清; 旗权不占满 → 靠同归零豁免启动
+// 队0留1人, 队1留2人 (挪远角), 其余全清; 旗权保持开局混合归属
 var keep0=null,k1a=null,k1b=null;
 for(const s of soldiers){ if(!s.alive) continue;
 if(s.team===0){ if(!keep0){ keep0=s; s.pos.set(-140,0,-140); } else s.die(null,false); }
 else { if(!k1a){ k1a=s; s.pos.set(140,0,140); } else if(!k1b){ k1b=s; s.pos.set(140,0,140); } else s.die(null,false); } }
 for(const t of tanks){ if(t.alive) t.die(null); }
 updateFlags(0.05);
-const wA=wipeT[0];                       // 队0仅1人 → 倒计时启动 (旗权未占满, 靠豁免)
-for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);   // 快进2秒, 队0计时已跑掉一截
+const wA=wipeT[0];   // 新规收窄: 非对称同归零(队1还有2人)+旗权未占满 → 倒计时不启动
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);
 const wRun=wipeT[0];
-k1b.die(null,false);                     // 队1也只剩1人 → 队1倒计时启动 + 双方对齐回30
+const f1Start=fieldCount(1);   // 队1此时尚有2人 (非对称同归零)
+// 队1占满全部旗点 → 队0最后1人的倒计时启动 (点位门槛满足)
+FLAGS.forEach(f=>{ f.owner=1; f.cap=0; f.capTeam=-1; });
+updateFlags(0.05);
+const wGate=wipeT[0];
+k1b.die(null,false);   // 队1也只剩1人 → 对称 1v1 → 队1倒计时启动 + 双方对齐回30
 updateFlags(0.05);
 const w0=wipeT[0], w1=wipeT[1];
 const aligned=(__m.msgs||[]).some(m=>m.indexOf('对齐')>=0);
-return {wA,wRun,w0,w1,aligned,f1:fieldCount(1)};
+return {wA,wRun,f1Start,wGate,w0,w1,aligned,f0:fieldCount(0),f1:fieldCount(1)};
 }catch(e){ return 'ERR:'+String(e&&e.stack||e); }
 })()`,ctx);
 if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T17 '+(err||'')); return; }
-ok(err.wA>29&&err.wA<=30,'T17 同归零+队0仅1人 → 倒计时启动, 旗权未占满被豁免 (实测 '+err.wA+')');
-ok(err.wRun<29.7,'T17 队0倒计时先跑 (2秒后剩 '+err.wRun.toFixed(2)+'s)');
-ok(err.f1===1,'T17 队1清到仅剩1人');
-ok(err.w0>29&&err.w1>29,'T17 队1进倒数时双方都被重置回30s (实测 '+err.w0.toFixed(2)+'/'+err.w1.toFixed(2)+') — 先剩1人的一方不再吃亏');
+ok(err.f0===1&&err.f1Start===2,'T17 场面: 队0剩1人/队1剩2人 (同归零非对称) (实测 '+err.f0+'/'+err.f1Start+')');
+ok(err.wA===null&&err.wRun===null,'T17 非对称同归零+旗权未占满 → 倒计时不启动 (2026-11-19 收窄: 幸存方须先占满点位)');
+ok(err.wGate>29&&err.wGate<=30,'T17 队1占满全部旗点后 → 队0最后1人倒计时启动 (=30s 起算, 实测 '+err.wGate+')');
+ok(err.f1===1,'T17 队1清到仅剩1人 (对称 1v1)');
+ok(err.w0>29&&err.w1>29,'T17 1v1 对齐: 队1进倒数时双方都被重置回30s (实测 '+err.w0.toFixed(2)+'/'+err.w1.toFixed(2)+') — 2026-10-06 对齐保留');
 ok(err.aligned,'T17 对齐播报已发出');
 }
 
-// T18: 对齐后双双到点=平局 —— 1v1 各自倒计时同步走完 30 秒, 双方最后1人均存活 → 平局结算。
+
+// T18: 对齐后双双到点=平局 —— 1v1 各自倒计时同步走完 30 秒, 双方最后1人均存活 → 平局结算。 (2026-11-19 注: 同归零对称 1v1 豁免保留, 对峙平局兜底不变)
 function t18(){
 console.log('T18 1v1 双双到点→平局 (淞沪 征服)');
 const ctx=boot(3);
@@ -943,8 +972,109 @@ ok(err.a0===true&&err.a1===true,'T18 结算时双方最后1人均还活着 (正�
 ok(err.draw===true,'T18 同帧到点播报已发出');
 }
 
+// T19: 破袭模式 (baituan, demolition) —— 全模式统一: 归零+旗点未占满 → 不判胜; 占满后判胜。
+//      (旧版 flagsLostOf 恒 0 ⇒ 归零即结; 破袭的本模式目标路径 (炸库→requestEnd(ATK)) 代码未动, 不在本测内)
+function t19(){
+console.log('T19 破袭: 归零+旗点未占满→不判胜, 占满后判胜 (百团大战 demolition)');
+const ctx=boot(4);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+if(GAMEMODE!=='demolition') return 'ERR:boot(4) 不是 demolition: '+GAMEMODE;
+if(!FLAGS.length) return 'ERR:baituan 无旗点';
+FLAGS.forEach((ff,i)=>{ ff.owner=(i===0)?1:0; ff.cap=0; ff.capTeam=-1; });   // 显式混编归属 (不依赖开局分配): 队1持1点/队0持4点 ⇒ 未占满
+tickets[0]=0;
+// 队0全清; 活口全挪远角防止步进占旗; 旗权保持开局归属 (破袭开局=守方据守+攻方最近点)
+for(const s of soldiers){ if(s.alive&&s.team===0) s.die(null,false); }
+for(const t of tanks){ if(t.alive&&t.team===0) t.die(null); }
+for(const s of soldiers){ if(s.alive) s.pos.set(-140,0,-140); }
+updateFlags(0.05);
+const p1=matchEndPending;
+const fl=flagsLostOf(1);
+// 占满 → 判队1胜
+FLAGS.forEach(f=>{ f.owner=1; f.cap=0; f.capTeam=-1; });
+updateFlags(0.05);
+const p2=matchEndPending;
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);
+return {p1,fl,p2,over:matchOver,w:__m.winner,gm:GAMEMODE,nf:FLAGS.length};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T19 '+(err||'')); return; }
+ok(err.gm==='demolition'&&err.nf>0,'T19 前置: 百团大战 demolition / 旗点 '+err.nf+' 个');
+ok(err.fl>0,'T19 前置: 旗点未占满 (flagsLostOf(1)='+err.fl+')');
+ok(err.p1===null,'T19 归零+清空但旗点未占满 → 不判胜 (旧版归零即结, 2026-11-19 收紧)');
+ok(err.p2===1&&err.over===true&&err.w===1,'T19 占满全部旗点后 → 判队1胜');
+}
+
+
+// T20: 遭遇战 (steppe, clash) —— flagsLostOf 的强点口径: 无旗图以 capturable 强点计,
+//      归零+强点未占满 → 不判胜; 占满全部强点后判胜 (旧版归零即结)。
+function t20(){
+console.log('T20 遭遇: 归零+强点未占满→不判胜, 占满全部强点后判胜 (草原 clash)');
+const ctx=boot(8);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+if(GAMEMODE!=='clash') return 'ERR:boot(8) 不是 clash: '+GAMEMODE;
+if(!SPOTS.length) return 'ERR:steppe 无强点';
+tickets[0]=0;
+for(const s of soldiers){ if(s.alive&&s.team===0) s.die(null,false); }
+for(const t of tanks){ if(t.alive&&t.team===0) t.die(null); }
+for(const s of soldiers){ if(s.alive) s.pos.set(-140,0,-140); }
+updateFlags(0.05);
+const p1=matchEndPending;
+const fl=flagsLostOf(1), capN=SPOTS.filter(s=>s.capturable&&s.own!==1).length;
+// 占满全部可争夺强点 → 判队1胜
+SPOTS.forEach(s=>{ if(s.capturable){ s.own=1; s.cap=0; s.capTeam=-1; } });
+updateFlags(0.05);
+const p2=matchEndPending;
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);
+return {p1,fl,capN,p2,over:matchOver,w:__m.winner,gm:GAMEMODE,ns:SPOTS.length,nf:FLAGS.length};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T20 '+(err||'')); return; }
+ok(err.gm==='clash'&&err.nf===0&&err.ns>0,'T20 前置: 草原遭遇 clash / 无旗点 / 强点 '+err.ns+' 个 — 点位门槛全靠强点口径');
+ok(err.capN>0&&err.fl===err.capN,'T20 flagsLostOf 强点口径: 未占满 capturable 强点 = flagsLostOf(1) = '+err.fl+' (期望 '+err.capN+')');
+ok(err.p1===null,'T20 归零+强点未占满 → 不判胜 (旧版归零即结, 2026-11-19 收紧)');
+ok(err.p2===1&&err.over===true&&err.w===1,'T20 占满全部强点后 → 判队1胜');
+}
+
+
+// T21: 劫道 (canyon, convoy) —— 劫道图无旗点、固定出生点不可争 ⇒ flagsLostOf 恒 0: 归零即结。
+//      (2026-11-19 全模式统一双条件的自然豁免口径回归护栏 —— 防止统一规则误伤"图上没有可占点位"的模式)
+function t21(){
+console.log('T21 劫道: 无点位图归零即结回归护栏 (断崖公路 convoy)');
+const ctx=boot(10);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+if(GAMEMODE!=='convoy') return 'ERR:boot(10) 不是 convoy: '+GAMEMODE;
+if(FLAGS.length) return 'ERR:canyon 应无旗点, 实得 '+FLAGS.length;
+const capSpots=SPOTS.filter(sp=>sp.capturable).length;
+if(capSpots) return 'ERR:canyon 应无可争强点, 实得 '+capSpots;
+tickets[0]=0;
+for(const s of soldiers){ if(s.alive&&s.team===0) s.die(null,false); }
+for(const t of tanks){ if(t.alive&&t.team===0) t.die(null); }
+updateFlags(0.05);
+const p1=matchEndPending;
+const fl=flagsLostOf(1);
+const cvOver=(typeof CONVOY_STATE!=="undefined"&&CONVOY_STATE)?CONVOY_STATE.over:null;
+for(let i=0;i<40&&!matchOver;i++) updateFlags(0.05);
+return {p1,fl,cvOver,over:matchOver,w:__m.winner,gm:GAMEMODE,nf:FLAGS.length,ns:SPOTS.length};
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T21 '+(err||'')); return; }
+ok(err.gm==='convoy'&&err.nf===0&&err.ns>0&&err.fl===0,'T21 前置: 断崖公路 convoy / 无旗点 / 固定出生点不可争 ⇒ flagsLostOf≡0 (旗点 '+err.nf+'/强点 '+err.ns+')');
+ok(err.cvOver===false,'T21 车队判定未触发 (劫道目标路径不受归零干扰)');
+ok(err.p1===1&&err.over===true&&err.w===1,'T21 无点位图归零即结 (自然豁免口径不变)');
+}
+
+
 // ── 入口 ──
 console.log('== 清场胜利规则沙箱 ==');
-t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15(); t16(); t17(); t18();
+t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15(); t16(); t17(); t18(); t19(); t20(); t21();
 console.log(`== 结果: ${PASS.length} 通过 / ${FAILS} 失败 ==`);
 process.exit(FAILS?1:0);

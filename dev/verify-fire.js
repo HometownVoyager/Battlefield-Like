@@ -380,7 +380,8 @@ sandbox.combatants=[]; sandbox.soldiers=[]; sandbox.tanks=[]; sandbox.planes=[];
 sandbox.AudioSys={explosion(){},gunshot(){},click(){},hurt(){}};
 sandbox.addTrauma=()=>{};
 sandbox.spawnP=()=>{};
-sandbox.PT={smoke:1,dark:1,flash:1,blood:1,dirt:1,spark:1};
+sandbox.spawnFlame=(x,y,z,vx,vy,vz,size,grow,life,opa,grav)=>{ sandbox.spawnP(sandbox.PT.flame,x,y,z,vx,vy,vz,size,grow,life,opa===undefined?0.85:opa,grav===undefined?-1:grav,true); return null; }; // ★2026-11-19 火焰重做批: 轻沙箱 spawnP 本就是 no-op 桩, spawnFlame 同哲学委托 (视觉火不在本探针测量范围)
+sandbox.PT={smoke:1,dark:1,flash:1,blood:1,dirt:1,spark:1,flame:2};
 sandbox.spawnWallDebris=()=>{};
 sandbox.TAU=Math.PI*2; sandbox.HPI=Math.PI/2;
 sandbox.nowT=0;

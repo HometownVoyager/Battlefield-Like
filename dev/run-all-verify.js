@@ -131,6 +131,8 @@ const SANDBOX=[
 ['dev/verify-tvosd-headbonk-20261110.js',[],'2026-11-10 两项批: 巡飞弹 TV 遮罩 FPV OSD 加点料(REC/时间码/信号条/四角标/分划/离地/速度/离机/存续条/开镜标/低量红脉冲, index.html+CSS+22-hud 驱动+i18n)+跳跃头顶钳制 headCeilClamp 单源+collideMove 纵带门头部擦碰容差 HEAD_GRAZE (2026-11-19 效率批补登: 全绿在册此前漏登)'],
 ['dev/verify-frameperf-fx-20261113.js',[],'2026-11-13 特效/战斗层性能批: 火焰视觉粒子全局预算门 FIRE_FX_BUDGET_STEPS(≥8 火源+预算绷紧+伤害账照常)+12-ragdolls 静止结算门(真实击杀链落定冻结+活跃帽+冲量解冻)+fireBullet 分配槽位化(构造计数对照)+实例矩阵局部上传+生物燃烧隔帧交错 DPS 逐位 (2026-11-19 效率批补登: 全绿在册此前漏登)'],
 ['dev/verify-walkstep-ceiling-20261118.js',[],'2026-11-18 顶头穿墙通用修: 碰撞横推"最近边"对头顶笼罩件不作为+standHeightSafe 抬脚前过顶头净空(顶头自动蹲/连蹲放不下不抬脚, 玩家/Bot/丧尸共用)——走跳上砖不再头探楼板被横推弹射穿墙 (2026-11-19 效率批补登: 全绿在册此前漏登)'],
+['dev/verify-wipe.js',[],'2026-11-19 终局双条件批: 归零+占满全部点位双条件全模式统一 (flagsLostOf 数据声明 capturable 扩强点/破袭炸库·劫道护送目标路径不加门槛/无点位图自然豁免)+双归零平局与 1v1 对齐保留+30s 倒计时 paradox 门 fieldCount(1-zt)>0 (T19 百团/T20 遭遇战强点/T21 无点位图自然豁免护栏)'],
+['dev/verify-firefx2-20261119.js',[],'2026-11-19 火焰重做批: PT.flame 舌形贴图(Canvas 三段径向渐变兜底+02-scene svgFlame feTurbulence 精修)+spawnFlame 附加账(纵拉伸≈2:1/双轴异频摇摆/生命色带白热→暗红)+updateParticles 火苗分支零分配+SMOKES 火舌换装保比+spawnP return/清账 (04b×4+16×2 站点换装, 预算门/限流/池帽原样) (含 --neg 三补丁逐补丁隔离 boot)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

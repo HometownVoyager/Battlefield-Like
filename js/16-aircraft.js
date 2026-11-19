@@ -76,7 +76,7 @@ w.smokeT-=dt;
 if(w.smokeT<=0){
 w.smokeT=0.05;
 spawnP(PT.dark,w.pos.x,w.pos.y,w.pos.z,rand(-0.5,0.5),rand(0.5,1.5),rand(-0.5,0.5),1.0,1.6,rand(0.9,1.4),0.7,0.2);
-spawnP(PT.flash,w.pos.x,w.pos.y,w.pos.z,rand(-1,1),rand(-1,1),rand(-1,1),rand(0.4,0.7),0.5,0.22,0.9,0,true);
+spawnFlame(w.pos.x,w.pos.y,w.pos.z,rand(-1,1),rand(-1,1),rand(-1,1),rand(0.4,0.7),0.5,0.22,0.9,0);   // ★2026-11-19 火焰重做批
 }
 const gh=(typeof planeFloorY==='function')?planeFloorY(w.pos.x,w.pos.z):heightAt(w.pos.x,w.pos.z);
 // (2026-10-03 引入, 2026-11-10 注记改写): 水面上 heightAt 给的是水底 ⇒ 坠机在水底"触地爆炸",
@@ -620,7 +620,7 @@ spawnP(PT.dark,this.pos.x,this.pos.y,this.pos.z,0,0,0,0.8,1.2,1.2,0.6,0);
 if(this.burning&&this.alive){
 this.burnFxT=(this.burnFxT||0)-dt;
 if(this.burnFxT<=0){ this.burnFxT=0.05;
-spawnP(PT.flash,this.pos.x+rand(-0.6,0.6),this.pos.y+rand(-0.4,0.4),this.pos.z+rand(-0.6,0.6),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1,true);
+spawnFlame(this.pos.x+rand(-0.6,0.6),this.pos.y+rand(-0.4,0.4),this.pos.z+rand(-0.6,0.6),rand(-0.3,0.3),rand(1.4,2.6),rand(-0.3,0.3),rand(0.6,1.1),1.6,rand(0.25,0.45),0.9,-1);   // ★2026-11-19
 spawnP(PT.dark,this.pos.x,this.pos.y+0.8,this.pos.z,rand(-0.3,0.3),rand(1,2),rand(-0.3,0.3),0.9,1.7,rand(1.2,2.2),0.55,0.1);
 }
 this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;

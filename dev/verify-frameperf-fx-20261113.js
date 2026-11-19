@@ -112,7 +112,7 @@ drive(ctx,120);   // 预热: AI 展开/交火账进入稳态
 G(ctx,`
 var __spN=0; var __spFlash=0; var __hN=0;
 const __spOrig=spawnP, __hOrig=heightAt, __wyOrig=waterYAt;
-spawnP=function(t,x,y,z,vx,vy,vz,s,g,l,o,gr,ad,sp2){ __spN++; if(t===PT.flash) __spFlash++; return __spOrig(t,x,y,z,vx,vy,vz,s,g,l,o,gr,ad,sp2); };
+spawnP=function(t,x,y,z,vx,vy,vz,s,g,l,o,gr,ad,sp2){ __spN++; if(t===PT.flash||t===PT.flame) __spFlash++; return __spOrig(t,x,y,z,vx,vy,vz,s,g,l,o,gr,ad,sp2); };   // ★2026-11-19 火焰重做批: 火苗改走 PT.flame, 火粒计数随码 (窗口 [100,240] 口径不变)
 heightAt=function(x,z,nb){ __hN++; return __hOrig(x,z,nb); };
 `);
 
@@ -143,7 +143,7 @@ ok(teA.burn0>0,'T-E igniteCreature 写入燃烧账 (burnTimer='+teA.burn0.toFixe
 ok(teA.ticks>=23&&teA.ticks<=27,'T-E 10s 伤害跳数 '+teA.ticks+' ∈ [23,27] (0.4s 周期, dt 累积钟逐位等价)');
 ok(near(teA.dmg/Math.max(1,teA.ticks),3.2*teA.mul,1e-6),'T-E 每跳伤害 '+(teA.ticks?(teA.dmg/teA.ticks).toFixed(4):'?')+' ≈ 3.2×天气乘子('+teA.mul+')');
 ok(Math.abs(teA.dmg-25*3.2*teA.mul)<=3.2*3,'T-E 10s 总伤 '+teA.dmg.toFixed(1)+' ≈ 25 跳×3.2×'+teA.mul+' (DPS 总量不变, ±3 跳容差)');
-ok(teB.spF>=100&&teB.spF<=240,'T-E 火焰粒子采样频次减半: 600 帧窗 flash spawn='+teB.spF+' ∈ [100,240] (旧每帧账 ≈330, 交错后半频 ≈165)');
+ok(teB.spF>=100&&teB.spF<=240,'T-E 火焰粒子采样频次减半: 600 帧窗火粒 spawn(PT.flash|PT.flame)='+teB.spF+' ∈ [100,240] (旧每帧账 ≈330, 交错后半频 ≈165)');
 }
 
 console.log('── T-C 分配槽位化: fireBullet 驱动基准 (修后 vs 槽位回退阴性对照) ──');

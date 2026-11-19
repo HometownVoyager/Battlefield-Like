@@ -11,6 +11,29 @@ stops.forEach(s=>gr.addColorStop(s[0],s[1]));
 g.fillStyle=gr; g.fillRect(0,0,64,64);
 return new THREE.CanvasTexture(c);
 }
+// ★2026-11-19 火焰重做批: 专用火舌贴图 (替代 PT.flash 圆盘当火用)。三段径向渐变沿纵轴堆叠成
+// 上窄下宽的泪滴轮廓 (火根最亮/最宽 → 火尖收细上扬), 白芯 —— 塑形归贴图、色带归材质 color
+// (spawnFlame/updateParticles 逐帧染), 与 SVG 精修版 (02-scene puffFlame) 同构。
+function flameTex(){
+const c=document.createElement('canvas'); c.width=64; c.height=64;
+const g=c.getContext('2d');
+let gr=g.createRadialGradient(32,40,2,32,40,20);   // 火根
+gr.addColorStop(0,'rgba(255,255,255,.95)');
+gr.addColorStop(0.45,'rgba(255,250,226,.55)');
+gr.addColorStop(1,'rgba(255,244,210,0)');
+g.fillStyle=gr; g.fillRect(0,0,64,64);
+gr=g.createRadialGradient(32,24,1.5,32,24,13);     // 火腹
+gr.addColorStop(0,'rgba(255,255,244,.85)');
+gr.addColorStop(0.5,'rgba(255,252,232,.45)');
+gr.addColorStop(1,'rgba(255,248,218,0)');
+g.fillStyle=gr; g.fillRect(0,0,64,64);
+gr=g.createRadialGradient(32,11,1,32,11,7);        // 火尖
+gr.addColorStop(0,'rgba(255,255,250,.75)');
+gr.addColorStop(0.5,'rgba(255,253,240,.35)');
+gr.addColorStop(1,'rgba(255,250,225,0)');
+g.fillStyle=gr; g.fillRect(0,0,64,64);
+return new THREE.CanvasTexture(c);
+}
 const PT = {
 smoke: radialTex(2,30,[[0,'rgba(200,195,185,.85)'],[0.5,'rgba(160,155,145,.4)'],[1,'rgba(150,150,140,0)']]),
 dark:  radialTex(2,30,[[0,'rgba(60,55,48,.9)'],[0.5,'rgba(70,64,55,.5)'],[1,'rgba(60,60,55,0)']]),
@@ -19,9 +42,10 @@ blood: radialTex(2,26,[[0,'rgba(140,20,12,.95)'],[0.6,'rgba(110,14,8,.5)'],[1,'r
 dirt:  radialTex(2,28,[[0,'rgba(120,100,70,.95)'],[0.6,'rgba(100,84,58,.5)'],[1,'rgba(90,76,52,0)']]),
 spark: radialTex(1,20,[[0,'rgba(255,240,180,1)'],[1,'rgba(255,160,40,0)']]),
 drop:  radialTex(2,26,[[0,'rgba(232,246,252,.95)'],[0.5,'rgba(190,222,236,.5)'],[1,'rgba(170,205,225,0)']]),
+flame: flameTex(),   // ★2026-11-19 火焰重做批: 舌形火苗贴图 (只 04b/16 火焰 spawnFlame 链消费, PT.flash 保留给枪口焰/爆炸/焦痕)
 };
 // SVG 精修: 烟/黑烟/尘团改 feTurbulence 位移扰动的蓬松轮廓 (02-scene 生成器, Canvas 径向渐变兜底)
-svgApply(PT.smoke,'puffSmoke'); svgApply(PT.dark,'puffDark'); svgApply(PT.dirt,'puffDirt');
+svgApply(PT.smoke,'puffSmoke'); svgApply(PT.dark,'puffDark'); svgApply(PT.dirt,'puffDirt'); svgApply(PT.flame,'puffFlame');   // ★2026-11-19: 火舌 SVG 精修 (feTurbulence 泪滴)
 const particles=[];
 // ★2026-11-08 性能与画面批: 粒子上限档位化 (原硬编码 280) —— FXMAX_STEPS[fxMaxIdx] (标准280/精简140/增强560),
 // applyFxQuality 由 boot 与 22-hud 循环钮调用; 调低时超出部分就地回收进池, 立即生效。
@@ -54,7 +78,25 @@ p.sp.material.rotation=rand(0,TAU);
 p.sp.position.set(x,y,z);
 p.sp.scale.setScalar(size);
 p.vx=vx; p.vy=vy; p.vz=vz; p.grow=grow; p.life=life; p.age=0; p.opa=opa; p.grav=grav; p.spin=spin;
+p.ramp=0;   // ★2026-11-19: 火苗附加账每次 spawn 清零 (spawnFlame 随后重写; 池化复用不串样式)
 particles.push(p);
+return p;   // ★2026-11-19 火焰重做批: 返回池对象 (spawnFlame 写附加账); 既有调用不消费返回值, 零兼容风险
+}
+// ═══ 火苗粒子 (2026-11-19 火焰重做批, 用户裁定 方案2 贴图+活体/尺寸与现状相近) ═══
+// 专用 PT.flame 舌形贴图 + 纵向拉伸(≈2:1) + 双轴异频摇摆 + 生命色带; updateParticles 分支消费。
+// 老粒子 (无 ramp) 走原路径逐位不变; 粒子数/预算门 (04b fireFxOK)/上限档全不动 —— 只换长相不换预算。
+const FLAME_RAMP=[[1,0.98,0.87],[1,0.79,0.40],[1,0.55,0.17],[0.78,0.26,0.07]];   // 白热→黄→橙→暗红 (age/life 线性采样)
+function spawnFlame(x,y,z,vx,vy,vz,size,grow,life,opa,grav){
+const p=spawnP(PT.flame,x,y,z,vx,vy,vz,size,grow,life,opa===undefined?0.85:opa,grav===undefined?-1:grav,true);
+if(!p) return null;
+p.sp.material.rotation=0;   // 舌形朝上, 不吃 spawnP 的随机旋转 (拉伸+摇摆自带方向性)
+p.spin=0;
+p.stretch=rand(1.7,2.2);    // 纵向拉伸倍率 (随机相位每粒不同, 免"同款火苗"复制感)
+p.swayA=rand(0.45,0.95);    // 摇摆振幅 (横漂 m/s 级)
+p.swF=rand(5,9);            // 摇摆频率 rad/s (≈0.8-1.4Hz, 与 updateSmokes 火舌 fk 同数量级)
+p.swPh=rand(0,TAU);         // 双轴异频相位 (z 轴频率 ×0.83 / 相位 ×1.7 = 扭动)
+p.ramp=1;
+return p;
 }
 // 水花 (2026-09-18 塔拉瓦批): 子弹/炮弹/手雷入水与落水冲击 —— 白色水柱 + 飞溅水滴 (纯视觉)
 // big=true: 炮弹/载具级入水 (更高更散); bubbles=true 追加水下气泡 (哑火的手雷/沉物)
@@ -90,7 +132,18 @@ if(p.age>=p.life){ recycleP(p); particles.splice(i,1); continue; }
 p.vy-=p.grav*dt;
 p.sp.position.x+=p.vx*dt; p.sp.position.y+=p.vy*dt; p.sp.position.z+=p.vz*dt;
 const s=p.sp.scale.x+p.grow*dt;
+// ★2026-11-19 火焰重做批: 火苗分支 (双轴摇摆/纵向拉伸/生命色带) —— 零分配: 相位读粒子自带账,
+//   色带插值读 FLAME_RAMP 静态表, color.setRGB 复用材质既有 Color 对象; 老粒子 (无 ramp) 原路径。
+if(p.ramp){
+p.sp.position.x+=Math.sin(nowT*p.swF+p.swPh)*p.swayA*dt;
+p.sp.position.z+=Math.cos(nowT*p.swF*0.83+p.swPh*1.7)*p.swayA*0.6*dt;
+p.sp.scale.set(s,s*p.stretch);
+const rf=(p.age/p.life)*(FLAME_RAMP.length-1), ri=Math.min(FLAME_RAMP.length-2,rf|0), ru=rf-ri;
+const ra=FLAME_RAMP[ri], rb=FLAME_RAMP[ri+1];
+p.sp.material.color.setRGB(ra[0]+(rb[0]-ra[0])*ru,ra[1]+(rb[1]-ra[1])*ru,ra[2]+(rb[2]-ra[2])*ru);
+}else{
 p.sp.scale.setScalar(s);
+}
 p.sp.material.rotation+=p.spin*dt;
 p.sp.material.opacity=p.opa*(1-p.age/p.life);
 }
@@ -189,9 +242,9 @@ cloud.sprites.push({sp,vx:rand(-0.16,0.16),vy:rand(0.05,0.16),vz:rand(-0.16,0.16
 if(incin){
 // 火舌: 云底 additive 火光贴片, 随机闪烁
 for(let i=0;i<7;i++){
-const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:PT.flash,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,color:0xff9a3c}));
+const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:PT.flame,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,color:0xff9a3c}));   // ★2026-11-19: 圆盘火光→舌形火苗 (白芯贴图+橙染)
 sp.position.set(p.x+rand(-2,2),p.y+rand(0.15,0.9),p.z+rand(-2,2));
-sp.scale.setScalar(rand(1.2,2.2));
+const w0=rand(1.2,1.8); sp.scale.set(w0,w0*1.6);   // ★2026-11-19: 火舌纵拉 (比例 1.6, updateSmokes 闪烁随动保比)
 scene.add(sp);
 cloud.sprites.push({sp,flame:true,fk:rand(6,14),ph:rand(0,TAU),vx:0,vy:0,vz:0,rs:0,g:-0.1});
 }
@@ -215,7 +268,7 @@ if(s.flame){
 // 火舌闪烁: 后半段逐渐熄灭
 const fade=clamp((c.dur-c.t)/4,0,1);
 s.sp.material.opacity=(0.4+0.3*Math.sin(nowT*s.fk+s.ph))*fade;
-s.sp.scale.setScalar(s.sp.scale.x+Math.sin(nowT*s.fk*0.7+s.ph)*dt*0.5);
+const w2=s.sp.scale.x+Math.sin(nowT*s.fk*0.7+s.ph)*dt*0.5; s.sp.scale.set(w2,w2*1.6);   // ★2026-11-19: 保纵横比 (spawn 处 1.6 拉伸)
 continue;
 }
 s.sp.position.x+=s.vx*dt; s.sp.position.y+=s.vy*dt; s.sp.position.z+=s.vz*dt;

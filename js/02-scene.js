@@ -618,6 +618,16 @@ return `<defs><radialGradient id="pfg"><stop offset="0" stop-color="rgb(${inner}
 +`<filter id="pff" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="3" seed="${seed}" result="tr"/><feDisplacementMap in="SourceGraphic" in2="tr" scale="8" xChannelSelector="R" yChannelSelector="G"/></filter></defs>`
 +`<circle cx="32" cy="32" r="${r}" fill="url(#pfg)" filter="url(#pff)"/>`;
 }
+// 火苗 (2026-11-19 火焰重做批): 竖向泪滴轮廓 + feTurbulence 位移扰动 (烟团同款手法, baseFrequency
+// 各向异性=纵向拉丝)。白芯 —— 色带由 spawnFlame/updateParticles 的材质 color 逐帧染;
+// Canvas 兜底=08-effects flameTex (三段径向渐变同构)。
+function svgFlame(seed){
+return '<defs><radialGradient id="pfg"><stop offset="0" stop-color="rgb(255,255,255)" stop-opacity="0.95"/><stop offset="0.5" stop-color="rgb(255,250,226)" stop-opacity="0.6"/><stop offset="1" stop-color="rgb(255,246,214)" stop-opacity="0"/></radialGradient>'
++'<filter id="pff" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.08 0.14" numOctaves="3" seed="'+seed+'" result="tr"/><feDisplacementMap in="SourceGraphic" in2="tr" scale="10" xChannelSelector="R" yChannelSelector="G"/></filter></defs>'
++'<ellipse cx="32" cy="40" rx="17" ry="20" fill="url(#pfg)" filter="url(#pff)"/>'
++'<ellipse cx="32" cy="23" rx="11" ry="14" fill="url(#pfg)" filter="url(#pff)"/>'
++'<ellipse cx="32" cy="10" rx="6" ry="8" fill="url(#pfg)" filter="url(#pff)"/>';
+}
 // ── 各贴图 SVG 生成器 (基色与旧 Canvas 版一致, 保证主题着色/雪地黄土换色行为不变) ──
 svgReg('grass',256,256,()=>{
 const b=[];
@@ -968,6 +978,7 @@ return `<rect width="64" height="64" fill="#d8d4c4"/>`
 svgReg('puffSmoke',64,64,()=>svgPuff('200,195,185','160,155,145',0.85,0.4,26,5));
 svgReg('puffDark',64,64,()=>svgPuff('60,55,48','70,64,55',0.9,0.5,26,11));
 svgReg('puffDirt',64,64,()=>svgPuff('120,100,70','100,84,58',0.95,0.5,26,17));
+svgReg('puffFlame',64,64,()=>svgFlame(23));   // ★2026-11-19 火焰重做批
 // ── 白底微噪共享贴图: 叠加到平色材质上 (color 乘法保持原色调, 均值≈1 不改亮度) ──
 svgReg('grime',128,128,()=>{
 return `<rect width="128" height="128" fill="#ffffff"/>`

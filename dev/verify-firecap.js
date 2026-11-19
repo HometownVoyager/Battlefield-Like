@@ -24,7 +24,8 @@ sb.rand=(a,b)=>sb.wr(a,b); sb.randi=(a,b)=>Math.floor(sb.wr(a,b+1));
 sb.heightAt=()=>0;
 sb.SETTINGS={quality:2};
 sb.camera={position:{x:0,y:30,z:0}};
-sb.spawnP=()=>{}; sb.PT={smoke:1,dark:1,flash:1,dirt:1,spark:1};
+sb.spawnP=()=>{}; sb.PT={smoke:1,dark:1,flash:1,dirt:1,spark:1,flame:2};
+sb.spawnFlame=(x,y,z,vx,vy,vz,size,grow,life,opa,grav)=>{ sb.spawnP(sb.PT.flame,x,y,z,vx,vy,vz,size,grow,life,opa===undefined?0.85:opa,grav===undefined?-1:grav,true); return null; };   // ★2026-11-19 火焰重做批: 轻沙箱 spawnP 本就是 no-op 桩, spawnFlame 同哲学委托
 sb.OCC={res:1,N:0,off:180,data:null};
 sb.combatants=[]; sb.tanks=[];
 load('js/00-config.js',sb);
