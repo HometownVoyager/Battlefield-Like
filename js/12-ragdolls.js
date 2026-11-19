@@ -74,8 +74,13 @@ const locP=(lx,ly,lz)=>loc(lx, ly*cp-lz*sp2, ly*sp2+lz*cp);
 // 站位 (相对骨盆, 与 cons 里的 P2P 锚点逐条对应): 躯干 +0.39 · 头 +0.79 · 臂 +0.35 · 腿 -0.47
 const ST={torso:0.39, head:0.79, arm:0.35, leg:-0.47, armX:0.31, legX:0.12};
 // 使用阵营制服材质, 保持外观一致
-const coatMat=U.coat, pantMat=U.pants, skinMat=U.skin, helmMat=U.helm;
-const parts=[];
+// ★2026-11-20 批⑥三版: 生成段 try 护栏 —— 生成中任何抛错 (外挂件宿主挂错/构建器缺件/桩环境缺构造器)
+//   旧版会把已 scene.add+world.addBody 的半成品部件留在场外: 不在 RAG.list ⇒ updateRagdolls 永不触碰、
+//   removeRagdoll 永不回收 = 实机"站立/悬空定格的裸头僵尸帧"的真身, 且异常沿帧护栏炸"帧异常"横幅。
+//   catch 清干净全部半成品并 return false ⇒ 走调用方既有的无物理倒地回退 (Bot A#10 / 玩家契约G / 丧尸)。
+let parts=[], cons=[], entry=null;
+try{
+const coatMat=U.coat, pantMat=U.pants, skinMat=U.skin;
 // (2026-09-26 A4 顺手清: 首参 geoKey 自古无人用, 删掉 —— 每具尸体当场 new 自己的几何)
 function mkPart(mat,sx,sy,sz,mass,px,py,pz){
 const mesh=new THREE.Mesh(new THREE.BoxGeometry(sx*2,sy*2,sz*2),mat);
@@ -110,33 +115,33 @@ const bpM=new THREE.Mesh(bpG,pantMat);
 bpM.position.set(0,0.02,-0.16);   // 躯干半深 0.13, 背包半深 0.07 @ z=-0.16 ⇒ 后缘 -0.23 贴背微嵌入
 bpM.castShadow=false;
 tMesh.add(bpM);
+// 腰带 = 躯干子网格 (2026-11-20 批⑥二版, 纯外观): 与活体 torsoG 的装具带 0.4×0.08×0.28 同规格同材质
+//   (soldierAccMat 单源); 活体系 y=0.02 = 躯干底缘 ⇒ 布娃娃心系 -0.23, 恰跨躯干/骨盆接缝 (用户点名的
+//   "腿和躯干连接处"的那件深色部件)。
+bx(soldierAccMat(0x3a3428,true),0.4,0.08,0.28, 0,-0.23,0, tMesh).castShadow=false;
 }
 b=mkPart(skinMat,0.1,0.11,0.1,2.5,...locP(0,H+ST.head,0)); const head=b;
-b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(-ST.armX,H+ST.arm,0)); const armL=b;
-b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(ST.armX,H+ST.arm,0)); const armR=b;
-b=mkPart(pantMat,0.075,0.45,0.075,4,...locP(-ST.legX,H+ST.leg,0)); const legL=b;
-b=mkPart(pantMat,0.075,0.45,0.075,4,...locP(ST.legX,H+ST.leg,0)); const legR=b;
-// 头盔: 独立物理体, 死亡时弹开
-let helmBody=null, hs2=0.155, hy2=0.16;
-const hs=TEAM_FACTION[bot.team].helmet;
-if(hs){
-if(hs==='pot'){ hs2=0.15; hy2=0.17; }
-else if(hs==='ssh'){ hs2=0.152; hy2=0.165; }
-else if(hs==='jp'){ hs2=0.142; hy2=0.175; }
-else{ hs2=0.13; hy2=0.19; } // cap
-const hm=new THREE.Mesh(new THREE.SphereGeometry(hs2,8,6),helmMat);
-hm.castShadow=true; scene.add(hm);
-const hb2=new CANNON.Body({mass:1.8,collisionFilterGroup:0,collisionFilterMask:0});
-hb2.addShape(new CANNON.Sphere(hs2*0.8));
-const hp=locP(0,H+ST.head+hy2,0); // 头盔=头部件之上 hy2 (2026-09-12 修复: 原写法把 p.y 重复累加, 头盔初始悬空≈海拔高度, 与头的 P2P 约束初始误差经求解器换算成 ~14×g 的弹射速度 → 坡地/高地死亡尸体飞天; 2026-09-26 A4: 站位改用同一张 ST 表, 腿/蹲/趴三态都不再产生初错)
-hb2.position.set(hp[0],hp[1],hp[2]); qSet(hb2.quaternion);
-hb2.angularDamping=0.3; hb2.linearDamping=0.06;
-hm.position.copy(hb2.position);   // 2026-11-04b 时停批: 生成当帧贴初始位姿 (同 mkPart)
-if(hm.quaternion&&hm.quaternion.copy) hm.quaternion.copy(hb2.quaternion);
-RAG.world.addBody(hb2);
-parts.push({mesh:hm,body:hb2,hy:hs2});
-helmBody=hb2;
-}
+// 头盔: 与活体**同一个** buildHelmetInto 单源构建器, 直接建在**头部件网格**上 —— 相对头锁死
+//   (2026-11-20 用户裁定: 松挂 P2P 下盔体可歪斜/滑脱/离头, 实机反复出现显示问题; 活体本就是
+//   头盔=headG 子件, 锁死才是与活体一致性的最大化)。头部件 mesh 原点=头心 (半尺寸 0.1×0.11×0.1
+//   与活体头盒 0.2×0.22×0.2 同规格), 与构建器的头心系逐位同框, 无需任何偏移; 几何随 removeRagdoll
+//   的 traverse 深收 (背包/批7 子网格先例)。旧"独立刚体+P2P 松挂+死亡弹开"整段摘除, 2026-09-12
+//   盔弹射 bug 类 (初错进求解器换算弹射速度 → 坡地飞天) 随之根除 —— 无约束即无初错。
+buildHelmetInto(parts[parts.length-1].mesh, bot.team, U);
+b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(-ST.armX,H+ST.arm,0)); const armL=b, armLm=parts[parts.length-1].mesh;
+// 手 = 臂子网格 (2026-11-20 批⑥二版, 纯外观): 袖口伸出的肤色手盒, 与活体 mkArm 的 hand 0.09³ 同规格
+//   同位 (活体手心在前臂端点再下 0.02 ⇒ 臂半长 0.28 时手心 -0.30, 外露 ~0.065); 零新增物理 (背包先例)。
+//   ★三版修: 宿主必须传**部件网格** (mkPart 返回的是刚体, 刚体没有 .add —— 二版误传刚体正是实机
+//   "g.add is not a function" 帧异常横幅 + 半成品孤儿件站立/悬空定格的真身; 背包段的 tMesh 同理)。
+bx(skinMat,0.09,0.09,0.09, 0,-0.30,0, armLm).castShadow=false;
+b=mkPart(coatMat,0.06,0.28,0.06,2,...locP(ST.armX,H+ST.arm,0)); const armR=b, armRm=parts[parts.length-1].mesh;
+bx(skinMat,0.09,0.09,0.09, 0,-0.30,0, armRm).castShadow=false;
+b=mkPart(pantMat,0.075,0.45,0.075,4,...locP(-ST.legX,H+ST.leg,0)); const legL=b, legLm=parts[parts.length-1].mesh;
+// 军靴 = 腿子网格 (2026-11-20 批⑥二版, 纯外观): 与活体 mkLeg 军靴 0.15×0.1×0.24 同规格同位 (皮革
+//   0x2e2820 走 11-soldiers 的 soldierAccMat 单源, 前伸 0.04 同活体, 靴底出腿端 ~0.03)。
+bx(soldierAccMat(0x2e2820,true),0.15,0.1,0.24, 0,-0.43,0.04, legLm).castShadow=false;
+b=mkPart(pantMat,0.075,0.45,0.075,4,...locP(ST.legX,H+ST.leg,0)); const legR=b, legRm=parts[parts.length-1].mesh;
+bx(soldierAccMat(0x2e2820,true),0.15,0.1,0.24, 0,-0.43,0.04, legRm).castShadow=false;
 const P2P=(A,pa,B,pb)=>{
 const c=new CANNON.PointToPointConstraint(A,new CANNON.Vec3(pa[0],pa[1],pa[2]),B,new CANNON.Vec3(pb[0],pb[1],pb[2]));
 RAG.world.addConstraint(c);
@@ -144,14 +149,8 @@ return c;
 };
 // (2026-09-26 A4: 锚点按"装配即零误差"重算 —— 臂/腿/头盔三处原本各差 0.072/0.110/0.048m, 同样是初错
 //  进求解器被换算成弹射冲量。现在七条约束的初始间距都是 0, 与上面 ST 站位表逐条对应。)
-const cons=[P2P(torso,[0,-0.26,0],pelvis,[0,0.13,0]),P2P(head,[0,-0.13,0],torso,[0,0.27,0]),P2P(armL,[0,0.24,0],torso,[-ST.armX,0.2,0]),P2P(armR,[0,0.24,0],torso,[ST.armX,0.2,0]),P2P(legL,[0,0.47,0],pelvis,[-ST.legX,0,0]),P2P(legR,[0,0.47,0],pelvis,[ST.legX,0,0])];
-// 头盔用松弛约束挂在头上, 可自由旋转
-if(helmBody){
-const hc=new CANNON.PointToPointConstraint(head,new CANNON.Vec3(0,0.13,0),helmBody,new CANNON.Vec3(0,0.13-hy2,0));
-RAG.world.addConstraint(hc);
-cons.push(hc);
-}
-{ const ptarr=[pelvis,torso,head,armL,armR,legL,legR,helmBody].filter(Boolean);
+cons=[P2P(torso,[0,-0.26,0],pelvis,[0,0.13,0]),P2P(head,[0,-0.13,0],torso,[0,0.27,0]),P2P(armL,[0,0.24,0],torso,[-ST.armX,0.2,0]),P2P(armR,[0,0.24,0],torso,[ST.armX,0.2,0]),P2P(legL,[0,0.47,0],pelvis,[-ST.legX,0,0]),P2P(legR,[0,0.47,0],pelvis,[ST.legX,0,0])];
+{ const ptarr=[pelvis,torso,head,armL,armR,legL,legR].filter(Boolean);
 for(const pt2 of ptarr){
 // 尸体继承角色移动惯性 + 被命中方向冲量 (旧"爆炸额外推力"死分支已删: window._lastExplosion 全库无写入, 2026-09-06 D3=a)
 let ix=rand(-1,1),iz=rand(-1,1),imp=rand(2.2,3.5);
@@ -166,7 +165,7 @@ pt2.angularVelocity.set(rand(-5,5),rand(-4,4),rand(-5,5));
 }
 if(isHead){ head.velocity.y+=2.2; head.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9)); }
 }
-const entry={parts,cons,t:9,bodies:parts.map(p=>p.body),frozen:false,stillT:0,
+entry={parts,cons,t:9,bodies:parts.map(p=>p.body),frozen:false,stillT:0,
 last:parts.map(p=>[p.body.position.x,p.body.position.y,p.body.position.z])};
 RAG.list.push(entry);
 // ★2026-11-13 性能批 B③: 活跃布娃娃数量帽 —— 超帽立即冻结最旧的 (优先挑已接近静止的)。
@@ -182,6 +181,18 @@ freezeRagdoll(RAG.list[pick]);
 _act--;
 }
 return entry;
+}catch(e2){
+// 半成品清账 (批⑥三版): 已 scene.add 的网格 / world.addBody 的刚体 / 已挂约束全部摘除 + 几何回收
+//   (与 removeRagdoll 同款 traverse 深收), RAG.list 若已 push 也一并摘除; 再 return false 走回退。
+for(const p of parts){
+if(RAG.world.removeBody) RAG.world.removeBody(p.body); else RAG.world.remove(p.body);
+if(p.mesh){ p.mesh.traverse(o=>{ const g=o&&o.geometry; if(g&&typeof g.dispose==='function') g.dispose(); }); scene.remove(p.mesh); }
+}
+for(const c of cons) RAG.world.removeConstraint(c);
+const _ei=RAG.list.indexOf(entry);
+if(_ei>=0) RAG.list.splice(_ei,1);
+return false;
+}
 }
 function removeRagdoll(r){
 const i=RAG.list.indexOf(r);
@@ -190,8 +201,9 @@ for(const c of r.cons) RAG.world.removeConstraint(c);
 for(const p of r.parts){
 if(RAG.world.removeBody) RAG.world.removeBody(p.body); else RAG.world.remove(p.body);
 scene.remove(p.mesh);
-// 几何逐具回收 (2026-09-25 修): 每具尸体的 7~8 个 Box/Sphere 几何都是 spawnRagdoll 当场 new 的
-// (材质才是共享的 U.coat/pants/skin/helm —— 只能删几何, 删材质会打穿全队制服)。旧版只 scene.remove,
+// 几何逐具回收 (2026-09-25 修): 每具尸体的 7~8 个部件的几何 (含 2026-11-20 批⑥ 的背包/腰带/手/靴/盔
+// 子网格, traverse 深收) 都是 spawnRagdoll 当场 new 的
+// (材质才是共享的 U.coat/pants/skin/helm/soldierAccMat —— 只能删几何, 删材质会打穿全队制服)。旧版只 scene.remove,
 // 几何留在 GPU 上: 一局打下来几百具尸体 = 几百个几何常驻, 就地重开也收不回。同文件 removeDebrisEntry 本是这个写法。
 // ★2026-11-16 批7: traverse 回收 —— 躯干 mesh 带背包子网格后, 旧的单层 geometry.dispose 会漏掉它。
 if(p.mesh) p.mesh.traverse(o=>{ const g=o&&o.geometry; if(g&&typeof g.dispose==='function') g.dispose(); });

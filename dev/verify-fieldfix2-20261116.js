@@ -510,7 +510,7 @@ ok(has('js/12-ragdolls.js','p.mesh.traverse(o=>{ const g=o&&o.geometry;'),'T10c 
 console.log('T12 源码防回退锚点汇总');
 {
 ok(has('js/00-config.js',"localStorage.getItem('sf_nadedrop')!=='0'"),'A1 NADE_DEATH_DROP 解析 (缺省=是)');
-ok(has('js/00-config.js',"parseInt(localStorage.getItem('sf_perfopt'),10)")&&has('js/00-config.js','const VEH_REPAIR_R=4.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26'),'A2 PERF_OPT 三档解析+修理五常量单源');
+ok(has('js/00-config.js',"parseInt(localStorage.getItem('sf_perfopt'),10)")&&has('js/00-config.js','const VEH_REPAIR_R=5.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26'),'A2 PERF_OPT 三档解析+修理五常量单源 (2026-11-20 用户令⑤ 维修距离 4.5→5.5 判据跟走)');
 ok(has('js/18-game.js','||!!this.vehRepair')&&has('js/18-game.js','tryVehRepair(){'),'A3 修理读条入取消网+起步口');
 ok(has('js/19-input.js',"player.onVehicle.kind==='tank'&&typeof player.tryVehRepair==='function'"),'A4 R 键座位分支接线');
 ok(has('js/20a-seats.js',"showScorePop('维修被打断: 移动')")&&has('js/20a-seats.js','VEH_REPAIR_R*1.35'),'A5 玩家修理 tick (移动/远离门)');

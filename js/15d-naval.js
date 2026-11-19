@@ -503,13 +503,14 @@ class NavalCraft {
     if(!ap&&typeof TANK_ARMOR!=='undefined') amt*=TANK_ARMOR;
     this.hp-=amt;
     this.lastDmgT=nowT;
+    if(attacker) this.lastHitBy=attacker;   // 2026-11-20 批: 击杀归因章 (坦克/飞机 lastHitBy 同款; 无归属伤害不清章)
     this.flood+=(amt*(this.spec.floodK||0));         // §3.4: flood += dmg*floodK
     if(this.playerDriven&&typeof addDmgFlash==='function'){ addDmgFlash(0.35); addTrauma(0.3); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
     else if(attacker&&attacker.pos) this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
     // 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走; follow 火源对舰艇通用, 04b-fire)
     if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
-    if(this.flood>1) this.beginDestroy(attacker,'sink');
-    else if(this.hp<=0) this.die(attacker);
+    if(this.flood>1) this.beginDestroy(attacker||this.lastHitBy||null,'sink');
+    else if(this.hp<=0) this.die(attacker||this.lastHitBy||null);   // 2026-11-20 批: attacker=null 时回退最后命中者 (飞机坠毁同款)
   }
   die(attacker){
     if(this.state==='sinking'||this.state==='wreck') return;
@@ -699,6 +700,7 @@ class NavalCraft {
     // 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者/弃船标记不得跨生死携带
     if(this.burnSrc){ removeFireSource(this.burnSrc); this.burnSrc=null; }
     this.burning=false; this.burnBy=null; this._burnCrewOut=false;
+    this.lastHitBy=null;   // 2026-11-20 批: 归因章不跨生死携带 (与 burning/burnBy 同账)
     if(this.wreckBs){ for(const b of this.wreckBs) killDynCollider(b); this.wreckBs=null; }
     if(this.sinkJob){ finishSinkJob(this.sinkJob); this.sinkJob=null; }
     this.sink=null;
@@ -746,7 +748,7 @@ class NavalCraft {
     if(this.burning){
     if(!this._burnCrewOut&&this.crewBot&&!this.playerDriven){ this._burnCrewOut=true; this.crewOut(); }
     this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
-    if(this.hp<=0){ this.die(this.burnBy||null); return; }
+    if(this.hp<=0){ this.die(this.burnBy||this.lastHitBy||null); return; }   // 2026-11-20 批: 无点燃者回退最后命中者 (坦克/飞机同款归因章)
     }
     this.cannonCd-=dt; this.secT-=dt; this.mgT-=dt; this.torpCd-=dt;
     // A#3 载具机枪过热 (契约 A): 每帧推进散热/解锁 (玩家 0.22/s 且开火不散 / AI 0.15/s 常散);

@@ -908,7 +908,8 @@ if(nowT-p.lastDmgT>6){
 // 绷带包扎 (★2026-10-12 用户实报②: 读条互斥单源)
 if(p.bandaging>0){
 // 与拆除读条同规 (06-engineering updateDemolish 的 VM.state!=='idle' 判据): 读条期间只要有**别的行动
-//   占用身体** (上炮/上车/上艇/进炮位/驾巡飞弹/取弹…) 或 VM 动作态已被抢走 ⇒ 一律按"被打断"收账。
+//   占用身体** (上车/上艇/驾巡飞弹/取弹…) 或 VM 动作态已被抢走 ⇒ 一律按"被打断"收账。
+//   ★2026-11-20 火力点坐姿批: 固定火力点五座已摘出 readBarBusy (坐炮位包扎/换弹是本批要的正行为)。
 // 旧版只认"自己走完"这一条出口 ⇒ F 取弹抢走 VM.state 后, bandaging 会一路 tick 到满 (照样回血),
 //   而 VM.state 再也不是 'bandage', 10-viewmodel 里那个分支的收尾永不执行 ⇒ 绷带卷 + 缠臂环永久留手上。
 if(p.readBarBusy()) p.cancelReadBar('包扎被打断!');
@@ -920,6 +921,30 @@ p.bandages--;
 p.hp=Math.min(100,p.hp+BANDAGE_HEAL);
 showScorePop('包扎完成 +45');
 AudioSys.click(1200,0.3,0.06);
+// ★2026-11-20 火力点坐姿批: 座位上 24-main 不跑 updateViewModel (座位门停跑) ⇒ 包扎完成必须在这里
+//   归位 VM (不归位则 VM 永卡 'bandage' → 下次 H 起不了步); 模型层同规收尾 (绷带卷收起+枪件还原,
+//   下车不残留)。步行完成路径不碰 —— 五旗全空即短路, VM 自己收。
+if((p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery)&&(typeof VM!=='undefined')&&VM.state==='bandage'){
+if(typeof vmBandageHide==='function') vmBandageHide();
+if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true;
+VM.state='idle'; VM.stateT=0; VM.stateDur=0; vmSndFlags={};
+}
+}
+}
+}
+// 原位换弹 (★2026-11-20 火力点坐姿批): 固定火力点上给随身武器装填的读条账 (tryReload 火力点分支起步)。
+//   必须在座位早退 (下方 onVehicle/onAT/onAA/onMG/onBattery/onMortar 分派) **之前** tick —— 座位分支直接
+//   return, 无人收账。结算复用 finishReload (它无座位守卫, 本 tick 是它的新合法调用点);
+//   下车/被震下 (五旗全空) = 打断, 静默清账无弹损失 (X/受击/抢占/死亡走 cancelReadBar 单源)。
+if(p.seatReload>0){
+if(!(p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery)){ p.seatReload=0; p.seatReloadDur=0; }
+else{
+p.seatReload-=dt;
+if(p.seatReload<=0){
+p.seatReload=0; p.seatReloadDur=0;
+p.barArmKey=null;   // 读条自然走完清打断确认账 (与包扎/前摇同规)
+p.finishReload();
+AudioSys.metalSlide(0.18,0.12,500,900);
 }
 }
 }
@@ -1295,7 +1320,11 @@ player.ffSpecSniper=!!(player.spectator&&w&&w.key==='specsniper');
 player.fireT-=dt;
 player.bloom=Math.max(0,player.bloom-dt*4);
 if(mouseDown&&w&&VM.state==='idle'&&player.fireT<=0&&!matchOver&&canFire){
-if(w.mag>0){
+// ★2026-11-20 近战重做: 军刀左键 = 刺 (三式单源 startMelee, 19-input) —— fireHeld 照旧置位 ⇒
+// 按住只出单刺 (单击单刺), 松开再按才接下一式; canFire/matchOver/VM 态等外层门照旧生效。
+if(w.def.melee){
+if(!player.fireHeld) startMelee('thrust');
+} else if(w.mag>0){
 if(w.def.type==='auto'||!player.fireHeld) playerShoot(w);
 } else if(!player.fireHeld){ AudioSys.click(2600,0.2,0.03); tryReload(); }
 player.fireHeld=true;
@@ -1804,7 +1833,8 @@ const nadeWind=(typeof VM!=='undefined'&&VM&&VM.state==='nade');
 if(nadeWind&&!p._nadeArmed){ p._nadeArmed=true; p.nadeThrowT=NADE_ANIM_T; }
 if(!nadeWind) p._nadeArmed=false;
 const melWind=(typeof VM!=='undefined'&&VM&&VM.state==='melee');
-if(melWind&&!p._meleeArmed){ p._meleeArmed=true; p.meleeT=Math.max(p.meleeT||0,MELEE_ANIM_T); }
+// ★2026-11-20 近战重做: 置满时长用 meleeDur (三式 0.35/0.5/0.7 各不同, MELEE_ANIM_T 只作缺省兜底)
+if(melWind&&!p._meleeArmed){ p._meleeArmed=true; p.meleeT=Math.max(p.meleeT||0,p.meleeDur||MELEE_ANIM_T); }
 if(!melWind) p._meleeArmed=false;
 }
 // 死亡倒地 (契约G): 两套尸体不同屏, 也绝不留一个"站着死的第三人称本体"。
@@ -1995,12 +2025,22 @@ shL=-1.02-0.42*Math.max(0,-nadeArc); elL=-0.55; shLz=0.3; shLy=0.25;
 shR=0.52; elR=-1.35; shRz=-0.1;
 shL=-1.02; elL=-0.55; shLz=0.3; shLy=0.25;
 }
-// 刺刀 (契约G): 枪前刺 + 上身突进, thrust 中段最大 (前刺量见下面 gunG/root)
-const meleeK=clamp((p.meleeT||0)/MELEE_ANIM_T,0,1);
+// 军刀三式 3P 姿态 (2026-11-20 近战重做, 契约G 刺刀 overlay 扩展): player.meleeKind 分式 ——
+// 刺=前刺 (现款值) / 斩=右臂横扫 / 劈=右臂纵劈, modest 初值实机验收再调; 归一化时长用
+// player.meleeDur (三式 0.35/0.5/0.7 各不同, 旧 MELEE_ANIM_T 0.42 只作缺省兜底)。
+const meleeK=clamp((p.meleeT||0)/(p.meleeDur||MELEE_ANIM_T),0,1);
 const thrust=meleeK>0?Math.sin((1-meleeK)*Math.PI):0;
 if(thrust>0){
+if(p.meleeKind==='slash'){
+shR=-0.7-thrust*0.5; elR=-1.15+thrust*0.35; shRz=-0.15-thrust*1.05;
+shL=-1.02; elL=-0.55; shLz=0.30;
+}else if(p.meleeKind==='chop'){
+shR=-1.7+thrust*1.15; elR=-0.75+thrust*0.55; shRz=-0.15;
+shL=-1.02; elL=-0.55; shLz=0.30;
+}else{
 shR=-0.42-thrust*1.05; elR=-1.3+thrust*0.9; shRz=-0.2;
 shL=-1.08-thrust*0.6; elL=-0.28; shLz=0.45;
+}
 }
 // 包扎 (契约G): 左手离枪按向身体 (VM 同态手上已是绷带模型, 见下面 world 枪模隐藏)
 const bandK=(p.bandaging||0)>0?1:0;
@@ -2030,7 +2070,7 @@ let gunZ=sprint?0.16:0;
 // 疾跑那套"横端在胸前"对 5cm 厚的工具件没有意义, 所以 sprint 附加量在这里不叠。
 if(hold){ gunX+=hold.gunX; gunY+=hold.gunY; gunZ+=hold.gunZ; }
 let gunOffY=0, gunOffZ=0;
-if(thrust>0){ gunOffZ=thrust*0.42; gunX-=thrust*0.16; }        // 刺刀: 枪前刺
+if(thrust>0){ gunOffZ=thrust*(p.meleeKind==='slash'||p.meleeKind==='chop'?0.18:0.42); gunX-=thrust*0.16; }        // 刺刀: 枪前刺 (斩/劈=横扫/纵劈, 前突收半)
 if(p.braced&&!(hold&&hold.noBrace)) gunOffY=0.12;               // 架枪: 枪抬到胸口遮挡位 (工具件不架枪)
 if(reloading&&!sprint&&!prone){ gunX+=0.20; gunZ+=0.12; }       // 换弹: 枪身下压
 if(nadeK>0) gunZ+=0.35*Math.max(0,nadeArc);                     // 手雷: 起手时枪随左臂让开
@@ -2047,7 +2087,7 @@ const handK=(nadeK>0||nadeHold||bandK>0)?0:(thrust>0?0.35:1);
 // 抓机 —— 若沿用通用 handK=1, armIK 会把左手也拽到机身上 = "双手捧着对讲机抵肩", 正是要修掉的那套
 // 步枪姿态。★ 上面 handK 与下面 handKL 两行是既有探针的源码锚点 (verify-animfix-20260926 的反向对照
 //   锚 + "换弹左臂单独取 0" 断言逐字比对), 所以**不改这两行**, 只在其后派生实际使用的权重。
-const handKUse=(hold)?hold.handK:handK;
+const handKUse=(hold)?(thrust>0?0.35:hold.handK):handK;   // ★2026-11-20 近战重做: 挥刀中 IK 权重降档 (仿旧刺刀 0.35) —— 满权重会把右手钉死在静止握点上, 盖掉挥刀姿态
 // ★ 2026-09-26 B2: 换弹时**左臂单独取 0** —— Bot 侧有 handKL (14-bots), 玩家侧漏了这一步, 于是上面
 // 摆好的"左手沉到弹匣"被 IK 的 handK=1 逐帧抹掉 (换弹时左臂全程贴回护木 = 换弹动作看不见)。
 // 语义与 Bot 一致: 换弹的语义就是左手离枪去弹匣; 右臂仍为 1 (枪始终在右手)。
@@ -2477,6 +2517,9 @@ if(cls!==undefined) p.cls=cls;
 const wkeys=playerClassWeapons(p.team,p.cls);
 const gear=p.spectator?specGear():clsGear(p.cls,p.team); // 观战: 四弹种全给 (与 0.5s 回满同一配置, 部署瞬间就不缺弹种)
 p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEFS[k].reserve}));
+// 军刀第 3 槽 (2026-11-20 近战重做): 非观战常驻追加 (N 键切换, 与 23-deploy p.slots 构建行互指同源) ——
+// 不动 playerClassWeapons (部署卡列表/观战覆盖不受影响); Bot setClass 不加 (Bot 不切槽)。
+if(!p.spectator) p.slots.push({key:'sabre',def:WPN_DEFS.sabre,mag:0,reserve:0});
 p.curSlot=0;
 p.curW=p.slots[0];
 p.nadeCount=gear.nades;

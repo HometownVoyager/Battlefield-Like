@@ -1195,6 +1195,12 @@ let EXPLO_FF=localStorage.getItem('sf_explo_ff')!=='0';
 // 死亡时手雷落下 (2026-11-16 批4): 默认开=士兵死亡 (玩家/Bot) 手里捏的手雷掉落 + 引信继承 (dropHeldNade
 // 单源 13-combat, 四个调用点全过它); 关=死亡时手里的雷就地消失, 不掉落不入 nades 账。
 let NADE_DEATH_DROP=localStorage.getItem('sf_nadedrop')!=='0';
+// 死亡动画模式 (2026-11-20 批⑦, 游戏内容设置"死亡动画"卡, 用户令): '1'=就地倒下 —— 死亡不 spawn 布娃娃,
+// Bot/玩家/丧尸走各自**既有的**无物理倒地分支 (14-bots A#10 / 20-player playerAvatarDeath 契约G / 25-zombies
+// deathAnimT), 尸体=活体模型本体 (盔/手/靴/背包天然一致), 无刚体/无冻结滞留, Bot 重生前 2.5s 收走;
+// 缺省/其他=布娃娃 (现状, 12-ragdolls 物理账原样)。每次死亡现读 (死亡是低频事件, localStorage 读开销可忽略)
+// ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
+function deathFallMode(){ try{ return localStorage.getItem('sf_deathfx')==='1'; }catch(e){ return false; } }
 // 主动优化档 (2026-11-16 批5): 0=关闭 1=标准 2=激进 —— 帧率持续偏低时主动清理战场碎屑
 // (碎块/弹壳/烟云/粒子; 激进档再压布娃娃与弹坑)。决策器 = 24-main perfOptTick (1s 窗均帧率+迟滞防抖)。
 let PERF_OPT=(function(){ const v=parseInt(localStorage.getItem('sf_perfopt'),10); return (v===0||v===1||v===2)?v:1; })();
@@ -1202,7 +1208,7 @@ let PERF_OPT=(function(){ const v=parseInt(localStorage.getItem('sf_perfopt'),10
 // 读条 VEH_REPAIR_TIME 秒, 走完回 VEH_REPAIR_HEAL×maxHp。打断网: 移动 (前进输入或 |vel|>VEH_REPAIR_MOVE) /
 // 主炮/同轴机枪开火 / 下车 / 起火 / 远离补给点 (1.35×R 迟滞) / 单次受伤 >VEH_REPAIR_DMG_FRAC×maxHp。
 // Bot 坦克不修理 (无人要求)。读条 UI 复用 22-hud _demolishBar, 账挂 player.vehRepair (进 readBarActive 取消网)。
-const VEH_REPAIR_R=4.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26, VEH_REPAIR_MOVE=0.6;
+const VEH_REPAIR_R=5.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26, VEH_REPAIR_MOVE=0.6;   // ★2026-11-20 批 (用户令⑤): 维修起始距离 4.5→5.5 略微放宽 (远离迟滞 1.35×R=7.4 自动跟随, 玩家/Bot 两路门同源)
 // 动态换弹时长系数单源: 关=1 (原时长); 开=clamp(已耗/容量,0,1)。已耗<=0 (满弹匣, 正常被换弹门拦) 或容量非法回退 1, 防零时长瞬间换弹
 function dynReloadFac(mag,cap){ if(!DYN_RELOAD||!cap||cap<=0) return 1; const used=cap-Math.max(0,mag); return used<=0?1:clamp(used/cap,0,1); }
 const THEMES={

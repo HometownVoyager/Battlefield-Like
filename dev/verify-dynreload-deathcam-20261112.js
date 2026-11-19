@@ -40,8 +40,8 @@ document.querySelector=(s)=>patchStyle(q(s));
 
 // ── 阴性对照 (一律单行锚, 替换体整语句+块注释) ──
 const PATCHES_ALL=[
- // N1 病灶还原: 玩家换弹总时长摘动态系数 (⇒ ② 全部数值判据红)
- ['js/19-input.js', "VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1)*dynReloadFac(w.mag,w.def.mag); // 连杀增益: 换弹加速 (2026-09-11); 动态换弹速度 ×已耗/弹匣 (2026-11-12, 单源 dynReloadFac — VM 动画/读条/3P 镜像按 nt 比例自动跟随)",
+ // N1 病灶还原: 玩家换弹总时长摘动态系数 (⇒ ② 全部数值判据红; ★2026-11-20 火力点坐姿批跟码: 行内公式已收编为 reloadDurOf 单源, 锚跟走 — 摘除语义不变, 步行 VM 换弹分母回到无系数)
+ ['js/19-input.js', "VM.stateDur=reloadDurOf(w); // 连杀增益: 换弹加速 (2026-09-11); 动态换弹速度 ×已耗/弹匣 (2026-11-12, 单源 dynReloadFac — VM 动画/读条/3P 镜像按 nt 比例自动跟随)",
   "VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1); /* NEG N1 动态换弹摘除 */"],
  // N2 病灶还原: dynReloadFac 恒 1 (系数公式失效 ⇒ ② 数值判据红; 保留函数体防调用点 ReferenceError 崩探针)
  ['js/00-config.js', 'function dynReloadFac(mag,cap){ if(!DYN_RELOAD||!cap||cap<=0) return 1; const used=cap-Math.max(0,mag); return used<=0?1:clamp(used/cap,0,1); }',
@@ -122,9 +122,9 @@ assert('18-game: 重部署时序零改动 (blackOv/showDeploy 两个 addMatchTim
  s18.includes("addMatchTimeout(()=>{ if(!this.alive){ const bo=document.getElementById('blackOv'); if(bo) bo.style.opacity=0.75; } },dly);")
  &&s18.includes("addMatchTimeout(()=>{ if(!matchOver&&!this.alive&&typeof showDeploy==='function') showDeploy(true); },dly+700);"));
 assert('run-all 已登记本探针',ra.includes('verify-dynreload-deathcam-20261112.js'));
-assert('版本戳 20261119b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261112a 清零',
- [...ih.matchAll(/20261119b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261119b';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261119b')).length===45
+assert('版本戳 20261120b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261112a 清零',
+ [...ih.matchAll(/20261120b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261120b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120b')).length===45
  &&!ih.includes('20261112a')&&!gf.includes('20261112a'));
 }
 

@@ -102,7 +102,11 @@ cyl(gm,0.012,0.012,0.09, 0,0.03,-0.13,g);
 bx(gm,0.026,0.085,0.045, 0,-0.038,0.045,g).rotation.x=-0.25;
 bx(gm,0.02,0.06,0.032, 0,-0.045,0.04,g);
 bx(gm,0.006,0.016,0.006, 0,0.052,-0.11,g);
-}} else if(kind==='radio'){
+}} else if(kind==='sabre'){
+// 军刀 (2026-11-20 近战重做): 3P 世界比例长刃 —— 件形走 09-weapons buildSabreBody 单源
+// (第一/第三人称同一份件形, 只有比例差; 通讯仪 buildRadioBody 同一教训), 轴向同各枪 (-z=刀尖方向)。
+buildSabreBody(g,1.35);
+} else if(kind==='radio'){
 // 通讯仪 (2026-10-27 重做, 用户 7 项需求第 1 条): **不在这里另画一台** —— 整机几何与阵营配色走
 // 09-weapons 的 buildRadioBody 单源 (第一人称 buildGunModel 的 radio 分支调的是同一个函数)。
 // 为什么必须单源: 旧版本函数**根本没有 radio 分支**, 落进下面的步枪默认档 ⇒ 第三人称拿通讯仪时
@@ -122,6 +126,10 @@ return g.clone();
 function gunKindOf(key){
 let d=WPN_DEFS[key];
 if(d.model){ key=d.model; d=WPN_DEFS[key]; }
+// 军刀 (2026-11-20 近战重做): 近战手持件独立 kind, 必须先于下面所有武器档判定 —— 它 def 里不含
+// rocket/mortar/atRifle/pistol/auto 任何旗标, 不前置就会落进默认档建出步枪 + 整套步枪持握动画
+// (通讯仪批的同型事故); 判据认 def.melee 而不是武器键名。
+if(d.melee) return 'sabre';
 // 通讯仪 (2026-10-27, 用户 7 项需求第 1.5 条根因): 工具类手持件必须**先于**下面所有武器档判定。
 // 它的 def 是 type:'tool' + radio:true, 不含 rocket/mortar/atRifle/pistol/auto, 旧版一路落到末尾的
 // 默认档 (return 'rifle') ⇒ worldGunModel 建出步枪、GUN_MOUNT_BY_KIND/PRONE/CARRIED_FWD 也全走
@@ -169,6 +177,9 @@ radio:{x:-0.17,y:0.40,z:0.30},
 // 臂长校验: 右肩 (-0.28,0.50,0) 到握点 ≈0.39m; 左肩到护木点 ≈0.60m —— 后者贴近全伸 0.62m 是有意的
 // (护木站位落在臂展内包络 |vx|≤hy(d) 的边界内; 超界时既有 gunAxisPoint 走 t 回退保手在枪上)。
 pistol:{x:-0.17,y:0.42,z:0.33},
+// 军刀 (2026-11-20 近战重做): 单手持刀挂在右腰前 —— 挂点仿步枪档略收 (刀柄短, 不需要枪托抵肩的
+// 前伸量), 右手由持握表 handK:1 反解到握柄原点; 漏登记会落 default 步枪档 (通讯仪批教训)。
+sabre:{x:-0.16,y:0.34,z:0.28},
 default:{x:-0.15,y:0.33,z:0.26},
 };
 // ── 匍匐挂点 (2026-09-26 A1 修): 挂点必须**随躯干俯角**给, 否则趴姿下枪与手一起埋进地面 ────────────
@@ -191,6 +202,8 @@ radio:{x:-0.22,dy:0.12,dz:0.40},
 // 站位旋到躯干正前, 左肩到目标变成纯横向 0.469m, 超出弯肘横向包络 (hy≈0.372m) ⇒ 左手脱枪 0.19m
 // (a21-j ④′ 实测); 前伸到 0.62 后左肩到目标转为斜前向 d≈0.57, 双手 IK 全落枪面, 且枪盒离头/躯干更远。
 pistol:{x:-0.24,dy:0.12,dz:0.62},
+// 军刀: 趴姿把刀收在头侧前方 (薄手持件, 仿 radio 档; dz 收短 —— 刀全长 <1m, 步枪档 0.545 会推到臂展外)
+sabre:{x:-0.22,dy:0.12,dz:0.40},
 default:{x:-0.24,dy:0.10,dz:0.545},
 };
 // 站↔趴的过渡按**当前**骨盆俯角平滑混合 (站 0.05 / 蹲 0.14 / 疾跑 0.30 / 趴 1.50):
@@ -233,6 +246,15 @@ shR:-1.02, elR:-1.62, shRz:-0.30, shL:-0.30, elL:-0.62, shLz:0.30,
 gunX:0.12, gunY:-0.42, gunZ:0.10,
 handK:1, handKL:0, noReload:true, noBrace:true,
 },
+// 军刀 (2026-11-20 近战重做): 单手持刀 (仿 radio 单手先例) —— 右手握柄 (handK 1 = armIK 反解到刀柄
+// 原点), 左手自然下垂不抓 (刀柄只有一只手的宽度); 刀没有"拉栓换弹/抵肩架枪"这两件事, noReload/noBrace
+// 整段跳过 (否则持刀也演换弹/架枪动作 = 通讯仪批的"拿工具演步枪动画"同款病)。挥刀姿态由 20-player
+// 的 melee overlay 按 player.meleeKind 分式覆盖 (本表只管**持刀**的常态)。
+sabre:{
+shR:-0.52, elR:-1.25, shRz:-0.22, shL:-0.30, elL:-0.62, shLz:0.30,
+gunX:0.04, gunY:-0.08, gunZ:0,
+handK:1, handKL:0, noReload:true, noBrace:true,
+},
 };
 // 取表: 没有条目的 kind (步枪/冲锋枪/机枪/火箭筒/迫击炮…) 返回 null ⇒ 姿态机走原路径, 逐位不变。
 // 入参就是 gunKindOf() 的返回值, 所以调用方不需要认识武器键, 也不需要再判一次类型。
@@ -243,7 +265,7 @@ const ARM_SIDE={R:-1,L:1};                 // mkArm 的 side 参数: 右=-1 (-X)
 // 0.30 时四姿态头/颈盒 0 组、躯干仅"抵肩接触" 0.034m(肩窝距 0.136 ≤0.30) —— 见 dev/out/tmp-infantry-gunmount-sweep.txt。
 // 通讯仪 0.14: 枪模前推量的语义是"把长枪身从躯干里推出来", 而通讯仪只有 5cm 厚、且挂点已在胸前
 // 0.30 —— 沿用 0.30 会让它悬在身前 30cm 处脱离手 (armIK 够不到, 手被钳在可达球面上)。
-const CARRIED_FWD={rifle:0.30,smg:0.30,mg:0.30,atr:0.24,launcher:0.30,mortar:0.30,radio:0.14,pistol:0.06};   // 手枪 0.06 (2026-11-04): 枪短, 沿用步枪 0.30 会把手枪推出手外 (IK 钳臂长 ⇒ 脱手)
+const CARRIED_FWD={rifle:0.30,smg:0.30,mg:0.30,atr:0.24,launcher:0.30,mortar:0.30,radio:0.14,pistol:0.06,sabre:0.10};   // 手枪 0.06 (2026-11-04): 枪短, 沿用步枪 0.30 会把手枪推出手外 (IK 钳臂长 ⇒ 脱手); 军刀 0.10 (2026-11-20): 刀短, 同理不能吃步枪档 0.30
 // 上半身镜像符号单源 (契约 §12.2 的数学依据, 别再改回去):
 //   镜像平面 x=0 下旋转矩阵的共轭 M·R·M⁻¹ 为 Rx(θ)→Rx(θ) (不变) / Ry(θ)→Ry(-θ) / Rz(θ)→Rz(-θ);
 //   Euler 顺序 XYZ 时逐分量成立 ⇒ 肩链的 rotation.y / rotation.z **目标值**写回时乘这个符号, rotation.x 不动。
@@ -440,6 +462,53 @@ return o;
 const _soldierFlBaseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:14;
 const _soldierFlGeo=new THREE.ConeGeometry(1.0,_soldierFlBaseL,10,1,true);
 const _soldierFlMat=new THREE.MeshBasicMaterial({color:0xffedd0,transparent:true,opacity:0.12,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false});
+// ═══ 士兵小件材质单源 (2026-11-20 批⑥) ═══
+// 军靴 (0x2e2820) / 腰带 (0x3a3428) / 盔徽 (青天白日徽蓝白 / 日军星徽金 / 八路红星红) 原是活体建模里
+// 逐兵 new 的匿名材质 + 布娃娃根本没建 —— 现在收成懒建共享表: 活体不再逐兵新建, 布娃娃逐具复用,
+// 两侧外观逐位一致 (textured=带 TEX.cloth 布纹的皮件; 徽章为纯色小面)。
+const _accMats={};
+function soldierAccMat(color,textured){
+const ck=color+(textured?'t':'');
+if(!_accMats[ck]) _accMats[ck]=new THREE.MeshLambertMaterial(textured?{color:color,map:TEX.cloth}:{color:color});
+return _accMats[ck];
+}
+// ═══ 阵营头盔单源构建器 (2026-11-20 批⑥: 活体 buildSoldierMesh 与布娃娃 spawnRagdoll 共用) ═══
+// 坐标系 = **头心系** (头盒 0.2×0.22×0.2 的中心): 活体侧挂在 headG 下 (0,0.1,0) 的 helmG 子组上;
+// 布娃娃侧头部件 mesh 原点即头心, 直接 add。两侧头盒同规格 ⇒ 头盔几何逐位一致 (布娃娃一致性的核心)。
+// 五型球冠参数与徽章坐标 = 2026-11-03 穿模修复批原值, 仅从 headG 系平移进头心系 (y−0.1)。
+function buildHelmetInto(g,team,U){
+const hs=TEAM_FACTION[team].helmet;
+if(hs==='pot'){
+const helm=new THREE.Mesh(new THREE.SphereGeometry(0.162,10,8,0,TAU,0,HPI*1.2),U.helm);
+helm.position.set(0,0.054,0);
+g.add(helm);
+} else if(hs==='stahl'){
+const helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.35),U.helm);
+helm.position.set(0,0.045,0); helm.scale.z=1.15;
+g.add(helm);
+// 国军M35: 正面青天白日徽 (新盔该高度 z 向截面半径 ≈0.1784, 徽章前缘出面 ~1mm / 后缘埋入盔面)
+if(TEAM_FACTION[team].sym==='✷'){
+bx(soldierAccMat(0x2050b0),0.032,0.032,0.008, 0,0.07,0.1755, g);
+bx(soldierAccMat(0xe8e8e8),0.016,0.016,0.01, 0,0.07,0.1775, g);
+}
+} else if(hs==='ssh'){
+const helm=new THREE.Mesh(new THREE.SphereGeometry(0.167,10,8,0,TAU,0,HPI*1.28),U.helm);
+helm.position.set(0,0.053,0); helm.scale.y=1.1;
+g.add(helm);
+} else if(hs==='jp'){
+const helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.22),U.helm);
+helm.position.set(0,0.046,0);
+g.add(helm);
+const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.17,0.025,10),U.helm);
+brim.position.set(0,0,0); g.add(brim);
+bx(soldierAccMat(0xd8b840),0.02,0.024,0.008, 0,0.06,0.1535, g);
+} else {
+// 八路军帽: 布帽+短帽檐(朝前)+红星
+bx(U.helm,0.21,0.09,0.21, 0,0.09,0, g);
+bx(U.helm,0.18,0.028,0.07, 0,0.055,0.12, g);
+bx(soldierAccMat(0xc03028),0.024,0.024,0.008, 0,0.09,0.106, g);
+}
+}
 function buildSoldierMesh(team,name){
 const U=uniformMats[team];
 const root=new THREE.Group();
@@ -448,45 +517,16 @@ const torsoG=new THREE.Group(); pelvis.add(torsoG);
 bx(U.coat,0.44,0.55,0.26, 0,0.28,0, torsoG);
 const headG=new THREE.Group(); headG.position.set(0,0.62,0); torsoG.add(headG);
 bx(U.skin,0.2,0.22,0.2, 0,0.1,0, headG);
-// 阵营特色头盔/军帽
+// 阵营特色头盔/军帽 —— ★2026-11-20 批⑥: 收编为 buildHelmetInto 单源 (活体与布娃娃 spawnRagdoll 共用;
+//   头盔件挂在 headG 下 (0,0.1,0) = 头盒中心的 helmG 子组上, 原 headG 系坐标 −0.1 转头心系, 几何/材质逐位不变)。
 // ★2026-11-03 穿模修复 (用户实测: 方头四上角总从盔里探出来): 头盒半宽 0.1 → 上角离轴线 0.1414, 而旧盔在
 //   头顶高度的截面半径只有 0.134~0.142, 且 10 段多面体还要再内缩 ~4% ⇒ 四角必然穿出。四盔统一放大球冠
 //   半径并微调冠高 (头顶轮廓位移 ≤6mm, 剪影不变), 保证**多面体化后**的盔面在 [盔沿, 头顶] 全程压住四角
 //   (裕量 ≥3mm, 判据钉 dev/verify-crushhead-20261103.js)。头盒/爆头命中球 (13-combat r=0.26) 均不动。
 //   顺带修: 日军星徽/国军青天白日徽旧 z 值本就埋在盔面内侧 (旧盔该高度截面半径 > 徽章 z) 从未露出,
 //   随新盔尺寸一并挪到盔面上 (前缘出盔面 ~2mm, 后缘埋入固定)。
-let helm;
-const hs=TEAM_FACTION[team].helmet;
-if(hs==='pot'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.162,10,8,0,TAU,0,HPI*1.2),U.helm);
-helm.position.set(0,0.154,0);
-headG.add(helm);
-} else if(hs==='stahl'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.35),U.helm);
-helm.position.set(0,0.145,0); helm.scale.z=1.15;
-headG.add(helm);
-// 国军M35: 正面青天白日徽 (新盔该高度 z 向截面半径 ≈0.1784, 徽章前缘出面 ~1mm / 后缘埋入盔面)
-if(TEAM_FACTION[team].sym==='✷'){
-bx(new THREE.MeshLambertMaterial({color:0x2050b0}),0.032,0.032,0.008, 0,0.17,0.1755, headG);
-bx(new THREE.MeshLambertMaterial({color:0xe8e8e8}),0.016,0.016,0.01, 0,0.17,0.1775, headG);
-}
-} else if(hs==='ssh'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.167,10,8,0,TAU,0,HPI*1.28),U.helm);
-helm.position.set(0,0.153,0); helm.scale.y=1.1;
-headG.add(helm);
-} else if(hs==='jp'){
-helm=new THREE.Mesh(new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.22),U.helm);
-helm.position.set(0,0.146,0);
-headG.add(helm);
-const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.17,0.025,10),U.helm);
-brim.position.set(0,0.1,0); headG.add(brim);
-bx(new THREE.MeshLambertMaterial({color:0xd8b840}),0.02,0.024,0.008, 0,0.16,0.1535, headG);
-} else {
-// 八路军帽: 布帽+短帽檐(朝前)+红星
-const cap=bx(U.helm,0.21,0.09,0.21, 0,0.19,0, headG);
-bx(U.helm,0.18,0.028,0.07, 0,0.155,0.12, headG);
-bx(new THREE.MeshLambertMaterial({color:0xc03028}),0.024,0.024,0.008, 0,0.19,0.106, headG);
-}
+const helmG=new THREE.Group(); helmG.position.set(0,0.1,0); headG.add(helmG);
+buildHelmetInto(helmG,team,U);
 const mkArm=(side)=>{
 const sh=new THREE.Group(); sh.position.set(side*0.28,0.5,0); torsoG.add(sh);
 bx(U.coat,0.13,0.32,0.13,0,-0.16,0,sh);
@@ -503,13 +543,13 @@ const hip=new THREE.Group(); hip.position.set(side*0.12,0,0); pelvis.add(hip);
 bx(U.pants,0.16,LEG_L1,0.16,0,-LEG_L1/2,0,hip);
 const knee=new THREE.Group(); knee.position.y=-LEG_L1; hip.add(knee);
 bx(U.pants,0.14,LEG_L2,0.14,0,-LEG_L2/2,0,knee);
-bx(new THREE.MeshLambertMaterial({color:0x2e2820,map:TEX.cloth}),0.15,0.1,0.24,0,-LEG_L2+0.02,0.04,knee); // B8/P3-12 军靴 (鞋底 = 踝下 0.03)
+bx(soldierAccMat(0x2e2820,true),0.15,0.1,0.24,0,-LEG_L2+0.02,0.04,knee); // B8/P3-12 军靴 (鞋底 = 踝下 0.03) — ★2026-11-20 批⑥: 材质收进 soldierAccMat 单源 (布娃娃同源复用)
 return {hip,knee};
 };
 const legL=mkLeg(-1), legR=mkLeg(1);
 const gunG=new THREE.Group(); gunG.position.set(GUN_MOUNT.x,GUN_MOUNT.y,GUN_MOUNT.z); gunG.rotation.order='YXZ'; torsoG.add(gunG);
 bx(team===0?U.pants:U.coat,0.3,0.34,0.14, 0,0.3,-0.18, torsoG);
-bx(new THREE.MeshLambertMaterial({color:0x3a3428,map:TEX.cloth}),0.4,0.08,0.28, 0,0.02,0, torsoG); // B8/P3-12 装具/背包带
+bx(soldierAccMat(0x3a3428,true),0.4,0.08,0.28, 0,0.02,0, torsoG); // B8/P3-12 装具/背包带 — ★2026-11-20 批⑥: 材质收进 soldierAccMat 单源 (布娃娃腰带同源)
 // 步兵战术手电筒 (右胸挂载, 指向前方)
 const flGrp=new THREE.Group();
 flGrp.position.set(0.12,0.34,0.16);

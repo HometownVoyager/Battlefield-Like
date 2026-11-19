@@ -111,7 +111,7 @@ let IDX=0; { const c0=boot(0); IDX=vm.runInContext('CAMPAIGNS.findIndex(c=>c.id=
 const ctx=boot(IDX,true);
 const SH=ctx2=>s=>vm.runInContext(s,ctx2);
 const Gm=SH(ctx);
-ok(html.includes("__sfStyleVer='20261119b'"),'前置: 版本戳 20261119b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261120b'"),'前置: 版本戳 20261120b 在位 (index.html 内联)');
 ok(Gm('player.alive')===true,'前置: 开局/部署成功 (normandy)');
 
 // ══ T1 契约不破 ══
@@ -128,11 +128,11 @@ ok(Array.isArray(GUN_KEYS)&&GUN_KEYS.length>=45&&['rifle','smg','sniper','pistol
 ok(Array.isArray(CANNON_KEYS)&&['generic','tkJp','tkMed','tkHeavy','atgun','battery','naval_lvt','naval_kami','naval_pt','naval_gyorai','rocket_bazooka','rocket_schreck','rocket_loiter'].every(k=>CANNON_KEYS.includes(k)),'T2c CANNON_PROFILES 在册 (坦克三档+atgun+battery+舰炮四型+火箭三型+generic)');
 ok(Array.isArray(EXPL_KEYS)&&['generic','frag','atcharge','mine','mortar','bomb','shell','tankdie','truckdie','planedie','navalShell','naval','torpedo','barrage','thunder','drum','collapse','batterydie','loiter'].every(k=>EXPL_KEYS.includes(k)),'T2d EXPLOSION_PROFILES 在册 (18 kind)');
 ok(Array.isArray(EK_KEYS)&&['tankSmall','tankJp','tankBig','planeInline','planeRadial','truck','amph','boat','loiter'].every(k=>EK_KEYS.includes(k))&&src01.includes("const ENGINE_ALIASES={ tank:'tankSmall', plane:'planeInline' };")===true,'T2e ENGINE_KINDS 九档在册 + tank/plane 旧档别名 verbatim');
-{ // T2b 每把在役武器一条独立档案 (tool 不发火 / rocket·mortar·loiter 走炮声与爆炸档, 均豁免)
-const wkeys=Gm('JSON.stringify(Object.keys(WPN_DEFS).map(k=>{const d=WPN_DEFS[k];return [k, !!d.tool, !!(d.rocket||d.mortar), d.sid||d.snd];}))');
+{ // T2b 每把在役武器一条独立档案 (tool 不发火 / rocket·mortar·loiter 走炮声与爆炸档 / melee 近战无射击声 — 2026-11-20 军刀批, 均豁免)
+const wkeys=Gm('JSON.stringify(Object.keys(WPN_DEFS).map(k=>{const d=WPN_DEFS[k];return [k, !!d.tool, !!(d.rocket||d.mortar), !!d.melee, d.sid||d.snd];}))');
 const wl=JSON.parse(wkeys);
-const missing=wl.filter(([k,tool,rct,sid])=>!tool&&!rct&&!GUN_KEYS.includes(sid)).map(([k])=>k);
-ok(wl.every(([k,tool,,sid])=>tool?true:!!sid)&&missing.length===0,'T2b ★每把发火武器 sid 档案全覆盖 (缺: '+(missing.join(',')||'无')+')');
+const missing=wl.filter(([k,tool,rct,ml,sid])=>!tool&&!rct&&!ml&&!GUN_KEYS.includes(sid)).map(([k])=>k);
+ok(wl.every(([k,tool,,ml,sid])=>(tool||ml)?true:!!sid)&&missing.length===0,'T2b ★每把发火武器 sid 档案全覆盖 (缺: '+(missing.join(',')||'无')+')');
 ok(Gm('Object.keys(WPN_DEFS).every(k=>!!WPN_DEFS[k].sid)')===true,'T2b-2 WPN_DEFS 全部条目带 sid 字段');
 }
 

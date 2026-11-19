@@ -56,7 +56,9 @@ const PATCHES=[
  // D 匍匐挂点 radio 档退场 ⇒ ④ 趴姿判据红
  ['js/11-soldiers.js', 'radio:{x:-0.22,dy:0.12,dz:0.40},', ''],
  // E 前推量 radio 档退场 (落回步枪 0.30) ⇒ ④ 前推量判据红
- ['js/11-soldiers.js', 'mortar:0.30,radio:0.14,pistol:0.06};', 'mortar:0.30};'],   // 锚已随 2026-11-04 批更新 (追加 pistol 项)
+ // ★2026-11-20 判据跟走 (军刀近战重做批): CARRIED_FWD 追加 sabre:0.10 档 (军刀短, 不吃步枪 0.30),
+ //   radio 档语义不变 —— 锚跟码到新行尾。
+ ['js/11-soldiers.js', 'mortar:0.30,radio:0.14,pistol:0.06,sabre:0.10};', 'mortar:0.30};'],
  // F 持握表 radio 档退场 (表变空 ⇒ gunHoldOf 恒 null) ⇒ ① 单源判据 + ⑤ 姿态判据红
  ['js/11-soldiers.js', 'const GUN_HOLD_BY_KIND={', 'const GUN_HOLD_BY_KIND={};const _UNUSED_HOLD={'],
  // G 姿态机的持握表接入退场 (回到"四分支按步枪写死") ⇒ ⑤ 姿态判据红
@@ -110,7 +112,7 @@ assert('①-c gunKindOf 的 radio 判定在**最前** (先于 rocket/mortar/atRi
 assert('①-d 四张表都有 radio 档: 站姿挂点 / 匍匐挂点 / 前推量 / 持握姿态',
  /GUN_MOUNT_BY_KIND=\{[\s\S]*?radio:\{x:/.test(s11)
  && /GUN_MOUNT_PRONE=\{[\s\S]*?radio:\{x:/.test(s11)
- && s11.includes('radio:0.14,pistol:0.06};')   // 锚已随 2026-11-04 副武器差异化批更新 (CARRIED_FWD 追加 pistol 项, radio 档语义不变)
+ && s11.includes('radio:0.14,pistol:0.06,sabre:0.10};')   // 锚已随 2026-11-04 批更新 (追加 pistol 项) + ★2026-11-20 跟走 (追加 sabre:0.10, radio 档语义不变)
  && s11.includes('const GUN_HOLD_BY_KIND={') && /GUN_HOLD_BY_KIND=\{[\s\S]*?radio:\{/.test(s11)
  && s11.includes('function gunHoldOf(kind){'));
 assert('①-e 姿态机只认持握表, 不写武器名硬编码 (20-player 里不出现 \'radio\')',

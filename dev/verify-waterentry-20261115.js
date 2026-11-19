@@ -77,7 +77,7 @@ try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
 G('for(const s of soldiers) s.protUntil=0; player.protUntil=0;');
-ok(html.includes("__sfStyleVer='20261119b'"),'前置: 版本戳 20261119b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261120b'"),'前置: 版本戳 20261120b 在位 (index.html 内联)');
 
 // ── spy 安装: waterSplash/spawnP 重绑 + AudioSys.splash 包裹 ──
 G("const _wsOrig=waterSplash; const _spOrig=spawnP; const _asOrig=AudioSys.splash; _wsCalls=[]; _spN=0; _asCalls=[];"+

@@ -60,7 +60,9 @@ const NEG_PATCHES=[
 // N5 摘掉血期特效驱动 → T3a 红 (opacity 停在积寒渐变 ≤0.46)
 ['js/20-player.js','coldFxDrive(dt,0.55,true);',';'],
 // N6 弹药阈值回旧 25% → T1b 红
-['js/22-hud.js',"(!player.onMG&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee'","(!player.onMG&&w.mag<=Math.max(2,w.def.mag*0.25))?'#ff7060':'#eee'"],
+// ★2026-11-20 判据跟走 (军刀近战重做批): 低弹红门加 !w.def.melee (军刀 mag=0 ⇒ 不排除就 0<=floor(0/2) 恒红),
+//   枪械阈值语义不变 —— 阴性锚跟码到新片段。
+['js/22-hud.js',"(!player.onMG&&!w.def.melee&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee'","(!player.onMG&&w.mag<=Math.max(2,w.def.mag*0.25))?'#ff7060':'#eee'"],
 ];
 if(NEG) for(const [f,from,to] of NEG_PATCHES){
 if(SRC[f]===undefined) SRC[f]=fs.readFileSync(path.join(root,f),'utf8');
@@ -84,22 +86,22 @@ else { FAILN++; console.log('  ✘ '+label); }
 }
 
 // ══ T0 版本戳 ══
-console.log('T0 版本戳 20261119b');
+console.log('T0 版本戳 20261120b');
 {
-const stamps=[...html.matchAll(/20261119b/g)].length;
-ok(stamps>=48&&html.includes("window.__sfStyleVer='20261119b';")
-&&html.includes('css/style.css?v=20261119b')
-&&!html.includes('20261118b'),'T0a ★版本戳 20261119b: index.html '+stamps+' 处 + __sfStyleVer + css 链 + 旧 20261118b 清零');
+const stamps=[...html.matchAll(/20261120b/g)].length;
+ok(stamps>=48&&html.includes("window.__sfStyleVer='20261120b';")
+&&html.includes('css/style.css?v=20261120b')
+&&!html.includes('20261118b'),'T0a ★版本戳 20261120b: index.html '+stamps+' 处 + __sfStyleVer + css 链 + 旧 20261118b 清零');
 const gf=fs.readFileSync(path.join(root,'dev/_game_files.txt'),'utf8');
 const gl=gf.split(/\r?\n/).filter(l=>l.includes('?v='));
-ok(gl.length===45&&gl.every(l=>l.endsWith('?v=20261119b'))&&!gf.includes('20261118b'),'T0b ★_game_files.txt 45 行全 20261119b (旧戳清零)');
+ok(gl.length===45&&gl.every(l=>l.endsWith('?v=20261120b'))&&!gf.includes('20261118b'),'T0b ★_game_files.txt 45 行全 20261120b (旧戳清零)');
 }
 
 // ══ T1 批① 低弹变红 ══
 console.log('T1 批① 低弹变红 (≤弹匣/2 向下取整)');
 {
 const s22=srcOf('js/22-hud.js');
-ok(s22.includes("hudStyle('magN','color',(!player.onMG&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee');")
+ok(s22.includes("hudStyle('magN','color',(!player.onMG&&!w.def.melee&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee');")
 &&!s22.includes('w.def.mag*0.25'),'T1a ★源码钉: 新阈值 floor(弹匣/2) 在位 + 旧 25% 阈值绝迹');
 // 行为钉: 真 updateHUD 写 #magN 色
 const IDX_S=(()=>{ const c0=boot(0); return vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="stalingrad")',c0); })();
@@ -280,5 +282,5 @@ G('coldFxDrive(1/60,0,false); coldFxDrive(1/60,0,false)');
 ok(Number(fx2.style.opacity||0)===o2,'T7f ★变了才写纪律: 稳态后不再落 DOM (同值幂等)');
 }
 
-console.log('verify-20261119b: PASS='+PASS.length+' FAIL='+FAILN+(NEG?' (--neg)':''));
+console.log('verify-20261120b: PASS='+PASS.length+' FAIL='+FAILN+(NEG?' (--neg)':''));
 process.exit(FAILN>0?1:0);

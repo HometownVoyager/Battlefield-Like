@@ -663,6 +663,9 @@ p.yaw=(_sy!==null)?_sy:Math.atan2(-sx,-sz); p.pitch=0;
 const wkeys=playerClassWeapons(p.team,p.cls);
 const gear=p.spectator?specGear():clsGear(p.cls,p.team); // 观战: 四弹种全给 (2026-10-24 用户指定, 与补给回满同源)
 p.slots=wkeys.map(k=>({key:k,def:WPN_DEFS[k],mag:WPN_DEFS[k].mag,reserve:WPN_DEFS[k].reserve}));
+// 军刀第 3 槽 (2026-11-20 近战重做): 非观战常驻追加 (N 键切换; 与 20-player rearmPlayerClass 互指同源,
+// 两处同一事实只此一对) —— 不动 playerClassWeapons (部署卡列表/观战覆盖不受影响); Bot setClass 不加。
+if(!p.spectator) p.slots.push({key:'sabre',def:WPN_DEFS.sabre,mag:0,reserve:0});
 p.curSlot=0; p.curW=p.slots[0];
 p.nadeCount=gear.nades;
 p.atNades=gear.atn;

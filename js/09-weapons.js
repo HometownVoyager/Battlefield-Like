@@ -549,6 +549,11 @@ rr.visible=false;
 G.add(rr);
 parts.reloadRocket=rr;
 parts.muzzle.set(0,0.06,-1.02); // 火箭筒/巡飞弹(loiter 复用 bazooka 模型)炮口前移出管口 0.02 (P3-10: audit-gunmodels 枪口前置0.050)
+} else if(key==='sabre'){
+// 军刀 (2026-11-20 近战重做): 第一人称长刃 —— 件形走 buildSabreBody 单源 (3P 同源, 见函数头注),
+// 原点=握柄中段 (10-viewmodel vmHandDefault 的 melee 手位同锚), 刀身沿 -z 前伸, 无任何枪械件。
+buildSabreBody(G,1);
+parts.muzzle.set(0,0.01,-0.65);   // 无枪口: 停在刀尖附近, 枪口特效对近战本就不该出现 (melee 分流已挡开火)
 } else if(key==='radio'){
 // 通讯仪 (2026-10-27 重做, 用户参考图 对讲机参考.jpg): 整机几何与配色走**单源** buildRadioBody() ——
 // 第一人称 (这里) 与第三人称 (11-soldiers worldGunModel 的 kind==='radio') 建的是同一份件、同一份色,
@@ -691,4 +696,19 @@ const g=new THREE.Group();
 bx(vmMats.woodD,0.02,0.025,0.09, 0,0,0.045,g);
 const blade=bx(new THREE.MeshLambertMaterial({color:0x9aa2a8}),0.006,0.028,0.15, 0,0.004,-0.075,g);
 return g;
+}
+// 军刀建模单源 (2026-11-20 近战重做): 第一人称 (buildGunModel) 与第三人称 (11-soldiers worldGunModel)
+// 各按自己的比例调这一个函数 —— 件形/材质/轴向只有一份, 两条视角不会漂 (通讯仪 buildRadioBody 同一教训)。
+// 坐标系: 原点=握柄中段 (手位), 刀身沿 -z 前伸 (与各枪"枪口朝 -z"同约定), scale 参数 = 全长倍率
+// (FP≈1.0, 3P≈1.35 让第三人称剪影读得出长刃)。
+function buildSabreBody(G,scale){
+const s=scale||1;
+const st=vmMats.gunL;                        // 刀身钢色 (亮钢, 与深钢枪件分开读)
+bx(vmMats.woodD,0.030*s,0.040*s,0.150*s, 0,-0.008*s,0.055*s,G);          // 握柄 (木色)
+bx(st,0.026*s,0.030*s,0.016*s, 0,0.004*s,0.120*s,G);                     // 柄尾镦
+bx(vmMats.gun,0.070*s,0.012*s,0.014*s, 0,0.010*s,-0.030*s,G);            // 护手 (横条)
+bx(vmMats.gun,0.014*s,0.044*s,0.016*s, 0,0.002*s,-0.022*s,G);            // 护手座
+const bl=bx(st,0.007*s,0.034*s,0.560*s, 0,0.010*s,-0.315*s,G);           // 长刃刀身 (细长盒)
+bl.rotation.x=0.02;                                                       // 微斜: 刃口朝下 (劈砍形制)
+bx(st,0.004*s,0.016*s,0.070*s, 0,0.002*s,-0.620*s,G);                    // 刀尖收薄
 }

@@ -338,16 +338,18 @@ const mid={alive:player.alive,deployed:player.deployed,spec:player.spectator};
 confirm=()=>false;
 card.onclick();
 const cancel={spec:player.spectator,want:player.specWant};
-// ③ 战斗中选"确定" → 只记意图, 当场不免伤 (打一发 40 伤害看血)
+// ③ 战斗中点自己卡 (★2026-11-20 用户令④): 战地整备界面不切调试模式 — 确认框都不会弹, 开关纹丝不动
 confirm=()=>true;
 card.onclick();
 const pending={spec:player.spectator,want:player.specWant};
 player.hp=100; player.damage(40,null,false);
 const hp=player.hp;
-// ④ 下一次部署才落地 (配枪同步换成观战连狙)
-deployPlayer();
+// ④ 阵亡等待期点卡 = 立即生效 (战地整备门只拦活人 — 死人没有"瞬间变强"问题, 2026-09-26H 原口径;
+//   战斗中路径被④封死后这是调试模式的唯一开启口) 配枪同步换观战连狙
+player.damage(500,null,false);
+card.onclick();
 const applied={spec:player.spectator,want:player.specWant,slot:player.slots[1]&&player.slots[1].key};
-// ⑤ 关闭: 立即生效 (观战者不会阵亡 ⇒ 若也等部署就永远退不出来)
+// ⑤ 关闭: 立即生效 (调试观战不会阵亡 ⇒ 若也要等部署就永远退不出来)
 card.onclick();
 const off={spec:player.spectator,want:player.specWant};
 return {stage,mid,cancel,pending,hp,applied,off};
@@ -356,9 +358,9 @@ if(typeof r==='string'){ exc('T3',r); return; }
 ok(r.stage.spec===true&&r.stage.want===null,'T3 兵种选择阶段开观战: 立即生效 (未落地时不打扰)');
 ok(r.mid.alive===true&&r.mid.deployed===true&&r.mid.spec===false,'T3 前置: 已进入战斗中 (活着·已落地·非观战)');
 ok(r.cancel.spec===false&&r.cancel.want===null,'T3 ★ 战斗中确认框选"取消" ⇒ 开关不动 (旧版是当场生效)');
-ok(r.pending.spec===false&&r.pending.want===true,'T3 ★ 战斗中确认后只记意图: player.spectator 仍为 false (待生效)');
-ok(r.hp===60,'T3 ★ 待生效期间**照常挨打** (打 40 血实扣: 60) —— 没有"瞬间变免伤"的窗口');
-ok(r.applied.spec===true&&r.applied.want===null&&r.applied.slot==='specsniper','T3 ★ 下一次部署落地: 观战生效 + 副武器换观战连狙');
+ok(r.pending.spec===false&&r.pending.want===null,'T3 ★ 战地整备点自己卡不切调试模式 (2026-11-20 用户令④): 确认框不弹, 开关纹丝不动 (specWant 不记)');
+ok(r.hp===60,'T3 ★ 战斗中照常挨打 (打 40 血实扣: 60) —— 没有"瞬间变免伤"的窗口');
+ok(r.applied.spec===true&&r.applied.want===null&&r.applied.slot==='specsniper','T3 ★ 阵亡后部署页点卡: 立即生效 + 副武器换观战连狙 (战斗中路径已被④封死, 这是唯一开启口)');
 ok(r.off.spec===false&&r.off.want===null,'T3 关闭观战: 立即生效 (不需要再死一次)');
 }
 

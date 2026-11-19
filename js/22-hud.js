@@ -1082,12 +1082,22 @@ hudStyle('magN','color',player.loiter.life<4?'#ff7060':'#9fe89f');
 hudText('resN',Math.round(player.loiter.spd)+' m/s');
 hudText('nadeN',SHOW_CTL_HINTS?t2('鼠标 制导 · 左键 自爆 · 空格 加速 · 右键 开镜 · U 切换视角 · 本体定身'):''); // 详细操作开关 (2026-11-09 批)
 } else if(w){
+// 军刀 (2026-11-20 近战重做): 近战没有弹药账 —— 弹数一格显示 '—' / 备弹留空; 低弹变红门必须
+// 排除 melee (mag=0 ⇒ 0<=floor(0/2) 恒真, 不排除就是常红)。
+if(w.def.melee){
+hudText('wname',t2(w.def.name));
+hudText('wmode',w.def.mode);
+hudText('magN','—');
+hudText('resN','');
+hudStyle('magN','color','#eee');
+}else{
 hudText('wname',player.onMG?t2('MG42 通用机枪'):t2(w.def.name));
 hudText('wmode',player.onMG?t2('全自动'):w.def.mode);
 hudText('magN',player.onMG?'∞':String(w.mag));
 hudText('resN',player.onMG?'':'/ '+w.reserve);
 // 低弹变红 (2026-11-18 批①用户令): 现有子弹数 ≤ 弹匣总容量/2 (向下取整) 即红 —— 旧 25% 阈值作废
-hudStyle('magN','color',(!player.onMG&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee');
+hudStyle('magN','color',(!player.onMG&&!w.def.melee&&w.mag<=Math.floor(w.def.mag/2))?'#ff7060':'#eee');
+}
 hudText('nadeN',_hv?(t2('绷带[H] ×{0}',_hv.bandages||0)   // ★2026-11-03: 宿主有雷账 (弹药账对齐后随补给消耗/补充), 随绷带一并显示
 +(_hv.nades>0?' · '+t2('手雷 ×{0}',_hv.nades):'')+(_hv.atn>0?' · '+t2('AT雷 ×{0}',_hv.atn):''))   // 附身: 宿主读数 (真附身批 2026-11-01)
 :(t2('手雷 ×{0}',player.nadeCount)+' · '+t2('绷带[H] ×{0}',player.bandages)
@@ -1100,6 +1110,8 @@ hudText('nadeN',_hv?(t2('绷带[H] ×{0}',_hv.bandages||0)   // ★2026-11-03: �
 //   (player.useCast.t / uc.dur) ③ 包扎 (player.bandaging, 总数收在 00-config 的 BANDAGE_T 单源)
 //   ④ 举雷待发 (VM 'nade' 哨兵 + nadeHeld; 普通雷显示引信倒数, 其余三弹种无计时显"已举起") ⑤ 换弹
 //   (VM 'reload'; 座位态冻结不显示 —— 换弹计时挂在 VM 上, 上车后被冻住, 条不该在驾驶位上挂着跑)。
+//   ⑥ 原位换弹 (player.seatReload, ★2026-11-20 火力点坐姿批): 坐固定火力点给随身武器装填, 账在 player
+//      不在 VM ⇒ 不吃 _seated 门 (⑤ 的座位门只属于 VM 换弹)。
 //   五条账目各在自己文件里, 这里只**读**不写: 取消一律走 player.cancelReadBar (18-game) 那个出口 ⇒
 //   "点 ✕ / 按 X / 点左键(举雷除外) / 受击>25 / 移动"收尾完全一致 (用户实报②的模型滞留就是各写一份收尾写漏了)。
 //   ★2026-10-30 读条交互批 (用户裁定②③): **同键再按=极少加快** (+2.5% 进度, 不再取消); **其他动作键打断**
@@ -1151,6 +1163,7 @@ const rb=((player.alive||player.specViewHost)&&!hudBlocked)   // ★2026-11-03: 
 :player.useCast?{lab:t2(EMCAST[player.useCast.kind]||'使用中: 火力点 …'),k:clamp(player.useCast.t/Math.max(0.01,player.useCast.dur),0,1)}
 :player.vehRepair?{lab:t2('坦克维修中: {0}s · 移动/开火打断',Math.max(0,(player.vehRepair.dur||0)-(player.vehRepair.t||0)).toFixed(1)),k:clamp((player.vehRepair.t||0)/Math.max(0.01,(player.vehRepair.dur||0.01)),0,1)}   // 坦克补给箱修理 (2026-11-16 批1): 8s 读条回 25%×maxHp, 打断网见 18-game tryVehRepair
 :player.bandaging>0?{lab:t2('包扎中: {0}s',Math.max(0,player.bandaging).toFixed(1)),k:clamp(1-player.bandaging/BANDAGE_T,0,1)}
+:player.seatReload>0?{lab:t2('原位换弹: {0}s',Math.max(0,player.seatReload).toFixed(1)),k:clamp(1-player.seatReload/Math.max(0.01,player.seatReloadDur),0,1)}   // ★2026-11-20 火力点坐姿批: 坐固定火力点给随身武器装填 (账在 player 不在 VM, 不吃 _seated 门 — VM 分支的座位门不适用)
 :(_nk&&typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)?(_nk!=='at'   // ★2026-11-17 批2.6: 引信倒数扩到烟雾/燃烧 (at 撞炸无引信, 保持满条"已举起")
 ?{lab:t2((_nkLabel[_nk]||'手雷')+' · 引信 {0}s · X 收回',Math.max(0,player.nadeFuse).toFixed(1)),k:clamp(1-Math.max(0,player.nadeFuse)/(_nfT[_nk]||_fuseT),0,1)}
 :{lab:t2(_nkName[_nk]||'手雷 · X 收回'),k:1})
@@ -2535,6 +2548,23 @@ syncMenuButtons();
 		};
 		}
 		}
+		// 死亡动画 (2026-11-20 批⑦, 用户令): 单钮循环 就地倒下⇄布娃娃 —— 单源 deathFallMode() (00-config)。
+		// 就地倒下=死亡不 spawn 布娃娃, 三路各自走**既有的**无物理倒地分支 (Bot=14-bots A#10 倒地动画 /
+		// 玩家=playerAvatarDeath 契约G / 丧尸=25-zombies deathAnimT), 尸体即活体模型本体 (盔/手/靴/背包
+		// 天然一致), 无刚体/无冻结滞留, 重生前 2.5s 收走 (Bot 死亡分支既有账)。布娃娃=缺省档 (现状)。
+		// 每次死亡现读开关 ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
+		{
+		const dfb=el('deathFxBtn');
+		if(dfb){
+		const syncDf=()=>{ const fall=deathFallMode(); dfb.textContent='💀 '+t('死亡动画')+': '+t(fall?'就地倒下':'布娃娃'); dfb.classList.toggle('sel',fall); };
+		syncDf();
+		dfb.onclick=()=>{
+		AudioSys.resume&&AudioSys.resume();
+		localStorage.setItem('sf_deathfx',deathFallMode()?'0':'1');
+		syncDf();
+		};
+		}
+		}
 		// 点位周边补给箱数量 (2026-11-17 批): 单钮循环 1↔2 —— 05c-layouts 弹药箱旗点循环读取 sf_crates,
 		// 补给箱随世界在页面载入期一次性建账 ⇒ 改档不即时生效, 换图/重开一局 (页面重载) 后生效 (desc 已注明)。
 		{
@@ -3034,6 +3064,15 @@ if(el('deployMenuBtn')) el('deployMenuBtn').onclick=()=>{ AudioSys.resume&&Audio
 //     · 开启 + 活着·已落地·未结算 ⇒ 二次确认 + 记为 player.specWant, **下一次部署**才生效 (23-deploy 结算);
 //     · 关闭 ⇒ 立即生效 (反过来的方向没有可利用性; 且观战者不会阵亡 ⇒ 若也要等部署就永远退不出来);
 //     · 兵种选择阶段 / 死亡等待期 / 结算后 ⇒ 与旧版一致, 立即生效 (那时人没在交战, 没有"瞬间变强"的问题)。
+	// ★2026-11-20 批 (用户令④): 战地整备界面 (活着·已部署 — 补给箱旁按 ESC 呼出的改兵种界面) 里点自己的
+	//   巡飞弹兵卡 = 普通重选, **不再触发调试模式开关**。调试是"干涉战局"的开关, 与 2026-09-26H
+	//   "战斗中不许即时开启"同族 —— 战地整备路径同样极短 (Esc 丢指针锁就自动进本界面), 误触即改变本局性质。
+	//   兵种选择阶段 / 死亡等待期 / 结算后 (alive=false 或未部署) 的开关行为原样保留 (下面原分支不动)。
+	if(EXPERIMENT&&i===3&&player.cls===3&&player.alive&&player.deployed&&!matchOver){
+	showScorePop(t2('调试模式不可在战地整备中切换'));
+	AudioSys.click(400,0.2,0.05);
+	return;
+	}
 	if(EXPERIMENT&&i===3&&player.cls===3){
 	// D15 (2026-10-26 指挥官批): 指挥官与观战态互斥 —— 战斗中开关/选兵阶段/双击卡三条路径
 	// 全收敛在这一个 onclick 里, 一道门全堵 (防"指挥官身体 + 观战换装"缝合态)。

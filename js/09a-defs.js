@@ -78,6 +78,13 @@ specsniper: { name:'观战连狙', mode:'全自动 · 4x', type:'auto', snd:'sni
 // 指挥地图 (19-input mousedown 分流, 不进 ADS); mag/reserve 全 0 ⇒ 永不触发空仓点击换弹;
 // 不进 readBarActive 交互读条网 (自身无读条操作); 持通讯仪时 G/绷带照常 (不依赖主武器槽)。
 radio:{ name:'通讯仪', mode:'工具 · 右键指挥地图', type:'tool', snd:'pistol', sid:'radio', dmg:0, headMul:1, rpm:60, mag:0, reserve:0, reload:2.0, spreadHip:5, spreadAds:5, recoil:0, recSide:0, adsFov:60, kick:0, tool:true, radio:true, tracer:0, wSpd:1 },
+// 军刀 (2026-11-20 近战重做): 切枪模式第 3 槽常驻武器 (N 键切换), 非火力 —— 三式近战:
+//   左键刺 / 右键斩 (扇形多目标) / 中键劈, 节奏与伤害各在 def 内单源 (thrustT/slashT/chopT +
+//   thrustDmg/slashDmg/chopDmg; 用户裁定标准档 45/35/70 —— 满血 100 单式都杀不死)。
+//   mag/reserve=0 仿 radio 先例 (永不触发空仓点击换弹); 伤害直伤不过 DIFF_TABLE/距离衰减 (与既有
+//   近战直伤先例一致, doMeleeHit 直调 damage); isHead 一律 false (现款); melee:true 是全链判据
+//   (gunKindOf/HUD/startMelee/3P 表全认它, 别用武器键名判断)。
+sabre:{ name:'军刀', mode:'近战 · 左键刺 / 右键斩 / 中键劈', type:'melee', snd:'pistol', sid:'sabre', dmg:45, headMul:1, rpm:0, mag:0, reserve:0, reload:0, spreadHip:0, spreadAds:0, recoil:0, recSide:0, adsFov:60, kick:0, melee:true, thrustDmg:45, slashDmg:35, chopDmg:70, thrustT:0.35, slashT:0.5, chopT:0.7, range:2.6, tracer:0, wSpd:1 },
 };
 // 兵种 8→5 (2026-09-28 阶段三 P1 首轮, 用户裁定):
 //   冲锋枪手+突击兵 → **突击兵** (主武器只留冲锋枪, 德军例外=STG44; 燃烧弹/AT雷随突击兵保留);

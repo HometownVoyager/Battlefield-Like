@@ -113,7 +113,7 @@ assert('19-C H 再按 = 极少加快不取消 (★2026-10-30 判据跟走: 用�
  &&s19.includes('player.bandaging=Math.max(0.01,player.bandaging-_bb);')
  &&!s19.includes("player.cancelReadBar('包扎已取消');"));
 assert('19-C 读条中左键 = 取消且**吞掉这次点击** (不顺势走火; 锚已随 2026-10-25 批更新: 举雷待发除外——左键非有意取消, 收雷只走 X/✕)',
- s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){")&&s19.includes("player.cancelReadBar('已取消');\nreturn;\n}\nif(e.button===0) mouseDown=true;")); /* ★2026-11-13 批跟码: 换弹中左键豁免 (用户令④), 举雷例外保留 */
+ s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))&&!(player.seatReload>0||((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&player.bandaging>0))){")&&s19.includes("player.cancelReadBar('已取消');\nreturn;\n}\nif(e.button===0) mouseDown=true;")); /* ★2026-11-13 批跟码: 换弹中左键豁免 (用户令④), 举雷例外保留; ★2026-11-20 火力点坐姿批跟码: 负条件加坐姿两支豁免 (座位开炮不取消读条), 吞点击体原样 */
 assert('19-C 包扎读条时长走 BANDAGE_T 单源 (2.6 字面量已收)',
  s19.includes('player.bandaging=BANDAGE_T;')&&s19.includes('VM.stateDur=BANDAGE_T;'));
 
@@ -141,9 +141,9 @@ assert('i18n 新增读条文案全部有英文键',
 const sh=SRC('index.html');
 const stamps=[...sh.matchAll(/\?v=([0-9a-z]+)/g)].map(m=>m[1]);
 const stampSet=[...new Set(stamps)].sort();
-assert('index.html 版本戳全量唯一 20261119b',
- stamps.length>40&&stampSet.join(',')==='20261119b'
- &&stamps.filter(s=>s==='20261119b').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
+assert('index.html 版本戳全量唯一 20261120b',
+ stamps.length>40&&stampSet.join(',')==='20261120b'
+ &&stamps.filter(s=>s==='20261120b').length>44,`戳集合=${stampSet.join(' / ')} ×${stamps.length}`);
 }
 
 // ── 沙箱装载 (真 three) ───────────────────────────────────────

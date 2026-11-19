@@ -106,6 +106,9 @@ const I18N_EN={
 '兵种':'CLASS','出生点':'SPAWN POINT','战场态势':'TACTICAL MAP',
 // 点位周边补给箱数量 (2026-11-17 批): 游戏内容设置单钮循环 1↔2 + 说明整串 (data-i18n-html 键=innerHTML)
 '点位周边补给箱数量':'SUPPLY CRATES PER POINT',
+// 死亡动画 (2026-11-20 批⑦): 游戏内容设置单钮循环 就地倒下⇄布娃娃 + 说明整串
+'死亡动画':'DEATH ANIMATION','就地倒下':'Fall in Place','布娃娃':'Ragdoll',
+'死亡尸体的呈现方式：布娃娃（默认）＝物理布娃娃，尸体由刚体翻滚落地；就地倒下＝无物理的倒地动画，尸体就是士兵本体模型（头盔/手/靴/背包与活体完全一致），落地后停留至重生前收走。改档即时生效，下一具尸体开始采用新档。':'How corpses are presented: Ragdoll (default) = physics ragdoll, the body tumbles and settles via rigid bodies; Fall in Place = a physics-free falling animation where the corpse IS the soldier model itself (helmet/hands/boots/pack identical to the living model), staying until shortly before respawn. Applies instantly — the next corpse uses the new setting.',
 '每个据点（旗点）周边摆放的弹药补给箱数量：1（默认）或 2。选 2 时每据点周边会有两只错开的补给箱（首只箱位不变，第二只按贴掩体优选另行落位）。换图或重开一局后生效。':'Ammo crates placed around each capture point: 1 (default) or 2. At 2, every point gets a second staggered crate (the first crate keeps its spot; the second picks a covered spot of its own). Applies after changing maps or restarting a match.',
 // 严寒倒计时 (2026-11-18 寒冷批): 游戏内容设置显隐开关 + 说明整串 (data-i18n-html 键=innerHTML)
 '严寒倒计时':'FREEZE COUNTDOWN',
@@ -360,7 +363,7 @@ const I18N_EN={
 // 举雷/换弹读条 (★2026-10-25 手雷与换弹并入取消网)
 '手雷 · 引信 {0}s · X 收回':'Frag · fuse {0}s · X to stow','反坦克雷 · X 收回':'AT charge · X to stow',
 '烟雾弹 · X 收回':'Smoke · X to stow','燃烧弹 · X 收回':'Incin. · X to stow','手雷 · X 收回':'Frag · X to stow',
-'换弹中: {0}s':'Reloading: {0}s','举雷被打断!':'Grenade raise interrupted!','换弹被打断!':'Reload interrupted!',
+'换弹中: {0}s':'Reloading: {0}s','原位换弹: {0}s':'In-place reload: {0}s','举雷被打断!':'Grenade raise interrupted!','换弹被打断!':'Reload interrupted!',   // ★2026-11-20 火力点坐姿批: 坐固定火力点给随身武器装填的读条条目
 // ── HUD 顶栏 ──
 '({0}人)':'({0} in field)',
 '拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉':'Tug of war · 3 river crossings: main & north bridge take tanks · south ford wadeable · rapids elsewhere are deadly',
@@ -379,7 +382,7 @@ const I18N_EN={
 '进入战场后: 选兵种 → 选出生点 → 按 <b>部署</b> 落地。跟随小队标记进攻, 站进旗圈占领据点, 活下去比什么都重要。':'After deploy: pick a class → pick a spawn → press <b>DEPLOY</b>. Follow your squad marker, stand in flag circles to capture, and staying alive matters most.',
 '基础操作':'BASIC CONTROLS',
 '<b>WASD</b> 移动 · <b>Shift</b> 疾跑(机瞄时为屏息稳枪) · <b>空格</b> 跳跃':'<b>WASD</b> move · <b>Shift</b> sprint (hold breath while aiming) · <b>Space</b> jump',
-'<b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断) · <b>1/2</b> 切换武器 · <b>N</b> 近战':'<b>LMB</b> fire · <b>RMB</b> aim/scope · <b>R</b> reload (<b>X</b> cancels the bar; interrupted by a single hit over 25 dmg or by starting another action) · <b>1/2</b> weapon slots · <b>N</b> melee',
+'<b>左键</b> 射击 · <b>右键</b> 机瞄/瞄准镜 · <b>R</b> 装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断) · <b>1/2</b> 切换武器 · <b>N</b> 军刀 (左键刺 / 右键斩 / 中键劈)':'<b>LMB</b> fire · <b>RMB</b> aim/scope · <b>R</b> reload (<b>X</b> cancels the bar; interrupted by a single hit over 25 dmg or by starting another action) · <b>1/2</b> weapon slots · <b>N</b> sabre (LMB thrust / RMB slash / MMB chop)',
 '<b>C</b> 蹲 · <b>Z</b> 卧倒 · <b>X</b> 在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消) · <b>Q/E</b> 左右侧身探头':'<b>C</b> crouch · <b>Z</b> prone · <b>X</b> brace on cover (big accuracy boost; during a cast/raised grenade/reload it cancels instead) · <b>Q/E</b> lean',
 // 第三人称 (2026-09-20 第三人称批): 键位 U 的说明条目 —— 措辞与切换播报 '<b>U</b> 第三人称: 开' 同源 (步行=开关生效的场合)
 '<b>U</b> 第三人称: 开/关 (步行可用; 开镜或上车时自动回到第一人称)':'<b>U</b> third person: ON/OFF (on foot; ADS or vehicles return to first person)',
@@ -627,6 +630,9 @@ const I18N_EN={
 '击落战机':'Aircraft shot down',
 '摧毁舰艇':'Ship destroyed',
 '刺刀':'Bayonet',
+// 军刀 (2026-11-20 近战重做): 击杀来源/HUD 武器名走 t() 单源; 三式模式串与 N 键说明行中英配对
+'军刀':'Sabre',
+'近战 · 左键刺 / 右键斩 / 中键劈':'Melee · LMB thrust / RMB slash / MMB chop',
 '乘员×3':'crew ×3',
 '地面目标':'ground target',
 '运输车突围! 已突围 {0} 辆':'Convoy breakaway! {0} truck(s) through',
@@ -655,6 +661,7 @@ const I18N_EN={
 '已取消收藏':'Favorite removed',
 'ZP 点数不足 ({0}/{1}) — 击杀丧尸 / 占领旗点可得':'Not enough ZP ({0}/{1}) — kill zombies / capture flags to earn',
 '[战地整备受限: 需在友方补给箱 2.8m 内方可调配装备]':'[Field refit restricted: within 2.8m of a friendly supply crate]',
+'调试模式不可在战地整备中切换':'Debug mode cannot be toggled during field refit',   // ★2026-11-20 补 ④批欠账: 22-hud 战地整备调试开关拦截提示的 EN 配对 (原缺)
 '[补给站整备完成: 换装已生效]':'[Supply station refit complete: loadout applied]',
 '附近没有补给箱, 无法维修':'No supply crate nearby · cannot repair',
 '维修中… 移动/开火将打断':'Repairing… moving/firing cancels',

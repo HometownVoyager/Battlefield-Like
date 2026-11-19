@@ -6,7 +6,7 @@
 //   ① 行为: 时停中转动/平移观察者 40 帧 ⇒ drawMinimap/drawCompass 照常重绘 (~10Hz, ≥5 次);
 //   ② 对照: 非时停普通帧节流照常 (≥2 次 / 20 帧) —— 修的是"冻结期停绘", 不是把节流拆了;
 //   ③ 单实参退化: 旧口径 updateHUD(0) (无第二实参, 旧探针直调同款) 依旧不重绘 —— 退化路径零漂移;
-//   ④ 源码钉: 24-main 实参 / 22-hud 签名+节流行 / 版本戳 20261119b。
+//   ④ 源码钉: 24-main 实参 / 22-hud 签名+节流行 / 版本戳 20261120b。
 // 用法: node dev/verify-timestophud-20261108.js [--neg]
 //   --neg = 阴性对照 (3 补丁累积应用, 对认按红名): N1 节流行还原 hudSlowT-=dt ⇒ ①行为红;
 //           N2 24-main 实参还原 updateHUD(dt) ⇒ ①源码钉红; N3 签名摘 pdt ⇒ ①钉红+①行为红。
@@ -61,9 +61,9 @@ assert('22 updateHUD 签名带 pdt (单实参旧调用退化 dt)',s22.includes('
 assert('22 节流钟吃观察者帧长 (新行在 / 旧 hudSlowT-=dt 绝迹)',
  s22.includes('hudSlowT-=(pdt===undefined?dt:pdt);')&&!s22.includes('hudSlowT-=dt;'));
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('版本戳 20261119b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261107a 清零 (2026-11-10 海战移除批判据跟码)',
- [...idx.matchAll(/20261119b/g)].length>=48&&idx.includes("window.__sfStyleVer='20261119b';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261119b')).length===45
+assert('版本戳 20261120b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261107a 清零 (2026-11-10 海战移除批判据跟码)',
+ [...idx.matchAll(/20261120b/g)].length>=48&&idx.includes("window.__sfStyleVer='20261120b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120b')).length===45
  &&!idx.includes('20261107a')&&!gf.includes('20261107a'));
 }
 

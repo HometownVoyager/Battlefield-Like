@@ -62,18 +62,20 @@ assert('15 幸存宽限三件: 墙钟衰减 + 门 + 发账',
 assert('15 范围护栏: 卡车 300 / 两栖 320 本批不动 (碾压分档只管坦克)',
  SRC('js/15b-trucks.js').includes('_o.crushDmg=300;')
  &&SRC('js/15d-naval.js').includes('_o.crushDmg=320;'));
-assert('11 四盔球冠放大 (pot .162 / stahl .165 / ssh .167 / jp .165) + 冠高跟调',
+// ★锚随 2026-11-20 批⑥更新: 头盔构建收进 buildHelmetInto 单源 (活体+布娃娃共用), 坐标系从 headG 系
+//   改为头心系 (= 原值−0.1), 球冠几何与语义逐位不变 —— 位置锚换新值, 非"改盔"。
+assert('11 四盔球冠放大 (pot .162 / stahl .165 / ssh .167 / jp .165) + 冠高跟调 (头心系坐标, 批⑥单源化)',
  s11.includes('new THREE.SphereGeometry(0.162,10,8,0,TAU,0,HPI*1.2)')
  &&s11.includes('new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.35)')
  &&s11.includes('new THREE.SphereGeometry(0.167,10,8,0,TAU,0,HPI*1.28)')
  &&s11.includes('new THREE.SphereGeometry(0.165,10,8,0,TAU,0,HPI*1.22)')
- &&s11.includes('helm.position.set(0,0.154,0)')&&s11.includes('helm.position.set(0,0.145,0)')
- &&s11.includes('helm.position.set(0,0.153,0)')&&s11.includes('helm.position.set(0,0.146,0)'));
+ &&s11.includes('helm.position.set(0,0.054,0)')&&s11.includes('helm.position.set(0,0.045,0)')
+ &&s11.includes('helm.position.set(0,0.053,0)')&&s11.includes('helm.position.set(0,0.046,0)'));
 assert('11 头盒不动 (0.2×0.22×0.2) + 爆头命中球不动 (r=0.26 与头盒解耦)',
  s11.includes('bx(U.skin,0.2,0.22,0.2, 0,0.1,0, headG);')
  &&SRC('js/13-combat.js').includes('const hr=0.26+ex;'));
-assert('11 两徽章出盔面 (日军星 0.1535 / 国军蓝 0.1755+白 0.1775; 旧 z 本就埋在盔内从未露出)',
- s11.includes('0,0.16,0.1535')&&s11.includes('0,0.17,0.1755')&&s11.includes('0,0.17,0.1775'));
+assert('11 两徽章出盔面 (日军星 0.1535 / 国军蓝 0.1755+白 0.1775; 头心系 y=原值−0.1, z 不变)',
+ s11.includes('0,0.06,0.1535')&&s11.includes('0,0.07,0.1755')&&s11.includes('0,0.07,0.1775'));
 }
 
 // ── 沙箱装载 (真 three; 与 verify-parity 同款 boot + 全 index.html 脚本链) ─────
@@ -245,17 +247,20 @@ for(const hk of ['pot','stahl','ssh','jp','cap']){
  TEAM_FACTION[0].helmet=hk; TEAM_FACTION[0].sym=(hk==='stahl')?'✷':'★';
  const m=buildSoldierMesh(0,'几何');
  const spheres=[],badges=[];
+ // ★2026-11-20 批⑥: 盔件收进 helmG(0,0.1,0) 头心系子组 ⇒ 取位加父链累计 (headG 系坐标不变, 判据语义不变)
+ const _chY=o=>{ let y=0,n=o.parent; while(n&&n!==m.headG){ y+=n.position.y; n=n.parent; } return y; };
+ const _chZ=o=>{ let z=0,n=o.parent; while(n&&n!==m.headG){ z+=n.position.z; n=n.parent; } return z; };
  m.headG.traverse(o=>{
   if(o.isMesh&&o.geometry){
    if(o.geometry.type==='SphereGeometry') spheres.push(o);
    const c=o.material&&o.material.color&&o.material.color.getHex();
    if(o.geometry.type==='BoxGeometry'&&(c===0x2050b0||c===0xe8e8e8||c===0xd8b840))
-    badges.push({c,z:o.position.z,y:o.position.y,depth:o.geometry.parameters.depth});
+    badges.push({c,z:o.position.z+_chZ(o),y:o.position.y+_chY(o),depth:o.geometry.parameters.depth});
   }});
  const it={n:spheres.length};
  if(spheres.length===1){
   const p=spheres[0].geometry.parameters;
-  const d={r:p.radius,thL:p.thetaLength,y0:spheres[0].position.y,sy:spheres[0].scale.y||1,sz:spheres[0].scale.z||1};
+  const d={r:p.radius,thL:p.thetaLength,y0:spheres[0].position.y+_chY(spheres[0]),sy:spheres[0].scale.y||1,sz:spheres[0].scale.z||1};
   it.d=d; it.margin=minMargin(d);
   it.badges=badges.map(b=>{ const sz=surfZ(d,b.y);
    return {c:b.c,front:(b.z+b.depth/2)-sz,back:sz-(b.z-b.depth/2)}; });
@@ -286,10 +291,10 @@ assert('③ 国军青天白日徽蓝/白两层出盔面且埋入固定 (旧 0.14
 section('④ 版本戳');
 {
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261119b/g)].length;
-assert('版本戳 20261119b: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
- stamps>=48&&idx.includes("window.__sfStyleVer='20261119b';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261119b')).length===45
+const stamps=[...idx.matchAll(/20261120b/g)].length;
+assert('版本戳 20261120b: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
+ stamps>=48&&idx.includes("window.__sfStyleVer='20261120b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120b')).length===45
  &&!idx.includes('20261103b')&&!gf.includes('20261103b'));
 }
 

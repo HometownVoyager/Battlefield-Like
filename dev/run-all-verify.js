@@ -133,6 +133,9 @@ const SANDBOX=[
 ['dev/verify-walkstep-ceiling-20261118.js',[],'2026-11-18 顶头穿墙通用修: 碰撞横推"最近边"对头顶笼罩件不作为+standHeightSafe 抬脚前过顶头净空(顶头自动蹲/连蹲放不下不抬脚, 玩家/Bot/丧尸共用)——走跳上砖不再头探楼板被横推弹射穿墙 (2026-11-19 效率批补登: 全绿在册此前漏登)'],
 ['dev/verify-wipe.js',[],'2026-11-19 终局双条件批: 归零+占满全部点位双条件全模式统一 (flagsLostOf 数据声明 capturable 扩强点/破袭炸库·劫道护送目标路径不加门槛/无点位图自然豁免)+双归零平局与 1v1 对齐保留+30s 倒计时 paradox 门 fieldCount(1-zt)>0 (T19 百团/T20 遭遇战强点/T21 无点位图自然豁免护栏)'],
 ['dev/verify-firefx2-20261119.js',[],'2026-11-19 火焰重做批: PT.flame 舌形贴图(Canvas 三段径向渐变兜底+02-scene svgFlame feTurbulence 精修)+spawnFlame 附加账(纵拉伸≈2:1/双轴异频摇摆/生命色带白热→暗红)+updateParticles 火苗分支零分配+SMOKES 火舌换装保比+spawnP return/清账 (04b×4+16×2 站点换装, 预算门/限流/池帽原样) (含 --neg 三补丁逐补丁隔离 boot)'],
+['dev/verify-ragdoll2-20261120.js',[],'2026-11-20 布娃娃一致性批: 手/靴/腰带/背包子网格宿主=部件网格(g.add 帧异常真身)+生成段 try 护栏(抛错清账→回退无物理死亡)+头盔与头相对锁死(buildHelmetInto 直建头部件网格=与活体同款单源, 独立刚体+P2P 松挂"盔弹飞/歪斜"类根除) — 真击杀链双阵营帽檐/盔球两样式+冻结路径 (含 --neg 两补丁隔离 boot)'],
+['dev/verify-melee-20261120.js',[],'2026-11-20 军刀近战批: N 切第三槽军刀(无拔刀收刀动画, _lastGunSlot 记账)+左键刺45/右键斩35扇形多目标/中键劈70 节奏0.35/0.5/0.7s 满血兵皆不一刀秒+FP/3P 建模四表登记+Bot 近战 70→45·归因军刀 (含 --neg 两补丁隔离 boot)'],
+['dev/verify-seatbar-20261120.js',[],'2026-11-20 火力点不下车批: 五固定座(onMG/AT/AA/Mortar/Battery)原位换弹(player.seatReload 账+finishReload 复用+reloadDurOf 单源抽取)与包扎不下车(okH/readBarBusy 摘五旗+座位收尾 VM 归位)+双击打断约定继承+左键开炮豁免+岸防炮键门放行 H/R+下机静默清账 (含 --neg 两补丁隔离 boot)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[

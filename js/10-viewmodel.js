@@ -35,6 +35,9 @@ const d=WPN_DEFS[key];
 // 这里仍给一档"举到胸前细看"的位姿, 兜住触屏/手柄/外部直接置 ads 的路径: 位置比 HIP 抬高一截、
 // 机面正对镜头 (rot.y 回 0), 不会像枪那样出现"半张脸埋在枪身里"的怪画面。
 if(d.radio) return { pos:V3(0.10,-0.20,-0.40), rot:V3(0.10,0,0.06) };
+// 军刀 (2026-11-20 近战重做): 近战没有"开镜" (右键已被横斩分流, 19-input mousedown), 正常路径到不了 ADS;
+// 给一档无害位姿兜住手柄 LT / 外部直接置 ads 的路径 —— 刀略抬向胸前, 不出现"刀柄怼脸"。
+if(d.melee) return { pos:V3(0.12,-0.16,-0.36), rot:V3(0.08,0.08,0.05) };
 if(d.rocket) return { pos:V3(0.052,-0.148,-0.3), rot:V3(0,0,0) };
 if(d.atRifle) return { pos:V3(0.05,-0.105,-0.28), rot:V3(0,0.05,0) }; // 反坦克枪: 顶部弹匣挡视线, 侧偏机瞄(同火箭筒)
 if(d.scoped) return { pos:V3(0,-0.085,-0.22), rot:V3(0,0,0) };
@@ -83,7 +86,14 @@ if(!VM.hammerM) VM.hammerM=buildHammer();
 VM.hammerM.visible=false; VM.inner.add(VM.hammerM);
 if(VM.gunParts.reloadRocket) VM.reloadRocket=VM.gunParts.reloadRocket; else VM.reloadRocket=null;
 VM.ads=adsPoseFor(key);
+if(WPN_DEFS[key]&&WPN_DEFS[key].melee){
+// 军刀 (2026-11-20 近战重做, 用户裁定): 切枪模式无拔刀收刀动画 —— 不进 'draw', 直接就位 idle;
+// 单手持刀 (左臂整条藏起, 收尾口径见 vmAbortAction 的 melee 分支)。
+VM.state='idle'; VM.stateT=0; VM.stateDur=0;
+VM.arms.L.visible=false;
+}else{
 VM.state='draw'; VM.stateT=0; VM.stateDur=0.45;
+}
 positionHands(key);
 AudioSys.metalSlide(0.18,0.1,700,1400);
 }
@@ -141,6 +151,10 @@ if(d.pistol) return side? {pos:V3(-0.103,-0.09,0.082),rot:V3(0.5,-0.6,0)} : {pos
 // 右手握机身下部 (握点 = 建模原点), 左手托在机底偏左 (托举姿态), 左臂 rotY 保持 -0.95 基准带内
 // (袖管朝画面左下, 见 vmHandLSnap 的基准 VM_LARM_Y)。
 if(d.radio) return side? {pos:V3(-0.055,-0.105,0.02),rot:V3(0.45,-0.95,0)} : {pos:V3(0.012,-0.075,0.015),rot:V3(0.28,0,0)};
+// 军刀 (2026-11-20 近战重做): 握位贴**握柄** (建模原点, 见 09-weapons sabre 分支) —— 枪的右手位在
+// z=+0.2 (枪托), 照抄会让手悬在刀柄后面。左手位只兜 display 竞态 (单手持刀时整条左臂 visible=false,
+// vmEquip / melee 分支收尾都按 def.melee 显隐), 不参与持刀。
+if(d.melee) return side? {pos:V3(-0.06,-0.105,0.02),rot:V3(0.45,-0.95,0)} : {pos:V3(0.014,-0.062,0.10),rot:V3(0.28,0,0)};
 return side? {pos:V3(-0.08,-0.075,-0.24),rot:V3(0.5,-1.0,0)} : {pos:V3(0.02,-0.07,0.2),rot:V3(0.32,0,0)};
 }
 function positionHands(key){
@@ -297,7 +311,14 @@ const st=VM.state;
 //   出手弧 (松手后 0.55s, nadeHeld 已 false) 里的雷已经/即将脱手, 不属于可中止段, 不在此列。
 let steal=false;
 if(st==='bandage'){ vmBandageHide(); steal=true; }
-else if(st==='melee'){ if(VM.knifeM) VM.knifeM.visible=false; if(VM.arms) VM.arms.L.visible=true; steal=true; }
+else if(st==='melee'){
+// ★2026-11-20 近战重做: 持刀被打断的收尾 —— 刀件=gunParts 本体, 由下面 steal 统一块还 visible;
+//   旧刺刀临时件 knifeM 收尾行保留 (verify-animfix-20261012 钉死 knifeM 三件套); 左臂显隐按**当前
+//   武器**判定: 持刀态保持单手 (整臂藏), 枪械态照旧还臂 —— 不能再无条件还臂 (军刀会多出一只浮手)。
+if(VM.knifeM) VM.knifeM.visible=false;
+if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);
+steal=true;
+}
 else if(st==='nade'&&VM.stateDur>10){ if(VM.nadeM) VM.nadeM.visible=false; steal=true; }   // 收雷回枪 (与状态机哨兵自愈同一份收尾)
 else if(st==='reload'){ vmReloadRestore(); steal=true; }
 if(steal){
@@ -462,14 +483,37 @@ oy-=k*0.25; rx+=k*0.9; rz+=k*0.3;
 if(nt>=1) VM.state='idle';
 }
 else if(VM.state==='melee'){
+// ★2026-11-20 近战重做: 军刀三式 FP 动画 —— 刀件就是 gunParts 本体 (持刀模式, 旧刺刀的临时 knifeM
+//   件不再上场, 收尾兼容仍由 vmAbortAction 保留), 单手持刀 (左臂藏), 右手 handROverride 跟刀。
+//   VM.meleeKind 分段: 刺=直线前突 (out-back 单峰) / 斩=先回撤再右→左横扫 / 劈=举刀-下劈-收。
+//   数值全是观感初值, 实机验收再调; 命中点各式中段 vmPlayOnce 单发 (刺 0.4 / 斩 0.35 / 劈 0.5)。
 const k=pulse(nt,0,0.35,1);
-VM.knifeM.visible=true; g.gun.visible=false;
+const mk=VM.meleeKind||'thrust';
+VM.knifeM&&(VM.knifeM.visible=false);
+g.gun.visible=true;
 VM.arms.L.visible=false;
-VM.knifeM.position.set(0.1-k*0.22,-0.12+k*0.06,-0.25-k*0.28);
-VM.knifeM.rotation.set(-k*1.1,0.3-k*0.5,k*0.4);
-handROverride=_ovR, handROverride.pos.set(0.1-k*0.2,-0.16+k*0.05,-0.1-k*0.2), handROverride.rot.set(0.4-k*1.0,0,0);
-if(nt>0.3) vmPlayOnce('meleeHit',()=>player.doMeleeHit());
-if(nt>=1){ VM.state='idle'; VM.knifeM.visible=false; g.gun.visible=true; VM.arms.L.visible=true; vmSndFlags={}; }
+if(mk==='thrust'){
+g.gun.position.set(0.02,-0.01-k*0.02,-k*0.34);
+g.gun.rotation.set(0.06-k*0.10,0,0);
+handROverride=_ovR, handROverride.pos.set(0.05,-0.09,-0.06-k*0.30), handROverride.rot.set(0.25-k*0.55,0,0);
+}else if(mk==='slash'){
+const sw=ss(nt,0.18,0.62), bk=ss(nt,0.62,0.95);
+g.gun.position.set(0.16-sw*0.36+bk*0.20,-0.04,-0.10-sw*0.10);
+g.gun.rotation.set(0.10,-1.15*sw+1.05*bk,0.25-sw*0.55);
+handROverride=_ovR, handROverride.pos.set(0.10-sw*0.30+bk*0.16,-0.12,-0.12-sw*0.08), handROverride.rot.set(0.35,-sw*0.5+bk*0.4,-sw*0.4);
+}else{
+const up=pulse(nt,0,0.3,1), dn=ss(nt,0.3,0.62), rc=ss(nt,0.62,0.95);
+g.gun.position.set(0.06,-0.02+up*0.14-dn*0.16,0.02+up*0.06-dn*0.10);
+g.gun.rotation.set(0.15-up*1.05+dn*1.55,0,0);
+handROverride=_ovR, handROverride.pos.set(0.08,-0.08+up*0.10-dn*0.10,-0.08+up*0.04-dn*0.06), handROverride.rot.set(0.3-up*0.7+dn*1.1,0,0);
+}
+if(nt>(mk==='thrust'?0.4:(mk==='slash'?0.35:0.5))) vmPlayOnce('meleeHit',()=>player.doMeleeHit(mk));
+if(nt>=1){
+VM.state='idle'; VM.knifeM&&(VM.knifeM.visible=false);
+g.gun.visible=true; g.gun.position.set(0,0,0); g.gun.rotation.set(0,0,0);
+VM.arms.L.visible=!(d&&d.melee);   // 持刀态左臂保持藏起 (单手); 枪械态照旧还臂
+vmSndFlags={};
+}
 }
 else if(VM.state==='nade'){
 // 弹种 → 手上模型 (2026-09-30 批): 进 'nade' 态与持雷期间弹种变了就换件。VM.nadeM 恒指向**当前展示**的

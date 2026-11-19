@@ -101,7 +101,14 @@ onBattery:null,
 //   nadeThrowT 手雷起手/松手各置一次        meleeT 刺刀起手/命中各置一次        flinchT 中弹瞬间置满
 fireAnimT:0, reloadT:0, nadeThrowT:0, meleeT:0, flinchT:0,
 suppressV:0, meleeCd:0,
+// 军刀三式账 (2026-11-20 近战重做): startMelee (19-input) 起手时写入 —— 3P 姿态机按 meleeKind 分式,
+// meleeT/meleeDur 归一化 (三式时长 0.35/0.5/0.7 各不同, MELEE_ANIM_T 只作缺省兜底)。
+meleeKind:null, meleeDur:0,
 bandages:4, maxBandages:4, bandaging:0, bandResupCd:0, grabAction:null,
+// 原位换弹账 (★2026-11-20 火力点坐姿批): 固定火力点 (onMG/onAT/onAA/onMortar/onBattery) 上给随身武器
+// curW 装填的读条账 —— 账挂 player 不挂 VM: 座位上 24-main 停跑 updateViewModel, VM 账没人收;
+// 起步在 tryReload 火力点分支, tick/结算在 20-player (复用 finishReload), 打断收口在 cancelReadBar。
+seatReload:0, seatReloadDur:0,
 eyeH:1.62,
 lastFiredT:-99, killerName:'',
 suppress(a){ this.suppressV=Math.min(1,this.suppressV+a); },
@@ -122,13 +129,16 @@ leanT:0,
 //   ① "打断"的完整语义 = 读条期间做**其他交互动作**会打断读条 (换枪/装填/举雷/包扎/近战/建造拆除/
 //      F 交互栈…各入口在确认起步后调 stealBar 抢占; 同键重按不抢——R 重按不重启换弹、同种雷重举不重烧引信);
 //   ② 受伤打断门槛 = 单次伤害 >READBAR_DMG_GATE (25) 才打断, 刮伤/火蚀/小跳伤不再打断 (damage 内单源门)。
-readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast||!!this.vehRepair
+readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast||!!this.vehRepair||this.seatReload>0
 ||(typeof VM!=='undefined'&&((VM.state==='nade'&&this.nadeHeld)||VM.state==='reload')); },
 // 读条期间"身体被别的行动占用"的判据 (包扎 tick 每帧问一次, 见 20-player 的包扎段):
-//   上炮/上车/上艇/进炮位/驾巡飞弹/取弹 (grabAction) 任一为真, 或 VM 动作态已被抢走 ⇒ 按被打断收账。
+//   上车/上艇/驾巡飞弹/取弹 (grabAction) 任一为真, 或 VM 动作态已被抢走 ⇒ 按被打断收账。
+//   ★2026-11-20 火力点坐姿批: 固定火力点五座 (onMG/onAT/onAA/onMortar/onBattery) **摘出本判据** ——
+//   用户裁定坐着可以不下车包扎/换弹, 坐炮位不再构成"身体被占用"; 旧版 onMortar/onBattery 根本没列入,
+//   是"H 起步一帧即断"的脏行为, 本批一并收编成"五座全放行"的单源口径 (载具/艇船/巡飞维持现状)。
 // 故意**不含 useCast**: 它是"F 刚点上的新行动", 由 useCast 自己的 tick 反向收掉包扎 —— 放进来会把
 //   玩家刚按下的 F 吃掉 (自己取消自己)。
-readBarBusy(){ return !this.alive||!!this.onVehicle||!!this.onNaval||!!this.onMG||!!this.onAT||!!this.onAA||!!this.onMortar||!!this.onBattery||!!this.loiter||!!this.grabAction||(typeof VM!=='undefined'&&VM.state!=='bandage'); },
+readBarBusy(){ return !this.alive||!!this.onVehicle||!!this.onNaval||!!this.loiter||!!this.grabAction||(typeof VM!=='undefined'&&VM.state!=='bandage'); },
 cancelReadBar(msg,quiet){
 // ★2026-10-25 举雷/换弹并入: 账目旗必须在 vmAbortAction **之前**取 —— 模型层一收, VM.state 已回 idle,
 //   事后再判就永远扑空 (any 不置位 ⇒ 取消了也不弹文案)。换弹的账目全在 VM/模型层, 这里只补旗标。
@@ -140,6 +150,9 @@ if(this.bandaging>0){ this.bandaging=0; any=true; }
 if(this.demolish){ if(typeof stopDemolish==='function') stopDemolish(this,true); else this.demolish=null; any=true; }
 if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; any=true; }
 if(this.vehRepair){ this.vehRepair=null; any=true; }   // 坦克维修读条 (2026-11-16 批1): 并入取消网, X/死亡收口/F 抢占同口清账
+// ★2026-11-20 火力点坐姿批: 原位换弹并入取消网 —— X / 受击>25 / 死亡 / stealBar 抢占 / 换局全自动继承
+//   (账挂 player, 与 VM 无关, 放在 vmAbortAction 之后判也算得准); 弹不结算, 与换弹中止同语义。
+if(this.seatReload>0||this.seatReloadDur>0){ this.seatReload=0; this.seatReloadDur=0; any=true; }
 if(nadeHold){ this.nadeHeld=false; any=true; }   // 举雷收回: 雷回 pouch 不消耗 (VM/雷模由 vmAbortAction 收)
 if(rl){ any=true; }                              // 换弹中止: 弹药不结算 (finishReload 只在自然走完那条路)
 if(any&&!quiet&&this.isPlayer) showScorePop(msg||'已取消');
@@ -291,8 +304,9 @@ if(typeof updateInteractHint==='function') updateInteractHint();
   const mw=document.getElementById('mgHeatWrap'); if(mw) mw.style.display='none'; }
 document.exitPointerLock&&document.exitPointerLock();
 noteDeath(this.pos.x,this.pos.z);
-// 玩家布娃娃 + 2秒第三人称死亡镜头
-this.deathRag=window.CANNON?spawnRagdoll(this,attacker,isHead):null;
+// 玩家布娃娃 + 2秒第三人称死亡镜头 —— 2026-11-20 批⑦: 就地倒下档不 spawn ⇒ deathCamT=0.8 短镜头 +
+// playerAvatarDeath 本体倒地 (契约G 既有无物理分支), 零新增账。
+this.deathRag=(window.CANNON&&!deathFallMode())?spawnRagdoll(this,attacker,isHead):null;
 this.deathCamT=this.deathRag?2.2:0.8;
 this.deathCamYaw=this.yaw+Math.PI;
 this.deathPos=this.pos.clone();
@@ -311,26 +325,55 @@ const dly=this.deathRag?2100:900;
 addMatchTimeout(()=>{ if(!this.alive){ const bo=document.getElementById('blackOv'); if(bo) bo.style.opacity=0.75; } },dly);
 addMatchTimeout(()=>{ if(!matchOver&&!this.alive&&typeof showDeploy==='function') showDeploy(true); },dly+700);
 },
-doMeleeHit(){
-// (2026-09-21 A#2 契约G) 刺刀命中瞬间: 动作计时置满 (姿势机据此做"枪前刺 + 上身突进")。
-// 起手那一刻由 20-player playerAnimTick 按 VM.state==='melee' 的边沿置一次, 这里是第二段 (命中/落空都算出手)。
-this.meleeT=MELEE_ANIM_T;
+doMeleeHit(kind){
+// ★2026-11-20 近战重做: 军刀三式结算 (kind='thrust'|'slash'|'chop', 10-viewmodel melee 分支中段经
+// vmPlayOnce 单发调用)。伤害直伤 (不过 DIFF_TABLE/距离衰减, 与既有近战直伤先例一致), isHead 恒 false。
+// 命中瞬间动作计时置满 (3P 姿态机据此做前刺/横扫/纵劈 + 上身突进), 归一化用本式的 meleeDur。
+this.meleeT=this.meleeDur||MELEE_ANIM_T;
+const def=WPN_DEFS.sabre;
 const dir=camForward();
 const o=camera.position.clone();
 // 刺刀摘 ffSpecSniper (2026-09-20 观战连狙批; 2026-11-09 观战中立批后为历史注记): 旧口径"只有观战连狙
 // 可打双方"时, 不摘标记的话观战者握连狙贴队友按 V 会直接把友军捅死。新口径下观战者所有武器对双方生效
-// (coFfFire 的 spectator 门), 摘旗不再阻断观战刺刀伤友军; 代码保留 —— 非观战握持态语义不变, 探针锚在此。
+// (coFfFire 的 spectator 门), 摘旗不再阻断观战军刀伤友军; 代码保留 —— 非观战握持态语义不变。
 const ff=player.ffSpecSniper; player.ffSpecSniper=false;
-const sr=raySoldiers(o,dir,2.6,player);
-player.ffSpecSniper=ff;
+player._src='军刀';   // 击杀来源单源 (killSrcLabel 优先读 _src; 三式同源, 结算前落定)
+let hitAny=false;
+if(kind==='slash'){
+// 横斩: 扇形多目标 —— 候选集与子弹同一口径 (combatants, 含丧尸), 门: XZ 距≤range / |dy|≤1.8 /
+// 水平前向点积≥0.5 (±60° ≈ 120° 扇) / 无遮挡 (仿 splashDamage 的逐人世界射线)。
+const fxz=V3(dir.x,0,dir.z); if(fxz.lengthSq()<1e-6) fxz.set(0,0,-1); fxz.normalize();
+for(const s of combatants){
+if(!s.alive||s===player||s.onVehicle||s.spectator) continue;
+if(!coFfFire(player)&&s.team===player.team) continue;
+const dx=s.pos.x-o.x, dz=s.pos.z-o.z;
+const dxz=Math.hypot(dx,dz);
+if(dxz>def.range||dxz<0.05) continue;
+if(Math.abs((s.pos.y+0.9)-o.y)>1.8) continue;
+if((dx*fxz.x+dz*fxz.z)/dxz<0.5) continue;
+if(dxz>0.6){
+const bd=raycastWorld(o,V3(dx,(s.pos.y+0.9)-o.y,dz).normalize(),dxz);
+if(bd&&bd.dist<dxz-0.5) continue;
+}
+hitAny=true;
+s.damage(def.slashDmg,player,false);
+}
+} else {
+// 刺 / 劈: 单目标射线 (头球+身柱, raySoldiers 敌我过滤同子弹) —— 劈伤害更重。
+const sr=raySoldiers(o,dir,def.range,player);
 if(sr){
-player._src='刺刀';
-// 近战命中反馈 (2026-09-30 批): 刺刀也是"攻击方式" —— 档='mg' 无框白X; 致命一击不补白 (die 链红档)
+hitAny=true;
+sr.sol.damage(kind==='chop'?def.chopDmg:def.thrustDmg,player,false);
+}
+}
+player.ffSpecSniper=ff;
+if(hitAny){
+// 近战命中反馈 (2026-09-30 批口径保留, 按式分级): 档='mg' 无框白X; 致命一击不补白 (die 链红档);
+// 扇形多目标聚合反馈一次 (与 splashDamage 的 _fbAny 同款), 劈=更重的震屏与更低的打击音。
 if(typeof markHitCls==='function') markHitCls('mg');
-sr.sol.damage(110,player,false);
-if(sr.sol.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('mg');
-AudioSys.click(500,0.5,0.09);
-addTrauma(0.15);
+if(typeof onPlayerHitAny==='function') onPlayerHitAny('mg');
+addTrauma(kind==='chop'?0.25:0.15);
+AudioSys.click(kind==='chop'?380:500,0.5,0.09);
 } else {
 const wr=raycastWorld(o,dir,2.4);
 if(wr){ impactFX(wr.point,wr.normal,wr.kind); AudioSys.click(1800,0.3,0.05); }

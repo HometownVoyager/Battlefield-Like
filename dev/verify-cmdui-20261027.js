@@ -91,9 +91,11 @@ const PATCHES=[
   "if(typeof cmdMapKeyGate==='function'&&cmdMapKeyGate(e.code)) return;",
   ""],
  // O 19-input 近战键退场: 改回 KeyV ⇒ 键位判据红
+ // ★2026-11-20 判据跟走 (军刀近战重做批): 旧 N 分支是"刺刀瞬刺"多行块 (锚带 读条注释), 本批整段退役换成
+ //   单行 switchSlot 切军刀槽 —— 锚换成新 N 行首 (if(e.code==='KeyN'){), 键位退场语义不变 (改回 KeyV)。
  ['js/19-input.js',
-  "if(e.code==='KeyN'){\n// ★2026-10-25 反馈轮①: 读条中 近战键",
-  "if(e.code==='KeyV'){\n// ★2026-10-25 反馈轮①: 读条中 近战键"],
+  "if(e.code==='KeyN'){",
+  "if(e.code==='KeyV'){"],
  // P Esc 分支退场 (2026-10-27 排查批: 布势期 Esc=确认开战的上提修复):
  //    回到旧写「cmdMapUIOpen 分支嵌在 deployed&&alive 门内」⇒ 布势期 (deployed/alive 皆 false) 永远
  //    走不到确认单源, Esc 落进 else 变 togglePause(true) ⇒ 上提判据红。同时收掉 !gamePaused 门

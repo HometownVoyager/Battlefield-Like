@@ -158,7 +158,7 @@ die(attacker,isHead){
  this.clingVeh=null; this.fuseT=-1; this.zVehT=null;   // 扒车/引信随死终结 (布娃娃接管表现)
  zStats.killed++;                   // 结算页"已消灭"计数 (2026-10-07c)
  // 零票务 (红线): 不扣 tickets / 不 noteDeath / 不进 wipe 计数 —— fieldCount 只认 team 0/1
- if(window.CANNON){ this.ragdolled=spawnRagdoll(this,attacker,isHead); if(this.ragdolled) this.mesh.root.visible=false; }
+ if(window.CANNON&&!deathFallMode()){ this.ragdolled=spawnRagdoll(this,attacker,isHead); if(this.ragdolled) this.mesh.root.visible=false; }   // 2026-11-20 批⑦: 就地倒下档走 else 既有 deathAnimT 倒地
  else { this.deathAnimT=0.6; }
  if(attacker){
   attacker.kills=(attacker.kills||0)+1;
@@ -513,7 +513,7 @@ function zombieInfect(sol,attacker){
  sol.deaths=(sol.deaths||0)+1;
  sol.deathAnimT=0;
  let rag=null;
- if(window.CANNON&&typeof spawnRagdoll==='function'){
+ if(window.CANNON&&typeof spawnRagdoll==='function'&&!deathFallMode()){   // 2026-11-20 批⑦: 就地倒下档走 else 既有倒地
   rag=spawnRagdoll(sol,attacker,false);
  }
  if(rag){

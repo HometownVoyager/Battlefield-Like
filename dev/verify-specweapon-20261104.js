@@ -60,8 +60,10 @@ const PATCHES=[
   "pistol:{x:-0.24,dy:0.12,dz:0.62},",
   "pistol:{x:-0.20,dy:0.12,dz:0.38},"],
  ['js/11-soldiers.js',
-  "radio:0.14,pistol:0.06};",
-  "radio:0.14};"],
+  // ★2026-11-20 判据跟走 (军刀近战重做批): CARRIED_FWD 追加 sabre:0.10 档 (军刀短, 不吃步枪 0.30),
+  //   手枪 0.06 档语义不变 —— 阴性锚跟码到新行尾。
+  "radio:0.14,pistol:0.06,sabre:0.10};",
+  "radio:0.14,sabre:0.10};"],
  // ③ 换弹 2/3 退场 (全串锚: reload:2.4/2.5 在 garand/thompson/c96auto/type11 行也有, 必须带 mag:1, reserve:16 前缀)
  ['js/09a-defs.js',
   "mag:1, reserve:16, reload:2.4,",
@@ -122,8 +124,8 @@ assert('11 站姿挂点独立档 (a21-j 全量复测定位: 四姿态×双路径
  s11.includes('pistol:{x:-0.17,y:0.42,z:0.33},'));
 assert('11 匍匐挂点独立档 (双臂前伸: 收胸前时枪角把护木站位旋到纯横向, 超弯肘横向包络 ⇒ 左手脱枪 0.19m)',
  s11.includes('pistol:{x:-0.24,dy:0.12,dz:0.62},'));
-assert('11 前推量独立档 (枪短, 沿用步枪 0.30 会把手枪推出手外)',
- s11.includes('radio:0.14,pistol:0.06};'));
+assert('11 前推量独立档 (枪短, 沿用步枪 0.30 会把手枪推出手外; ★2026-11-20 跟走: 追加 sabre:0.10, 手枪档语义不变)',
+ s11.includes('radio:0.14,pistol:0.06,sabre:0.10};'));
 assert('11 无 GUN_HOLD_BY_KIND.pistol 表项 = 双手持枪走默认机械 + armIK (用户裁定, 通信仪单手表不受影响)',
  s11.includes('shR:-1.02, elR:-1.62')&&!/pistol:\{shR:/.test(s11));
 }
@@ -137,8 +139,8 @@ assert('9 bazooka reload 3.6→2.4 / schreck 3.8→2.5 (全串锚, 带 mag:1, re
  &&!s9.includes('mag:1, reserve:16, reload:3.6,')&&!s9.includes('mag:1, reserve:16, reload:3.8,'));
 assert('9 换弹单源注释在案 (Bot 侧 fireT=3.6 再射击间隔是另一本账, 不随动)',
  s9.includes('fireT=3.6'));
-assert('19 tryReload 读 def.reload 单源 (玩家侧换弹时长跟批自动生效)',
- srcOf('js/19-input.js').includes('VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1)'));
+assert('19 tryReload 读 def.reload 单源 (玩家侧换弹时长跟批自动生效; ★2026-11-20 火力点坐姿批跟码: 行内公式收编为 reloadDurOf 单源 — 锚跟走, 连杀 reloadMul 仍在其内)',
+ srcOf('js/19-input.js').includes('VM.stateDur=reloadDurOf(w);'));
 }
 
 // ── 沙箱装载 (真 three; 与 verify-specview-20261101 同款) ─────

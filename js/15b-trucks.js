@@ -124,7 +124,7 @@ if(this.escaped||this.sunk||this.sinking) return;
 // 载具残血起火 (2026-11-09 批): 燃烧掉血账 —— 每秒烧 maxHp×VEH_BURN_FRAC/VEH_BURN_TIME (击杀归因=点燃者)
 if(this.burning&&this.alive){
 this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
-if(this.hp<=0){ this.die(this.burnBy||null); return; }
+if(this.hp<=0){ this.die(this.burnBy||this.lastHitBy||null); return; }   // 2026-11-20 批: 无点燃者回退最后命中者 (坦克/飞机同款归因章)
 }
 const P=convoyPath();
 if(this.wpI>=P.length-1){
@@ -201,9 +201,10 @@ for(const w of this.wheels){ const wr=(w.geometry&&w.geometry.parameters&&w.geom
 takeDmg(amt,attacker){
 if(!this.alive) return;
 this.hp-=amt;
+if(attacker) this.lastHitBy=attacker;   // 2026-11-20 批: 击杀归因章 (坦克/飞机 lastHitBy 同款; 无归属伤害不清章)
 // 载具残血起火 (2026-11-09 批): hp<10% 点火 (燃烧掉血账在 update 里走, 烧毁仍走本 die 链)
 if(typeof vehBurnIgnite==='function'&&!this.burning&&this.hp>0&&this.hp<this.maxHp*VEH_BURN_FRAC) vehBurnIgnite(this,attacker);
-if(this.hp<=0) this.die(attacker);
+if(this.hp<=0) this.die(attacker||this.lastHitBy||null);   // 2026-11-20 批: attacker=null 时回退最后命中者
 }
 die(attacker){
 this.alive=false;

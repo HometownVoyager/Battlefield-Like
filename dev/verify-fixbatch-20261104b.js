@@ -32,9 +32,11 @@ return ctx;
 console.log('① 时停击杀/破坏即现 (生成当帧贴初始位姿)');
 {
 const s=SRC['js/12-ragdolls.js'];
-ok(s.indexOf('mesh.position.copy(body.position);')>=0&&s.indexOf('hm.position.copy(hb2.position);')>=0&&
+ok(s.indexOf('mesh.position.copy(body.position);')>=0&&
    s.indexOf('mesh2.position.copy(body.position);')>=0,
- '三处网格 (躯干部件/头盔/墙碎块) 全在生成当帧 copy 刚体 position');
+ '躯干/墙碎块网格在生成当帧 copy 刚体 position (2026-11-20 批⑥: 头盔旧独立刚体 copy 钉退役)');
+ok(s.indexOf('buildHelmetInto(parts[parts.length-1].mesh')>=0&&s.indexOf('hm.position.copy(hb2.position);')<0,
+ '头盔=头部件子网格相对锁死 (buildHelmetInto 头心系直建=与活体同源; 独立刚体+P2P 松挂"盔弹飞/歪斜"类根除)');
 ok(s.indexOf('if(mesh.quaternion&&mesh.quaternion.copy)')>=0&&s.indexOf('if(mesh2.quaternion&&mesh2.quaternion.copy)')>=0,
  'quaternion.copy 带桩守卫 (无 copy 的沙箱不炸, 位置同步不依赖它)');
 // 真跑一遍: 桩 CANNON 下 spawnDebris 后 mesh 位姿应等于刚体位姿, 不依赖 updateRagdolls(dt>0)。
@@ -171,12 +173,12 @@ ok(typeof r==='object'&&Math.abs(r.rainLen-0.7)<1e-4,
 // 版本戳 ───────────────────────────────────────────────────────
 console.log('版本戳');
 {
-ok(SRC['index.html'].indexOf("window.__sfStyleVer='20261119b';")>=0&&
-   (SRC['index.html'].match(/20261119b/g)||[]).length>=44&&
+ok(SRC['index.html'].indexOf("window.__sfStyleVer='20261120b';")>=0&&
+   (SRC['index.html'].match(/20261120b/g)||[]).length>=44&&
    !SRC['index.html'].includes('20261104a'),
- 'index.html 全量升 20261119b (__sfStyleVer + css/js 引用, 老戳清零) (2026-11-10 跟码: 49 处/45 行)');
+ 'index.html 全量升 20261120b (__sfStyleVer + css/js 引用, 老戳清零) (2026-11-10 跟码: 49 处/45 行)');
 ok(!read('dev/_game_files.txt').includes('20261104a')&&
-   (read('dev/_game_files.txt').match(/20261119b/g)||[]).length===45,
+   (read('dev/_game_files.txt').match(/20261120b/g)||[]).length===45,
  'dev/_game_files.txt 45 行同步升戳 (2026-11-10 海战移除批判据跟码)');
 }
 

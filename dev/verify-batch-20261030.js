@@ -149,14 +149,14 @@ assert('19 同键再按=加速不取消: 拆除 B / 迫击炮回收 6 (推进 DE
  &&!s19.includes('if(player.demolish){ stopDemolish(player); }'));
 assert('19 同键再按=加速不取消: 换弹 R (推进 stateDur 的 2.5%), 旧"R 不重启"判据升级不回退',
  s19.includes("if(VM.state==='reload'){ VM.stateT=Math.min(VM.stateDur,(VM.stateT||0)+VM.stateDur*BAR_PRESS_BOOST); return; }"));
-assert('19 打断双击门 11 处 (N/G/3/4×2/6×2/H/B/R/SW)',
- (s19.match(/player\.barStealArmed\(/g)||[]).length===11,
+assert('19 打断双击门 10 处 (G/3/4×2/6×2/H/B/R/SW; ★2026-11-20 判据跟走·两笔来历: ①军刀批摘掉 KeyN 的 barStealArmed 调用 (N 改单行 switchSlot, 打断语义由 SW2 既有结构继承) 11→10; ②火力点坐姿批零新增 (R 同键加速/双击确认仍走原有 KeyR 门)',
+ (s19.match(/player\.barStealArmed\(/g)||[]).length===10,
  `实测 ${(s19.match(/player\.barStealArmed\(/g)||[]).length} 处`);
 assert('19 换枪双击门用 SW+槽位 (Digit1↔槽0 一一对应, 连按同一键=连按同一标识)',
  s19.includes("if(!player.barStealArmed('SW'+i)) return;"));
 assert('19 X 取消 / 左键取消(举雷除外) / 系统自动换弹不抢 三条旧口径原样',
  s19.includes("if(player.readBarActive()){ player.cancelReadBar('已取消'); return; }")
- &&s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){") /* ★2026-11-13 批跟码: 换弹中左键豁免 */
+ &&s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))&&!(player.seatReload>0||((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&player.bandaging>0))){") /* ★2026-11-20 火力点坐姿批跟码: 左键豁免加坐姿两支 (原位换弹/五旗包扎), 举雷/换弹豁免保留 */
  &&s19.includes('if(!viaKey) return;'));
 const s20=srcOf('js/20-player.js');
 assert('20 F 交互栈双击门 7 处 (2026-11-10 跟码: 原钉 14 处 —— 大舰甲板层跳海/上炮塔/补弹/登机×2/并靠登舰/甲板炮等 7 处随大舰子系统下架摘除)',
@@ -165,8 +165,8 @@ assert('20 F 交互栈双击门 7 处 (2026-11-10 跟码: 原钉 14 处 —— �
 assert('20 前摇 useCast 同键 F=加速不取消 (占位保留), 旧"使用已取消"取消体退场',
  s20.includes('player.useCast.t+=player.useCast.dur*BAR_PRESS_BOOST;')
  &&!s20.includes("showScorePop('使用已取消');"));
-assert('20 自然走完清账: 包扎完成 / 前摇完成 (barArmKey=null)',
- (s20.match(/p\.barArmKey=null;/g)||[]).length===2);
+assert('20 自然走完清账: 包扎完成 / 前摇完成 / 原位换弹完成 (barArmKey=null; ★2026-11-20 判据跟走: 火力点坐姿批给原位换弹 tick 加第三处, 2→3)',
+ (s20.match(/p\.barArmKey=null;/g)||[]).length===3);
 const s06=srcOf('js/06-engineering.js');
 assert('06 回收起步双击门 (找到炮=确认起步, 门在 stealBar 之前) + 建造起步双击门 (全部早退之后, 不置 pendingBuild)',
  s06.includes("if(pl.isPlayer&&player.readBarActive()){ if(!player.barStealArmed('Digit6')) return; player.stealBar(); }")

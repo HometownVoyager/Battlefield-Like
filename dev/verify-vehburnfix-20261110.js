@@ -36,15 +36,18 @@ document.querySelector=(s)=>patchStyle(q(s));
 }
 
 // ── 阴性对照 (一律单行锚; 15-vehicles 为纯 LF 文件 — 本批 od 验过 — 故 N2 允许两行锚) ──
-const BURN_RET='if(this.hp<=0){ this.die(this.burnBy||null); return; }';
+// 2026-11-20 批③ (烧毁击杀归因): 坦克/卡车/舰船燃烧账 die 实参改 burnBy||lastHitBy 双章回退;
+//   16-aircraft 不在③批口径 (坠地/撞楼两路本就带 lastHitBy 章), 燃烧行维持旧单章 — 钉随之分立。
+const BURN_RET='if(this.hp<=0){ this.die(this.burnBy||this.lastHitBy||null); return; }';
+const BURN_RET_AIR='if(this.hp<=0){ this.die(this.burnBy||null); return; }';
 const PATCHES=[
  // N1 病灶还原: 坦克燃烧账 return 摘除 (死亡当帧继续走碰撞段 ⇒ 判据①烧毁漂移转红)
- ['js/15-vehicles.js',BURN_RET,'if(this.hp<=0) this.die(this.burnBy||null); // NEG N1'],
+ ['js/15-vehicles.js',BURN_RET,'if(this.hp<=0) this.die(this.burnBy||this.lastHitBy||null); // NEG N1'],
  // N2 病灶还原: 激流/涉水死亡停帧守卫摘除 (⇒ 判据②激流漂移转红)。两行锚: `if(!this.alive) return;`
  // 在本文件有两处 (takeDmg 早退同文), 单行锚会误伤 takeDmg 的合法早退。
  ['js/15-vehicles.js','// (能在这里看到 !alive 的必是本帧刚死的: 顶部死车分支早退, 活车不受影响)\nif(!this.alive) return;','// NEG N2\nif(this.alive&&false) return;'],
  // N3 病灶还原: 飞机燃烧账 return 摘除 (低空烧毁同帧二次 die ⇒ 判据③双残骸转红)
- ['js/16-aircraft.js',BURN_RET,'if(this.hp<=0) this.die(this.burnBy||null); // NEG N3'],
+ ['js/16-aircraft.js',BURN_RET_AIR,'if(this.hp<=0) this.die(this.burnBy||null); // NEG N3'],
 ];
 const PATCH_MAP={};
 const applyPatch=(list)=>{ for(const [f,from,to] of list){
@@ -62,12 +65,12 @@ section('① 源码防回退 (修好的写法在 / 旧写法不在)');
 {
 const s15=srcOf('js/15-vehicles.js'), s16=srcOf('js/16-aircraft.js'),
       s15b=SRC('js/15b-trucks.js'), s15d=SRC('js/15d-naval.js');
-assert('15-vehicles: 燃烧账烧毁就地停帧 { die; return; } (与 15b/15d 同款)',s15.includes(BURN_RET));
+assert('15-vehicles: 燃烧账烧毁就地停帧 { die; return; } (与 15b/15d 同款; 2026-11-20 批③ die 实参=burnBy||lastHitBy 双章回退)',s15.includes(BURN_RET));
 assert('15-vehicles: 激流/涉水中段死亡停帧守卫 (燃烧账后 if(!this.alive) return;)',
  s15.includes('// 激流/涉水两处 takeDmg 同样能在 update 中段触发 die() —— 同一漂移病根, 死亡当帧一并停帧。')
  &&s15.includes('\nif(!this.alive) return;\n'));
-assert('16-aircraft: 机体烧毁就地停帧 { die; return; } (防同帧二次 die)',s16.includes(BURN_RET));
-assert('15b-trucks/15d-naval: 燃烧账 return 既有钉 (当年就带, 回归锚)',s15b.includes(BURN_RET)&&s15d.includes(BURN_RET));
+assert('16-aircraft: 机体烧毁就地停帧 { die; return; } (防同帧二次 die; ③批口径外维持旧单章)',s16.includes(BURN_RET_AIR));
+assert('15b-trucks/15d-naval: 燃烧账 return 既有钉 (当年就带, 回归锚; 2026-11-20 批③ 同款双章)',s15b.includes(BURN_RET)&&s15d.includes(BURN_RET));
 }
 
 // ── 沙箱装载 (真 three; 与 verify-vehburn-20261109 同款 boot) ──────────

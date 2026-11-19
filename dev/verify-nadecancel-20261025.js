@@ -122,8 +122,8 @@ assert('10 栓 z0 改无条件下捕获 + slide 静止位 z0 捕获 (三把手�
 const s19=srcOf('js/19-input.js');
 assert('19 举雷引信全长走 NADE_FUSE_T 单源 (3.8 字面量已收)',
  s19.includes('player.nadeFuse=NADE_FUSE_T;')&&!s19.includes('player.nadeFuse=3.8;'));
-assert('19 左键取消**举雷除外** (收雷只有 X/✕ 两条有意路径; ★2026-11-13 批跟码: 换弹(reload)也豁免——换弹中左键不再取消, 举雷例外保留)',
- s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){"));
+assert('19 左键取消**举雷除外** (收雷只有 X/✕ 两条有意路径; ★2026-11-13 批跟码: 换弹(reload)也豁免——换弹中左键不再取消, 举雷例外保留; ★2026-11-20 火力点坐姿批跟码: 负条件再加坐姿两支豁免——原位换弹中 / 五旗上包扎中, 座位开炮不取消读条)',
+ s19.includes("if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))&&!(player.seatReload>0||((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&player.bandaging>0))){"));
 assert('19 tryReload 带 viaKey 抢占 (读条中 R=打断再装填, 系统自动换弹不带; ★2026-10-30 判据跟走: 打断=双击确认 + 同键重按=极少加快)',
  s19.includes('function tryReload(viaKey){')
  &&s19.includes('if(!viaKey) return;')
@@ -140,9 +140,13 @@ assert('19 四投掷键 sameHeld 守卫 (同键重按不抢=不重烧引信, 异
  &&s19.includes('const sameHeld=player.nadeHeld&&player.nadeIsAT;')
  &&s19.includes('const sameHeld=player.nadeHeld&&player.nadeIsSmoke;')
  &&s19.includes('const sameHeld=player.nadeHeld&&player.nadeIsIncin;'));
-assert('19 V 近战/ H 包扎读条抢占前缀 (除 VM 态外全门先过=确认会起步才抢, 空按不白丢读条; ★2026-10-30 判据跟走: 抢占前多一道双击确认门 barStealArmed)',
- s19.includes('if(!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&player.meleeCd<=0){\nif(!player.barStealArmed(\'KeyN\')) return;\nplayer.stealBar();')
- &&s19.includes('const okH=player.bandages>0&&player.hp<100&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.loiter;\nif(okH){ if(!player.barStealArmed(\'KeyH\')) return; player.stealBar(); }'));
+assert('19 N/ H 读条抢占语义 (★2026-11-20 判据跟走·军刀近战重做批: 旧 N"刺刀瞬刺"三行前缀整段退役 —— 近战改切枪模式,'
+ +' N=单行 switchSlot 切军刀槽, "N 双击打断读条"语义由 switchSlot 的 viaKey+barStealArmed(\'SW2\') 既有结构继承'
+ +' (上方"switchSlot 带 viaKey 抢占"断言钉的就是这条路); H 包扎抢占前缀逐字保留'
+ +'; ★2026-11-20 火力点坐姿批跟码: okH 摘 !onMG/!onAT/!onAA —— 固定火力点五座放行坐着包扎, onVehicle/loiter 维持硬挡)',
+ s19.includes('switchSlot(player.curSlot===2?(player._lastGunSlot||0):2,true);')
+ &&!s19.includes('if(!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&player.meleeCd<=0){')
+ &&s19.includes('const okH=player.bandages>0&&player.hp<100&&!player.onVehicle&&!player.loiter;\nif(okH){ if(!player.barStealArmed(\'KeyH\')) return; player.stealBar(); }'));
 
 const s20=srcOf('js/20-player.js');
 const steal20=(s20.match(/player\.stealBar\(\);/g)||[]).length;

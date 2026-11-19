@@ -710,8 +710,9 @@ this.state='idle'; this.target=null; this.pushPt=null; this.coverPt=null;
 this.man='hold'; this.manT=0; this.peekPhase='in'; this.peekPos=null; this.supFireT=0;
 this.coverCd=0; this.slideCd=0; this.lastCover=null; this.emCast=null;
 noteDeath(this.pos.x,this.pos.z);
-// 布娃娃尸体 (cannon可用时)
-this.ragdolled=window.CANNON?spawnRagdoll(this,attacker,isHead):false;
+// 布娃娃尸体 (cannon可用时) —— 2026-11-20 批⑦: 就地倒下档不 spawn ⇒ ragdolled=false 走上方 A#10 倒地
+// 动画 (mesh 保持可见=尸体即活体模型本体, 重生前 2.5s 收走), 零新增物理账。
+this.ragdolled=(window.CANNON&&!deathFallMode())?spawnRagdoll(this,attacker,isHead):false;
 if(this.ragdolled) this.mesh.root.visible=false;
 if(this.targetVeh){ if(this.targetVeh.claimBot===this) this.targetVeh.claimBot=null; this.targetVeh=null; }
 if(this.onVehicle){ if(this.onVehicle.crewBot===this) this.onVehicle.crewBot=null; this.onVehicle=null; }
@@ -1569,7 +1570,7 @@ const mt=this._pendMelee.tgt; this._pendMelee=null;
 if(this.alive&&mt&&mt.alive){
 const md=Math.hypot(mt.pos.x-this.pos.x,mt.pos.z-this.pos.z);
 const mdy=Math.abs(mt.pos.y-this.pos.y);
-if(md<2.6&&mdy<1.8){ mt.damage(70,this,false); AudioSys.click(500,0.4,0.08); }
+if(md<2.6&&mdy<1.8){ this._src='军刀'; mt.damage(45,this,false); AudioSys.click(500,0.4,0.08); }   // ★2026-11-20 近战重做: 伤害 70→45 对齐玩家军刀标准档 (满血 100 杀不死), _src 结算前落定 (killSrcLabel 单源)
 }
 }
 }

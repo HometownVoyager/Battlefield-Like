@@ -971,7 +971,7 @@ this.hp-=this.maxHp*VEH_BURN_FRAC/VEH_BURN_TIME*dt;
 // 中弹死亡的 die() 发生在 update 之外 (之后不再走车体碰撞段) 所以从不漂移 —— 只有 update
 // 内段杀车 (燃烧/激流/涉水) 会踩中。与 15b-trucks/15d-naval 燃烧账同款 return (那两处落地时
 // 就带, 坦克漏了)。
-if(this.hp<=0){ this.die(this.burnBy||null); return; }
+if(this.hp<=0){ this.die(this.burnBy||this.lastHitBy||null); return; }   // 2026-11-20 批: 无点燃者(burnBy=null, 如火源tick/激流点火)回退最后命中者 lastHitBy (飞机同款)
 }
 // 激流/涉水两处 takeDmg 同样能在 update 中段触发 die() —— 同一漂移病根, 死亡当帧一并停帧。
 // (能在这里看到 !alive 的必是本帧刚死的: 顶部死车分支早退, 活车不受影响)
@@ -1696,6 +1696,10 @@ if(typeof specRide==='function'&&specRide(this)) return;
 if(!ap) amt*=TANK_ARMOR;
 this.hp-=amt;
 this.lastDmgT=nowT;
+// ★2026-11-20 批: 击杀归因章镜像飞机 (16-aircraft takeDmg 的 lastHitBy 同款) —— 每次**有归属**受击重盖章;
+//   无归属伤害 (急流/涉水/火源 tick/无主爆炸, attacker=null) 不清章, 保住最后一名真正打过它的射手。
+//   修"残血临界被无归属伤害点火 ⇒ burnBy=null ⇒ 烧毁后'被谁击杀'整行省略" (用户实报, 飞机同款)。
+if(attacker) this.lastHitBy=attacker;
 // ★2026-11-16 批1: 单次受伤 >26%×maxHp 打断坦克修理 (与步兵读条 25 点门槛同族, 按载具血量比例; 刮伤/小跳伤不打断)
 // ★2026-11-17 Bot 侧并入: 账挂 tank.vehRepair, 同一门槛同款打断 (Bot 无 score pop)
 if(this.playerDriven&&player&&player.vehRepair&&player.vehRepair.tank===this&&amt>this.maxHp*VEH_REPAIR_DMG_FRAC){ player.vehRepair=null; showScorePop('维修被打断: 重伤'); }
@@ -1707,7 +1711,7 @@ else if(attacker&&attacker.pos){
 this.threatYaw=Math.atan2(attacker.pos.x-this.pos.x,attacker.pos.z-this.pos.z);
 this.threatYawT=6;   // ★2026-11-18 卡顿审计: setTimeout→dt 账 (2026-11-01 雷链同族病: 弹幕刮血期每次受击挂一个 6s 定时器闭包, 且暂停/时停照走) —— update 顶部随帧递减清空
 }
-if(this.hp<=0) this.die(attacker);
+if(this.hp<=0) this.die(attacker||this.lastHitBy||null);   // 2026-11-20 批: 直接打爆但 attacker=null (无主爆炸等) 同样回退最后命中者 (飞机坠地 die(this.lastHitBy||null) 同款)
 }
 die(attacker){
 const spec=(typeof specRide==='function')&&specRide(this); // 观战者座驾: 车可以毁, 人绝不死 (见下面隆断)
@@ -1798,6 +1802,7 @@ if(this.burning||this.burnBy||this.burnSrc){
 if(this.burnSrc){ removeFireSource(this.burnSrc); this.burnSrc=null; }
 this.burning=false; this.burnBy=null;
 }
+this.lastHitBy=null; // 2026-11-20 批: 归因章不跨生死携带 (与 burning/burnBy 同账)
 this.vehRepair=null; // Bot 修理账不跨生死携带 (2026-11-17 批; 玩家账挂 player.vehRepair 由 die/cancelReadBar 收)
 const bp=basePos(this.team);
 // 同variant多车(东线4辆/西线3辆)按队内序号错位前后排, 避免叠在同一点 (2026-09-02 加载具配套)

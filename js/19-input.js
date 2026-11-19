@@ -229,8 +229,12 @@ return;
 // 与 onNaval 同规: 一处挡完, 只放行 F (下炮; 上炮也是它) —— 炮位上其余动作一律由 20a updatePlayerBattery
 // 用鼠标驱动 (转向/俯仰/左键开炮), 不需要任何键盘动作。触控键走 kd()/ku() 合成同一批 code, 一并覆盖。
 if(player.onBattery){
-if(e.code==='KeyF') tryInteract();
-return;
+// ★2026-11-20 火力点坐姿批: H/R 放行到下方各自处理器 —— 坐岸防炮不下车包扎/原位换弹与其余四座同权
+//   (旧版这里整段吞键, okH/tryReload 放得再开 H/R 也到不了, 炮位上等于死键)。其余键照旧吞掉
+//   (炮位动作全部由鼠标驱动); F=下炮 (处理后即归位, 不再落到下方 KeyF 分支重复 tryInteract)。
+//   海战门 (上方) 维持现状不动。
+if(e.code==='KeyF'){ tryInteract(); return; }
+else if(e.code!=='KeyH'&&e.code!=='KeyR') return;
 }
 // (2026-11-10: 大舰炮位座位门 player.capitalGun 随大舰子系统下架摘除)
 // 游泳/潜水 (2026-09-18 塔拉瓦批, 用户定案): 武器背起 —— 除换枪/换弹外全部动作封禁
@@ -275,13 +279,12 @@ if(e.code==='Digit2') switchSlot(1,true);
 //     近战是瞬时单发动作, 按一下就走, 放在 N 上不影响手感 (且 N 在 V 右边一格, 手指不需离开手位)。
 //   · 近战已有多条等价入口 (手柄 RS / 移动端 tMelee), 键位挪动的实际影响面最小。
 if(e.code==='KeyN'){
-// ★2026-10-25 反馈轮①: 读条中 近战键 = 打断读条再出刺刀 (座位/冷却门外移, 抢占只在真会出手时发生)。
-// ★2026-10-30 读条交互批: 读条中打断 = 双击确认 (BAR_ARM_WIN 内同键两次, 第一次只亮提示; barStealArmed 单源)。
-if(!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&player.meleeCd<=0){
-if(!player.barStealArmed('KeyN')) return;
-player.stealBar();
-if(VM.state==='idle'){ VM.state='melee'; VM.stateT=0; VM.stateDur=0.5; player.meleeCd=0.7; vmSndFlags={}; AudioSys.metalSlide(0.15,0.06,1200,2000); }
-}
+// ★2026-11-20 近战重做批: N = 切军刀槽 / 切回 (军刀成为第 3 槽常驻武器; 旧"刺刀瞬刺"整段退役 ——
+//   三式起手全部改走 startMelee 单源: 左键刺 / 右键斩 / 中键劈, 见本文件 mousedown 与 20-player playerFireTick)。
+//   目标槽二态: 已在军刀槽(2) ⇒ 切回上次枪槽 (_lastGunSlot, switchSlot 内记账), 否则切军刀槽。
+//   门全部复用 switchSlot 既有结构 (座位门 / VM 态门 / viaKey 双击打断读条 barStealArmed('SW2')),
+//   本分支不再自写任何门 —— 与 Digit1/2 同一条路径, 语义零分叉。
+switchSlot(player.curSlot===2?(player._lastGunSlot||0):2,true);
 }
 if(e.code==='KeyG'){
 // ★2026-10-25 反馈轮①: 读条中按 G = 先收当前读条再举雷; **同键重按不抢** (举普通雷中再按 G 维持烹饪,
@@ -383,9 +386,11 @@ player.bandaging=Math.max(0.01,player.bandaging-_bb);   // 钳 0.01: 让 20-play
 if(VM.state==='bandage') VM.stateT=Math.min(VM.stateDur,(VM.stateT||0)+_bb);
 return;
 }
-// ★2026-10-25 反馈轮①: 其他读条 (换弹/举雷/拆除/前摇) 被 H 打断 = 收掉再包扎; ok=除 VM 态外全门
+// ★2026-10-25 反馈轮①: 其他读条 (换弹/举雷/拆除/前摇/原位换弹) 被 H 打断 = 收掉再包扎; ok=除 VM 态外全门
 //   (满血/没绷带/座位上本就不会起步, 不白丢读条)。★2026-10-30: 打断改双击确认 (barStealArmed 单源)。
-const okH=player.bandages>0&&player.hp<100&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.loiter;
+// ★2026-11-20 火力点坐姿批: 摘 !onMG/!onAT/!onAA (onMortar/onBattery 旧版本就未列入) —— 固定火力点
+//   五座放行"坐着不下车包扎" (readBarBusy 同批摘五旗); 载具 (onVehicle) 维持硬挡。
+const okH=player.bandages>0&&player.hp<100&&!player.onVehicle&&!player.loiter;
 if(okH){ if(!player.barStealArmed('KeyH')) return; player.stealBar(); }
 if(okH&&VM.state==='idle'&&player.bandaging<=0){
 player.bandaging=BANDAGE_T;
@@ -482,7 +487,10 @@ return;
 // 左键 mouseDown=true 虽因 updatePlayer 冻结 (20-player :799) 打不出去, 也照样置账。视模式 (alive=false)
 // 走上方分支已 return, 这里拦的是调试附身: 左/中/右键一律吞掉, 不进 ADS、不 cancel 读条。
 if(player.specViewHost) return;
-if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))){
+// ★2026-11-20 火力点坐姿批: 负条件再加两支豁免 —— 座位上开炮不取消读条 (2026-11-13 换弹豁免先例的延伸):
+//   ① 原位换弹中 (seatReload>0); ② 火力点五旗上包扎中 (bandaging>0)。该分支 return 不置 mouseDown,
+//   点击照常落给座位开火 tick (updatePlayerMG/AT/AA/Mortar/Battery 消费 mouseDown)。
+if(e.button===0&&player.readBarActive()&&!(typeof VM!=='undefined'&&(VM.state==='nade'&&player.nadeHeld||VM.state==='reload'))&&!(player.seatReload>0||((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&player.bandaging>0))){
 // ★2026-10-12 用户提议②: 读条中左键 = 取消读条。**这次点击必须被吞掉** —— 取消之后 VM.state 立刻回到
 //   'idle', 若照旧置 mouseDown=true, 下一帧的 playerFireTick 就会顺势把这一枪打出去 (取消读条不该走火)。
 // ★2026-10-25 举雷并入读条后的**唯一例外**: 举雷待发是"按住瞄准"的持续态, 左键在枪上本来无语义
@@ -498,8 +506,17 @@ if(e.button===0) mouseDown=true;
 if(e.button===1){ // 鼠标中键 (7b-丙): 飞机锁定切换, 与 E 同一单源 planeLockToggle; preventDefault 压掉浏览器中键自动滚屏
 e.preventDefault();
 if(player.alive&&player.onVehicle&&player.onVehicle.kind==='plane'&&typeof planeLockToggle==='function') planeLockToggle();
+// ★2026-11-20 近战重做: 军刀中键 = 竖劈 (门全在 startMelee 单源内, 不吃座位门 —— 座位上自然落空)
+else if(player.alive&&player.curW&&player.curW.def&&player.curW.def.melee) startMelee('chop');
 }
 if(e.button===2){
+// ★2026-11-20 近战重做: 军刀右键 = 横斩 —— 步行门通过才起步 (门细项在 startMelee 单源内),
+//   通过即 return: 不进 ADS 也不置 mouse2Down (军刀没有机瞄语义, ADS 分流只属于枪)。
+if(player.alive&&player.curW&&player.curW.def&&player.curW.def.melee
+&&!player.loiter&&!player.flying&&!player.swim&&!player.onVehicle&&!player.onNaval&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.onBattery){
+startMelee('slash');
+return;
+}
 mouse2Down=true;
 // 通讯仪右键 (2026-10-26 指挥官批, 设计 R2/§3): 右键 = 开/关指挥地图, 不进 ADS ——
 // 姿态门 (D18 仅步行地面) 与开图条件都在 cmdMapToggle 内部单源把关, 这里只按"手里是通讯仪"分流。
@@ -632,10 +649,20 @@ function lockPointer(){
 if(MOBILE){ pointerLocked=true; return; }
 try{ const r=renderer.domElement.requestPointerLock(); if(r&&r.catch) r.catch(()=>{}); }catch(e){}
 }
+// 换弹时长单源 (★2026-11-20 火力点坐姿批): 步行 VM 换弹与座位原位换弹 (player.seatReload) 共用一份公式
+// —— 连杀增益 ×动态换弹速度 (×已耗/弹匣, 2026-11-12); 原为 tryReload 行内公式, 抽出防两处漂移。
+function reloadDurOf(w){
+return w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1)*dynReloadFac(w.mag,w.def.mag);
+}
 function tryReload(viaKey){
 if(player.spectator) return; // 观战: 弹药每0.5s自动回满, 永不换弹 —— 拦截手动R/空仓点击/打空自动换弹/巡飞弹引爆后的自动换弹 (2026-09-11 修复不定时换弹)
 const w=player.curW;
-if(!w||player.onMG||player.onVehicle||player.onAT||player.onAA) return;
+// ★2026-11-20 火力点坐姿批: 座位门只留载具 (onVehicle) —— 固定火力点五座放行走"原位换弹" (坐在炮位上
+//   给随身武器装填, 账挂 player.seatReload); 海战维持现状不新增门 (艇上 curW=null 由 !w 挡住, 旧门本就没列它)。
+if(!w||player.onVehicle) return;
+// 冻账收编 (★2026-11-20): 上车前遗留的 VM 换弹在座位上永走不完 (24-main 座位门停跑 updateViewModel) ⇒
+//   静默收掉 (弹不结算, 与 cancelReadBar 的换弹中止语义一致) —— 不收的话 VM 态门会把这发 R 当"同键加速"白按。
+if((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&(typeof VM!=='undefined'&&VM.state==='reload')){ VM.state='idle'; vmSndFlags={}; }
 if(VM.state!=='idle'){
 // ★2026-10-25 反馈轮①: 读条中按 R = 打断当前读条再装填; **换弹中重按 R 不重启** (同键不抢, 进度不白丢)。
 //   viaKey 只来自按键 (本文件 keydown 三处); 空仓自动换弹 (20-player 的 click/timeout) 不带 ——
@@ -643,15 +670,25 @@ if(VM.state!=='idle'){
 //   stealBar 不会动它, 二道门照样拦。
 // ★2026-10-30 用户裁定②③: 换弹中重按 R = **极少加快** (推进 stateDur 的 2.5%); 其他读条中 R = 双击确认
 //   打断 (第一次只亮"再按一次打断", barStealArmed 单源)。
+// ★2026-11-20 火力点坐姿批: 坐着包扎中按 R 也走这里 = 双击确认打断包扎再换弹 (座位门已放行)。
 if(!viaKey) return;
 if(VM.state==='reload'){ VM.stateT=Math.min(VM.stateDur,(VM.stateT||0)+VM.stateDur*BAR_PRESS_BOOST); return; }
 if(!player.barStealArmed('KeyR')) return;
 player.stealBar();
 if(VM.state!=='idle') return;
 }
+// 火力点原位换弹 (★2026-11-20): 账挂 player.seatReload, tick/结算在 20-player (座位早退之前)。
+//   同键重按 = 极少加速 (与步行换弹 R 同规); 弹满/无备弹不起步 (不白丢读条)。
+if(player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery){
+if(player.seatReload>0){ player.seatReload=Math.max(0.01,player.seatReload-player.seatReloadDur*BAR_PRESS_BOOST); return; }
+if(w.mag>=w.def.mag||w.reserve<=0) return;
+const d=reloadDurOf(w);
+player.seatReload=d; player.seatReloadDur=d;
+return;
+}
 if(w.mag>=w.def.mag||w.reserve<=0) return;
 VM.state='reload'; VM.stateT=0;
-VM.stateDur=w.def.reload*(player.streakBuff?player.streakBuff.reloadMul:1)*dynReloadFac(w.mag,w.def.mag); // 连杀增益: 换弹加速 (2026-09-11); 动态换弹速度 ×已耗/弹匣 (2026-11-12, 单源 dynReloadFac — VM 动画/读条/3P 镜像按 nt 比例自动跟随)
+VM.stateDur=reloadDurOf(w); // 连杀增益: 换弹加速 (2026-09-11); 动态换弹速度 ×已耗/弹匣 (2026-11-12, 单源 dynReloadFac — VM 动画/读条/3P 镜像按 nt 比例自动跟随)
 vmSndFlags={};
 }
 function switchSlot(i,viaKey){
@@ -668,5 +705,24 @@ if(VM.state!=='idle'&&VM.state!=='fire') return;
 }
 player.curSlot=i;
 player.curW=player.slots[i];
+if(i!==2) player._lastGunSlot=i;   // ★2026-11-20 近战重做: 记住最后枪槽 (N 切回军刀槽的落点; 军刀槽自身不入账)
 vmEquip(player.curW.key,player.team);
+}
+// ★2026-11-20 近战重做: 军刀三式起手单源 (thrust/slash/chop)。三个输入点 (左键=20-player playerFireTick
+//   分流 / 右键·中键=本文件 mousedown) 全部汇到这里, 门只写一遍。通过 ⇒ VM 'melee' 态
+//   (10-viewmodel 按 VM.meleeKind 分段播动画, 中段 vmPlayOnce 单发结算), 冷却 = 该式时长
+//   (挥完即可接下一式, 无额外硬直); 3P 姿态机读 player.meleeKind/meleeDur 分式归一。
+function startMelee(kind){
+const p=player;
+if(!p.alive||p.meleeCd>0||p.readBarActive()) return;
+if(p.loiter||p.swim||p.flying||p.onVehicle||p.onNaval||p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery) return;
+const w=p.curW;
+if(!w||!w.def||!w.def.melee) return;
+if(VM.state!=='idle') return;
+const dur=w.def[kind+'T'];
+if(!(dur>0)) return;
+VM.state='melee'; VM.meleeKind=kind; VM.stateT=0; VM.stateDur=dur;
+p.meleeCd=dur; p.meleeKind=kind; p.meleeDur=dur;   // meleeKind/meleeDur: 3P 姿态机分式 + 归一化用
+vmSndFlags={};   // 重置单发账: vmPlayOnce('meleeHit') 每一式都要能再发
+AudioSys.metalSlide(0.12,0.05,1500,500);   // 挥刀风声 (现有音效函数; 命中声在 doMeleeHit 按式分级)
 }
