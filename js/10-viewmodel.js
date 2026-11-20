@@ -29,6 +29,11 @@ const HIP_ROCKET={ pos:V3(0.15,-0.14,-0.56), rot:V3(0.02,0.04,0) };
 // 0.38m 会让机身糊住半个屏幕; 后倾 0.06 + 外旋 0.14 让面板朝向镜头 ⇒ 一眼认出"这是对讲机",
 // 天线指向画面中心偏上而不是戳出画面。
 const HIP_RADIO={ pos:V3(0.19,-0.30,-0.46), rot:V3(0.06,0.14,0.10) };
+// 军刀 (2026-11-20 实机反馈批, 用户令: 常态**上举**"像 MC 一样", 不许水平指前): 刀身沿 -z 前伸 (buildSabreBody),
+// rot.x≈0.78 = 仰角 45°/前倾 45° 的 MC 式前斜对角 (★二轮实机反馈: 1.0 的近竖直+左倾剪影被读成"扛肩朝后拿反",
+// 改 45° 前斜 + 去左倾 ry 0.04 ⇒ "举着指前"无可歧义), 握位右下 (0.34m)。挥砍三式 (melee 分支) 的局部曲线
+// 以此**为基准重定基**, 各相位系数和=0 ⇒ 起手/收势逐位回本位姿 (旧版落通用步枪 HIP = 水平指前的根因)。
+const HIP_SABRE={ pos:V3(0.13,-0.20,-0.34), rot:V3(0.78,0.04,0.06) };
 function adsPoseFor(key){
 const d=WPN_DEFS[key];
 // 通讯仪 (2026-10-27): 工具件没有"开镜", 但右键是开指挥地图 (19-input 分流) ⇒ 正常路径到不了 ADS。
@@ -36,8 +41,9 @@ const d=WPN_DEFS[key];
 // 机面正对镜头 (rot.y 回 0), 不会像枪那样出现"半张脸埋在枪身里"的怪画面。
 if(d.radio) return { pos:V3(0.10,-0.20,-0.40), rot:V3(0.10,0,0.06) };
 // 军刀 (2026-11-20 近战重做): 近战没有"开镜" (右键已被横斩分流, 19-input mousedown), 正常路径到不了 ADS;
-// 给一档无害位姿兜住手柄 LT / 外部直接置 ads 的路径 —— 刀略抬向胸前, 不出现"刀柄怼脸"。
-if(d.melee) return { pos:V3(0.12,-0.16,-0.36), rot:V3(0.08,0.08,0.05) };
+// 给一档无害位姿兜住手柄 LT / 外部直接置 ads 的路径 —— ★2026-11-20 实机反馈批: 与 HIP_SABRE 同值
+// (45° 前斜举刀, 用户令"像 MC 一样举着"), 两处必须同值否则兜底路径刀姿突变。
+if(d.melee) return { pos:V3(0.13,-0.20,-0.34), rot:V3(0.78,0.04,0.06) };
 if(d.rocket) return { pos:V3(0.052,-0.148,-0.3), rot:V3(0,0,0) };
 if(d.atRifle) return { pos:V3(0.05,-0.105,-0.28), rot:V3(0,0.05,0) }; // 反坦克枪: 顶部弹匣挡视线, 侧偏机瞄(同火箭筒)
 if(d.scoped) return { pos:V3(0,-0.085,-0.22), rot:V3(0,0,0) };
@@ -420,7 +426,7 @@ const adsTgt=(player.ads&&(VM.state==='idle'||VM.state==='fire'||VM.state==='bol
 VM.adsBlend=dampF(VM.adsBlend,adsTgt,14,dt);
 const sprTgt=(player.sprinting&&VM.state==='idle')?1:0;
 VM.sprintBlend=dampF(VM.sprintBlend,sprTgt,8,dt);
-const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:(d.radio?HIP_RADIO:HIP));
+const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:(d.radio?HIP_RADIO:(d.melee?HIP_SABRE:HIP)));
 const px=lerp(hip.pos.x,VM.ads.pos.x,VM.adsBlend);
 const py=lerp(hip.pos.y,VM.ads.pos.y,VM.adsBlend);
 const pz=lerp(hip.pos.z,VM.ads.pos.z,VM.adsBlend);
@@ -493,19 +499,26 @@ VM.knifeM&&(VM.knifeM.visible=false);
 g.gun.visible=true;
 VM.arms.L.visible=false;
 if(mk==='thrust'){
-g.gun.position.set(0.02,-0.01-k*0.02,-k*0.34);
-g.gun.rotation.set(0.06-k*0.10,0,0);
-handROverride=_ovR, handROverride.pos.set(0.05,-0.09,-0.06-k*0.30), handROverride.rot.set(0.25-k*0.55,0,0);
+// ★2026-11-20 实机反馈批: 三式曲线按 HIP_SABRE 举刀基准**重定基** (局部量=总位姿-举刀位; 旧值按水平指前的
+// 通用 HIP 写, 直接沿用会让三式从举刀位瞬移)。各相位系数和=0 ⇒ 起手/收势逐位回举刀位。
+// 刺: 刃随前突放平到近水平 (总 rot.x ≈0.78→-0.10, ★二轮举刀基准 0.78), 收回举刀位。
+g.gun.position.set(-0.04*k,-0.02*k,-k*0.34);
+g.gun.rotation.set(-0.88*k,0,0);
+handROverride=_ovR, handROverride.pos.set(0.014,-0.062,0.10-k*0.36), handROverride.rot.set(0.28-k*0.62,0,0);
 }else if(mk==='slash'){
-const sw=ss(nt,0.18,0.62), bk=ss(nt,0.62,0.95);
-g.gun.position.set(0.16-sw*0.36+bk*0.20,-0.04,-0.10-sw*0.10);
-g.gun.rotation.set(0.10,-1.15*sw+1.05*bk,0.25-sw*0.55);
-handROverride=_ovR, handROverride.pos.set(0.10-sw*0.30+bk*0.16,-0.12,-0.12-sw*0.08), handROverride.rot.set(0.35,-sw*0.5+bk*0.4,-sw*0.4);
+// 斩: 三相位右→左跨身扫 (★二轮: 旧单摆式只甩向一侧再收回, 读不出"横扫") —— 引刀 (刃收向画面右, 偏航 +0.45)
+// → 扫击 (压刃近水平 总rot.x≈0.23 + 偏航扫到 -1.10 ≈右→左 89° + 横滚立刃) → 收回举刀位; 系数和=0。
+const w=ss(nt,0,0.20), st=ss(nt,0.20,0.60), rc=ss(nt,0.60,0.95);
+g.gun.position.set(0.10*w-0.30*st+0.20*rc,-0.02*st+0.02*rc,-0.05*st+0.05*rc);
+g.gun.rotation.set(-0.55*st+0.55*rc,0.45*w-1.55*st+1.10*rc,-0.55*st+0.55*rc);
+handROverride=_ovR, handROverride.pos.set(0.014+0.10*w-0.26*st+0.16*rc,-0.062-0.05*st+0.05*rc,0.10-0.16*st+0.16*rc), handROverride.rot.set(0.28-0.55*st+0.55*rc,0.45*w-0.9*st+0.45*rc,-0.4*st+0.4*rc);
 }else{
+// 劈: 先举过肩 (总 rot.x≈1.48) 再下劈到前下 (≈-0.52) 后收回举刀位 —— 旧曲线是单一 out-back 脉冲且基准水平,
+// 读起来像"上挑" (实机报); 重定基后 up 段真上举、dn 段真下劈。
 const up=pulse(nt,0,0.3,1), dn=ss(nt,0.3,0.62), rc=ss(nt,0.62,0.95);
-g.gun.position.set(0.06,-0.02+up*0.14-dn*0.16,0.02+up*0.06-dn*0.10);
-g.gun.rotation.set(0.15-up*1.05+dn*1.55,0,0);
-handROverride=_ovR, handROverride.pos.set(0.08,-0.08+up*0.10-dn*0.10,-0.08+up*0.04-dn*0.06), handROverride.rot.set(0.3-up*0.7+dn*1.1,0,0);
+g.gun.position.set(0,0.14*up-0.20*dn+0.06*rc,0.06*up-0.16*dn+0.10*rc);
+g.gun.rotation.set(0.70*up-2.00*dn+1.30*rc,0,0);
+handROverride=_ovR, handROverride.pos.set(0.014,-0.062+0.10*up-0.12*dn+0.02*rc,0.10+0.05*up-0.15*dn+0.10*rc), handROverride.rot.set(0.28+0.50*up-1.35*dn+0.85*rc,0,0);
 }
 if(nt>(mk==='thrust'?0.4:(mk==='slash'?0.35:0.5))) vmPlayOnce('meleeHit',()=>player.doMeleeHit(mk));
 if(nt>=1){

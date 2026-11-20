@@ -68,7 +68,7 @@ const PATCHES=[
  // I 第一人称阵营透传退场 ⇒ ② 阵营配色判据红 (team 恒 undefined ⇒ 六阵营同色)
  ['js/10-viewmodel.js', 'VM.gunParts=buildGunModel(key,team);', 'VM.gunParts=buildGunModel(key);'],
  // J 第一人称 radio 位姿退场 (工具件套用步枪 HIP) ⇒ ① 位姿判据红
- ['js/10-viewmodel.js', 'const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:(d.radio?HIP_RADIO:HIP));', 'const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:HIP);'],
+ ['js/10-viewmodel.js', 'const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:(d.radio?HIP_RADIO:(d.melee?HIP_SABRE:HIP)));', 'const hip=d.rocket?HIP_ROCKET:(d.pistol?HIP_PISTOL:HIP);'],   // ★2026-11-20 跟走: hip 链追加军刀 HIP_SABRE 档 (常态上举批); 摘 radio+melee 两档=radio 位姿判据仍红
 ];
 const PATCH_MAP={};
 if(NEG) for(const [f,from,to] of PATCHES){
@@ -119,7 +119,7 @@ assert('①-e 姿态机只认持握表, 不写武器名硬编码 (20-player 里�
  s20.includes("const hold=(typeof gunHoldOf==='function')?gunHoldOf(gkNow):null;")
  && !s20.includes("'radio'") && !s20.includes('"radio"'));
 assert('①-f 第一人称三处位姿都有 radio 档 (HIP / ADS / 默认握位)',
- s10.includes('const HIP_RADIO=') && s10.includes('(d.radio?HIP_RADIO:HIP)')
+ s10.includes('const HIP_RADIO=') && s10.includes('(d.radio?HIP_RADIO:(d.melee?HIP_SABRE:HIP))')   // ★2026-11-20 跟走: hip 链追加军刀档 (常态上举批)
  && s10.includes('if(d.radio) return { pos:V3(0.10,-0.20,-0.40)')
  && s10.includes('if(d.radio) return side?'));
 // ★ Lead 复核 4b: noReload/noBrace 必须写成 **null 安全式** —— hold 为 null (所有枪械) 时

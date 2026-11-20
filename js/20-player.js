@@ -1862,6 +1862,9 @@ avNadeHide();                                  // 尸体也不握雷 (2026-09-30
 av.gunG.rotation.x=dampF(av.gunG.rotation.x,0.2,5,dt);
 return av;
 }
+// 挥砍期 IK 抓握点补偿槽 (2026-11-20 实机反馈批, 零分配): gunGripPoint 返回共享槽 _gaGrip 不可原地改,
+// 挥砍期把 gunOffX/Y/Z 加进本槽再喂 armIK —— 见 updatePlayerAvatar 右臂块。
+const _meleeGrip={x:0,y:0,z:0};
 function updatePlayerAvatar(dt){
 // ★2026-11-01 附身中 (调试观战) 本体模型永久隐藏 —— 旧版第三人称会把观战者本体和宿主 Bot
 // 钉在同一坐标上 = "两个人挤在一起" (用户实测)。此时第三人称追尾机位跟随的就是宿主, 只留 Bot 模型。
@@ -2026,18 +2029,29 @@ shR=0.52; elR=-1.35; shRz=-0.1;
 shL=-1.02; elL=-0.55; shLz=0.3; shLy=0.25;
 }
 // 军刀三式 3P 姿态 (2026-11-20 近战重做, 契约G 刺刀 overlay 扩展): player.meleeKind 分式 ——
-// 刺=前刺 (现款值) / 斩=右臂横扫 / 劈=右臂纵劈, modest 初值实机验收再调; 归一化时长用
+// ★2026-11-20 实机反馈批整段重写: ①挥砍期**刀件随式驱动** (见下面 gunX/gunY/gunOffX·Y·Z 分式块) +
+// 挥刀中 IK 权重升到 0.85 ⇒ 右手 glued 到**移动**的握点上 = 人刀一体 (旧 0.35 配静止刀件 = 刀浮空前刺、
+// 只有手臂在动的根因); ②斩/劈改**相位曲线** (引刀→挥/举→劈→收, 平滑阶梯), 各相位系数和=0 ⇒ 起收逐位回
+// 持刀常态 —— 旧版单一 out-back 脉冲无相位, 劈读成"上挑"、斩只有小摆幅 (实机报)。归一化时长用
 // player.meleeDur (三式 0.35/0.5/0.7 各不同, 旧 MELEE_ANIM_T 0.42 只作缺省兜底)。
 const meleeK=clamp((p.meleeT||0)/(p.meleeDur||MELEE_ANIM_T),0,1);
 const thrust=meleeK>0?Math.sin((1-meleeK)*Math.PI):0;
+// 平滑阶梯助手 (20-player 本地自带, 不依赖 10-viewmodel 的 ss —— 子集沙箱只载部分脚本也能跑)
+const mss=(t,a,b)=>{ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); };
 if(thrust>0){
+const mlA=1-meleeK;                            // 0=起手 → 1=收势 (meleeK 随 meleeT 1→0)
 if(p.meleeKind==='slash'){
-shR=-0.7-thrust*0.5; elR=-1.15+thrust*0.35; shRz=-0.15-thrust*1.05;
-shL=-1.02; elL=-0.55; shLz=0.30;
+// 横斩: 引刀 (右肩回拉) → 右→左大幅横扫 → 收回举刀位; 左臂对侧轻摆做配重
+const w=mss(mlA,0,0.22), sw=mss(mlA,0.22,0.58), rc=mss(mlA,0.58,0.92);
+shR=-0.52-0.30*w-0.28*sw+0.58*rc; elR=-1.25-0.15*sw+0.15*rc; shRz=-0.22-0.55*w+0.60*sw-0.05*rc;
+shL=-0.30-0.30*sw+0.30*rc; elL=-0.62-0.10*sw+0.10*rc; shLz=0.30;
 }else if(p.meleeKind==='chop'){
-shR=-1.7+thrust*1.15; elR=-0.75+thrust*0.55; shRz=-0.15;
-shL=-1.02; elL=-0.55; shLz=0.30;
+// 竖劈: 举过肩 (shR≈-1.97) → 向前下劈 (shR≈-0.55, 臂伸长跟刀) → 收回举刀位
+const up=mss(mlA,0,0.28), dn=mss(mlA,0.28,0.52), rc=mss(mlA,0.52,0.90);
+shR=-0.52-1.45*up+1.42*dn-0.03*rc; elR=-1.25-0.40*up+0.85*dn-0.45*rc; shRz=-0.22;
+shL=-0.30-0.15*up+0.15*rc; elL=-0.62; shLz=0.30;
 }else{
+// 刺 (0.35s): 原前突式保留, 左臂对侧前送做配重
 shR=-0.42-thrust*1.05; elR=-1.3+thrust*0.9; shRz=-0.2;
 shL=-1.08-thrust*0.6; elL=-0.28; shLz=0.45;
 }
@@ -2064,13 +2078,33 @@ const gunPitch=(engaged&&!hold)?-clamp(p.pitch,-0.7,0.7):(sprint?0.3:0.25);
 // 俯角的**同向**附加 (gunX 为正 = 枪口朝下), 在贴地的趴姿里等于把枪口往地里压 0.09m (实测枪底 -0.015m)。
 // 而 −pp 本来就已经把骨盆前倾补偿干净了 (A#10 审计① 的口径), 不需要再有第二项。
 let gunX=prone?gunPitch-pp:gunPitch;
-let gunY=-av.pelvis.rotation.y+(sprint?0.95:0);
+let gunY=-av.pelvis.rotation.y+(sprint&&!(hold&&hold.noSprintCant)?0.95:0);   // noSprintCant (军刀 2026-11-20 实机反馈批): 举刀不吃"疾跑横端"; 枪械/通讯仪逐位不变
 let gunZ=sprint?0.16:0;
 // 工具件 (通讯仪) 的机面朝向由持握表给 (gunY 负 = 屏幕转向角色脸侧, 第三人称能看到面板);
 // 疾跑那套"横端在胸前"对 5cm 厚的工具件没有意义, 所以 sprint 附加量在这里不叠。
 if(hold){ gunX+=hold.gunX; gunY+=hold.gunY; gunZ+=hold.gunZ; }
-let gunOffY=0, gunOffZ=0;
-if(thrust>0){ gunOffZ=thrust*(p.meleeKind==='slash'||p.meleeKind==='chop'?0.18:0.42); gunX-=thrust*0.16; }        // 刺刀: 枪前刺 (斩/劈=横扫/纵劈, 前突收半)
+let gunOffX=0, gunOffY=0, gunOffZ=0;
+// ★2026-11-20 实机反馈批: 挥砍期**刀件随式驱动** —— 刀不再钉在挂点上只吃一个前推量 (旧版"刀浮空前刺、
+// 手臂单独动"的根因), 改按式驱动 刀身角 (gunX/gunY) + 握点位移 (gunOffX/Y/Z), 与上面臂 overlay 同一套 mss
+// 相位、系数和=0 ⇒ 起收逐位回挂点; 配合 handKUse 挥刀中 0.85 (右手 glued 到移动握点 = 人刀一体)。
+if(thrust>0){
+if(p.meleeKind==='slash'){
+// 横斩: 刃身放平到近水平 (总 rot.x≈-0.25, 刃口仍朝下=立刃劈扫, 修"拿刀面蹭") + 偏航大幅右→左扫 (±0.85),
+// 握点右→左前平移
+const w=mss(1-meleeK,0,0.22), sw=mss(1-meleeK,0.22,0.58), rc=mss(1-meleeK,0.58,0.92);
+gunX+=0.65*w-0.65*rc; gunY+=-0.85*w+1.70*sw-0.85*rc;
+gunOffX=-0.16*w+0.22*sw-0.06*rc; gunOffZ=0.10*w+0.22*sw-0.32*rc;
+}else if(p.meleeKind==='chop'){
+// 竖劈: 刃身举过肩 (总 rot.x≈-1.60) → 前下劈 (≈+0.40, 刃口朝前下=劈的跟刀, 修"上挑") → 收回举刀位;
+// 握点先上后前下
+const up=mss(1-meleeK,0,0.28), dn=mss(1-meleeK,0.28,0.52), rc=mss(1-meleeK,0.52,0.90);
+gunX+=-0.70*up+2.00*dn-1.30*rc;
+gunOffY=0.10*up-0.22*dn+0.12*rc; gunOffZ=0.06*up+0.30*dn-0.36*rc;
+}else{
+// 刺: 原前推+微压保留 (刀路未收实机差评)
+gunOffZ=thrust*0.42; gunX-=thrust*0.16;
+}
+}
 if(p.braced&&!(hold&&hold.noBrace)) gunOffY=0.12;               // 架枪: 枪抬到胸口遮挡位 (工具件不架枪)
 if(reloading&&!sprint&&!prone){ gunX+=0.20; gunZ+=0.12; }       // 换弹: 枪身下压
 if(nadeK>0) gunZ+=0.35*Math.max(0,nadeArc);                     // 手雷: 起手时枪随左臂让开
@@ -2087,7 +2121,7 @@ const handK=(nadeK>0||nadeHold||bandK>0)?0:(thrust>0?0.35:1);
 // 抓机 —— 若沿用通用 handK=1, armIK 会把左手也拽到机身上 = "双手捧着对讲机抵肩", 正是要修掉的那套
 // 步枪姿态。★ 上面 handK 与下面 handKL 两行是既有探针的源码锚点 (verify-animfix-20260926 的反向对照
 //   锚 + "换弹左臂单独取 0" 断言逐字比对), 所以**不改这两行**, 只在其后派生实际使用的权重。
-const handKUse=(hold)?(thrust>0?0.35:hold.handK):handK;   // ★2026-11-20 近战重做: 挥刀中 IK 权重降档 (仿旧刺刀 0.35) —— 满权重会把右手钉死在静止握点上, 盖掉挥刀姿态
+const handKUse=(hold)?(thrust>0?0.85:hold.handK):handK;   // ★2026-11-20 实机反馈批: 挥刀中 IK 权重 0.35→0.85 —— 刀件已随式驱动 (握点是**移动**的), 高权重让右手 glued 到刀柄上=人刀一体; 旧 0.35 配静止刀件 = 刀浮空前刺而手臂单独摆 (实机报) 的根因
 // ★ 2026-09-26 B2: 换弹时**左臂单独取 0** —— Bot 侧有 handKL (14-bots), 玩家侧漏了这一步, 于是上面
 // 摆好的"左手沉到弹匣"被 IK 的 handK=1 逐帧抹掉 (换弹时左臂全程贴回护木 = 换弹动作看不见)。
 // 语义与 Bot 一致: 换弹的语义就是左手离枪去弹匣; 右臂仍为 1 (枪始终在右手)。
@@ -2099,11 +2133,15 @@ const gk=av._gunKind||'rifle';
 // (t<0 = 向枪托端回退, 仍在枪身上) —— 不把挂点挪近 (挪近会把枪身压回躯干), 也不让手脱枪。
 const reachR=(typeof ARM_L1!=='undefined')?(ARM_L1+ARM_L2-0.03):0.59;
 let tR=0, gp=gunGripPoint(gk,gunX,gunY,gunZ,pp);
+// ★2026-11-20 实机反馈批: 挥砍期刀件带 gunOffX/Y/Z 位移 (斩=握点右→左平移) —— 抓握点必须**同额补偿**,
+// 否则 armIK 反解到的还是挂点基准的静止点 ⇒ 右手不跟刀 ("刀浮空分离"根因之二)。枪械 gunOff 恒 0 ⇒ 不进此支。
+if(thrust>0){ _meleeGrip.x=gp.x+gunOffX; _meleeGrip.y=gp.y+gunOffY; _meleeGrip.z=gp.z+gunOffZ; gp=_meleeGrip; }
 if(typeof gunAxisPoint==='function'){
 const sr=av.armR.sh.position;
 for(let i=0;i<6&&tR>-0.6;i++){
 if(Math.hypot(gp.x-sr.x,gp.y-sr.y,gp.z-sr.z)<=reachR) break;
 tR-=0.15; gp=gunAxisPoint(gk,tR,gunX,gunY,gunZ,pp);
+if(thrust>0){ _meleeGrip.x=gp.x+gunOffX; _meleeGrip.y=gp.y+gunOffY; _meleeGrip.z=gp.z+gunOffZ; gp=_meleeGrip; }
 }
 }
 const rR=armIK(av.armR.sh,av.armR.elm,gp);                      // 右手 → 握把 (扳机手)
@@ -2132,14 +2170,18 @@ shLz=lerp(shLz,av.armL.sh.rotation.z,handKLUse); elL=lerp(elL,av.armL.elm.rotati
 // 必须叠在 IK 混合**之后**, 否则被 handK=1 的 lerp 抹平 (这就是"开火时枪口上跳可见、身体后坐看不见"的原因)。
 shR+=fireK*0.62; shRz+=fireK*0.06; elR-=fireK*0.22;
 // 关节写回 (阻尼率与 Bot 同档: x/肘 11, y 8, z 9; 上面已乘过 MIR 并混过 IK, 这里不再乘)
-av.armR.sh.rotation.x=dampF(av.armR.sh.rotation.x,shR,11,dt);
-av.armR.elm.rotation.x=dampF(av.armR.elm.rotation.x,elR,11,dt);
-av.armL.sh.rotation.x=dampF(av.armL.sh.rotation.x,shL,11,dt);
-av.armL.elm.rotation.x=dampF(av.armL.elm.rotation.x,elL,11,dt);
-av.armL.sh.rotation.y=dampF(av.armL.sh.rotation.y,shLy,8,dt);
-av.armR.sh.rotation.y=dampF(av.armR.sh.rotation.y,shRy,8,dt);
-av.armL.sh.rotation.z=dampF(av.armL.sh.rotation.z,shLz,9,dt);
-av.armR.sh.rotation.z=dampF(av.armR.sh.rotation.z,shRz,9,dt);
+// ★2026-11-20 实机反馈批: 挥砍窗口 (meleeK∈(0,1)) 阻尼率 ×3 —— 实测率 9~11 (时间常数 ≈0.1s) 会把 0.5s 挥砍里
+//   0.18s 的扫击相位糊成 ±0.2rad 的小摆 ("右键完全没有横扫动作, 就摇一摇" 实机报的根因); ×3 (τ≈33ms) 才跟得上
+//   曲线。枪械/工具件 meleeK 恒 0 ⇒ mFast=1 逐位不变。
+const mFast=(meleeK>0&&meleeK<1)?3:1;
+av.armR.sh.rotation.x=dampF(av.armR.sh.rotation.x,shR,11*mFast,dt);
+av.armR.elm.rotation.x=dampF(av.armR.elm.rotation.x,elR,11*mFast,dt);
+av.armL.sh.rotation.x=dampF(av.armL.sh.rotation.x,shL,11*mFast,dt);
+av.armL.elm.rotation.x=dampF(av.armL.elm.rotation.x,elL,11*mFast,dt);
+av.armL.sh.rotation.y=dampF(av.armL.sh.rotation.y,shLy,8*mFast,dt);
+av.armR.sh.rotation.y=dampF(av.armR.sh.rotation.y,shRy,8*mFast,dt);
+av.armL.sh.rotation.z=dampF(av.armL.sh.rotation.z,shLz,9*mFast,dt);
+av.armR.sh.rotation.z=dampF(av.armR.sh.rotation.z,shRz,9*mFast,dt);
 // 挂点基准 (2026-09-21 A#2 契约J): 单源 = 11-soldiers 的 **GUN_MOUNT_BY_KIND** (gunMountOf(kind)) ——
 // 别再缓存"当前 gunG.position"当基准 (挂点本批从 (0.14,0.4,0.1) 改到按枪种取, 缓存旧值会把抬枪/前刺量加错高度);
 // 扛肩式火箭筒的挂点与步枪不同, 所以这里必须按 av._gunKind 取。
@@ -2149,12 +2191,12 @@ av.armR.sh.rotation.z=dampF(av.armR.sh.rotation.z,shRz,9,dt);
 //   枪与双手整段扎进地面。这里与腿部反解、手臂 IK 目标用的是同一个 pp, 三处必须同源。
 const gb=(typeof gunMountOf==='function')?gunMountOf(av._gunKind||'rifle',pp)
 :((typeof GUN_MOUNT!=='undefined')?GUN_MOUNT:(av._gunGBase||(av._gunGBase={x:av.gunG.position.x,y:av.gunG.position.y,z:av.gunG.position.z})));
-av.gunG.rotation.y=dampF(av.gunG.rotation.y,gunY,9,dt);
-av.gunG.rotation.z=dampF(av.gunG.rotation.z,gunZ,8,dt);
-av.gunG.rotation.x=dampF(av.gunG.rotation.x,gunX,11,dt);
-av.gunG.position.x=dampF(av.gunG.position.x,gb.x,10,dt);
-av.gunG.position.y=dampF(av.gunG.position.y,gb.y+gunOffY,10,dt);
-av.gunG.position.z=dampF(av.gunG.position.z,gb.z+gunOffZ,10,dt);
+av.gunG.rotation.y=dampF(av.gunG.rotation.y,gunY,9*mFast,dt);   // mFast: 挥砍窗口 ×3 (刀件随式驱动不被阻尼糊掉, 见上); 枪械逐位不变
+av.gunG.rotation.z=dampF(av.gunG.rotation.z,gunZ,8*mFast,dt);
+av.gunG.rotation.x=dampF(av.gunG.rotation.x,gunX,11*mFast,dt);
+av.gunG.position.x=dampF(av.gunG.position.x,gb.x+gunOffX,10*mFast,dt);
+av.gunG.position.y=dampF(av.gunG.position.y,gb.y+gunOffY,10*mFast,dt);
+av.gunG.position.z=dampF(av.gunG.position.z,gb.z+gunOffZ,10*mFast,dt);
 // ── 头/上身 (Bot 同式): 交战看俯仰, 匍匐反向补偿躯干, 平时随俯角微低 ──
 const headTgt=(engaged?-clamp(p.pitch,-0.6,0.6)*0.7:0)+(prone?-0.08-pp:-torsoX*0.5);
 av.headG.rotation.x=dampF(av.headG.rotation.x,headTgt,9,dt);

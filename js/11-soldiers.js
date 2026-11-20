@@ -250,9 +250,14 @@ handK:1, handKL:0, noReload:true, noBrace:true,
 // 原点), 左手自然下垂不抓 (刀柄只有一只手的宽度); 刀没有"拉栓换弹/抵肩架枪"这两件事, noReload/noBrace
 // 整段跳过 (否则持刀也演换弹/架枪动作 = 通讯仪批的"拿工具演步枪动画"同款病)。挥刀姿态由 20-player
 // 的 melee overlay 按 player.meleeKind 分式覆盖 (本表只管**持刀**的常态)。
+// ★2026-11-20 实机反馈批: 常态**上举** (用户令"像 MC 一样举着", 旧 gunX:0.04 = 刀身水平指前的根因) ——
+// 姿态机基准 gunPitch +0.25 之上再抬 -0.85 ⇒ 总 rot.x ≈ -0.60 (仰角 34°/前倾 56° 的前斜举刀; ★二轮反馈:
+// -1.15 的近竖直+左倾剪影被读成"扛肩朝后拿反", 改前斜 45° 级 + gunY -0.25 抵掉侧身 pelvis 偏航 ⇒ 指前无歧义)。
+// 右手 handK=1 由 armIK 自动反解到举高后的刀柄 (gunGripPoint 随 gunG.rotation 移动), 臂基准值只作 IK 不足时的兜底。
+// noSprintCant: 疾跑横端 (gunY+0.95) 是"长枪收肘让路"语义, 对举着的刀没有意义 (举刀疾跑刀尖乱甩)。
 sabre:{
 shR:-0.52, elR:-1.25, shRz:-0.22, shL:-0.30, elL:-0.62, shLz:0.30,
-gunX:0.04, gunY:-0.08, gunZ:0,
+gunX:-0.85, gunY:-0.25, gunZ:0, noSprintCant:true,
 handK:1, handKL:0, noReload:true, noBrace:true,
 },
 };

@@ -328,8 +328,9 @@ addMatchTimeout(()=>{ if(!matchOver&&!this.alive&&typeof showDeploy==='function'
 doMeleeHit(kind){
 // ★2026-11-20 近战重做: 军刀三式结算 (kind='thrust'|'slash'|'chop', 10-viewmodel melee 分支中段经
 // vmPlayOnce 单发调用)。伤害直伤 (不过 DIFF_TABLE/距离衰减, 与既有近战直伤先例一致), isHead 恒 false。
-// 命中瞬间动作计时置满 (3P 姿态机据此做前刺/横扫/纵劈 + 上身突进), 归一化用本式的 meleeDur。
-this.meleeT=this.meleeDur||MELEE_ANIM_T;
+// ★2026-11-20 实机反馈批: **不再在命中瞬间把 meleeT 重置满** —— 3P 姿态时间轴从挥砍起点 (melWind 边沿
+//   置满 meleeDur, 20-player) 一路衰减, 与 FP 动画天然同轴; 旧重置会把相位曲线从中途"重播一遍引刀"
+//   (斩在 t≈0.175s 命中 ⇒ 扫击相位永远打不完, 实测刀件摆幅被腰斩)。meleeT 只被 3P overlay/thrust 门消费。
 const def=WPN_DEFS.sabre;
 const dir=camForward();
 const o=camera.position.clone();

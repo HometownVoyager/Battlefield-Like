@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // dev/verify-perf-20261024.js —— 2026-10-24 性能排查批沙箱
 // 覆盖: ①阴影半频刷新 (q0/q1 30Hz, q2 逐帧) ②大灯真灯池 60/75m 滞回 + 夜间链零分配
-//       ③火源灯 85/110m 滞回 + 0.2s 扫描节流 ④Bot 手电 raycast 0.12s 节流 ⑤版本戳 20261120b
+//       ③火源灯 85/110m 滞回 + 0.2s 扫描节流 ④Bot 手电 raycast 0.12s 节流 ⑤版本戳 20261120c
 // 用法: node dev/verify-perf-20261024.js
 // 纪律: 载入清单从 index.html 动态解析 (逐条同序对账, 不写死数量)。
 // ─────────────────────────────────────────────
@@ -175,12 +175,12 @@ ok(r.vis===true&&r.occ===true,'T4 行为: 光锥可见 + occD 缓存在位');
 }
 }
 
-console.log('── T5 版本戳 20261120b ──');
+console.log('── T5 版本戳 20261120c ──');
 {
 const stamps=[...new Set([...html.matchAll(/<script src="js\/[^"?]+\?v=([^"]+)"/g)].map(m=>m[1]))];
-ok(stamps.length===1&&stamps[0]==='20261120b','T5 全部 js 引用同一版本戳 '+stamps.join(','));
+ok(stamps.length===1&&stamps[0]==='20261120c','T5 全部 js 引用同一版本戳 '+stamps.join(','));
 const gf=read('dev/_game_files.txt');
-ok(!gf.includes('v=20260928h')&&gf.includes('v=20261120b'),'T5 dev/_game_files.txt 同步升戳');
+ok(!gf.includes('v=20260928h')&&gf.includes('v=20261120c'),'T5 dev/_game_files.txt 同步升戳');
 }
 
 console.log(FAILS?('\n✗ verify-perf-20261024: '+FAILS+' 项失败'):'\n✓ verify-perf-20261024: 全部通过 ('+PASS+' 项)');
