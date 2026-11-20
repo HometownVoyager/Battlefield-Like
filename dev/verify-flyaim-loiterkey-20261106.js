@@ -122,12 +122,12 @@ assert('i18n 新键在 / 旧键已摘 (制导提示/气动弹窗/顶栏)',
  &&!i18n.includes("'鼠标 制导 · 左键 自爆 · 右键 加速 · F 切换视角':")
  &&!i18n.includes("'气动飞行 · 沿视线前飞 · 右键加速 · 俯冲触地落地':"));
 
-// 版本戳 (本批升 20261120d: index.html 全量 + __sfStyleVer + _game_files 全行)
+// 版本戳 (本批升 20261121a: index.html 全量 + __sfStyleVer + _game_files 全行)
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261120d/g)].length;
-assert('版本戳 20261120d: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106a 清零 (2026-11-10 海战移除批判据跟码)',
- stamps>=48&&idx.includes("window.__sfStyleVer='20261120d';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120d')).length===45
+const stamps=[...idx.matchAll(/20261121a/g)].length;
+assert('版本戳 20261121a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106a 清零 (2026-11-10 海战移除批判据跟码)',
+ stamps>=48&&idx.includes("window.__sfStyleVer='20261121a';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121a')).length===45
  &&!idx.includes('20261106a')&&!gf.includes('20261106a'));
 }
 

@@ -72,7 +72,7 @@ function ok(cond,label){
 if(cond){ PASS.push(label); console.log('  ✔ '+label); }
 else { FAILN++; console.log('  ✘ '+label); }
 }
-ok(html.includes("__sfStyleVer='20261120d'"),'前置: 版本戳 20261120d 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261121a'"),'前置: 版本戳 20261121a 在位 (index.html 内联)');
 
 // ── 场地: 断崖公路 (开阔, 杂物少; 世界构建/部署链全通) ──
 const IDX_C=(()=>{ const c0=boot(0); return vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="canyon")',c0); })();

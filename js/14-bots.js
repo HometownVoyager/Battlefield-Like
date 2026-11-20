@@ -442,6 +442,7 @@ this.vehGoT=0; this.vehFailV=null; this.vehFailT=-99; this.objHoldT=0; // 2026-1
 	this.chute=false; this.onGround=true; this.chuting=false;
 	this.mesh.root.rotation.set(0,0,0);
 	this.mesh.pelvis.position.y=0.94;
+	this._deathLegs=null;   // 2026-11-21 倒地批: 蹲姿展腿首帧捕获账跨命清零 (否则下一命死亡从上一命的冻结角起展)
 	// 全局机制 (2026-09-06 用户指定): Bot 部署/重生时若有同队闲置坦克 → 直接部署为车组。
 	// 与玩家部署界面"选载具出生"同一语义 (不限距离, 取最近一辆); 小队成员除外 (随玩家步行);
 	// 战机不在此列 (pilotOf 专属流程), 卡车为劫道模式纯 AI 运输队 (无乘员位) 也不适用。
@@ -474,6 +475,7 @@ this.chute=false; this.onGround=true;
 this.mesh.root.visible=false;
 this.mesh.root.rotation.set(0,0,0);
 this.mesh.pelvis.position.y=0.94;
+this._deathLegs=null;   // 2026-11-21 倒地批: 蹲姿展腿首帧捕获账跨命清零
 	// 契约 §4 v3: 每车 1 名真实 AI 车组 —— crewBot 是唯一跑 AI 的驾驶员; 另 2 个"乘员名额"是
 	// Tank.crewSlots 轻量记录 (tank-core 建/结算), 不进士兵池, 与本文件无关。
 	this.onVehicle=v; v.crewBot=this; v.claimBot=null;
@@ -1613,21 +1615,34 @@ if(!this.deathDir) this.deathDir=Math.random()<0.5?1:-1;
 // A#10 审计⑤ (旧倒地动画分支, = 无 CANNON / 布娃娃链不可用时的交接):
 // ① 姿态必须从**当前姿态**出发: 旧版无条件 lerp(0.94→0.2), 趴姿死亡那一帧骨盆从 0.22 弹到 0.94
 //    (实测 0.72m 的竖向跳变) —— 现在从死亡时的实际骨盆高起算。
-// ② 倒地幅度按姿态缩放: 站着死 = 整身倒下 (-90°); 蹲着死 ≈ -50°; 已经趴着的只需 16° 的瘫倒 ——
-//    旧版对趴姿尸体也转 90°, 把人从"趴"翻成"竖"。
+// ② 倒地幅度 (2026-11-21 实机反馈批修订, 用户"蹲姿倒得不彻底, 冻在锐角上十分诡异"): 蹲姿不再按 0.55
+//    缩幅 —— 倒满 90°, 且双腿随倒地进度 k 从冻结蹲姿角匀速展开到直腿 (落地面与站姿尸体一致);
+//    骨盆高/残余抬升按展开中的等效腿长 pEff=lerp(p0,0.94,k) 排 (k=0 时 pEff=p0 与冻结姿态逐位衔接,
+//    审计① 的无跳变前提不破)。趴姿维持 0.18 小幅瘫倒不动: 趴姿躯干已水平 (骨盆前倾 1.5), root 再转
+//    90° = 头朝下插地 ("从趴翻成竖"的原判据仍成立), 且趴姿肢体本就贴地。
 // ③ 绕脚跟旋转会把躯干盒中心压到 y≈0 ⇒ 半个身子埋在地里 (实测最低关节 -0.30m 站 / -0.38m 蹲);
 //    骨盆下沉必须与倒地角**同步** (见下): 旧版把骨盆独立地 lerp 到 0.2, 于是倒到一半时腿还挂在骨盆下
 //    却已经贴地 ⇒ 实测蹲姿尸体的关节最深 -0.45m。
 const p0=this.prone?0.22:this.crouch?0.6:0.94;
-const fallK=this.prone?0.18:this.crouch?0.55:1;
+const fallK=this.prone?0.18:1;
 const th=HPI*k*fallK;
 this.mesh.root.rotation.x=-th*this.deathDir;
-// 骨盆高 = p0·cos(倒地角): 站立链的骨盆高 (0.94) 与脚到根的腿长 (0.94) 相等 ⇒ 靴底恒在地面 (0), 全身像
+const _dfU=this.crouch&&!this.prone;
+if(_dfU){
+// 蹲姿展腿: 首帧钉存冻结蹲姿角 (与 deathDir 同款"首帧捕获"), 随 k 匀速 lerp 到直腿
+// (目标 hip=0 / knee=0.06 = 站姿速度 0 时的站立直腿值); _deathLegs 在 spawn/spawnInVehicle 清账。
+if(!this._deathLegs) this._deathLegs={hl:this.mesh.legL.hip.rotation.x,kl:this.mesh.legL.knee.rotation.x,hr:this.mesh.legR.hip.rotation.x,kr:this.mesh.legR.knee.rotation.x};
+const dl=this._deathLegs;
+this.mesh.legL.hip.rotation.x=lerp(dl.hl,0,k); this.mesh.legL.knee.rotation.x=lerp(dl.kl,0.06,k);
+this.mesh.legR.hip.rotation.x=lerp(dl.hr,0,k); this.mesh.legR.knee.rotation.x=lerp(dl.kr,0.06,k);
+}
+const pEff=_dfU?lerp(p0,0.94,k):p0;
+// 骨盆高 = pEff·cos(倒地角): 站立链的骨盆高 (0.94) 与脚到根的腿长 (0.94) 相等 ⇒ 靴底恒在地面 (0), 全身像
 // 绕脚跟倒下的"木头人"一样贴地旋转; 下限 0.14 = 躯干盒半高, 躺着时不再下沉。初始帧 cosθ≈1 ⇒ 无竖向跳变。
-this.mesh.pelvis.position.y=Math.max(0.14,p0*Math.cos(th));
-// 残余抬升: 绕脚跟旋转时脚在**倒地中途**会短暂低于地面 (几何量 = p0·cosθ·(1-cosθ), θ=45° 时最深),
+this.mesh.pelvis.position.y=Math.max(0.14,pEff*Math.cos(th));
+// 残余抬升: 绕脚跟旋转时脚在**倒地中途**会短暂低于地面 (几何量 = pEff·cosθ·(1-cosθ), θ=45° 时最深),
 // 按同一式子给等量抬升 ⇒ 全程最低关节贴地不穿地; θ=0/90° 两端为 0 (起手与落地都不跳)。
-this.mesh.root.position.y=this.pos.y+p0*Math.cos(th)*(1-Math.cos(th))*1.05;
+this.mesh.root.position.y=this.pos.y+pEff*Math.cos(th)*(1-Math.cos(th))*1.05;
 this.mesh.tag.visible=false;
 }
 }

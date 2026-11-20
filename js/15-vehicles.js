@@ -279,6 +279,13 @@ if(dx*dx+dz*dz<1.55*1.55&&b.maxY>_tsQ.h) _tsQ.h=b.maxY;
 }
 function _tsCylCb(c){
 if(c.r<0.3||c.y1-c.y0>TANK_STEP) return;
+// ★2026-11-21 实机反馈批: 悬空竖直闸 —— 2026-11-15 锥体碰撞批给教堂尖顶/国会穹顶/水塔锥顶登记的
+// "分层近似"圆柱每带自身只有 1.0~1.3m 厚, 上面的自身厚度闸拦不住; 但它们整体悬在 10m+ 高空,
+// 采样半径 (r+1.5, 基档 5m) 一盖到, 坦克悬挂就把 12m 的尖顶顶面当"可跨越坡面" ⇒
+// tgtP=-atan2(12.1,4.8)≈-68°, 坦克在教堂钟塔旁整辆垂直上翘 (沙箱实测 suspP 收敛 67°, 车不飞起只姿态炸)。
+// 对齐 _tsBoxCb 的 bh 闸口径: 顶面高出其脚下地形 TANK_STEP 以上 = 不可跨越, 不入悬挂采样。gh 首采样惰性 memo。
+if(c.gh===undefined) c.gh=heightAt(c.x,c.z);
+if(c.y1-c.gh>TANK_STEP) return;
 const dx=_tsQ.x-c.x, dz=_tsQ.z-c.z, q=c.r+1.5;
 if(dx*dx+dz*dz<q*q&&c.y1>_tsQ.h) _tsQ.h=c.y1;
 }

@@ -103,7 +103,7 @@ function ok(cond,label){
 if(cond){ PASS.push(label); console.log('  ✔ '+label); }
 else { FAILN++; console.log('  ✘ '+label); }
 }
-ok(/__sfStyleVer='202611(19|20)[a-z]'/.test(html),'前置: 版本戳 20261119x-20261120x 在位 (index.html 内联, 正则兼容并行升戳)');
+ok(/__sfStyleVer='202611(19|20|21)[a-z]'/.test(html),'前置: 版本戳 20261119x-20261121x 在位 (index.html 内联, 正则兼容并行升戳)');
 
 // ── 源码钉 (无需 boot) ──
 const s24=srcOf('js/24-main.js'),s26=srcOf('js/26-commander.js'),s15=srcOf('js/15-vehicles.js'),

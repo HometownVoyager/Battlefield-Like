@@ -136,6 +136,7 @@ const SANDBOX=[
 ['dev/verify-ragdoll2-20261120.js',[],'2026-11-20 布娃娃一致性批: 手/靴/腰带/背包子网格宿主=部件网格(g.add 帧异常真身)+生成段 try 护栏(抛错清账→回退无物理死亡)+头盔与头相对锁死(buildHelmetInto 直建头部件网格=与活体同款单源, 独立刚体+P2P 松挂"盔弹飞/歪斜"类根除) — 真击杀链双阵营帽檐/盔球两样式+冻结路径 (含 --neg 两补丁隔离 boot)'],
 ['dev/verify-melee-20261120.js',[],'2026-11-20 军刀近战批: N 切第三槽军刀(无拔刀收刀动画, _lastGunSlot 记账)+左键刺45/右键斩35扇形多目标/中键劈70 节奏0.35/0.5/0.7s 满血兵皆不一刀秒+FP/3P 建模四表登记+Bot 近战 70→45·归因军刀 (含 --neg 两补丁隔离 boot)'],
 ['dev/verify-seatbar-20261120.js',[],'2026-11-20 火力点不下车批: 五固定座(onMG/AT/AA/Mortar/Battery)原位换弹(player.seatReload 账+finishReload 复用+reloadDurOf 单源抽取)与包扎不下车(okH/readBarBusy 摘五旗+座位收尾 VM 归位)+双击打断约定继承+左键开炮豁免+岸防炮键门放行 H/R+下机静默清账 (含 --neg 两补丁隔离 boot)'],
+['dev/verify-tiltfall-20261121.js',[],'2026-11-21 实机两症状批: 教堂旁坦克垂直姿态(尖顶/穹顶/水塔 noNav 分带圆柱每带≤1.3m 骗过自身厚度闸 ⇒ tankSurfH 取 12m 顶面 tgtP=-68° suspP=67° — 悬空竖直闸 y1-gh>TANK_STEP+gh 惰性 memo, 对照组贴地矮圆柱照常=不过杀) × 蹲姿就地倒下不彻底(旧 A#10 fallK 0.55 只倒 49.5° 冻在锐角 — 摘 0.55 倒满 HPI+双腿随 k 展到直腿+骨盆 pEff=lerp(p0,0.94,k), 站姿基准/趴姿 0.18 档逐位不变) (含 --neg 三补丁; N1→T1/T2/T4b, N2→T5a+次生T5c/T5d, N3→T5b, T5a/T5b 互补可辨)'],
 ['dev/probe-renderstat.js',['0'],'渲染规模遥测 (2026-10-24): mesh/sprite/阴影投射者/材质去重/灯池清点 (诊断工具, 恒 0 退出; 全图请手跑 `node dev/probe-renderstat.js all [night]`)'],
 ];
 const BROWSER=[
