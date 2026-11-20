@@ -3,6 +3,11 @@
 > **《钢铁前线》(STEEL FRONT) 是一套二战主题的单机 FPS 战役合集游戏**，
 > 基于 Three.js WebGL 渲染 + Cannon.js 物理，纯前端、无后端，双击即可运行。
 
+> **📜 基座出处与授权**：本项目基于原作者 stupid_scout（UID 517637254）的《DeepSeek 战地》
+> 单文件版（即 `Index.original.html`，377KB 拆分前原始版）二次开发而来。原作者已授权
+> 对其代码进行修改与二次分发（非商用），授权凭证（聊天记录截图）见根目录
+> `Licence from UID517637254.jpg`。
+
 **⚠️ 重要约定：每次更新游戏代码，都必须同步更新本 README！**
 **⚠️ 文档管理规则：未完成的文档需要放在主目录，完成了的文档需要放到finished-docs文件夹。**
 
@@ -30,7 +35,8 @@
 ```
 Battlefield Like/
 ├── Index.html              # 入口页面：UI 骨骼 + 按顺序引入所有模块
-├── Index.original.html     # 拆分前的原始单文件版（377KB，仅供对照，勿修改）
+├── Index.original.html     # 拆分前的原始单文件版（377KB，仅供对照，勿修改；即基座《DeepSeek 战地》原版）
+├── Licence from UID517637254.jpg  # 基座原作者（stupid_scout, UID 517637254）授权凭证（修改+二次分发·非商用）
 ├── README.md               # 本文档（开发手册与全局架构说明）
 ├── PLAN.md                 # 计划总表（待验收 / 待办 / 计划特性）
 ├── finished-docs/          # 【已完成文档库】设计定稿、纲领与历次交付文档（完成了的文档放到 finished-docs 文件夹）

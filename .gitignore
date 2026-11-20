@@ -1,5 +1,7 @@
 dev/*.log
 dev/out/
+# _diag-nade-compare-tmp.js 的基线快照（git show 5990785 预导出, 可再生, 不入库）
+dev/_diag-nade-base-tmp/
 node_modules/
 .zcode/
 *参考*.jpg
