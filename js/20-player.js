@@ -2038,7 +2038,10 @@ const meleeK=clamp((p.meleeT||0)/(p.meleeDur||MELEE_ANIM_T),0,1);
 const thrust=meleeK>0?Math.sin((1-meleeK)*Math.PI):0;
 // 平滑阶梯助手 (20-player 本地自带, 不依赖 10-viewmodel 的 ss —— 子集沙箱只载部分脚本也能跑)
 const mss=(t,a,b)=>{ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); };
-if(thrust>0){
+// ★2026-11-20 三轮实机反馈批: melee overlay 加门 —— 上面手雷两段 (nadeK 投掷弧 / nadeHold 举雷蓄力) 先写,
+//   本 overlay 无门时 meleeT 残留 (挥砍后立刻按 G) 会劫持雷姿态 (举雷手臂被军刀三式角覆盖)。bandage 在
+//   本块之后写、本就在 overlay 后, 不需要门。
+if(thrust>0&&nadeK<=0&&!nadeHold){
 const mlA=1-meleeK;                            // 0=起手 → 1=收势 (meleeK 随 meleeT 1→0)
 if(p.meleeKind==='slash'){
 // 横斩: 引刀 (右肩回拉) → 右→左大幅横扫 → 收回举刀位; 左臂对侧轻摆做配重
@@ -2089,16 +2092,18 @@ let gunOffX=0, gunOffY=0, gunOffZ=0;
 // 相位、系数和=0 ⇒ 起收逐位回挂点; 配合 handKUse 挥刀中 0.85 (右手 glued 到移动握点 = 人刀一体)。
 if(thrust>0){
 if(p.meleeKind==='slash'){
-// 横斩: 刃身放平到近水平 (总 rot.x≈-0.25, 刃口仍朝下=立刃劈扫, 修"拿刀面蹭") + 偏航大幅右→左扫 (±0.85),
-// 握点右→左前平移
+// 横斩 (★2026-11-20 三轮实机反馈批: 扫幅/立刃/握点三路加大 —— 旧 ±0.85 偏航 + 0.06 握点平移, 实机读成
+//   "拿刀面蹭/小摇"): 刃身放平更深 (总 rot.x≈+0.20 前下压扫) + 偏航右→左大回环 (引刀 -0.85 → 扫击 +1.55,
+//   扫幅 2.40rad) + gunZ 立刃 -0.85 (宽面转离镜头=刃口线可见) + 握点右→左平移峰 0.30 (gunOffX, IK 同额跟刀);
+//   系数和=0 (起收逐位回挂点)。
 const w=mss(1-meleeK,0,0.22), sw=mss(1-meleeK,0.22,0.58), rc=mss(1-meleeK,0.58,0.92);
-gunX+=0.65*w-0.65*rc; gunY+=-0.85*w+1.70*sw-0.85*rc;
-gunOffX=-0.16*w+0.22*sw-0.06*rc; gunOffZ=0.10*w+0.22*sw-0.32*rc;
+gunX+=0.80*w-0.80*rc; gunY+=-0.85*w+2.70*sw-1.85*rc; gunZ+=-0.85*sw+0.85*rc;
+gunOffX=-0.20*w+0.50*sw-0.30*rc; gunOffZ=0.10*w+0.22*sw-0.32*rc;
 }else if(p.meleeKind==='chop'){
-// 竖劈: 刃身举过肩 (总 rot.x≈-1.60) → 前下劈 (≈+0.40, 刃口朝前下=劈的跟刀, 修"上挑") → 收回举刀位;
-// 握点先上后前下
+// 竖劈 (★2026-11-20 三轮实机反馈批: 加立刃 gunZ -1.20·dn —— 宽面转离镜头, 修 FP 同款"刀面拍" +
+//   gunY +0.30·dn 微斜劈, 劈落轨迹向角色左前 = 与 FP 过肩斜下同向; 举过肩/前下劈的 gunX 与握点跟刀原式保留)。
 const up=mss(1-meleeK,0,0.28), dn=mss(1-meleeK,0.28,0.52), rc=mss(1-meleeK,0.52,0.90);
-gunX+=-0.70*up+2.00*dn-1.30*rc;
+gunX+=-0.70*up+2.00*dn-1.30*rc; gunY+=0.30*dn-0.30*rc; gunZ+=-1.20*dn+1.20*rc;
 gunOffY=0.10*up-0.22*dn+0.12*rc; gunOffZ=0.06*up+0.30*dn-0.36*rc;
 }else{
 // 刺: 原前推+微压保留 (刀路未收实机差评)

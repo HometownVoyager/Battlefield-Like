@@ -2876,12 +2876,17 @@ shLy+=-m.pelvis.rotation.y*0.85;
 // (所以下面先把基准值的 y/z 乘 MIR, 再与不乘 MIR 的 IK 值混合, 最后直接写回)。
 // handK: 持枪 1 / 刺刀 0.35 / 投弹·包扎 0。**左臂在换弹时单独取 0** —— 换弹的语义就是左手离枪去弹匣
 // (审计⑥ 刚修好"疾跑/匍匐换弹可见", 若左手也被钉回护木, 换弹动作会重新消失); 右臂仍为 1 (枪始终在右手)。
-const gunY_t=-m.pelvis.rotation.y+(sprint?0.95:0);
+// ★2026-11-20 三轮实机反馈批 (军刀持握 parity, 顺手): 玩家化身按 GUN_HOLD_BY_KIND.sabre 举刀 (gunX 附加
+//   -0.85 ⇒ 总角≈-0.60 / gunY -0.25 抵侧身 / noSprintCant 摘疾跑横端), Bot 侧姿态机不读表 ⇒ 持刀会
+//   "刀身水平指前+疾跑横甩" (两视角漂移)。这里补读同表对齐 —— 只对军刀开门 (其余 kind 无条目=null,
+//   表达式逐位不变; 当前兵种表没有 Bot 持军刀, 本行是 parity 保险)。radio 等工具件 Bot 本就不持, 不动。
+const _hold=(this.gunKind==='sabre'&&typeof gunHoldOf==='function')?gunHoldOf(this.gunKind):null;
+const gunY_t=-m.pelvis.rotation.y+((sprint&&!(_hold&&_hold.noSprintCant))?0.95:0)+(_hold?_hold.gunY:0);
 const gunZ_t=sprint?0.16:0;
 // A#10 审计①: 枪身挂在骨盆之下, 骨盆前倾 pp 会把枪口一起带偏 —— 旧版只补偿 pitch, 于是"据枪瞄准"时
 // 枪口仰角恒为 pitch - torsoX (实测 站 -0.05 / 蹲 -0.14 / 趴 -0.10 rad ≈ 2.9°/8.0°/5.7°)。减 pp 后仰角 = pitch。
 const gunPitch=(engaged||this.mgUse||this.empUse||this.batUse)?-clamp(this.pitch,-0.7,0.7):(sprint?0.3:0.25);
-const gunX_t=gunPitch-pp;
+const gunX_t=gunPitch-pp+(_hold?_hold.gunX:0);   // ★三轮批: 军刀吃持握表 gunX (举刀), 其余 kind=null 加 0 逐位不变
 const handK=(this.state==='melee')?0.35:((this.state==='nade'||this.state==='atnade'||this.nadeAnimT>0||this.bandageT>0)?0:1);
 const handKL=rl?0:handK;
 // ↑ **不许按 §12.4 字面删掉 `rl`** (Lead 2026-09-21 追认): 换弹的语义就是"左手离枪去弹匣"——审计⑥ 刚修好

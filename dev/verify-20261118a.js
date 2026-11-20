@@ -10,7 +10,7 @@
 //      余火烤毙 2.5m 邻桶 = 级联火)
 //   T5 投射物弹性削减 (用户令"有限减少一些手雷等投射物的弹性": 落地 0.38→0.24/切向 0.68→0.60,
 //      盒顶 0.4→0.26·切向 0.7→0.62, 盒侧 0.5→0.34; 触发判据/弹跳音效/预瞄弧共用积分器全链不动)
-//   T6 版本戳 20261120c (index.html 全量唯一 + __sfStyleVer + _game_files 45 行 + 旧 20261117b 清零)
+//   T6 版本戳 20261120d (index.html 全量唯一 + __sfStyleVer + _game_files 45 行 + 旧 20261117b 清零)
 //   T7 弹坑生命周期 (用户裁定"开局遗迹坑也限时消失, 寿命≤人造坑几倍": CRATER fresh150/scar450=3×/fade45;
 //      CRATER_LIFE 双账并行 — runtimeCraters 三处既有消费点零改动; 24-main updateCraters(dt) 驱动, dt<=0 时停冻结;
 //      23b cratersResetLife 快照回场清零; 账条靠 m.parent 探活自愈, 36 上限/性能清账挤掉不尸留)
@@ -104,7 +104,7 @@ function ok(cond,label){
 if(cond){ PASS.push(label); console.log('  ✔ '+label); }
 else { FAILN++; console.log('  ✘ '+label); }
 }
-ok(html.includes("__sfStyleVer='20261120c'"),'前置: 版本戳 20261120c 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261120d'"),'前置: 版本戳 20261120d 在位 (index.html 内联)');
 
 // ── 场地: 断崖公路 (开阔平地; 世界构建/部署链全通) ──
 const IDX_C=(()=>{ const c0=boot(0); return vm.runInContext('CAMPAIGNS.findIndex(c=>c.id==="canyon")',c0); })();
@@ -527,10 +527,10 @@ G('Object.assign(WX_CFG,{fireMul:1,fireDmgMul:1,burnDur:3.5,burnRateMul:1,stormE
 console.log('T6 版本戳');
 {
 const gf=fs.readFileSync(path.join(root,'dev/_game_files.txt'),'utf8');
-const stamps=[...html.matchAll(/20261120c/g)].length;
-ok(stamps>=48&&html.includes("window.__sfStyleVer='20261120c';")
-&&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120c')).length===45
-&&!html.includes('20261117b')&&!gf.includes('20261117b'),'T6 ★版本戳 20261120c: index.html '+stamps+' 处 + __sfStyleVer + _game_files 45 行 + 旧 20261117b 清零 (跟码: 2026-11-10 海战移除批判据)');
+const stamps=[...html.matchAll(/20261120d/g)].length;
+ok(stamps>=48&&html.includes("window.__sfStyleVer='20261120d';")
+&&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261120d')).length===45
+&&!html.includes('20261117b')&&!gf.includes('20261117b'),'T6 ★版本戳 20261120d: index.html '+stamps+' 处 + __sfStyleVer + _game_files 45 行 + 旧 20261117b 清零 (跟码: 2026-11-10 海战移除批判据)');
 }
 
 console.log('verify-20261118a: PASS='+PASS.length+' FAIL='+FAILN+(NEG?' (--neg)':''));

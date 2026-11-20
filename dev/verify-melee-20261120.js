@@ -3,10 +3,16 @@
 //
 // 用法: node dev/verify-melee-20261120.js [--neg]
 //   正常 = 全量判据 (T1..T7 + 源码防回退), 必须全绿。
-//   --neg = 阴性对照, 两支**各自隔离 boot** (锚=最终代码的逐字行):
+//   --neg = 阴性对照, 四支**各自隔离 boot** (锚=最终代码的逐字行):
 //     NEG-A 摘 playerFireTick 里 LMB→startMelee('thrust') 那行 ⇒ "LMB 端到端起手 / 刺恰-45" 定向红
 //           (直调 startMelee 的斩照常绿 = 补丁隔离证明);
 //     NEG-B 刺击 damage 调用改字面 110 ⇒ "满血单刺不杀" 定向红 (斩/劈 35/70 判据照常绿)。
+//     NEG-C 摘 19-input 军刀右键分流门的 startMelee('slash') 行 (★三轮批) ⇒ "RMB 真事件端到端" 定向红
+//           (T8 判据: 派发真 mousedown(button=2) 后 VM 停在 idle)。
+//     NEG-D 摘 'nade' 投掷弧收尾的还臂行 (★三轮批修1) ⇒ "持刀投弹收尾藏回" 定向红
+//           (T9 判据: 收尾后左臂仍可见; X 抢断路径走 steal 块还臂 = 补丁隔离证明照常绿)。
+//     NEG-E FP斩 gun.rotation 行回退旧曲线 (偏航符号未翻) ⇒ "斩跨身扫幅/中段立刃" 定向红
+//           (T10 判据; 劈立刃通道独立成行 = 补丁隔离证明照常绿)。
 //
 // 用户裁定 (不可改): 近战=切枪模式 (N 键切第 3 槽军刀, 无拔刀动画); 左键刺 / 右键斩 / 中键劈;
 //   标准档伤害 刺45 / 斩35 (扇形多目标) / 劈70 —— 满血 100 的兵三种都杀不死; 节奏 刺0.35s / 斩0.5s / 劈0.7s;
@@ -22,6 +28,15 @@
 //   T5 归因: 劈死敌兵 (真 Bot damage→die 链) → 击杀来源 '军刀'。
 //   T6 3P: gunKindOf/worldGunModel/av._gunKind + 四表 (MOUNT/HOLD/PRONE/CARRIED_FWD) 源码登记。
 //   T7 Bot 近战: 真实触发 (state='melee'+贴脸+update 步进) → 玩家恰 -45 且 bot._src==='军刀'。
+//   T8 RMB 真事件端到端 (★2026-11-20 三轮批): 真 MouseEvent('mousedown',{button:2}) 派发 → 19-input
+//      window 监听 → 军刀分流门 → startMelee('slash') (旧探针 :207 自认"右键 mousedown 不可派发"全走
+//      直调, 本支补上真事件链)。
+//   T9 持刀投弹左臂 (★2026-11-20 三轮批): 军刀态进 'nade' 左臂必须举起 (修1), 投掷弧走完回 idle
+//      (持刀) 左臂藏回; X 抢断取消 (vmAbortAction steal 块统一还臂) 同判据。
+//   T10 三式曲线真值 (★2026-11-20 三轮批): FP 逐帧驱动 updateViewModel + 视空间链式欧拉合成
+//      (root→sway→inner→gun) —— 斩=刀尖视空间 x 右(+0.45)→左(−0.55)跨身扫/中段放平/rz 立刃/root ry 腰转/
+//      手刀同步; 劈=dn 段 rz 立刃 + 斜劈轨迹 + 收势逐位回举刀位; 刺=原曲线回归锁; 3P=gunY 扫幅/gunZ 立刃/
+//      gunOffX 握点三路 (20-player 刀件驱动)。
 //
 // 口径: 照 verify-deathflight-20261103 loader 骨架 (stub three + 忠实 CANNON 桩 + index.html 全脚本链
 //   + 淞沪开局 + startBtn/deployPlayer/protUntil=0); 靶兵摆位/冻结手法照抄 verify-crushhead-20261103
@@ -56,6 +71,18 @@ const FILES=[...html.matchAll(/src="(js\/[^"?]+)/g)].map(m=>m[1]);
 console.log('载入清单: 解析 index.html 得 '+FILES.length+' 个脚本');
 const SRC=f=>fs.readFileSync(path.join(root,f),'utf8');
 
+// ── 真事件桥 (★2026-11-20 三轮批, T8 RMB 端到端义务): stub 的全局 addEventListener/dispatchEvent
+//    是 no-op ⇒ 19-input 的 window mousedown 监听注册不落账, 旧探针因此"右键 mousedown 不可派发"
+//    全走 startMelee 直调。这里在 boot 前把 sandbox 的 add/remove/dispatch 换成真账本 (忠实 DOM 语义:
+//    dispatchEvent 同步逐个调用处理器), 并补 MouseEvent 构造器。只对 mousedown 派发 (keydown/等仅注册
+//    不派发, 不改其它探针的既有行为 —— 它们的 boot 各自独立进程)。
+const _EV={};
+stub.sandbox.addEventListener=(t,f)=>{(_EV[t]=_EV[t]||[]).push(f);};
+stub.sandbox.removeEventListener=(t,f)=>{const a=_EV[t]||[];const i=a.indexOf(f);if(i>=0)a.splice(i,1);};
+stub.sandbox.dispatchEvent=e=>{const a=(_EV[e&&e.type]||[]).slice();for(const f of a)f.call(stub.window,e);return true;};
+stub.sandbox.MouseEvent=class MouseEvent{constructor(type,o){o=o||{};this.type=type;this.button=o.button||0;
+this.clientX=o.clientX||0;this.clientY=o.clientY||0;this.preventDefault=()=>{};this.stopPropagation=()=>{};}};
+
 // ── NEG 阴性对照补丁 (两支, 各自隔离 boot; 锚=最终代码的逐字行, 装载前文本替换) ──
 const NEG=process.argv.includes('--neg');
 const NEG_PATCHES=[
@@ -63,6 +90,14 @@ const NEG_PATCHES=[
 {file:'js/20-player.js',from:"if(!player.fireHeld) startMelee('thrust');",to:""},
 // NEG-B (index 1): 刺击 damage 调用改字面 110 ⇒ "满血单刺不杀" (45→110 直接击杀) 定向红
 {file:'js/18-game.js',from:"sr.sol.damage(kind==='chop'?def.chopDmg:def.thrustDmg,player,false);",to:"sr.sol.damage(kind==='chop'?def.chopDmg:110,player,false);"},
+// NEG-C (index 2): 摘 19-input 军刀右键分流门的 startMelee('slash') 行 ⇒ RMB 真事件端到端 定向红
+{file:'js/19-input.js',from:"startMelee('slash');",to:"/*NEG-C*/"},
+// NEG-D (index 3): 摘 'nade' 投掷弧收尾的还臂行 (★三轮批修1) ⇒ 持刀投弹收尾藏回 定向红
+{file:'js/10-viewmodel.js',from:"if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee); }   // ★三轮批: 回 idle 按当前武器还臂 (持刀藏/持枪现)",
+to:"if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; }"},
+// NEG-E (index 4): FP斩 gun.rotation 行回退旧曲线 (三轮批偏航符号未翻) ⇒ 跨身扫幅/中段立刃 定向红
+{file:'js/10-viewmodel.js',from:"g.gun.rotation.set(-0.95*st+0.95*rc,-0.45*w+1.85*st-1.40*rc,-1.05*st+1.05*rc);",
+to:"g.gun.rotation.set(-0.55*st+0.55*rc,0.45*w-1.55*st+1.10*rc,-0.55*st+0.55*rc);"},
 ];
 function boot(campIdx,patchIdxs){
 const PATCH_MAP={};
@@ -125,6 +160,82 @@ function _toSlot(i){ _vmIdle(); if(player.curSlot!==i) switchSlot(i,true); _vmId
 function _place(rng){ player.pos.set(rng.x,heightAt(rng.x,rng.z),rng.z);
 player.yaw=Math.PI; player.pitch=0; player.crouch=false; player.prone=false; player.sprinting=false;
 camera.position.set(player.pos.x,player.pos.y+1.62,player.pos.z); }
+// ── 三式曲线真值采样 (★三轮批 T10): FP 视空间链式欧拉合成 (three.js 'XYZ' 语义 R=Rx·Ry·Rz) + 3P gunG 总角 ──
+function _rxyz(e,v){
+if(e.length!==undefined) e={x:e[0],y:e[1],z:e[2]};
+var cx=Math.cos(e.x),sx=Math.sin(e.x),cy=Math.cos(e.y),sy=Math.sin(e.y),cz=Math.cos(e.z),sz=Math.sin(e.z);
+var x=v.x*cz-v.y*sz,y=v.x*sz+v.y*cz,z=v.z;
+var x2=x*cy+z*sy,z2=-x*sy+z*cy;
+return {x:x2,y:y*cx-z2*sx,z:y*sx+z2*cx};
+}
+function _fpPt(o,l,mv){                    // mv=true 加位置 (点) / false 纯旋转 (方向)
+var p=_rxyz(o.gr,l); if(mv) p={x:p.x+o.gp[0],y:p.y+o.gp[1],z:p.z+o.gp[2]};
+p=_rxyz(o.ir,p); if(mv) p={x:p.x+o.ip[0],y:p.y+o.ip[1],z:p.z+o.ip[2]};
+p=_rxyz(o.sr,p); if(mv) p={x:p.x+o.sp[0],y:p.y+o.sp[1],z:p.z+o.sp[2]};
+p=_rxyz(o.rr,p); if(mv) p={x:p.x+o.rp[0],y:p.y+o.rp[1],z:p.z+o.rp[2]};
+return p;
+}
+function _meleeFP(kind,frames,dur){        // FP: 逐帧 updateViewModel, 刀尖/刀轴/宽面法线视空间真值
+_toSabre(); _vmIdle(); player.meleeCd=0;
+if(VM.state==='idle') updateViewModel(1/60,player);   // 归一帧: T9 类取消路径会留下上一动作 stale 手位, 真实游戏下一 idle 帧即由 positionHands 复位 (手位基线必须取自真正的 idle 帧)
+var HP0=[VM.arms.R.position.x,VM.arms.R.position.y,VM.arms.R.position.z];
+var GP0=[VM.gunParts.gun.position.x,VM.gunParts.gun.position.y,VM.gunParts.gun.position.z];
+var RR0=[VM.root.rotation.x,VM.root.rotation.y,VM.root.rotation.z];
+startMelee(kind);
+var TL={x:0,y:0.003,z:-0.65}, rows=[];
+for(var i=1;i<=frames;i++){
+updateViewModel(1/60,player); player.meleeCd=Math.max(0,player.meleeCd-1/60);
+var o={gr:[VM.gunParts.gun.rotation.x,VM.gunParts.gun.rotation.y,VM.gunParts.gun.rotation.z],
+gp:[VM.gunParts.gun.position.x,VM.gunParts.gun.position.y,VM.gunParts.gun.position.z],
+ir:[VM.inner.rotation.x,VM.inner.rotation.y,VM.inner.rotation.z], ip:[VM.inner.position.x,VM.inner.position.y,VM.inner.position.z],
+sr:[VM.sway.rotation.x,VM.sway.rotation.y,VM.sway.rotation.z], sp:[VM.sway.position.x,VM.sway.position.y,VM.sway.position.z],
+rr:[VM.root.rotation.x,VM.root.rotation.y,VM.root.rotation.z], rp:[VM.root.position.x,VM.root.position.y,VM.root.position.z]};
+var tip=_fpPt(o,TL,true), org=_fpPt(o,{x:0,y:0,z:0},true), nm=_fpPt(o,{x:0,y:1,z:0},false);
+var dx=tip.x-org.x,dy=tip.y-org.y,dz=tip.z-org.z,hl=Math.sqrt(dx*dx+dy*dy+dz*dz)||1;
+var hp=[VM.arms.R.position.x,VM.arms.R.position.y,VM.arms.R.position.z];
+rows.push({nt:i/frames, st:VM.state, tip:tip, elev:Math.asin(Math.max(-1,Math.min(1,dy/hl))),
+faceZ:nm.z/(Math.sqrt(nm.x*nm.x+nm.y*nm.y+nm.z*nm.z)||1),
+gr:o.gr, gp:o.gp, rr:o.rr, hp:hp});
+}
+var w=-9,m=9,rzMin=9,ryMn=9,ryMx=-99,rxMn=9,rxMx=-99,devMx=0,mid=null,plat=null,lastM=null,upE=-9,rzDn=9,dnXmn=9,dnXmx=-9,rxVal=9,tzMin=9;
+for(var j=0;j<rows.length;j++){ var r=rows[j];
+if(r.nt>=0.13&&r.nt<=0.26&&r.tip.x>w) w=r.tip.x;
+if(r.nt>0.26&&r.nt<0.97&&r.tip.x<m) m=r.tip.x;
+if(r.gr[2]<rzMin) rzMin=r.gr[2];
+if(r.rr[1]<ryMn) ryMn=r.rr[1]; if(r.rr[1]>ryMx) ryMx=r.rr[1];
+if(r.rr[0]<rxMn) rxMn=r.rr[0]; if(r.rr[0]>rxMx) rxMx=r.rr[0];
+if(r.gr[0]<rxVal) rxVal=r.gr[0];
+if(r.tip.z<tzMin) tzMin=r.tip.z;
+var dh=0; for(var k2=0;k2<3;k2++) dh+=Math.pow((r.hp[k2]-HP0[k2])-(r.gp[k2]-GP0[k2]),2);
+if(Math.sqrt(dh)>devMx) devMx=Math.sqrt(dh);
+if(Math.abs(r.nt-0.4)<1e-9) mid=r;
+if(Math.abs(r.nt-0.6)<1e-9) plat=r;
+if(r.st==='melee') lastM=r;
+if(r.elev>upE) upE=r.elev;
+if(r.nt>=0.31&&r.nt<=0.63){ if(r.gr[2]<rzDn) rzDn=r.gr[2]; if(r.tip.x<dnXmn) dnXmn=r.tip.x; if(r.tip.x>dnXmx) dnXmx=r.tip.x; }
+}
+var dnMono=true, dnRows=rows.filter(function(r){return r.nt>=0.31&&r.nt<=0.63;});
+for(var j2=1;j2<dnRows.length;j2++) if(dnRows[j2].tip.y>=dnRows[j2-1].tip.y+1e-6) dnMono=false;
+var resR=0,resP=0;
+if(lastM){ for(var k3=0;k3<3;k3++){ resR=Math.max(resR,Math.abs(lastM.rr[k3]-RR0[k3]),Math.abs(lastM.gr[k3])); resP=Math.max(resP,Math.abs(lastM.gp[k3])); } }
+return {wPeak:w, swMin:m, midElev:mid?mid.elev:null, midRz:mid?mid.gr[2]:null, platPitch:plat?(plat.rr[0]+plat.gr[0]):null,
+faceZmid:mid?mid.faceZ:null, ryAmp:ryMx-ryMn, rxAmp:rxMx-rxMn, devMax:devMx, rzMin:rzMin, upElev:upE,
+rzDnPeak:rzDn, dnMono:dnMono, dnXSpan:dnXmx-dnXmn, residRot:resR, residPos:resP, rxValley:rxVal, tipZmin:tzMin};
+}
+function _meleeP3(kind,frames,dur){        // 3P: updatePlayerAvatar 姿态机, gunG 三轴总角/挂点位移/右肩角
+_toSabre(); _vmIdle(); player.meleeCd=0;
+var av=playerAvatarEnsure(); for(var q=0;q<30;q++) updatePlayerAvatar(1/60);
+var by=av.gunG.rotation.y, bx0=av.gunG.position.x;
+player.meleeCd=0; startMelee(kind);
+var yMn=9,yMx=-99,zMn=9,dx=-9,shRmn=9,shRmx=-99;
+for(var i2=1;i2<=frames;i2++){
+updateViewModel(1/60,player); player.meleeCd=Math.max(0,player.meleeCd-1/60); updatePlayerAvatar(1/60);
+var gy=av.gunG.rotation.y, gz=av.gunG.rotation.z, gpx=av.gunG.position.x-bx0, sr=av.armR.sh.rotation.x;
+if(gy<yMn) yMn=gy; if(gy>yMx) yMx=gy; if(gz<zMn) zMn=gz; if(gpx>dx) dx=gpx;
+if(sr<shRmn) shRmn=sr; if(sr>shRmx) shRmx=sr;
+}
+return {baseY:by, span:yMx-yMn, zMin:zMn, dxMax:dx, shRMin:shRmn, shRMax:shRmx};
+}
 `;
 function bootStart(campIdx,patchIdxs,label){
 const ctx=boot(campIdx,patchIdxs);
@@ -398,7 +509,104 @@ ok(Math.abs(t7.hp-55)<1e-6&&t7.dead===false,'T7 ★玩家恰 -45 且存活 (hp='
 ok(t7.src==='军刀','T7 ★bot._src = 军刀 (get='+t7.src+')');
 }
 ok(SRC('js/14-bots.js').includes("this._src='军刀'; mt.damage(45,this,false);"),
-'T7 源码锚: Bot 近战 45 + 军刀归因 (旧 70 已退场)');
+	'T7 源码锚: Bot 近战 45 + 军刀归因 (旧 70 已退场)');
+
+// ── T8 RMB 真事件端到端 ──
+section('T8 RMB 真事件端到端: 真 MouseEvent(button=2) 派发 → window 监听 → 军刀分流门 → startMelee(slash)');
+const t8=G(`(function(){
+try{
+var out={};
+player.hp=100; player.alive=true; player.meleeCd=0;
+_toSabre();
+pointerLocked=true;                       // 沙箱没有指针锁 API (loiterfix/specbatch 先例): mousedown 入口有 !pointerLocked 早退
+out.preState=VM.state; out.cd0=player.meleeCd;
+dispatchEvent(new MouseEvent('mousedown',{button:2}));   // 真事件 → 19-input window mousedown → 军刀分流门
+out.state=VM.state; out.kind=VM.meleeKind; out.pKind=player.meleeKind; out.dur=VM.stateDur;
+out.cd=player.meleeCd;
+_vmSwing(60);
+out.endState=VM.state;
+return out;
+}catch(e){ return {err:String(e&&e.stack||e)}; }
+})()`);
+if(t8.err){ ok(false,'T8 异常 '+t8.err); }
+else{
+	ok(t8.preState==='idle','T8 前置: 持刀 idle (state='+t8.preState+')');
+	ok(t8.state==='melee'&&t8.kind==='slash'&&t8.pKind==='slash','T8 ★真右键事件起手横斩 (VM.state='+t8.state+', VM.kind='+t8.kind+', player.kind='+t8.pKind+')');
+	ok(Math.abs(t8.cd-0.5)<1e-9&&Math.abs(t8.dur-0.5)<1e-9,'T8 节奏随式: 斩 cd=dur=0.5 ('+t8.cd+'/'+t8.dur+')');
+	ok(t8.endState==='idle','T8 挥完回 idle (state='+t8.endState+')');
+}
+
+// ── T9 持刀投弹左臂 (修1) ──
+section('T9 持刀投弹左臂: 军刀态进 nade 左臂举起 / 投掷弧收尾藏回 / X 抢断取消藏回');
+const t9=G(`(function(){
+try{
+var out={};
+player.hp=100; player.alive=true; player.meleeCd=0;
+_toSabre();
+out.preL=VM.arms.L.visible;               // 持刀单手: false (vmEquip 藏左臂)
+// 进举雷: 19-input KeyG 同一套账 (VM idle ⇒ 门通过; 旧 2026-09-30 批哨兵口径)
+player.nadeCount=2;
+VM.state='nade'; VM.stateT=0; VM.stateDur=999;
+player.nadeHeld=true; player.nadeFuse=NADE_FUSE_T; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false; vmSndFlags={};
+for(var i=0;i<6;i++) updateViewModel(1/60,player);
+out.holdState=VM.state;
+out.holdL=VM.arms.L.visible;              // ★判据: true (左臂举雷 — 持刀不还臂就是症状③)
+out.nadeShown=!!(VM.nadeM&&VM.nadeM.visible);
+// 松 G: 19-input KeyG keyup 同套账 (0.55s 投掷弧) → 走完自然收尾回 idle (持刀) ⇒ 左臂藏回
+player.nadeHeld=false; VM.stateT=0; VM.stateDur=0.55;
+for(var i=0;i<45;i++){ updateViewModel(1/60,player); if(VM.state==='idle') break; }
+out.endState=VM.state;
+out.endL=VM.arms.L.visible;               // ★判据: false (持刀藏回 — 修1 还臂行)
+out.gunBack=!!(VM.gunParts&&VM.gunParts.gun.visible);
+// X 抢断取消 (vmAbortAction steal 块统一还臂 = 修1 收口单源): 再举一颗, 读条中 cancelReadBar
+// (重置雷账 =2, 上一颗已走真投掷弧被 releaseNade 消耗, 这里只验"取消不消耗")
+player.nadeCount=2;
+VM.state='nade'; VM.stateT=0; VM.stateDur=999;
+player.nadeHeld=true; player.nadeFuse=NADE_FUSE_T;
+for(var i=0;i<3;i++) updateViewModel(1/60,player);
+out.busy=player.readBarActive();
+if(out.busy) player.cancelReadBar('已取消');
+out.abortState=VM.state;
+out.abortL=VM.arms.L.visible;             // ★判据: false (持刀抢断收尾按当前武器藏回)
+out.abortCount=player.nadeCount;          // 雷不消耗 (取消≠投掷)
+return out;
+}catch(e){ return {err:String(e&&e.stack||e)}; }
+})()`);
+if(t9.err){ ok(false,'T9 异常 '+t9.err); }
+else{
+	ok(t9.preL===false,'T9 前置: 持刀单手左臂藏起 (visible='+t9.preL+')');
+	ok(t9.holdState==='nade'&&t9.holdL===true,'T9 ★持刀举雷左臂还回 (state='+t9.holdState+', arms.L.visible='+t9.holdL+')');
+	ok(t9.nadeShown===true,'T9 雷模在手上 (取证前提, 非空转)');
+	ok(t9.endState==='idle'&&t9.endL===false,'T9 ★投掷弧收尾回 idle: 持刀左臂藏回 (state='+t9.endState+', visible='+t9.endL+')');
+	ok(t9.gunBack===true,'T9 收尾刀件回手上 (无模型滞留)');
+	ok(t9.abortState==='idle'&&t9.abortL===false,'T9 ★X 抢断取消: steal 块统一还臂同判据 (state='+t9.abortState+', visible='+t9.abortL+')');
+	ok(t9.abortCount===2,'T9 抢断取消雷不消耗 (nadeCount='+t9.abortCount+')');
+}
+
+// ── T10 三式曲线真值 (★三轮批: 斩跨身扫/劈立刃/腰转/手刀同步 + 3P 刀件三路) ──
+section('T10 三式曲线真值: FP 视空间合成逐帧采样 + 3P gunG 总角 (曲线族"相位系数和=0"纪律下的大幅化)');
+{
+const t10s=G('_meleeFP("slash",30,0.5)');
+ok(t10s.wPeak>=0.45,'T10 ★FP斩跨身扫①: 引刀段刀尖视空间 x ≥+0.45 (实测 '+t10s.wPeak.toFixed(3)+', 画面右上)');
+ok(t10s.swMin<=-0.55,'T10 ★FP斩跨身扫②: 扫击段刀尖 x 谷 ≤−0.55 (实测 '+t10s.swMin.toFixed(3)+', 扫到画面左)');
+ok(t10s.midElev>=-0.35&&t10s.midElev<=0,'T10 ★FP斩放平: 扫击中段(0.40)刀轴视空间俯角 ∈[−0.35,0] (实测 '+t10s.midElev.toFixed(3)+', 枪系总俯角@平台 '+t10s.platPitch.toFixed(3)+')');
+ok(t10s.midRz<=-0.5,'T10 ★FP斩立刃: 扫击中段 rz ≤−0.5 宽面转离镜头 (实测 '+t10s.midRz.toFixed(3)+', faceZ '+t10s.faceZmid.toFixed(2)+')');
+ok(t10s.ryAmp>=0.8,'T10 ★FP斩腰转: root ry 摆幅 ≥0.8rad (实测 '+t10s.ryAmp.toFixed(3)+')');
+ok(t10s.devMax<=0.05,'T10 ★FP斩手刀同步: 手-握点偏差峰 ≤0.05m (实测 '+t10s.devMax.toFixed(3)+')');
+const t10c=G('_meleeFP("chop",42,0.7)');
+ok(t10c.rzDnPeak<=-0.9,'T10 ★FP劈立刃: dn 段 rz 峰值 ≤−0.9 (实测 '+t10c.rzDnPeak.toFixed(3)+')');
+ok(t10c.dnMono&&t10c.dnXSpan>=0.08,'T10 ★FP劈斜劈: dn 段 tipY 单调降 + tipX 行程 ≥0.08 (行程 '+t10c.dnXSpan.toFixed(3)+')');
+ok(t10c.residRot<=0.02&&t10c.residPos<=0.03,'T10 ★FP劈收势: 逐位回举刀位 (rot 残差 '+t10c.residRot.toFixed(4)+' / pos '+t10c.residPos.toFixed(4)+')');
+const t10t=G('_meleeFP("thrust",21,0.35)');
+ok(Math.abs(t10t.rxValley+0.874)<=0.01&&t10t.tipZmin<=-1.20&&t10t.tipZmin>=-1.28,
+'T10 ★FP刺回归锁: 三轮批不动刺 (rx 谷 '+(+t10t.rxValley).toFixed(3)+' ≈−0.874, tipZ 谷 '+t10t.tipZmin.toFixed(3)+' ∈[−1.28,−1.20])');
+const p10s=G('_meleeP3("slash",30,0.5)');
+ok(p10s.span>=2.2,'T10 ★3P斩扫幅: gunY 峰谷 ≥2.2rad 相对持握态 (实测 '+p10s.span.toFixed(3)+', 基线 '+p10s.baseY.toFixed(3)+')');
+ok(p10s.zMin<=-0.7,'T10 ★3P斩立刃: gunZ 谷 ≤−0.7 (实测 '+p10s.zMin.toFixed(3)+')');
+ok(p10s.dxMax>=0.25,'T10 ★3P斩握点: gunOffX 峰 (挂点 x 位移) ≥0.25 (实测 '+p10s.dxMax.toFixed(3)+')');
+const p10c=G('_meleeP3("chop",42,0.7)');
+ok(p10c.zMin<=-1.0,'T10 ★3P劈立刃: gunZ 谷 ≤−1.0 (实测 '+p10c.zMin.toFixed(3)+')');
+}
 
 // ── 源码防回退 (关键单源/数值) ──
 section('源码防回退');
@@ -428,6 +636,23 @@ s10.includes('VM.arms.L.visible=false;'),
 ok(s09.includes('function buildSabreBody(G,scale){')&&s09.includes('buildSabreBody(G,1);')&&
 s11.includes('buildSabreBody(g,1.35);'),
 '建模: 军刀单源 buildSabreBody (FP=1.0 / 3P=1.35 两视角同件形)');
+// ★2026-11-20 三轮实机反馈批 防回退锚 (修1/2/3/4/5/6)
+ok((s10.match(/VM\.arms\.L\.visible=!\(WPN_DEFS\[VM\.key\]&&WPN_DEFS\[VM\.key\]\.melee\)/g)||[]).length===8,
+'修1: 还臂表达式 8 处在位 (abort melee 分支+steal 统一块+nade 哨兵/收尾+bandage/grab/build×2 = 进态可见/退出按武器还原)');
+ok(s10.includes('VM.arms.L.visible=true;'),'修1: 四个左手动作态块首进态置真 (nade/bandage/grab/build 共用判据行)');
+ok(s10.includes('if(VM.gunParts&&VM.gunParts.gun){ VM.gunParts.gun.position.set(0,0,0); VM.gunParts.gun.rotation.set(0,0,0); }'),
+'修3: vmAbortAction melee 抢断分支防御归零 (绝对 set 态绕过自然收尾时残姿冻结)');
+ok(s10.includes('if(!d.melee){ rx+=VM.sprintBlend*(d.rocket?0.85:0.5); ry+=VM.sprintBlend*(d.rocket?0.15:0.55); rz-=VM.sprintBlend*(d.rocket?0.05:0.25); }'),
+'修4: FP 疾跑附加角军刀豁免 (举刀位不被横甩; 与 3P noSprintCant 同口径)');
+ok(s20.includes('if(thrust>0&&nadeK<=0&&!nadeHold){'),
+'修2: 3P melee overlay 手雷门 (meleeT 残留不劫持雷姿态)');
+ok(s09.includes('const bl=bx(st,0.034*s,0.007*s,0.560*s, 0,0.010*s,-0.315*s,G);')&&
+s09.includes('bx(vmMats.gun,0.030*s,0.004*s,0.550*s, 0,0.0045*s,-0.315*s,G).rotation.x=0.02;')&&
+s09.includes('bx(st,0.016*s,0.004*s,0.070*s, -0.002*s,0.002*s,-0.620*s,G);'),
+'修5: 刀身横截面互换 (宽面法线 ±Y 正对镜头) + 刃口压边条 + 刀尖收薄偏 -X');
+ok(s14.includes("const _hold=(this.gunKind==='sabre'&&typeof gunHoldOf==='function')?gunHoldOf(this.gunKind):null;")&&
+s14.includes('const gunX_t=gunPitch-pp+(_hold?_hold.gunX:0);   // ★三轮批: 军刀吃持握表 gunX (举刀), 其余 kind=null 加 0 逐位不变'),
+'修6: Bot 军刀持握 parity (GUN_HOLD_BY_KIND.sabre 补读, 其余 kind null 逐位不变)');
 ok(s22.includes('if(w.def.melee){')&&s22.includes("hudText('magN','—');")&&
 s22.includes('!player.onMG&&!w.def.melee&&w.mag<=Math.floor(w.def.mag/2)'),
 'HUD: 军刀分支 (magN=— / 低弹红门排除 melee, 否则 0<=floor(0/2) 恒红)');
@@ -512,6 +737,74 @@ else{
 ok(r.b2.hp===55&&r.b2.alive===true,'NEG-B [期望红] 满血单刺不杀 (hp='+r.b2.hp+', alive='+r.b2.alive+')');
 ok(r.slashHp===65,'NEG-B [期望绿·隔离证明] 斩仍恰 -35 (hp='+r.slashHp+')');
 ok(r.chopHp===30,'NEG-B [期望绿·隔离证明] 劈仍恰 -70 (hp='+r.chopHp+')');
+}
+}
+
+console.log('\n══ NEG-C: 摘 19-input 军刀右键分流门的 startMelee(\'slash\') 行 ⇒ RMB 真事件端到端 定向红 ══');
+{
+const {G}=bootStart(CAMPI,[2],'NEG-C');
+const r=G(`(function(){
+try{
+var out={};
+player.hp=100; player.alive=true; player.meleeCd=0;
+_toSabre();
+pointerLocked=true;
+dispatchEvent(new MouseEvent('mousedown',{button:2}));
+out.state=VM.state; out.kind=VM.meleeKind;
+return out;
+}catch(e){ return {err:String(e&&e.stack||e)}; }
+})()`);
+if(r.err){ ok(false,'NEG-C 异常 '+r.err); }
+else{
+ok(r.state==='melee'&&r.kind==='slash','NEG-C [期望红] RMB 真事件仍起手横斩 (state='+r.state+', kind='+r.kind+')');
+}
+}
+
+console.log('\n══ NEG-D: 摘 \'nade\' 投掷弧收尾的还臂行 ⇒ 持刀投弹收尾藏回 定向红 ══');
+{
+const {G}=bootStart(CAMPI,[3],'NEG-D');
+const r=G(`(function(){
+try{
+var out={};
+player.hp=100; player.alive=true; player.meleeCd=0;
+_toSabre();
+player.nadeCount=2;
+VM.state='nade'; VM.stateT=0; VM.stateDur=999;
+player.nadeHeld=true; player.nadeFuse=NADE_FUSE_T; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false; vmSndFlags={};
+for(var i=0;i<6;i++) updateViewModel(1/60,player);
+out.holdL=VM.arms.L.visible;              // 进态置真 (块首行, NEG-D 不摘) = 补丁隔离证明
+player.nadeHeld=false; VM.stateT=0; VM.stateDur=0.55;
+for(var i=0;i<45;i++){ updateViewModel(1/60,player); if(VM.state==='idle') break; }
+out.endState=VM.state;
+out.endL=VM.arms.L.visible;               // ★NEG-D 判据: 摘还臂行后持刀收尾左臂滞留可见
+return out;
+}catch(e){ return {err:String(e&&e.stack||e)}; }
+})()`);
+if(r.err){ ok(false,'NEG-D 异常 '+r.err); }
+else{
+ok(r.holdL===true,'NEG-D [期望绿·隔离证明] 持刀举雷进态左臂仍置真 (visible='+r.holdL+')');
+ok(r.endState==='idle'&&r.endL===false,'NEG-D [期望红] 持刀投掷弧收尾藏回 (state='+r.endState+', visible='+r.endL+')');
+}
+}
+
+console.log('\n══ NEG-E: FP斩 gun.rotation 行回退旧曲线 ⇒ 跨身扫幅/中段立刃 定向红 ══');
+{
+const {G}=bootStart(CAMPI,[4],'NEG-E');
+const r=G(`(function(){
+try{
+var out={};
+var s=_meleeFP('slash',30,0.5);
+out.wPeak=s.wPeak; out.swMin=s.swMin; out.midRz=s.midRz;
+var c=_meleeFP('chop',42,0.7);   // 补丁隔离证明: 劈的立刃/斜劈通道是独立行, 不受斩行回退影响
+out.chopRz=c.rzDnPeak; out.chopSpan=c.dnXSpan;
+return out;
+}catch(e){ return {err:String(e&&e.stack||e)}; }
+})()`);
+if(r.err){ ok(false,'NEG-E 异常 '+r.err); }
+else{
+ok(r.wPeak>=0.45&&r.swMin<=-0.55,'NEG-E [期望红] 斩跨身扫幅 (引刀 '+r.wPeak.toFixed(3)+' / 扫谷 '+r.swMin.toFixed(3)+')');
+ok(r.midRz<=-0.5,'NEG-E [期望红] 斩中段立刃 rz ≤−0.5 (rz='+r.midRz.toFixed(3)+')');
+ok(r.chopRz<=-0.9&&r.chopSpan>=0.08,'NEG-E [期望绿·隔离证明] 劈立刃/斜劈通道照常 (rz='+r.chopRz.toFixed(3)+', 行程 '+r.chopSpan.toFixed(3)+')');
 }
 }
 

@@ -323,12 +323,20 @@ else if(st==='melee'){
 //   武器**判定: 持刀态保持单手 (整臂藏), 枪械态照旧还臂 —— 不能再无条件还臂 (军刀会多出一只浮手)。
 if(VM.knifeM) VM.knifeM.visible=false;
 if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);
+// ★2026-11-20 三轮实机反馈批: 防御归零 —— melee 态是**绝对 set** 驱动 (g.gun.position/rotation 每帧
+//   三式曲线直写), 唯一自然归零点在 10-viewmodel 状态机挥砍收尾 (:527 同款); 抢断收尾绕过它时刀件
+//   会停在挥砍中段的任意位姿上 (打断瞬间的残姿冻结)。与 :527 收尾同口径补两行归零。
+if(VM.gunParts&&VM.gunParts.gun){ VM.gunParts.gun.position.set(0,0,0); VM.gunParts.gun.rotation.set(0,0,0); }
 steal=true;
 }
 else if(st==='nade'&&VM.stateDur>10){ if(VM.nadeM) VM.nadeM.visible=false; steal=true; }   // 收雷回枪 (与状态机哨兵自愈同一份收尾)
 else if(st==='reload'){ vmReloadRestore(); steal=true; }
 if(steal){
 if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true;
+// ★2026-11-20 三轮实机反馈批: 抢断收尾统一还臂 (与 :325 melee 分支/各动作态收尾同一口径) —— 左手
+//   动作态 (nade/bandage/grab/build) 进态时左臂置真 (持刀投弹左手要举雷), 抢断绕过状态机自然收尾
+//   时必须按**当前武器**还原"持刀藏/持枪现", 否则持刀被打断会多出一只浮手 (melee 分支那行的推广)。
+if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);
 VM.state='idle'; VM.stateT=0; VM.stateDur=0; vmSndFlags={};
 hit=true;
 }
@@ -433,7 +441,10 @@ const pz=lerp(hip.pos.z,VM.ads.pos.z,VM.adsBlend);
 let rx=lerp(hip.rot.x,VM.ads.rot.x,VM.adsBlend);
 let ry=lerp(hip.rot.y,VM.ads.rot.y,VM.adsBlend);
 let rz=0;
-rx+=VM.sprintBlend*(d.rocket?0.85:0.5); ry+=VM.sprintBlend*(d.rocket?0.15:0.55); rz-=VM.sprintBlend*(d.rocket?0.05:0.25);
+// ★2026-11-20 三轮实机反馈批: 疾跑"抬臂横端"附加 (rx+0.5/ry+0.55/rz-0.25) 是长枪的收肘让路语义, 持刀
+//   没有这套 —— 军刀举刀位 (HIP_SABRE) 本来就是抬着的, 再叠这组角 = 举刀被横甩 0.55rad (实机报);
+//   3P 侧同款豁免是 GUN_HOLD_BY_KIND.sabre 的 noSprintCant 门 (20-player :2081), 这里对齐。
+if(!d.melee){ rx+=VM.sprintBlend*(d.rocket?0.85:0.5); ry+=VM.sprintBlend*(d.rocket?0.15:0.55); rz-=VM.sprintBlend*(d.rocket?0.05:0.25); }
 let ox=VM.sprintBlend*(d.rocket?-0.02:-0.04), oy=VM.sprintBlend*(d.rocket?-0.1:-0.05), oz=VM.sprintBlend*(d.rocket?0.06:0.06);
 // 蹲/趴/腾空/架设 姿态混合
 VM.crouchBlend=dampF(VM.crouchBlend||0,player.crouch?1:0,8,dt);
@@ -506,19 +517,31 @@ g.gun.position.set(-0.04*k,-0.02*k,-k*0.34);
 g.gun.rotation.set(-0.88*k,0,0);
 handROverride=_ovR, handROverride.pos.set(0.014,-0.062,0.10-k*0.36), handROverride.rot.set(0.28-k*0.62,0,0);
 }else if(mk==='slash'){
-// 斩: 三相位右→左跨身扫 (★二轮: 旧单摆式只甩向一侧再收回, 读不出"横扫") —— 引刀 (刃收向画面右, 偏航 +0.45)
-// → 扫击 (压刃近水平 总rot.x≈0.23 + 偏航扫到 -1.10 ≈右→左 89° + 横滚立刃) → 收回举刀位; 系数和=0。
+// 斩: 三相位**画面右上→左下跨身扫** (★2026-11-20 三轮实机反馈批: 旧曲线偏航方向与引擎数学相反 —— 沙箱
+//   真值 (_diag-melee-swing-tmp) 实测旧引刀 (+0.45·w) 把刀尖甩向画面**左**、扫击段反扫回**右**, 加上握点
+//   只挪 ±0.3, 整段读成"以刀中点为轴转一转" (实机判词); 本批按真值翻符号 + 腰转带动 + 握点大位移):
+//   引刀 w: ry -0.45 (刀尖拉向画面右上) / 扫击 st: rx -0.95 压平 (总 0.78-0.95=-0.17 放平略前下) +
+//   ry +1.85 大幅左扫 (≈106°) + rz -1.05 立刃 (中段 -0.53, 宽面转离镜头) + 握点左移 0.40/前伸 0.18 (手腕带刀走)
+//   / 收势 rc 全部逐位回举刀位 (各通道系数和=0)。手位/手姿逐项同步握点位移与横滚 (手枪不分离)。
 const w=ss(nt,0,0.20), st=ss(nt,0.20,0.60), rc=ss(nt,0.60,0.95);
-g.gun.position.set(0.10*w-0.30*st+0.20*rc,-0.02*st+0.02*rc,-0.05*st+0.05*rc);
-g.gun.rotation.set(-0.55*st+0.55*rc,0.45*w-1.55*st+1.10*rc,-0.55*st+0.55*rc);
-handROverride=_ovR, handROverride.pos.set(0.014+0.10*w-0.26*st+0.16*rc,-0.062-0.05*st+0.05*rc,0.10-0.16*st+0.16*rc), handROverride.rot.set(0.28-0.55*st+0.55*rc,0.45*w-0.9*st+0.45*rc,-0.4*st+0.4*rc);
+g.gun.position.set(0.10*w-0.40*st+0.30*rc,-0.04*st+0.04*rc,0.18*st-0.18*rc);
+g.gun.rotation.set(-0.95*st+0.95*rc,-0.45*w+1.85*st-1.40*rc,-1.05*st+1.05*rc);
+ry+=-0.30*w+0.90*st-0.60*rc;   // 腰转带动 (root 腰右转引刀→左转甩刀→回收, 摆幅 0.90; rx/ry 同函数作用域, :930 写回)
+rx+=-0.55*st+0.55*rc;          // 躯干前压随扫 (★三轮批迭代: 大偏航下 root 0.78 举刀俯角会把扫击中段刀轴在视空间抬高
+                               //   ~0.2rad, 实测中段 elev +0.20 不"放平"; 扫击段 root 前压 0.55 把刀轴压回水平, 顺带加身体带动)
+handROverride=_ovR, handROverride.pos.set(0.014+0.10*w-0.40*st+0.30*rc,-0.062-0.04*st+0.04*rc,0.10+0.18*st-0.18*rc), handROverride.rot.set(0.28-0.75*st+0.75*rc,-0.35*w+1.30*st-0.95*rc,-0.65*st+0.65*rc);
 }else{
-// 劈: 先举过肩 (总 rot.x≈1.48) 再下劈到前下 (≈-0.52) 后收回举刀位 —— 旧曲线是单一 out-back 脉冲且基准水平,
-// 读起来像"上挑" (实机报); 重定基后 up 段真上举、dn 段真下劈。
+// 劈: 过肩**斜下立刃劈** (★2026-11-20 三轮实机反馈批: 旧曲线纯俯仰 rx +1.48→-0.52 且零横滚, 建模修5 后
+//   宽面正对镜头, 实机判词"拿刀面拍"; 本批 up 段加 rz -0.55 侧刃举起, dn 段加 rz -1.20 立刃劈下 +
+//   ry 斜劈轨迹 (up -0.20 微收向右肩 / dn +0.35 劈向画面左下 = 过肩斜下) + root rx/ry 躯干前压带动)。
+//   ★本批顺修收势残差: 旧式 up=pulse 末端自归 0 而 dn/rc 只抵 1.30 ⇒ rx 残 -0.70 / 握点残 y -0.14, 全靠
+//   nt>=1 硬 set 归零 = 末帧可见瞬跳; 现 dn/rc 系数严格互抵 (up 项自衰减到 0), 起收逐位回举刀位。
 const up=pulse(nt,0,0.3,1), dn=ss(nt,0.3,0.62), rc=ss(nt,0.62,0.95);
-g.gun.position.set(0,0.14*up-0.20*dn+0.06*rc,0.06*up-0.16*dn+0.10*rc);
-g.gun.rotation.set(0.70*up-2.00*dn+1.30*rc,0,0);
-handROverride=_ovR, handROverride.pos.set(0.014,-0.062+0.10*up-0.12*dn+0.02*rc,0.10+0.05*up-0.15*dn+0.10*rc), handROverride.rot.set(0.28+0.50*up-1.35*dn+0.85*rc,0,0);
+g.gun.position.set(0.05*dn-0.05*rc,0.14*up-0.20*dn+0.20*rc,0.06*up-0.16*dn+0.16*rc);
+g.gun.rotation.set(0.70*up-2.00*dn+2.00*rc,-0.20*up+0.35*dn-0.35*rc,-0.55*up-1.20*dn+1.20*rc);
+rx+=0.10*up-0.30*dn+0.30*rc;   // 躯干带动: 举刀微后仰蓄势 → 下劈前压 (总俯角再压 0.30) → 回正
+ry+=-0.10*up+0.15*dn-0.15*rc;  // 躯干微拧随斜劈 (右上引→左下劈)
+handROverride=_ovR, handROverride.pos.set(0.014+0.05*dn-0.05*rc,-0.062+0.14*up-0.20*dn+0.20*rc,0.10+0.06*up-0.16*dn+0.16*rc), handROverride.rot.set(0.28+0.55*up-1.50*dn+1.50*rc,-0.15*up+0.25*dn-0.25*rc,-0.40*up-0.85*dn+0.85*rc);
 }
 if(nt>(mk==='thrust'?0.4:(mk==='slash'?0.35:0.5))) vmPlayOnce('meleeHit',()=>player.doMeleeHit(mk));
 if(nt>=1){
@@ -529,6 +552,10 @@ vmSndFlags={};
 }
 }
 else if(VM.state==='nade'){
+// ★2026-11-20 三轮实机反馈批: 左手动作态四分支补还臂 —— 举雷的左臂 (handLOverride) 是真动作, 持枪态
+//   本就可见; 持刀态 (a958bd1 藏左臂) 进举雷必须把左臂还回来, 否则"左手悬空举雷/雷模浮空前手"。
+//   直接赋值布尔 (本分支每帧跑, 零分配纪律)。
+VM.arms.L.visible=true;
 // 弹种 → 手上模型 (2026-09-30 批): 进 'nade' 态与持雷期间弹种变了就换件。VM.nadeM 恒指向**当前展示**的
 // 那一件 —— 外部 (20-player 自爆清枪 / 本文件哨兵自愈) 只写 VM.nadeM.visible=false, 语义不变。
 const nk=vmNadeKind();
@@ -541,7 +568,8 @@ shown.visible=true; g.gun.visible=false;
 // 于是手中一直握着雷、枪一直收不回来、也开不了火, 直到 999 秒后凭空"扔"出去 (同型事故在
 // 19-input 的岸防炮门卫注释里已有先例: "下炮那一帧状态机复活 ⇒ 立刻扔出一颗活雷")。
 // 这里补一条兜底: 哨兵态下发现手里已经没有雷 ⇒ 直接回 idle, **不触发投掷** (没松键就不是投掷)。
-if(!player.nadeHeld&&VM.stateDur>10){ VM.state='idle'; shown.visible=false; g.gun.visible=true; vmSndFlags={}; }
+// 哨兵自愈收尾也按当前武器还臂 (持刀收雷回"藏", 持枪回"现" —— 与下面 nt>=1 收尾同一口径)
+if(!player.nadeHeld&&VM.stateDur>10){ VM.state='idle'; shown.visible=false; g.gun.visible=true; vmSndFlags={}; VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee); }
 else if(player.nadeHeld){
 const k=ss(Math.min(t,0.3),0,0.3);
 shown.position.set(0.14,-0.12+k*0.04,-0.3+k*0.05);
@@ -551,11 +579,16 @@ handLOverride=vmHandLFix(-0.1,-0.2,-0.2,0.3,0,0);
 } else {
 const k=nt;
 const back=pulse(k,0,0.3,0.55), fwd=ss(k,0.35,0.6);
-shown.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.55);
+// ★2026-11-20 三轮实机反馈批: 出手弧收幅 —— 版本对比沙箱 (dev/_diag-nade-compare-tmp.js) 实锤:
+//   follow-through 段 (k≈0.42~0.88, 雷已脱手) 腕翻 rot.x +1.7→−1.7 = 195° 摆幅, 手甩到眼前 1.1m
+//   (超臂长 46%), 袖管断口悬空 0.68m —— "像是要把手臂扔出去"的字面来源 (5990785 基线逐位同款 =
+//   原版固有观感, 军刀批只是把注意力引了过去)。三处收幅: 腕翻 1.2/2.2→0.5/1.0 (195°→86°)、手位
+//   fwd z −0.35→−0.22 与雷体同步 −0.55→−0.35、后摆 y 0.14→0.10。雷脱手机制 (k>0.5) 不动。
+shown.position.set(0.14+back*0.1,-0.08+back*0.16-fwd*0.1,-0.3+back*0.25-fwd*0.35);
 shown.visible=k<0.55;
-handROverride=_ovR, handROverride.pos.set(0.13+back*0.08,-0.12+back*0.14-fwd*0.18,-0.18+back*0.2-fwd*0.35), handROverride.rot.set(0.5+back*1.2-fwd*2.2,0,0);
+handROverride=_ovR, handROverride.pos.set(0.13+back*0.08,-0.12+back*0.10-fwd*0.18,-0.18+back*0.2-fwd*0.22), handROverride.rot.set(0.5+back*0.5-fwd*1.0,0,0);
 if(k>0.5&&!VM.mirrorHost) vmPlayOnce('nadeThrow',()=>player.releaseNade());   // ★2026-11-03: 镜像态不出真雷 (真附身举雷镜像只走哨兵段, 本行是兜底保险)
-if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; }
+if(nt>=1){ VM.state='idle'; g.gun.visible=true; shown.visible=false; vmSndFlags={}; VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee); }   // ★三轮批: 回 idle 按当前武器还臂 (持刀藏/持枪现)
 }
 }
   else if(VM.state==='reload'){
@@ -780,6 +813,9 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       if(nt>=1){ VM.state='idle'; vmSndFlags={}; }
     }
     else if(VM.state==='bandage'){
+      // ★2026-11-20 三轮实机反馈批: 左手动作态还臂 —— 缠臂绷带环 (wrap) 就是 VM.arms.L 的子件, 持刀态
+      //   进包扎必须把左臂还回来 (否则绷带缠在一条看不见的胳膊上); 收尾按当前武器还原 (见下面 nt>=1)。
+      VM.arms.L.visible=true;
       VM.bandageM.visible=true; g.gun.visible=false;
       VM.reloadRocket&&(VM.reloadRocket.visible=false);
       const bk=nt;
@@ -835,9 +871,13 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       if(nt>=1||interrupted){
         VM.state='idle'; g.gun.visible=true;
         vmBandageHide(); vmSndFlags={}; VM.mirrorHost=false;
+        VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // ★三轮批: 回 idle 按当前武器还臂
       }
     }
     else if(VM.state==='grab'){
+      // ★2026-11-20 三轮实机反馈批: 左手动作态还臂 —— "左手扶箱沿" (handLOverride) 是真动作, 持刀态
+      //   进取物必须把左臂还回来; 收尾按当前武器还原 (见下面 nt>=1)。
+      VM.arms.L.visible=true;
       VM.grabitemM.visible=true; g.gun.visible=false;
       VM.reloadRocket&&(VM.reloadRocket.visible=false);
       const gk=nt;
@@ -848,10 +888,13 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       // 左手扶箱沿 (补给箱取弹药/从运输车补给/取绷带同一条 grab 分支): 掌位与旧字面量逐位相同, 只把袖管摆到左下
       handLOverride=vmHandLFix(-0.04,-0.08,-0.22,0.4,0,0);
       if(gk>0.45) vmPlayOnce('grab',()=>player.doGrabResolve());
-      if(nt>=1){ VM.state='idle'; g.gun.visible=true; VM.grabitemM.visible=false; vmSndFlags={}; }
+      if(nt>=1){ VM.state='idle'; g.gun.visible=true; VM.grabitemM.visible=false; vmSndFlags={}; VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee); }   // ★三轮批: 回 idle 按当前武器还臂
     }
     else if(VM.state==='build'){
       // 工程锤击建造: 右手抡锤反复敲击, 结束后工事落成
+      // ★2026-11-20 三轮实机反馈批: 左手动作态还臂 —— "左手扶桩" (handLOverride) 是真动作, 持刀态
+      //   进建造必须把左臂还回来; 收尾按当前武器还原 (见下面两个出口)。
+      VM.arms.L.visible=true;
       if(!VM.hammerM){ VM.hammerM=buildHammer(); VM.inner.add(VM.hammerM); }
       VM.hammerM.visible=true; g.gun.visible=false;
       VM.reloadRocket&&(VM.reloadRocket.visible=false);
@@ -880,8 +923,10 @@ if(k>0.88) vmPlayOnce('b4',()=>AudioSys.click(1300,0.22,0.03));
       // 被打断或中途取消
       if(!player.pendingBuild&&nt<1){
         VM.state='idle'; g.gun.visible=true; VM.hammerM.visible=false; vmSndFlags={};
+        VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // ★三轮批: 回 idle 按当前武器还臂
       } else if(nt>=1){
         VM.state='idle'; g.gun.visible=true; VM.hammerM.visible=false; vmSndFlags={};
+        VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // ★三轮批: 回 idle 按当前武器还臂
         engBuildExec(player);
       }
     }

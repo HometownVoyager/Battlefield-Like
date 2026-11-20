@@ -76,7 +76,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261120c'"),'前置: 版本戳 20261120c 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261120d'"),'前置: 版本戳 20261120d 在位 (index.html 内联)');
 
 // ══ T1 国会大厦穹顶 7 档碰撞 (柏林) ══
 console.log('T1 国会穹顶: 漏斗段带面半径 + 顶针三档, 全 noNav');
