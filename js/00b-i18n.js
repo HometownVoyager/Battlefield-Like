@@ -771,6 +771,51 @@ const I18N_EN={
 '车灯 · 手电':'vehicle lights · flashlight',
 '战局整备与重部署 · 再按=暂停':'loadout & redeploy · again = pause',
 'L':'L',
+
+// ═══ 2026-11-21 批B波3 (P2#31-34): 战斗HUD动态直写/通用读条/战备大厅简报·种子收藏/大厅阵营角色 缺键补全 ═══
+// P2#31 占领面板五态 (22-hud capTxt, 一态一键)
+'⚠ 争夺中 · 圈内仍有敌军':'⚠ CONTESTED · enemies still inside',
+'正在占领…':'Capturing…',
+'我方控制':'Friendly control',
+'站在旗点范围内占领':'Stand inside the zone to capture',
+'敌军正在占领!':'Enemy capturing!',
+// P2#31 小队HUD整行 (22-hud squadHUD: 状态词/键位提示拆占位)
+'◆ 小队 <b>{0}/{1}</b> · {2}<br><span style="opacity:.65">{3}</span>':'◆ Squad <b>{0}/{1}</b> · {2}<br><span style="opacity:.65">{3}</span>',
+'进攻标记点':'Attacking marker',
+'跟随中':'Following',
+'[T] 标点进攻 · [Y] 跟随我':'[T] attack order · [Y] follow me',
+// P2#31 架枪指示两态 (22-hud braceInd)
+'▙ 已架枪':'▙ Braced',
+'[X] 架枪':'[X] Brace',
+// P2#31 手雷警告三条 (22-hud nadeWarn; index.html 静态初值同键 data-i18n)
+'⚠ 离地过近 ⚠':'⚠ Too low to ground ⚠',
+'⚠ 手雷 {0}m ⚠':'⚠ Grenade {0}m ⚠',
+'⚠ 手雷 ⚠':'⚠ Grenade ⚠',
+// P2#31 丧尸双队归零行 (22-hud wipeLine; 与 543/671 行既有形近键并存不冲突)
+'⚠ {0} 兵力归零 · 全灭后出局 (剩 {1} 人)':'⚠ {0} out of tickets · total wipe = eliminated ({1} left)',
+// P2#32 通用读条两条 (22-hud 附身镜像条+坦克维修读条; 2026-11-16 批登记的是弹字版 '维修中… 移动/开火将打断', 读条版漏配对)
+'宿主 · 举雷 …':'Host · raising grenade …',
+'宿主 · 包扎 …':'Host · bandaging …',
+'坦克维修中: {0}s · 移动/开火打断':'Repairing tank: {0}s · move/fire cancels',
+// P2#33 战备大厅简报/种子收藏区九键 (22-hud updateHubRightPanel/renderFavSeedList; 注意与既有形近键 '单队生存 · 撑过10分钟'/'程序化生成 · {0}…' 并存)
+'单队生存: 固守中央阵地撑过10分钟':'Solo survival: hold the center for 10 minutes',
+'双队对抗: 击退尸潮并决出胜负':'Two teams: repel the horde and settle the winner',
+'程序化生成':'Procedural',
+'种子':'Seed',
+'丧尸生存演练':'Zombie survival exercise',
+'战术演练':'Tactical exercise',
+'胜利目标':'Victory objective',
+'暂无收藏，可在战术演练的暂停或结算界面收藏种子':'No saved seeds yet — save seeds from the pause or result screen in Tactical Exercise',
+'点击装入此种子':'Click to load this seed',
+// ★20261121c P2#33 编排者补齐: 同属种子收藏区/大厅简报但审计九键清单未列的两条 (22-hud:1838 tooltip / :1908 modeName 兜底)
+'取消收藏':'Remove favorite',
+'攻占全部据点':'Capture all objectives',
+// P2#34 大厅阵营角色 (22-hud hubFactionSeg 按钮 + 22a 盾徽 title): 红方/蓝方补键;
+//   攻方/守方=名词性新键, 不复用 26-commander 动词键 ('进攻':'attacking'/'防守':'holding' 保留给指挥官令态)
+'红方':'Red Team',
+'蓝方':'Blue Team',
+'攻方':'Attacking',
+'守方':'Defending',
 };
 // 取词: LANG==='en' 查表 (无命中回退中文原文); 多参时对 {0}{1}… 插值 (中英同规则)
 function t(s){

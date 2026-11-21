@@ -72,7 +72,7 @@ function achBuildCensus(){
  }catch(e){ ACH_CENSUS=null; return; }
  ACH_CENSUS={cells:cells,trees:trees,flora:flora,structs:structs,props:props,barrels:barrels,wires:wireList};
  _achLastDeaths=(typeof player!=='undefined'&&player)?(player.deaths||0):-1;
- if(typeof player!=='undefined'&&player) player._achPilotBld=false;   // 撞楼普查字段不跨局携带 (与 deaths 基线同步重建, 2026-11-14)
+ if(typeof player!=='undefined'&&player){ player._achPilotBld=false; player._achNadeSelf=false; }   // 撞楼/自刎普查字段不跨局携带 (与 deaths 基线同步重建; 2026-11-14 / ★2026-11-21 审计 B#30)
 }
 
 // ── 解锁 (R6): 永久落盘 + 弹框。双保险防"不停跳出来" (2026-11-11 实机反馈批):
@@ -147,6 +147,13 @@ function achEvaluate(){
  // ⇒ 只能轮询玩家尸检字段; deaths 变化=死亡边沿 (每局建账时同步基线, 跨局无陈旧边沿)。
  if(typeof player!=='undefined'&&player&&(player.deaths||0)!==_achLastDeaths){
   _achLastDeaths=(player.deaths||0);
+  // ★2026-11-21 审计 B#30: 自刎判据补专用普查字段 _achNadeSelf (盖章点=下方 nadeExplode 观察钩, 判据=
+  //   "炸死死者的这颗雷的归属者===死者本人") —— 与 killerSrc 解耦: killerSrc 是"最后一次开火"单值
+  //   字段 (20-player 每枪覆盖 _src, die 时 killSrcLabel 转抄), 投雷后再开一枪旧判据读到枪名 = 假阴性
+  //   (13-combat nadeExplode 的 2026-09-29 重盖章虽在爆炸结算前把 _src 刷回本弹标签, 但成就判据不该
+  //   依赖这条单值转发链)。读后即清: 陈旧字段不得让之后任何一次普通死亡误触发; onFreshMatch 建账时
+  //   同步清 (不跨局携带, 与 _achPilotBld 同款)。
+  if(player.alive===false&&player.killerName==='你'&&player._achNadeSelf){ player._achNadeSelf=false; achUnlock('seppuku'); }
   if(player.alive===false&&player.killerName==='你'&&player.killerSrc==='手雷') achUnlock('seppuku');
   // 利库德集团最好的飞行员 (2026-11-14 用户令): 驾机撞楼而亡 —— 与自刎归天同族的事件制成就,
   // 轮询账摸不到"楼面撞击"这个瞬间事件, 由 16-aircraft die() 撞楼档在玩家死亡链上盖 _achPilotBld
@@ -277,6 +284,28 @@ function achOnPanelShown(){
  }catch(e){}
  achSetPane('rec');   // 每次打开面板都回到默认页签 (战绩数据)
  achRenderPanel();
+}
+
+// ── 自刎普查账观察钩 (★2026-11-21 审计 B#30): "自己被**自己的手雷**炸死"这个事实轮询账摸不到 ——
+//    尸检字段 killerName/killerSrc 只记"击杀者名"+"最后一次开火来源", killerSrc 是单值字段: 投雷后
+//    开过一枪就被枪名覆盖 (20-player playerShoot 每枪写 _src; 18-game die 经 killSrcLabel 转抄)。与
+//    _achPilotBld 同族走"事件结算点盖章 + 死亡边沿读后即清"。结算点 = 13-combat nadeExplode (手雷
+//    击杀归因处 —— 2026-09-29 重盖章同一函数): 本钩**只读观察**不改爆炸行为 —— 爆炸结算前归属者
+//    (thrower) 活着、结算后死了 ⇒ 同步链内"这颗雷炸死了本人"成立, 盖 player._achNadeSelf (判据=
+//    炸死死者的这颗雷的归属者===死者本人, 与 killerSrc 完全解耦)。只认普通手雷 (frag: 排除 AT炸药/
+//    航弹/迫击炮弹/烟雾/燃烧, 与旧 killerSrc==='手雷' 判据同宽 —— 后者原样保留, 探针钉区)。
+//    dropHeldNade (2026-11-03 死亡掉雷契约雷) 与普通出手同走 frag 分支 = 两路一并覆盖。
+//    typeof 守卫: 硬编码 FILES 清单不载 13-combat 的旧探针里钩自动不存在, 零回归 (R8 口径);
+//    13-combat 先于本文件载入 (index.html :819/:847), 顶层 function 声明的全局绑定可再赋值,
+//    唯一调用点 13-combat updateNades 按名解析 ⇒ 调用时必经本钩。
+if(typeof nadeExplode==='function'){
+ const _achNadeExplode0=nadeExplode;
+ nadeExplode=function(n){
+  const th=(n&&n.thrower&&n.thrower.isPlayer&&n.thrower.alive&&!(n.at||n.bomb||n.mortar||n.smokeN||n.incinN))?n.thrower:null;
+  const r=_achNadeExplode0(n);
+  if(th&&th.alive===false) th._achNadeSelf=true;   // 结算窗口内归属者死亡 = 被自己的这颗雷炸死 (27-achievements 死亡边沿读, 读后即清)
+  return r;
+ };
 }
 
 // ── 对外单源 (三处接线全部 typeof ACH 守卫; 探针经 census()/state()/defs() 直达内部账) ──

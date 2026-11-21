@@ -34,7 +34,7 @@ test('需求1: 丧尸模式 HUD 独立下移至 top:50px 且丧尸模式清空 m
 test('需求2: 旗点争夺中提示去除 cap>0.02 门槛，刚进圈 cap=0 即正确判定争夺中', () => {
   const hudCode = fs.readFileSync(path.join(__dirname, '../js/22-hud.js'), 'utf8');
   // 必须是 if(contested) 而不能是 if(contested&&inFlag.cap>0.02)
-  assert(hudCode.includes("if(contested) capTxt='⚠ 争夺中 · 圈内仍有敌军';"), 'contested 判断必须无进度门槛');
+  assert(hudCode.includes("if(contested) capTxt=t2('⚠ 争夺中 · 圈内仍有敌军');"), 'contested 判断必须无进度门槛 (★20261121c P2#31 跟码: 占领五态入词典, 直写改 t2 包裹)');
   assert(!hudCode.includes("if(contested&&inFlag.cap>0.02) capTxt='⚠ 争夺中 · 圈内仍有敌军';"), '旧版 cap>0.02 门槛已被彻底移除');
 
   // 逻辑模拟断言

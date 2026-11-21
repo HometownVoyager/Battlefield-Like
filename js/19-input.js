@@ -115,20 +115,20 @@ if(!(typeof CMD_TIME!=='undefined'&&e.code===CMD_TIME.KEY)) return;
 // 实验模式: P 切换 AI 调试层 (bot 状态标签+寻路线), 仅供调参
 if(e.code==='KeyP'&&EXPERIMENT&&typeof BotDebug!=='undefined') BotDebug.toggle();
 // 战场大地图: M 呼出 (纯开关大地图, 解除与重部署按键冲突)
-if(e.code==='KeyM'&&player.deployed&&player.alive&&!matchOver){
+if(e.code==='KeyM'&&player.deployed&&player.alive&&!player.specViewHost&&!matchOver){   // ★2026-11-21 批B#3: 调试附身中吞 M (落到下方附身吞键块"Q/E 之外一律吞掉"; !specViewHost 对普通玩家恒真)
 if(typeof toggleBigMap==='function') toggleBigMap();
 }
 // 观战模式: 双击空格 = MC创造式悬停飞行开关 (无重力可悬停; 若在气动飞行中则切为悬停)
-if(e.code==='Space'&&player.spectator&&player.alive&&!player.onVehicle&&!player.onNaval&&!player.loiter){   // 2026-09-26E 审计 18: 艇上不留 flying 残留
+if(e.code==='Space'&&player.spectator&&player.alive&&!player.onVehicle&&!player.onNaval&&!player.loiter&&!player.specViewHost){   // 2026-09-26E 审计 18: 艇上不留 flying 残留; ★2026-11-21 批B#3: 调试附身中吞双击空格 (防附身中置 flying 账, E 脱离后人在观察位悬空)
 const tapT=performance.now();
 if(tapT-(player._spaceTapT||0)<300){
 if(!player.flying){
-player.flying=true; player.flyAero=false;
+player.flying=true; player.flyAero=false; player._flyT=0;   // ★2026-11-21 批B#1: 起飞清宽限账 (旧值>0.3 残留时, 首帧仍贴地会被 20-player 落地门同帧弹回"落地·行走状态")
 player.crouch=false; player.prone=false; player.onGround=false;
 player.vel.y=Math.max(player.vel.y,2.5);
 showScorePop('创造悬停飞行 · WASD移动 空格升/Shift降 · 落地退出');
 }else if(player.flyAero){
-player.flyAero=false;
+player.flyAero=false; player._flyT=0;   // ★2026-11-21 批B#1: 切悬停重计宽限账 (气动掠地平飞中切换, 旧值>0.3 会被落地门同帧弹回)
 showScorePop('切换: 创造悬停 (空格升/Shift降)');
 }else{
 player.flying=false;
@@ -255,7 +255,7 @@ return;
 //   X 键取消 (readBarActive 已含 vehRepair, 下面的 KeyX 分支照常覆盖)。
 if(e.code==='KeyR'&&player.onVehicle&&player.onVehicle.kind==='tank'&&typeof player.tryVehRepair==='function'){ player.tryVehRepair(); return; }
 if(e.code==='KeyR') tryReload(true);
-if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else { player.crouch=!player.crouch; player.prone=false; player._autoCrouch=false; player._autoProne=false; } }   // !player.loiter: 操控巡飞弹本体定身; ★11-18: 手动 C 夺回姿态控制权 (顶头自动压下帧再顶回); ★11-18c: 同时清自动趴旗
+if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else if(!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.crouch=!player.crouch; player.prone=false; player._autoCrouch=false; player._autoProne=false; } }   // !player.loiter: 操控巡飞弹本体定身; ★11-18: 手动 C 夺回姿态控制权 (顶头自动压下帧再顶回); ★11-18c: 同时清自动趴旗; ★2026-11-21 批B#6: 座位上不给切蹲姿 (MG/AT/AA/迫击炮与飞机等 onVehicle 座位 — 上炮瞬间强制 crouch=false 的口径, 下炮不残留蹲姿; 海战/岸防炮已在上游座位门拦死)
 if(e.code==='KeyZ'&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.prone=!player.prone; if(player.prone){ player.crouch=false; player.braced=false; } player._autoProne=false; player._autoCrouch=false; }   // !player.loiter: 操控定身; ★11-18c: 手动 Z 夺回姿态控制权 + 清自动蹲/趴旗
 if(e.code==='KeyX'&&!player.loiter){   // !player.loiter: 操控定身 (2026-11-07) — 撑枪/收枪是身体动作; 读条取消在操控中不可能激活 (读条键全被 loiter 门挡)
 // ★2026-10-12 用户提议② → 2026-10-25 扩容 → ★2026-11-21 P1-4 再收编 (建造/挥砍/出手弧): 读条 (包扎/拆除回收/前摇/举雷待发/换弹/建造锤击/挥砍/出手弧) 中 X = 取消读条
@@ -318,7 +318,7 @@ AudioSys.click(1200,0.3,0.05);
 if(e.code==='Digit4'){
 // 观战不切火箭筒 (观战槽位无火箭筒, findIndex=-1 会把 4 键整个吞掉): 观战者按 4 = 烟雾弹 (四弹种全给, 2026-10-24 用户指定)
 // ★2026-10-25 反馈轮①: 读条中 4 = 打断读条再切火箭筒/举烟雾弹; 同键(举烟雾中再按4)不抢; ok=除 VM 态外全门。
-if(player.cls===3&&!player.spectator&&!player.loiter){
+if(player.cls===3&&!player.spectator&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){   // ★2026-11-21 批B#4: 补座位门与兄弟分支(烟雾/燃烧/手雷)同款 —— 坐火力点双击4会把包扎/原位换弹读条白偷走; onBattery 已在 :231 座位门上游拦死 4 键, 无需重复
 if(!player.barStealArmed('Digit4')) return;   // ★2026-10-30 读条交互批: 打断双击确认
 player.stealBar();
 if(VM.state==='idle') switchSlot(player.slots.findIndex(s=>s&&s.def.rocket),true); // 2026-09-28 兵种8→5: 反坦克=3
@@ -692,7 +692,7 @@ VM.stateDur=reloadDurOf(w); // 连杀增益: 换弹加速 (2026-09-11); 动态�
 vmSndFlags={};
 }
 function switchSlot(i,viaKey){
-if(i===player.curSlot||!player.slots[i]||player.onMG||player.onVehicle||player.onNaval||player.onAT||player.onAA||player.loiter) return;   // 2026-09-26E 审计 5: 艇上换枪会打断座驾读数链路 (fov/炮手镜/弹药面板); 2026-10-04: 大舰炮位同门 (U2; 2026-11-10 该项随大舰子系统下架摘除)
+if(i===player.curSlot||!player.slots[i]||player.onMG||player.onVehicle||player.onNaval||player.onAT||player.onAA||player.onMortar||player.onBattery||player.loiter) return;   // 2026-09-26E 审计 5: 艇上换枪会打断座驾读数链路 (fov/炮手镜/弹药面板); 2026-10-04: 大舰炮位同门 (U2; 2026-11-10 该项随大舰子系统下架摘除); ★2026-11-21 批B#5: 补 onMortar/onBattery (迫击炮/岸防炮座位上按 1/2 或手柄 LS 切枪, 会把弹药面板从炮位读数切到随身枪)
 if(VM.state!=='idle'&&VM.state!=='fire'){
 // ★2026-10-25 反馈轮①: 读条中 1/2/4 换枪 = 打断读条再换枪 (同槽重按在上面的首门已挡, 不会白抢)。
 //   viaKey 只来自按键 (keydown / 手柄 LS); 再部署·观战补装等程序调用不带。

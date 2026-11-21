@@ -27,6 +27,15 @@
 // ─────────────────────────────────────────────
 var PG_WR_SEED=0;   // 05-world wr() 编程播种钩子: procgen 图=种子(布局级确定性), 其他图恒 0=逐位现状
 var PGDATA=null;
+// 地块足迹表 (单源, 00c addLot 与 05c layoutProcgen 共读): [宽, 深, 占位圆 r, 复合体足迹覆盖(可选)]。
+//   前 3 元同旧表 —— canTake 坡度/占位圆用 r, w/d 写进 lots (PGDATA 序列化指纹冻结, 不动);
+//   第 4 元 (可选) = 该 kind 的 placeAt 校验足迹覆盖 {w,d,oz}, 只给"主体矩形之外还有外接段"的复合体用 ——
+//   ★2026-11-21 (审计 B#26): 教堂=大殿 10×16 + 背面钟塔 5×5 (钟塔中心局部 z=-10.6, 见 05a buildChurch),
+//   复合体真实中心在局部 z=-2.55, 校验矩形 11.5×21.6 与手动路径四处 (05c:15/243/1354/1644, "全图统一")
+//   同规 —— 不覆盖的话钟塔段 (局部 z=-8.1..-13.1) 既不进 placeAt 校验也不进 B_FOOT, 地块/旗圈家具/掩体
+//   可压进钟塔体积。覆盖对象不进 lots (防布局指纹漂移), 其余 kind 无此字段 ⇒ layoutProcgen 走 lots 自带
+//   w/d, oz 缺省 0 (零行为变化)。★必须在文件顶层 (生成体在下面的 IIFE 里, 提进去 05c 就读不到)。
+const PG_LOT_TBL={house:[7,6,5.6],house2:[9,7,6.2],cabin:[6,5,4.9],twostory:[8,9,6.4],barn:[9,13,8],factory:[18,12,10.6],church:[10,16,9.4,{w:11.5,d:21.6,oz:-2.55}],tower:[4.5,4.5,3.5],mill:[8,8,5.7]};
 (function(){
 if(typeof CAMPAIGN==='undefined'||!CAMPAIGN||CAMPAIGN.layout!=='procgen'||typeof PG==='undefined'||!PG) return;
 const S=PG.seed>>>0;
@@ -619,9 +628,10 @@ function canTake(x,z,r){
  }
  return true;
 }
+// 地块足迹表 PG_LOT_TBL (单源) 见文件顶层 (生成体在 IIFE 内, 必须放顶层 05c 才读得到); addLot 只取
+// 前 3 元 (canTake/占位圆/lots 落账), 第 4 元复合体足迹覆盖由 05c layoutProcgen 消费 (审计 B#26)。
 function addLot(x,z,ry,kind,front){
- const TBL={house:[7,6,5.6],house2:[9,7,6.2],cabin:[6,5,4.9],twostory:[8,9,6.4],barn:[9,13,8],factory:[18,12,10.6],church:[10,16,9.4],tower:[4.5,4.5,3.5],mill:[8,8,5.7]};
- const t=TBL[kind]; if(!t) return false;
+ const t=PG_LOT_TBL[kind]; if(!t) return false;
  if(!canTake(x,z,t[2])) return false;
  taken.push({x,z,r:t[2]});
  lots.push({x:Math.round(x*10)/10,z:Math.round(z*10)/10,ry:Math.round(ry*100)/100,w:t[0],d:t[1],kind,

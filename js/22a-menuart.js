@@ -514,7 +514,7 @@ return `<path d="M6 20C6 12 12 8 20 8C28 8 34 12 34 20Z"/>`
 default: // 'pot' 美式: 浅锅盔 + 下颌带
 return `<path d="M8 18C8 9 13 5 20 5C27 5 32 9 32 18Z"/>`
 +`<path d="M5 18H35L33 22C28 24 12 24 7 22Z"/>`
-+`<path d="M11 22L9 29M29 22L31 29" stroke-width="1.6" stroke-linejoin="round"/>`;
++`<path d="M11 22L9 29M29 22L31 29" stroke="#f6ecd0" stroke-opacity=".32" stroke-width="1.6" stroke-linejoin="round"/>`;   // ★20261121c P2#35: 下颌带显式自带 stroke —— 父 g 的 stroke="none" 不再吞掉描边 (两段直线无填充面积, 旧版双重不可见); 色=头盔剪影色, 透明度对齐父级 fill-opacity=.32
 }
 }
 // 徽记字形路径 (★/✠/☭/☀/✷/✭) —— 手绘路径而非 <text>, 免字体依赖
@@ -600,7 +600,7 @@ for(let teamIdx=0;teamIdx<2;teamIdx++){
   const camp=(typeof CAMPAIGNS!=='undefined'&&typeof hubCampIdx!=='undefined'&&CAMPAIGNS[hubCampIdx])||(typeof CAMPAIGN!=='undefined'?CAMPAIGN:null);
   const isAtk=(camp&&camp.mode==='assault'&&camp.atk===teamIdx);
   const isDef=(camp&&camp.mode==='assault'&&camp.atk!==teamIdx);
-  const roleTxt=isAtk?t('进攻'):(isDef?t('防守'):(teamIdx===0?t('红方'):t('蓝方')));
+  const roleTxt=isAtk?t('攻方'):(isDef?t('守方'):(teamIdx===0?t('红方'):t('蓝方')));   // ★20261121c P2#34: 攻方/守方=名词性新键 (旧误用 26-commander 动词键 attacking/holding, 词性错位); 红方/蓝方补键
   const titleTxt=`${t(F.name)} (${roleTxt})`;
   html+=`<div class="facCard${on?' on':''}${on?'':' dim'}" data-t="${teamIdx}" title="${titleTxt}">${menuFactionSVG(teamIdx)}</div>`;
 }

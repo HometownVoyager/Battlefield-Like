@@ -304,11 +304,14 @@ if(e.c&&im.instanceColor&&im.instanceColor.array){ im.instanceColor.array.set(e.
 if(e.count!==undefined) im.count=e.count;
 }
 // ⑥b 草丛/庄稼的按格索引表写回 (烧尽时被 delete 的格要回来, 否则"下一局同一格再烧不隐藏实例")
+// ★B#27: 田块条目跨局是同对象复用 (CROP_FIELDS 截断还原不换条目), 烧尽 burned 标记必须随按格账
+// 一并复位 —— 植株视觉已回场, 软遮蔽也要回场, 否则灰烬标记跨局残留。
 for(const e of WSN.burnInst){
 const bc=e.bi&&e.bi.byCell;
 if(!bc||!e.cells) continue;
 bc.clear();
 for(const [k,v] of e.cells) bc.set(k,v);
+if(e.bi.field) e.bi.field.burned=false;
 }
 // ⑦ 火焰: 燃料回快照, 其余格状态整体清零
 if(WSN.fuel&&typeof FUEL!=='undefined') FUEL.set(WSN.fuel);

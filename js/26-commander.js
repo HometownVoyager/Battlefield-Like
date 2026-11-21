@@ -686,6 +686,16 @@ return false;
 function cmdMapPauseGate(){
 const w=cmdMapWrapEl();
 if(!w) return;
+// ★2026-11-21 批B#36: menuHold (主菜单) 不是"临时藏图"而是"离开战局" —— 与暂停的本质区别: 暂停解除
+//   (togglePause(false)) 后玩家原地继续, 藏着的地图放回是对的; 而回主菜单后的「继续游戏」走
+//   resumeBattle 无条件 lockPointer, 若地图还开着, 下面的放回支会把它亮回来 ⇒ 指针锁死在开着的指挥
+//   地图上, 只能盲按 Esc 收场; 且 menuHold 期 E/F/R 还会经 19-input→cmdMapKeyGate 按 stale cursor
+//   真实下令 (键侧另有本批 cmdMapKeyGate 冻结门兜底, 但收图才是断根)。故 menuHold 期强制收图
+//   (cmdMapClose(false), 不重锁指针 —— 冻结态本就不该锁, 与 endMatch/玩家 die 的 cmdMapForceClose
+//   同规)。本函数在 24-main 冻结分支每帧都跑 ⇒ 回菜单后第一帧即收, 22-hud 的 returnToMenu 不必跨
+//   文件调 cmdMapForceClose (verify-commander R12 "22-hud 不进 cmdMap" 单源纪律原样保住)。布势图
+//   同样被收 (wasDeploy 分支清 view + 搬回 #ui), 回战局后点指挥官卡可重进布势 (cmdDeployOpen 可重复进)。
+if(CMD.mapOn&&(typeof menuHold!=='undefined'&&menuHold)){ cmdMapClose(false); return; }
 const frozen=(typeof gamePaused!=='undefined'&&gamePaused)||(typeof menuHold!=='undefined'&&menuHold)||(typeof matchOver!=='undefined'&&matchOver);
 const wantHide=!!(CMD.mapOn&&frozen);
 if(CMD._pauseHid===wantHide) return;                     // 稳态零 DOM 写入 (本仓 HUD 对账纪律)
@@ -753,7 +763,11 @@ if(e.button===0){
 //   旧写的"点目标模式下令第二步 (CMD.pick)"整条链随面板重做一起退场 —— 三命令键 (E/F/R) 直接以
 //   光标位置为落点, 不再需要"先按按钮再点地图"的两步式。
 const u=cmdMapHit(e);
-if(u){ CMD.hl=u; CMD.sel=u; cmdMapDraw(); cmdMapPanelTick(); return; }
+if(u){ CMD.hl=u; CMD.sel=u; cmdMapDraw();
+// ★2026-11-21 批B#37 第4站点 (编排者批尾补齐): 左键点中自己人的选人路径同样复位面板节流戳 ——
+//   滚轮/命令键/集火三站已同规, 本站审计未列但症状同类 (选人后面板高亮行最长 0.5s 不跟手), 逐字同 idiom。
+const pnl=document.getElementById('cmdMapPanel'); if(pnl) pnl._t=0;
+cmdMapPanelTick(); return; }
 if(CMD.mapDeploy) return;
 cmdFocusFire(wx,wz);
 return;
@@ -808,6 +822,10 @@ e.stopPropagation();
 const dir=e.deltaY<0?-1:1;
 cmdHlStep(dir);
 cmdMapDraw();
+// ★2026-11-21 批B#37: 交互后立即复位面板节流戳 —— pnl._t>0 时 cmdMapPanelTick 直接早退, 滚轮切人后
+//   右侧面板高亮行最长 0.5s (30 帧) 不跟手, 玩家看面板确认对象再按 E/F/R 会对旧单位下令。与面板行
+//   点选 / cmdRat 两条既有路径的 `pnl._t=0` 同规; 2Hz 节流本身保留 (只有显式交互才强刷)。
+const pnl=document.getElementById('cmdMapPanel'); if(pnl) pnl._t=0;
 cmdMapPanelTick();
 },{passive:false});
 }
@@ -910,6 +928,8 @@ if(!cmdOrderUnit(u,mode,p.x,p.z)){ cmdMapAnnounceFail(u,mode); return true; }
 cmdMapAnnounce(u,mode);
 } else return false;
 cmdMapDraw();
+// ★2026-11-21 批B#37: 命令键路径同样不复位节流戳 ⇒ 面板高亮行/命令态最长 0.5s 不刷 (同滚轮, 一并复位)。
+const pnl=document.getElementById('cmdMapPanel'); if(pnl) pnl._t=0;
 cmdMapPanelTick();
 return true;
 }
@@ -971,6 +991,8 @@ showScorePop(n?t2('集火: {0} 个单位 → 该点',n):t2('集火: 半径内没
 }
 if(typeof AudioSys!=='undefined'&&AudioSys.click){ AudioSys.click(1600,0.3,0.05); AudioSys.click(900,0.25,0.07); }
 cmdMapDraw();
+// ★2026-11-21 批B#37: 集火清高亮 (CMD.hl=null) 同样要复位节流戳, 否则旧高亮行残留最长 0.5s。
+const pnl=document.getElementById('cmdMapPanel'); if(pnl) pnl._t=0;
 cmdMapPanelTick();
 }
 // 集火消费接口 (14-bots perceive / 15-vehicles tankPerceive / 16-aircraft 用):
@@ -1808,6 +1830,14 @@ function cmdSpecHudKeys(){ return ' · V=减速'; }
 //   这正是本 bug 的形态, 作为不变量写在这里。
 function cmdMapKeyGate(code){
 if(!CMD.mapOn) return false;
+// ★2026-11-21 批B#36: 冻结态 (暂停 / 主菜单 menuHold / 结算) 整层吞键。此态地图只被 cmdMapPauseGate
+//   藏起而 mapOn 仍 true —— 命令键若照旧放行, 就会在主菜单里按 stale cursor 真实下令 (回战局后生效)。
+//   吞掉 (return true) 而不是放行 (return false) 的理由: 19-input 的 keydown 只拦 gamePaused, menuHold
+//   期放行会让 E/F/R 落回战斗语义 (tryInteract/tryReload/侧身), V 也会落进读条减速 —— 冻结菜单里
+//   "按键无响应"才是正确语义 (与 19-input:82 的 gamePaused 吞键同规)。
+//   ★这是对下方"不存在返回 true 但什么都没做"不变量的显式 carve-out: 那条不变量管的是**交互态**
+//   (布势/战斗) 键义必须执行; 冻结态本来就没有任何键义, 不属同一形态。
+if((typeof gamePaused!=='undefined'&&gamePaused)||(typeof menuHold!=='undefined'&&menuHold)||(typeof matchOver!=='undefined'&&matchOver)) return true;
 const isCmd=(code===CMD_KEYS.hold||code===CMD_KEYS.attack||code===CMD_KEYS.free);
 if(!isCmd) return false;
 if(code===CMD_KEYS.hold) return cmdKeyCommand('hold');

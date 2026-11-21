@@ -133,6 +133,29 @@ const j0=clamp(Math.floor((fz-1.4+OCC.off)/OCC.res),0,OCC.N-1), j1=clamp(Math.ce
 for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=1;
 occTouch(fx-1.4,fz-1.4,fx+1.4,fz+1.4); // 增量重烘焙脏矩形 (03-terrain; 缺它=火线不进寻路)
 }
+// 火格熄灭/烧尽 → 占用网格直写清零 (★2026-11-21 B#18): 与 occMarkFire 同一 ±1.4m 格径逐格写回 0
+// + occTouch 登记簇 (NAV 快路径时代 buildOccupancy 全量重建降为 1:3 配额, "重建是唯一清格点"断供 ——
+// 火停后收尾 refresh 无簇可消费, 幻影火格可无限期)。直写与 03-terrain buildOccupancy 尾部按 FIRE_ACTIVE
+// 恢复火格 (±1.4m) 同格径: 重建不会再把已烧尽的格标回来, 两路收敛一致。
+// 直写置 0 会擦掉同格共存的其它标记 (既定契约: killOne/killDynCollider 同族, 靠 1全:3快 配额重建收敛);
+// 这里只多兜一处高频交叠: FRES=3 相邻燃烧格的 ±1.4m 矩形在 1m OCC 栅格上共享 1~2 格, 清本格会把
+// 仍在燃烧的邻格火标一起擦掉 —— 对交叠的 FIRE_ACTIVE 邻格重跑 occMarkFire 补标 (语义=重建恢复块减去
+// 被清的这格), 火线视觉/寻路不因逐格烧尽而断续漏标。
+function occUnmarkFire(ci){
+if(!OCC.data) return;
+const fx=(ci%FN)*FRES-FOFF, fz=Math.floor(ci/FN)*FRES-FOFF;
+const i0=clamp(Math.floor((fx-1.4+OCC.off)/OCC.res),0,OCC.N-1), i1=clamp(Math.ceil((fx+1.4+OCC.off)/OCC.res),0,OCC.N-1);
+const j0=clamp(Math.floor((fz-1.4+OCC.off)/OCC.res),0,OCC.N-1), j1=clamp(Math.ceil((fz+1.4+OCC.off)/OCC.res),0,OCC.N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) OCC.data[j*OCC.N+i]=0;
+occTouch(fx-1.4,fz-1.4,fx+1.4,fz+1.4); // 增量重烘焙脏矩形 (03-terrain; 快路径按簇消费清格)
+if(FIRE_ACTIVE.length>1){
+for(const fci of FIRE_ACTIVE){
+if(fci===ci) continue;
+const fx2=(fci%FN)*FRES-FOFF, fz2=Math.floor(fci/FN)*FRES-FOFF;
+if(Math.abs(fx2-fx)<=FRES&&Math.abs(fz2-fz)<=FRES) occMarkFire(fci);   // 离散格径交叠 (|d|∈{0,FRES}) 才补标
+}
+}
+}
 let fireNavT=0;
 function igniteCell(ci,attacker,lifeCap,noWx){
 if(FUEL[ci]<=0.05||FBURN[ci]>0) return;
@@ -254,9 +277,34 @@ if(!arr) continue;
 for(const rec of arr){ if(!rec.dead) cb(rec); }
 }
 }
+// 杀圆柱 (树倒/灌木消失/油桶引爆/拒马拆除/炮位摧毁共用): 置旗不删条目 (23b 快照按下标对位, 条目终身稳定)
+// ★2026-11-21 B#18: 直写清 OCC 占用 —— 圆柱的占用格是 buildOccupancy 烘焙的 (r≥0.28 且非 noNav 才标,
+// rr=r+0.6 圆测), 快路径时代全量重建降为 1:3 配额, "重建自然放行"的陈旧格可无限期 (幻影树格/桶格/拒马格)。
+// 这里按烘焙同格径 (rr=r+0.6 圆测) 直写 0 + occTouch 登记簇, 交叠燃烧火格照 occUnmarkFire 同款补标;
+// 尾随 markNavDirty() (非 forceFull) 保底 0.6s 后一次 refresh 消费簇 —— 快路径 bakeRegion 亚毫秒,
+// 碾林/连倒仍被 0.6s 合批, 不回退成高频全量重建 (旗翻型语义不适用: 这里占用已直写, 无需强制全量)。
 function killCyl(c){
 if(!c) return;
+if(!c.dead&&OCC.data&&c.r>=0.28&&!c.noNav){
+const rr=c.r+0.6, off=OCC.off, res=OCC.res, N=OCC.N;
+const i0=clamp(Math.floor((c.x-rr+off)/res),0,N-1), i1=clamp(Math.ceil((c.x+rr+off)/res),0,N-1);
+const j0=clamp(Math.floor((c.z-rr+off)/res),0,N-1), j1=clamp(Math.ceil((c.z+rr+off)/res),0,N-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+const x=i*res-off, z=j*res-off;
+if((x-c.x)*(x-c.x)+(z-c.z)*(z-c.z)<=rr*rr) OCC.data[j*N+i]=0;
+}
+occTouch(c.x-rr,c.z-rr,c.x+rr,c.z+rr);
+// 圆区可能盖住仍在燃烧的火格标 (树烧塌/火中拆拒马): 交叠者重跑 occMarkFire 补标 (语义=重建恢复块减去本柱)
+if(FIRE_ACTIVE.length){
+for(const fci of FIRE_ACTIVE){
+const fx=(fci%FN)*FRES-FOFF, fz=Math.floor(fci/FN)*FRES-FOFF;
+if(fx+1.4<c.x-rr||fx-1.4>c.x+rr||fz+1.4<c.z-rr||fz-1.4>c.z+rr) continue;
+occMarkFire(fci);
+}
+}
+}
 c.dead=true; c.r=0; c.y1=c.y0-1;
+if(typeof markNavDirty==='function') markNavDirty();
 }
 // ===== 灌木: 两片交叉叶面 (并入独立 InstancedMesh), 无碰撞, 可燃/可碾 =====
 const BUSH_BATCH=[];
@@ -336,9 +384,11 @@ const c=new THREE.Color(1,1,1);
 for(let i=0;i<im.count;i++) im.setColorAt(i,c);
 im.instanceColor.needsUpdate=true;
 }
-function registerBurnableInst(im,byCell){
+// field (★2026-11-21 B#27): 庄稼/高草批 ↔ CROP_FIELDS 田块条目关联 (05c 登记时传入) —— 烧尽判据
+// 单源=byCell 按格账清空 (该批全部植株格都走过烧尽分支) ⇒ 田块 burned=true, cropBlocksLOS 跳过。
+function registerBurnableInst(im,byCell,field){
 instColorInit(im);
-BURN_INST.push({im,byCell,dirty:false});
+BURN_INST.push({im,byCell,field:field||null,dirty:false});
 }
 // ═══════════ 植被软遮蔽 (2026-09-20 I5: 灌木/树冠挡视野 · 玩家与 Bot 同规则) ═══════════
 // 用户口径 (已确认): "灌木/树冠挡视野, 但只在命中遮挡时生效、且不挡子弹"。
@@ -576,7 +626,8 @@ tr.fall={t:0,dx,dz,dur:rand(0.9,1.2)*(0.7+0.35*tr.s),hit:false}; // 大树惯性
 FALLING.push(tr);
 const gy=tr.g0+0.25;
 for(let k=0;k<5;k++) spawnP(PT.dirt,tr.x+rand(-0.6,0.6),gy,tr.z+rand(-0.6,0.6),dx*rand(1,2.5)+rand(-1,1),rand(0.5,1.5),dz*rand(1,2.5)+rand(-1,1),rand(0.25,0.5),0.7,rand(0.5,0.9),0.85,3);
-// 不触发寻路重建: 倒树不挡路, 残干占位留到下次重建自然放行 (碾林/连倒时避免高频 rebake)
+// 倒树不挡路; 站立残干的占用格由 killCyl 直写清格+occTouch 放行 (B#18), 尾随 markNavDirty 0.6s 合批
+// 一次增量烘焙 —— 碾林/连倒不会高频 rebake (旧口径"留到下次全量重建自然放行"在快路径时代会无限期滞留)
 }
 // ===== 枯树/椰树倒伏 (2026-09-26 用户报: 这两类被炸只会原地消失, 没有乔木那样的"向爆心反方向倒下") =====
 // 这两类是**对象式**植被 (每株是独立网格: 枯树 2 件 / 椰树 1 个 Group), 不在 TREE_IM 实例批里,
@@ -584,7 +635,7 @@ for(let k=0;k<5;k++) spawnP(PT.dirt,tr.x+rand(-0.6,0.6),gy,tr.z+rand(-0.6,0.6),d
 // 残骸停留后沉入**全部复用乔木那一套** (同一个 FALLING 列表 + queueSink), 不另立第二套动画。
 // 与乔木的唯一差异是"株高"与"姿态写在哪": 对象式植被没有 scale 字段 (株高取自 cyl 段长), 姿态写
 // 各网格自身的 position/quaternion 而不是 TREE_IM 的实例矩阵; 倒向/时长/回弹/扬尘/沉入/碰撞体处理
-// 都与乔木同规 (killCyl 即杀且不触发寻路重建 —— 见 treeFall 的注释)。
+// 都与乔木同规 (killCyl 即杀并直写清占用格 —— 见 treeFall 的注释)。
 function floraTopple(rec,dx,dz){
 if(!rec||rec.fall||rec.dead||rec.alive===false) return;
 const base=[];
@@ -1134,6 +1185,8 @@ const cx=(ci%FN)*FRES-FOFF+FRES/2, cz=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
 if(sExt>0&&!FNOWX[ci]&&Math.random()<dt*sExt){   // 天气豁免格跳过暴雨浇灭 (油桶火池链)
   FBURN[ci]=0; FHEAT[ci]=0; FATT[ci]=null; FNOWX[ci]=0;
   FIRE_ACTIVE[i]=FIRE_ACTIVE[FIRE_ACTIVE.length-1]; FIRE_ACTIVE.pop();
+  occUnmarkFire(ci);   // ★2026-11-21 B#18: 浇灭同步直写清 OCC 火格 (快路径时代重建不再兜底)
+  if(fireNavT<=0) fireNavT=5;   // 末格被浇灭时保底一次收尾 refresh 消费清格簇 (与烧尽同款)
   if(Math.hypot(cx-camera.position.x,cz-camera.position.z)<90){
     const gy=heightAt(cx,cz);
     spawnP(PT.smoke,cx,gy+0.4,cz,0,1.0,0,1.0,1.6,rand(1.0,1.8),0.45,0.05);
@@ -1180,6 +1233,7 @@ FEXPIRE[ci]=0;
 FATT[ci]=null;
 FNOWX[ci]=0;
 FIRE_ACTIVE[i]=FIRE_ACTIVE[FIRE_ACTIVE.length-1]; FIRE_ACTIVE.pop();
+occUnmarkFire(ci);   // ★2026-11-21 B#18: 烧尽同步直写清 OCC 火格 (快路径时代重建不再兜底)
 const cx2=(ci%FN)*FRES-FOFF+FRES/2, cz2=Math.floor(ci/FN)*FRES-FOFF+FRES/2;
 const gy2=heightAt(cx2,cz2);
 if(Math.hypot(cx2-camera.position.x,cz2-camera.position.z)<90){
@@ -1196,6 +1250,9 @@ spawnP(PT.dark,cx2,gy2+0.5,cz2,rand(-0.2,0.2),rand(0.8,1.4),rand(-0.2,0.2),1.0,1
 	}
 	queueSink({inst:{im:bi.im,idxs:arr},depth:1.6,rest:rand(3.5,6.5),sink:2.0});
 	bi.byCell.delete(ci);
+	// ★B#27: 田块植株全格烧尽 → 摘软遮蔽 (标记位, 不 splice —— 布局期数组靠 23b 截断还原,
+	// splice 会错位; 跨局复位在 23b 按格账写回处)。灰烬田不再挡 Bot/丧尸/坦克视线。
+	if(bi.field&&!bi.field.burned&&bi.byCell.size===0) bi.field.burned=true;
 	}
 	}
 	// 格内灌木等对象植被消失 (枯树/椰树若已倒伏则跳过: 残骸已挂在自己的沉入任务上, 见 scheduleFloraObjSink)

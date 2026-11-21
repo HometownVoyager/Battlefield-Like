@@ -169,10 +169,31 @@ die(attacker,isHead){
  // 自爆尸殉爆 (2026-10-28 修复, 指导 §4.3(2)): 无论是引信到期 (zBoom 自杀支)、被枪弹击毙还是被
  // 连锁炸死, 一律当场起爆 —— 殉爆记在击杀者账上 (爆炸对人的归因走 explodeAt 的 src), 尸体照常退场。
  if(this.kind==='boomer') this.zBoomBlast(attacker||null);
- this._zGone=nowT+0.2;
+ this._zGone=nowT+(this.ragdolled?0.2:0.55);   // ★B#21: 就地倒下档放宽退场窗 —— 0.6s 倒地动画要播完 (0.55+0.2 扫描宽限 ≥0.6s); 布娃娃档维持 0.2 (物理接管, 早摘无碍)
 }
 update(dt){
- if(!this.alive) return;
+ if(!this.alive){
+  // ★B#21 (2026-11-21 审计): 就地倒下档 (无 CANNON / sf_deathfx='1') 的死亡只有 die() 里无人消费的
+  // deathAnimT=0.6 —— 旧版这里对死尸直接早退, 尸体保持站姿冻结 0.4s 后被 zSweep 瞬摘 ("僵立瞬摘")。
+  // 照 14-bots Bot.update A#10 倒地段同款写法把姿态摆到位 (Zombie extends Bot, mesh=buildSoldierMesh
+  // 与 Bot 网格同构: root/pelvis/tag 同名; 丧尸无蹲/趴态, 取站姿档 p0=0.94/fallK=1): 0.6s 绕脚跟
+  // 倒满 90° 贴地, 退场窗已在 die() 放宽盖住全程。布娃娃档由物理接管, 不进这段。
+  if(!this.ragdolled&&this.deathAnimT!==undefined&&this.mesh&&this.mesh.root){
+   this.deathAnimT-=dt;
+   const k=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
+   if(k>0){
+    if(!this.deathDir) this.deathDir=Math.random()<0.5?1:-1;
+    const th=HPI*k;
+    this.mesh.root.rotation.x=-th*this.deathDir;
+    // 骨盆高/残余抬升与 Bot 档同式: 站立链骨盆高 (0.94) 与脚到根腿长相等 ⇒ 靴底贴地旋转;
+    // 下限 0.14=躯干盒半高; 起手帧 cosθ≈1 与冻结站姿无竖向跳变。
+    this.mesh.pelvis.position.y=Math.max(0.14,0.94*Math.cos(th));
+    this.mesh.root.position.y=this.pos.y+0.94*Math.cos(th)*(1-Math.cos(th))*1.05;
+    if(this.mesh.tag) this.mesh.tag.visible=false;
+   }
+  }
+  return;
+ }
  // 近战伤害延时结算 (2026-10-28 修复, 指导 §4.3(1)): 旧 setTimeout(380) 脱离游戏主时钟 —— 暂停
  // (K 时停/布势帧长门) 期间照常到点受创。改挂实例账 _pendAtk 由 dt 积分驱动; 结算时补齐**三维门**
  // (水平 <2.6 且高度差 dy<1.8) —— 旧判据只有水平距离, 隔着数米高台/楼板的"隔空抓杀"病根在此。
@@ -527,6 +548,11 @@ function zombieInfect(sol,attacker){
  if(sol.mgUse){ releaseEmpl(sol.mgUse,true); sol.mgUse=null; }
  if(sol.empUse){ releaseEmpl(sol.empUse,true); sol.empUse=null; }
  if(sol.mortUse){ releaseEmpl(sol.mortUse,true); sol.mortUse=null; }
+ // ★B#19 (2026-11-21 审计): 尸变早退不进 die() 清账段 —— 对照 14-bots die() 尾段补齐缺的账:
+ // emCast 半途被杀 (emplMount 置 g.user=本兵) 不清 ⇒ g.user 滞留, empReady/batteryNear 对全体 Bot
+ // 判占用, 该火力点/岸防炮本局锁死; 连补给意向/计时一并撤 (die() :731 同款, 丧尸路径原样缺)。
+ if(sol.emCast){ if(sol.emCast.g&&sol.emCast.g.user===sol) sol.emCast.g.user=null; sol.emCast=null; }
+ sol.supplyGo=null; sol.supplyT=0; sol._dryScavT=0;
  if(sol.batUse){ sol.releaseBattery(); }
  if(sol.targetVeh){ if(sol.targetVeh.claimBot===sol) sol.targetVeh.claimBot=null; sol.targetVeh=null; }
  if(sol.onVehicle){ if(sol.onVehicle.crewBot===sol) sol.onVehicle.crewBot=null; sol.onVehicle=null; }
@@ -771,6 +797,12 @@ function zSweep(){
    ZOMBIES.splice(i,1);
    let si=soldiers.indexOf(z); if(si>=0) soldiers.splice(si,1);
    let ci=combatants.indexOf(z); if(ci>=0) combatants.splice(ci,1);
+   // ★B#38 (2026-11-21 审计): 摘除前释放 GPU 账 —— 丧尸逐具新建网格 (buildSoldierMesh ~10 个独占
+   // 几何 + 头顶 CanvasTexture 名牌), 旧版裸 remove 逐具泄漏 (长尸潮 GPU 缓存单调增长)。
+   // disposeActorHierarchy (02-scene) 白名单跳过共享军装/世界/VM 材质与 TEX 贴图; boomer 自爆球是
+   // 模块级共享静态 (Zombie._boomGeo/_boomMat, 不在白名单) —— 会被一并 dispose, 但对象仍被静态引用,
+   // 下具自爆尸生成时 GPU 重新上传/重编译, 无破坏仅极小一次性重传 (球体 10×8 段)。
+   if(z.mesh&&z.mesh.root&&typeof disposeActorHierarchy==='function') disposeActorHierarchy(z.mesh.root);
    if(z.mesh&&z.mesh.root&&z.mesh.root.parent) z.mesh.root.parent.remove(z.mesh.root);
   }
  }

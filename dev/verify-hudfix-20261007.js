@@ -13,7 +13,7 @@
 //   T3 非丧尸图结算页 (行为级): 两军兵力条照旧 (同时充当 T2 的 A/B 阴性对照);
 //   T4 zStats 单源: Zombie.die 累计 / zombieMatchStart 复位;
 //   T5 F1 开关源码锚: 19-input 处理块 / style.css 规则 / index.html 帮助行 (旧文案缺席=编辑落位) / i18n 词条;
-//   T6 版本戳 20261121b 全量唯一 (随批升戳, 钉与 index.html/__sfStyleVer 一致)。
+//   T6 版本戳 20261121c 全量唯一 (随批升戳, 钉与 index.html/__sfStyleVer 一致)。
 // 载入清单: 运行时解析 index.html (verify-zombie 同源教训: 清单与实载不一致 = 盲区假绿)。
 // 用法: node dev/verify-hudfix-20261007.js
 // ─────────────────────────────────────────────
@@ -155,7 +155,7 @@ ok(html.indexOf('<b>Tab</b> 战场记分板</div>')<0,'T5 旧版帮助行 (无F1
 console.log('── T6 版本戳唯一 ──');
 {
 const stamps=[...html.matchAll(/v=(\d{8}[a-z]?)/g)].map(m=>m[1]);
-ok(new Set(stamps).size===1&&stamps[0]==='20261121b','T6 全部引用同一版本戳 '+stamps[0]+' (共 '+stamps.length+' 处)');
+ok(new Set(stamps).size===1&&stamps[0]==='20261121c','T6 全部引用同一版本戳 '+stamps[0]+' (共 '+stamps.length+' 处)');
 }
 console.log('\n合计: '+pass+' 通过 / '+fail+' 失败');
 if(fails.length){ console.log('失败项:'); fails.forEach(f=>console.log('  ✗ '+f)); process.exitCode=1; }

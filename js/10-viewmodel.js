@@ -562,8 +562,14 @@ else if(VM.state==='nade'){
 VM.arms.L.visible=true;
 // 弹种 → 手上模型 (2026-09-30 批): 进 'nade' 态与持雷期间弹种变了就换件。VM.nadeM 恒指向**当前展示**的
 // 那一件 —— 外部 (20-player 自爆清枪 / 本文件哨兵自愈) 只写 VM.nadeM.visible=false, 语义不变。
+// ★2026-11-21 审计 B#10: 换模只判在**持雷段** (nadeHeld) —— 出手弧 (松手后 0.55s, nadeHeld 已 false)
+//   不再换模: releaseNade 在 k>0.5 出手瞬间清 nadeIsAT/Smoke/Incin (18-game), 旧写弧内下一帧
+//   vmNadeKind() 翻回 'frag' ⇒ vmNadeShow 换模, 而 shown.visible=k<0.55 仍在可见窗 ⇒ 出手后约 1-2 帧
+//   (~30ms) 手里凭空闪成普通雷 (举 AT/烟雾/燃烧弹出手时最刺眼)。弧内冻结弹种 (VM.nadeM 保持刚脱手
+//   那件, 弧末 nt>=1 回 idle 照旧收); 兜底 !VM.nadeM = 防御"首帧即弧"的异常入场, 与旧写"每帧必有一件
+//   可显"同保险 (nadeM 恒被本分支初始化, 哨兵自愈帧不动它)。
 const nk=vmNadeKind();
-if(VM.nadeKind!==nk) vmNadeShow(nk);
+if(VM.nadeKind!==nk&&(player.nadeHeld||!VM.nadeM)) vmNadeShow(nk);
 const shown=VM.nadeM;
 shown.visible=true; g.gun.visible=false;
 // 哨兵态自愈 (★2026-09-26 修): "按住 G 持雷"是 stateDur=999 的哨兵态, 只由"松开 G" (19-input 置 0.55)

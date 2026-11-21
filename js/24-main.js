@@ -21,7 +21,7 @@ try{ if(typeof SMOKES!=='undefined'&&SMOKES.length>2){ while(SMOKES.length>2){ c
 try{ if(typeof particles!=='undefined'&&typeof recycleP==='function'&&particles.length){ const cut=Math.floor(particles.length*0.4); for(let i=0;i<cut;i++) recycleP(particles.shift()); n+=cut; } }catch(e){}
 if(aggressive){
 try{ if(typeof RAG!=='undefined'&&typeof freezeRagdoll==='function'){ let act=0; for(const r of RAG.list) if(!r.frozen) act++; const keep=2; for(const r of RAG.list){ if(act<=keep) break; if(!r.frozen){ freezeRagdoll(r); act--; n++; } } } }catch(e){}
-try{ if(typeof runtimeCraters!=='undefined'&&runtimeCraters.length>12){ while(runtimeCraters.length>12){ const old=runtimeCraters.shift(); if(old&&old.parent) world.remove(old); n++; } } }catch(e){}
+try{ if(typeof runtimeCraters!=='undefined'&&runtimeCraters.length>12){ while(runtimeCraters.length>12){ const old=runtimeCraters.shift(); if(old&&old.parent){ old.geometry.dispose(); old.material.dispose(); world.remove(old); } n++; } } }catch(e){}   // ★2026-11-21: 弹坑逐坑 geo+克隆材质 dispose (审计#39, 与 05b 36 上限/TTL 两路同批)
 }
 return n;
 }

@@ -101,7 +101,7 @@ if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
 G('for(const s of soldiers) s.protUntil=0; player.protUntil=0;');
 ok(G('soldiers.length')>0,'前置: 战场已开局并部署 (soldiers='+G('soldiers.length')+', player.alive='+G('player.alive')+')');
-ok(html.includes("__sfStyleVer='20261121b'"),'前置: 版本戳 20261121b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261121c'"),'前置: 版本戳 20261121c 在位 (index.html 内联)');
 
 // ── 场地: CF 走廊 (承 loiterarm 同式) + 探针工具 ──
 G("CF=null; { const R=MAP_SIZE/2-70; const tallBox=(x0,z0,x1,z1,gy)=>{ for(const b of BOXES){ if(b.dead) continue; if(b.maxX<x0||b.minX>x1||b.maxZ<z0||b.minZ>z1) continue; if(b.maxY>gy-0.4&&b.minY<gy+1.5) return true; } return false; }; const tallCyl=(x0,z0,x1,z1,gy)=>{ for(const c of CYLS){ if(c.dead||c.foliage) continue; if(c.x<x0-(c.r+1.5)||c.x>x1+(c.r+1.5)||c.z<z0-(c.r+1.5)||c.z>z1+(c.r+1.5)) continue; if(c.y1>gy-0.4&&c.y0<gy+1.5) return true; } return false; }; for(let z=-R;z<=R&&CF===null;z+=13)for(let x=-R;x<=R-44;x+=13){ const gh=heightAt(x,z); if(gh<1||gh>45) continue; if(occBlocked(x,z)) continue; let flat=true; for(let xx=x-4;xx<=x+40&&flat;xx+=3){ if(Math.abs(heightAt(xx,z)-gh)>2) flat=false; } if(!flat) continue; if(tallBox(x-6,z-6,x+40,z+6,gh+5)) continue; if(tallCyl(x-6,z-6,x+40,z+6,gh+5)) continue; CF={x:x,z:z,gh:gh}; break; } }");
@@ -208,7 +208,8 @@ ok(s16.includes('if(!w.bld){')&&s16.includes('if(w.bld){')&&s16.includes('if(w.o
 ok(s15.includes("planeHitTest(s.pos,dir,hitD,s.team)")&&s15.includes('if(hitPl){ hitPl.takeDmg'),'T8 锚6 updateShells 对空判定+空中直击在位');
 ok(s22.includes("if(!player.alive&&(player.spectator||player.specWillBe())) deployPlayer();"),'T8 锚7 22-hud 调试冷却 bypass 在位');
 ok(s24.includes('btn.disabled=respawnCd>0&&!(player.spectator||player.specWillBe());'),'T8 锚8 24-main 冷却按钮放行在位');
-ok(s27.includes("achUnlock('likud_pilot');")&&s27.includes("player._achPilotBld=false;   // 撞楼普查字段不跨局携带"),'T8 锚9 成就判据+跨局清账在位');
+// ★20261121c B#30 跟码: 自刎成就新增专用普查字段 _achNadeSelf 与 _achPilotBld 同行清账, 锚跟新合并行 (判据不变=撞楼普查字段不跨局携带)
+ok(s27.includes("achUnlock('likud_pilot');")&&s27.includes("player._achPilotBld=false; player._achNadeSelf=false; }   // 撞楼/自刎普查字段不跨局携带"),'T8 锚9 成就判据+跨局清账在位');
 
 console.log('');
 console.log('通过 '+PASS.length+' / 失败 '+FAILN);

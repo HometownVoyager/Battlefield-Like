@@ -263,7 +263,6 @@ this.killerSrc=killSrcLabel(attacker); // 击杀来源: 载具/固定火力点/�
 if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+SCORE_TABLE.kill; addKillfeed(attacker,this,!!isHead); } // ★2026-11-01 判定批: 爆头位透传 (旧硬编码 false —— Bot die 链 14-bots 传 isHead, 唯独玩家被爆头击杀时播报永远不出 ☠)
 if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀计数
 const _pInfAct=(attacker&&attacker.zombie)||(typeof isFullInfectionActive==='function'&&isFullInfectionActive());
-if(ZOMBIE_MODE&&_pInfAct){ if(typeof queueZombieInfect==='function') queueZombieInfect(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker',1.6,this.deathRag); else if(typeof spawnZombie==='function') spawnZombie(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker'); } // 丧尸模式: 延迟尸变入队 (防同帧爆炸二次炸死/双倍击杀)
 	if(this.onMG){ releaseEmpl(this.onMG,true); this.onMG=null; }
 	if(this.onAT){ releaseEmpl(this.onAT,true); this.onAT=null; }
 	if(this.onAA){ releaseEmpl(this.onAA,true); this.onAA=null; }
@@ -316,6 +315,11 @@ noteDeath(this.pos.x,this.pos.z);
 // 玩家布娃娃 + 2秒第三人称死亡镜头 —— 2026-11-20 批⑦: 就地倒下档不 spawn ⇒ deathCamT=0.8 短镜头 +
 // playerAvatarDeath 本体倒地 (契约G 既有无物理分支), 零新增账。
 this.deathRag=(window.CANNON&&!deathFallMode())?spawnRagdoll(this,attacker,isHead):null;
+// 丧尸模式: 延迟尸变入队 (防同帧爆炸二次炸死/双倍击杀) —— ★B#20 (2026-11-21 审计): 入队必须在
+// deathRag 赋值**之后**: 旧位在 die() 开头读到的是上一次死亡遗留的 deathRag (首次死亡恒 null),
+// 1.6s 后 flush 删的是旧引用 (多半已过期), 本次死亡布娃娃不被尸变流程收走 ⇒ "尸体+爬起的丧尸"
+// 双身同屏至布娃娃 TTL。挪行不改 flush 时机 (同帧同步入队), 周围座位/读条清账顺序不受影响。
+if(ZOMBIE_MODE&&_pInfAct){ if(typeof queueZombieInfect==='function') queueZombieInfect(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker',1.6,this.deathRag); else if(typeof spawnZombie==='function') spawnZombie(this.pos.x,this.pos.z,Math.random()<0.18?'runner':'walker'); }
 this.deathCamT=this.deathRag?2.2:0.8;
 this.deathCamYaw=this.yaw+Math.PI;
 this.deathPos=this.pos.clone();

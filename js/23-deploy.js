@@ -647,7 +647,7 @@ p.demolish=null; // 上一局的拆除读条不跨命 (updateDemolish 的 alive 
 // A#8 契约 §7: 所有 player.chute=false 的写入点必须**同帧**收伞 —— 旧写法只在下一帧的 else 分支里摘,
 // 于是部署那一帧伞还挂在头顶 (typeof 守卫: 只加载部分脚本的沙箱没有 20-player, 不该因此报错)。
 if(typeof playerChuteClear==='function') playerChuteClear();
-p.stamina=1; p.suppressV=0; p.bloom=0;
+p.stamina=1; p.suppressV=0; p.bloom=0; p._flyT=0;   // ★2026-11-21 批B#1: 悬停飞行起飞宽限账随新命清零 (新命=新身体契约, _flyT 此前漏网)
 // 潜水态字段随部署复位 (★2026-09-26E 审计 31): diveD/oxy/_drownAcc/headDepth 此前**全库唯一**复位点
 // 是 15d-naval 的弃船 (crewOut) —— 潜水溺死后这条命带着 diveD(最多 4m) 进下一局: 一入水就被拽到
 // 水面下 (4+1.32)m、泳速长期吃 ×0.85、呼吸条显示空条。与 stamina/hp 同段清, 口径即"新命=新身体"。

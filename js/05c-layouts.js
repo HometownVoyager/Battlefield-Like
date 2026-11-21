@@ -2318,7 +2318,14 @@ const BLD={
 // 1) 建筑: placeAt 8 次抖动重试, 失败弃置 (地块本沿路带状生成, 弃置率≈0; 弃置不留空洞足迹)
 // noWater: 水乡图 8 次抖动 (±2.5m) 可能把滨河地块推进河/塘 (canTake 只保证**中心**离水 ≥0.5m)
 for(const L of D.lots){
- const p=placeAt(L.x,L.z,L.ry,L.w,L.d,{maxDh:1.7,noWater:true});
+ // ★2026-11-21 (审计 B#26): 教堂复合体足迹对齐手动路径 —— 00c PG_LOT_TBL 第 4 元 (可选) 是该 kind 的
+ // placeAt 校验足迹覆盖 {w,d,oz}: 教堂=大殿 10×16+背面钟塔 5×5 的复合体矩形 11.5×21.6@oz-2.55 (与
+ // 05c:15/243/1354/1644 手动四处同规, "全图统一"), 让钟塔段进校验与 B_FOOT 台账 (footFree/后续地块
+ // 不再能压进钟塔体积)。无覆盖 kind 照旧走 lots 自带 w/d (oz 缺省 0, 零行为变化); 纯校验参数改动,
+ // 不增删任何 wr 调用 (首投仍过 ⇒ 随机流零漂移), lots 落账不动 (PGDATA 指纹冻结)。
+ const ft=(typeof PG_LOT_TBL!=='undefined')&&PG_LOT_TBL[L.kind]&&PG_LOT_TBL[L.kind][3];
+ const p=ft?placeAt(L.x,L.z,L.ry,ft.w,ft.d,{maxDh:1.7,noWater:true,oz:ft.oz})
+          :placeAt(L.x,L.z,L.ry,L.w,L.d,{maxDh:1.7,noWater:true});
  if(p&&BLD[L.kind]) BLD[L.kind](p.x,p.z,p.ry);
 }
 // 1.2) 铁路货线 (镇集): 枕木+双轨沿货线折线铺设 (纯视觉不占位, 0.08m 可碾过; 与百团/柏林同款 railLine)
@@ -2868,8 +2875,9 @@ arr.push(k); k++;
 }
 im.count=k; im.receiveShadow=true;
 scene.add(im);
-registerBurnableInst(im,CROP_BY_CELL);
-CROP_FIELDS.push({x0:f.x0,x1:f.x1,z0:f.z0,z1:f.z1,h:f.t==='wheat'?1.15:f.t==='corn'?2.0:1.6});
+const _cf={x0:f.x0,x1:f.x1,z0:f.z0,z1:f.z1,h:f.t==='wheat'?1.15:f.t==='corn'?2.0:1.6};
+CROP_FIELDS.push(_cf);
+registerBurnableInst(im,CROP_BY_CELL,_cf);   // ★B#27: 批账↔田块条目关联, 烧尽判据单源=byCell 清空 ⇒ burned=true (04b)
 }
 }
 // ── 高草丛 (2026-10-24e 随机图): 无田空带的植被因素 —— 数据阶段规划 (PGDATA.grass, 避田/路/旗/聚落),
@@ -2914,8 +2922,9 @@ arr.push(k); k++;
 if(!k){ scene.remove(im); continue; }
 im.count=k; im.receiveShadow=true;
 scene.add(im);
-registerBurnableInst(im,CELL);
-CROP_FIELDS.push({x0:gp.x-gp.r,x1:gp.x+gp.r,z0:gp.z-gp.r,z1:gp.z+gp.r,h:1.4});
+const _cg={x0:gp.x-gp.r,x1:gp.x+gp.r,z0:gp.z-gp.r,z1:gp.z+gp.r,h:1.4};
+CROP_FIELDS.push(_cg);
+registerBurnableInst(im,CELL,_cg);   // ★B#27: 高草丛同款软遮蔽条目关联 (烧尽后不再遮视线)
 }
 }
 if(CAMPAIGN.sineRoad){

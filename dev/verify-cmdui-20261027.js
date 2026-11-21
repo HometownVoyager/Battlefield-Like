@@ -132,7 +132,7 @@ assert('26 滚轮 = 切高亮单位 (cmdHlStep), 不再是缩放',
  /cv\.addEventListener\('wheel'[\s\S]{0,700}?cmdHlStep\(dir\);/.test(s26)
  &&!/cv\.addEventListener\('wheel'[\s\S]{0,700}?CMD\.view\.scale=Math\.max/.test(s26));
 assert('26 左键三档: 点到自己人=高亮, 点到别处=集火 (布势期不集火)',
- /if\(u\)\{ CMD\.hl=u; CMD\.sel=u; cmdMapDraw\(\); cmdMapPanelTick\(\); return; \}/.test(s26)
+ /if\(u\)\{ CMD\.hl=u; CMD\.sel=u; cmdMapDraw\(\);[\s\S]{0,300}pnl\._t=0;[\s\S]{0,80}cmdMapPanelTick\(\); return; \}/.test(s26) // ★20261121c P2#37 跟码: 左键选人路径补 pnl._t=0 (第4站点, 同滚轮/命令键/集火三站), 旧单行锚跟新三行写法
  &&/if\(CMD\.mapDeploy\) return;\ncmdFocusFire\(wx,wz\);/.test(s26));
 assert('26 右键 = 退出指挥态 (走 cmdMapToggle 单源)',
  /\}else if\(e\.button===2\)\{[\s\S]{0,400}?cmdMapToggle\(\);/.test(s26));

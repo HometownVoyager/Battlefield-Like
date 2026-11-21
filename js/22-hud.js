@@ -1294,7 +1294,8 @@ const sqEl=el('squadHUD');
 if(SQUAD.members.length&&player.deployed&&!player.spectator){
 const alive=SQUAD.members.filter(s=>s.alive).length;
 sqEl.style.display='block';
-sqEl.innerHTML=`◆ 小队 <b>${alive}/${SQUAD.members.length}</b> · ${SQUAD.mode==='move'?'<b>进攻标记点</b>':'跟随中'}<br><span style="opacity:.65">[T] 标点进攻 · [Y] 跟随我</span>`;
+// ★20261121c P2#31: 整行走词典 (EN 词典缺键, 中文直写回退) —— 状态段/键位提示段拆成 {2}{3} 占位, 状态词单独成键
+sqEl.innerHTML=t2('◆ 小队 <b>{0}/{1}</b> · {2}<br><span style="opacity:.65">{3}</span>',alive,SQUAD.members.length,SQUAD.mode==='move'?'<b>'+t2('进攻标记点')+'</b>':t2('跟随中'),t2('[T] 标点进攻 · [Y] 跟随我'));
 } else sqEl.style.display='none';
 }
 let inFlag=null;
@@ -1307,8 +1308,9 @@ hudStyle('capBarFill','width',(inFlag.cap*100)+'%');
 const contested=inFlag.present&&inFlag.present[0]>0&&inFlag.present[1]>0;
 hudStyle('capBarFill','background',contested?'#e8d06a':(inFlag.capTeam===0?'#8fc1ff':(inFlag.capTeam===2?'#9ecfa0':'#ff9c8a')));
 let capTxt;
-if(contested) capTxt='⚠ 争夺中 · 圈内仍有敌军';
-else capTxt=inFlag.capTeam===player.team?'正在占领…':(inFlag.capTeam===-1?(inFlag.owner===player.team?'我方控制':'站在旗点范围内占领'):'敌军正在占领!');
+// ★20261121c P2#31: 占领五态走词典 (EN 词典缺键) —— 争夺/占领中/我方/中立提示/敌方, 一态一键
+if(contested) capTxt=t2('⚠ 争夺中 · 圈内仍有敌军');
+else capTxt=inFlag.capTeam===player.team?t2('正在占领…'):(inFlag.capTeam===-1?(inFlag.owner===player.team?t2('我方控制'):t2('站在旗点范围内占领')):t2('敌军正在占领!'));
 hudText('capTxt',capTxt);
 } else hudShow('capPanel',false);
 dmgFlash=Math.max(0,dmgFlash-dt*2);
@@ -1378,8 +1380,8 @@ if(!(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind===
 // (契约 §4: 不积热不显示条), 与上面 tankPip/mgPip 同一处收走。
 if(!(player.onVehicle&&player.onVehicle.kind==='tank')&&!player.onNaval){ const mgw=el('mgHeatWrap'); if(mgw&&mgw.style.display!=='none') mgw.style.display='none'; }
 // 架枪状态指示
-if(player.alive&&player.braced){ hudShow('braceInd',true); hudClass('braceInd','on'); hudText('braceInd','▙ 已架枪'); }
-else if(player.alive&&player.canBrace&&!player.prone&&!player.onVehicle&&SHOW_CTL_HINTS){ hudShow('braceInd',true); hudClass('braceInd',''); hudText('braceInd','[X] 架枪'); }   // 详细操作开关 (2026-11-09 批): 关=不显键位提示 ('▙ 已架枪' 状态保留)
+if(player.alive&&player.braced){ hudShow('braceInd',true); hudClass('braceInd','on'); hudText('braceInd',t2('▙ 已架枪')); }   // ★20261121c P2#31: 架枪两态走词典
+else if(player.alive&&player.canBrace&&!player.prone&&!player.onVehicle&&SHOW_CTL_HINTS){ hudShow('braceInd',true); hudClass('braceInd',''); hudText('braceInd',t2('[X] 架枪')); }   // 详细操作开关 (2026-11-09 批): 关=不显键位提示 ('▙ 已架枪' 状态保留)
 else hudShow('braceInd',false);
 	if(player.alive&&player.loiter){
 	hudShow('crosshair',true);
@@ -1533,7 +1535,7 @@ player.specView=false; player.specViewHost=null; player.specViewSpd=14; player._
 if(typeof cmdResetMatch==='function') cmdResetMatch();   // 指挥官层随新对局复位 (2026-10-26): 双向锁/编制/指挥读条/布势态, 换局零残留
 if(typeof specTimeReset==='function') specTimeReset();   // 观战时间倍率回 ×1 (2026-09-26H B7)
 if(typeof SpecLayer!=='undefined'&&typeof specLayerPurge==='function') specLayerPurge(); // 名牌/指向线收起 (B6)
-player.flying=false; player.flyAero=false; player._aeroSpd=0;
+player.flying=false; player.flyAero=false; player._aeroSpd=0; player._flyT=0;   // ★2026-11-21 批B#1: 起飞宽限账随新对局复位 (与 23-deploy deployPlayer 清账清单同款, 新命=新身体)
 player.hp=100;
 // 2026-11-04b 免着火批: 燃烧账随新对局复位 (否则上一局死在火里, 新一局部署完立刻继续冒火/抖屏)
 player.burnTimer=0; player.burnTickT=0; player.burnAttacker=null;
@@ -1611,16 +1613,25 @@ if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(s.mesh.root)
 s.mesh.root.parent.remove(s.mesh.root);
 }}
 for(const t of tanks){ if(!t) continue; t.alive=false; t.respawnT=1e9; t.crewBot=null;
+// ★2026-11-21 (审计 B#7): 换局收引擎 —— 与海战退场包装段同款口径 (engine 存在才 stop, 停完置 null):
+// 活着退场的坦克引擎句柄还挂在 01-audio 的 engines Set 里, 只摘 grp 不 stop ⇒ 振荡器常驻 + Set 强引用,
+// 引擎数随局数线性累积。坦克本局内同实例重生 (die 不停引擎), 但换局数组随即清空、下一局全新构造, 置 null 安全。
+// 幽灵坦克不进 tanks 表 (15c 头注①), 其引擎由 specVehStow/Reset 收 (停但不置 null, 入池复用), 这里碰不到。
+if(t.engine){ try{ t.engine.stop(); }catch(e){} t.engine=null; }
 if(t.grp&&t.grp.parent){
 if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(t.grp);
 t.grp.parent.remove(t.grp);
 }}
 for(const p of planes){ if(!p) continue; p.alive=false; p.pilotBot=null;
+// ★2026-11-21 (审计 B#7): 战机同坦克口径 —— 换局 stop 引擎并置 null (engines Set 唯一 delete 口在 01-audio stop())。
+if(p.engine){ try{ p.engine.stop(); }catch(e){} p.engine=null; }
 if(p.grp&&p.grp.parent){
 if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(p.grp);
 p.grp.parent.remove(p.grp);
 }}
 for(const k of trucks){ if(!k) continue; k.alive=false;
+// ★2026-11-21 (审计 B#7): 卡车同坦克口径 —— 车毁/突围下线已停过引擎的实例这里 if 守卫自然跳过。
+if(k.engine){ try{ k.engine.stop(); }catch(e){} k.engine=null; }
 if(k.grp&&k.grp.parent){
 if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(k.grp);
 k.grp.parent.remove(k.grp);
@@ -1918,7 +1929,7 @@ if(facSeg){
     btn.dataset.team=String(idx);
     const isAtk=(c.mode==='assault'&&c.atk===idx);
     const isDef=(c.mode==='assault'&&c.atk!==idx);
-    const roleTxt=isAtk?t2('进攻'):(isDef?t2('防守'):(idx===0?t2('红方'):t2('蓝方')));
+    const roleTxt=isAtk?t2('攻方'):(isDef?t2('守方'):(idx===0?t2('红方'):t2('蓝方')));   // ★20261121c P2#34: 攻方/守方=名词性新键 (旧误用 26-commander 动词键 attacking/holding, 词性错位); 红方/蓝方补键
     if(isUnknownPg){
       btn.textContent=(idx===0?t2('阵营一'):t2('阵营二'))+` (${roleTxt})`;
     }else{

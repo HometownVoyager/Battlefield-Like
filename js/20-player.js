@@ -540,7 +540,7 @@ p._flyT=(p._flyT||0)+dt;
 function specLand(p){
 p.pos.y=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);
 p.vel.set(0,0,0);
-p.flying=false; p.flyAero=false; p._aeroSpd=0; p.onGround=true;
+p.flying=false; p.flyAero=false; p._aeroSpd=0; p.onGround=true; p._flyT=0;   // ★2026-11-21 批B#1: 落地清起飞宽限账 (不清则二次起飞首帧贴地即被上方落地门弹回)
 AudioSys.footstep(true,0);
 showScorePop('落地 · 行走状态');
 }
@@ -863,7 +863,7 @@ if(typeof AudioSys!=='undefined'&&AudioSys.navalAudioTick) AudioSys.navalAudioTi
 // 严寒收尾 (2026-11-18 寒冷批②): 冷块在地面分支内, 而阵亡 (!alive 早退)/观战 (spec 分支) 都到不了那 ⇒
 // 在生死早退**之前**把提示条与结霜特效收干净 —— 旧版死亡后残留到重部署 (#ui 整层隐藏前 killcam/死亡镜头窗口期可见)。
 if(CAMPAIGN.cold&&(player.spectator||!player.alive)){ coldHudHide(); coldFxDrive(dt,0,false); }
-if(!player.alive){ return; }
+if(!player.alive){ player.suppressV=Math.max(0,player.suppressV-dt*0.8); return; }   // ★2026-11-21 批B#2: 死亡/观战期压制晕影照常衰减 (旧写早退在 :875 衰减之前 ⇒ 被压制时被杀, 死亡镜头/部署前窗口/自由观战全程恒亮; 24-main 帧序本函数先于 specViewTick, 附身镜像 :783/:799 每帧覆写不受影响, 调试附身活人走下方 specViewHost 早退亦不受影响)
 const p=player;
 // ★2026-11-01 附身中冻结门 (调试观战附身, specViewTick 钉位): 本体只读 —— 移动/开火/交互/读条全停,
 // 脱离=19-input 的 E (dbgSpecDetach 还原观察位)。视模式附身走上面的 !alive 早退, 不经过这里。
@@ -927,6 +927,7 @@ AudioSys.click(1200,0.3,0.06);
 if((p.onMG||p.onAT||p.onAA||p.onMortar||p.onBattery)&&(typeof VM!=='undefined')&&VM.state==='bandage'){
 if(typeof vmBandageHide==='function') vmBandageHide();
 if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true;
+if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // ★2026-11-21 批B#9: 还臂与 10-viewmodel vmAbortAction steal 统一块同款 (bandage 进态左臂置真; 缺此行持军刀坐姿包扎完成后浮左臂带下车)
 VM.state='idle'; VM.stateT=0; VM.stateDur=0; vmSndFlags={};
 }
 }
@@ -1486,7 +1487,7 @@ elm.style.display='block';
 elm.innerHTML=t2('使用中… {0}s (移动中止)',Math.max(0,(player.useCast.dur-player.useCast.t)).toFixed(1));
 return;
 }
-// 海战舰船驾驶位 (2026-09-20N 海战批): F 的两义按"可步行下船"与否切换 —— 与 tryInteract 的判据同源。
+// 海战舰船驾驶位 (2026-09-20N 海战批): F 的两义按 navalCanExitNow 单源切换 —— 与 tryInteract 的执行判据同源。
 // 浮在深水时用定稿给出的操作行 '[左键] 主炮 · [右键] 机炮 · [F] 鱼雷' (键已存在); 两栖车无鱼雷管时用
 // '[左键] 主炮 · [右键] 机炮'。可下船时改提示下船 (键 'F' 仍是同一个, 语义随状态)。
 // 2026-09-21: 补 C 三态提示 (追尾/炮手镜/艏向第一人称) —— 与 19-input 的 navalCycleView、22-hud 的操作行同源。
@@ -1496,7 +1497,7 @@ return;
 		const view=t2(player.navalGun?'<b>C</b> 炮手镜 (稳像)':(player.thirdPerson?'<b>C</b> 视角: 追尾':'<b>C</b> 视角: 艏向'));
 	elm.style.display='block';
 	// (2026-11-10: 贴帮优先跳帮提示随大舰子系统下架摘除)
-	elm.innerHTML=navalCanFootExit(c)
+	elm.innerHTML=navalCanExitNow(c)
 	?t2('<b>F</b> 下船 · <b>W/S</b>驾驶 <b>A/D</b>转向 <b>左键</b>主炮 <b>右键</b>机炮')+' · '+view
 	:t2((c.spec&&c.spec.torpedo>0)?'[左键] 主炮 · [右键] 机炮 · [F] 鱼雷':'[左键] 主炮 · [右键] 机炮')+' · '+view;
 	return;
@@ -1741,7 +1742,14 @@ function playerAvatarHide(){ if(playerAvatar) playerAvatar.root.visible=false; }
 // 下一局 playerAvatarEnsure 拿旧 root 每帧写 visible=true = "第三人称隐身"。世界还原链经此复位
 // (23b clearMatchEffects), 下次 ensure 原地重建。与 clearMatchEffects 里小队标记/降落伞同一处置模式。
 function playerAvatarReset(){
-if(playerAvatar&&playerAvatar.root.parent) playerAvatar.root.parent.remove(playerAvatar.root);
+if(playerAvatar){
+// ★B#38 (2026-11-21 审计): 本体与 Bot 同一套 buildSoldierMesh (逐次构建 new 独占几何+名牌 CanvasTexture),
+// 换阵营重建/世界还原摘除都走这里 —— 摘除前释放 GPU 账。disposeActorHierarchy (02-scene) 白名单
+// 跳过共享军装/世界/VM 材质与 TEX 贴图, 独占几何与名牌贴图释放 (与 22-hud retireMatchActors 对
+// Bot mesh.root 的既有处置同口径)。
+if(typeof disposeActorHierarchy==='function') disposeActorHierarchy(playerAvatar.root);
+if(playerAvatar.root.parent) playerAvatar.root.parent.remove(playerAvatar.root);
+}
 playerAvatar=null;
 _avNadeSet=null;                          // 手上的雷模随本体一起作废 (2026-09-30 批2)
 }

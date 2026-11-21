@@ -66,8 +66,8 @@ arm.position.set(0.075,CL[0]+0.01,CL[1]); grp.add(arm);
 const sight=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.028,0.20,8),vmMats.gunL);
 sight.position.set(0.135,CL[0]+0.035,CL[1]+0.02); sight.rotation.x=HPI; grp.add(sight);
 grp.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
-coverPoints.push({x,z});
-MORTARS.push({x,z,y:gh,face:yaw,grp,tube,user:null,cd:0,cdLock:0,owner,alive:true});
+const cp={x,z}; coverPoints.push(cp);   // ★2026-11-21 B#23: 掩体点引用记进 MORTARS 条目 —— 回收时按引用摘除
+MORTARS.push({x,z,y:gh,face:yaw,grp,tube,user:null,cd:0,cdLock:0,owner,alive:true,cp});
 if(owner.isPlayer){ showScorePop('迫击炮已架设 (F 上炮 · 6 靠近回收)'); AudioSys.click(800,0.3,0.05); }
 owner.mortarPlaced=true;
 return true;
@@ -77,6 +77,10 @@ const m=MORTARS.find(mt=>mt.owner===pl&&mt.alive&&!mt.user&&Math.hypot(mt.x-pl.p
 if(!m){ if(pl.isPlayer&&pl.mortarPlaced) showScorePop('需靠近自己的迫击炮才能回收'); return; }
 world.remove(m.grp);
 MORTARS.splice(MORTARS.indexOf(m),1);
+// ★2026-11-21 B#23: 架设时登记的掩体点随炮离场 —— 旧版留在 coverPoints 成幽灵驻守点 (Bot defend 直选
+// 一个没有炮的坐标)。按引用 splice 只动局内增量段 (架设必发生在开局快照之后), 23b 按 coverN 长度截断
+// 还原的开局前缀下标零扰动。
+if(m.cp){ const i=coverPoints.indexOf(m.cp); if(i>=0) coverPoints.splice(i,1); }
 pl.mortarPlaced=false;
 // ★2026-09-26 修: 旧写法 `find(mortar) || slots[0]` 在"玩家身上已无迫击炮槽"时把 2 发炮弹记到**主武器**
 // (卡宾枪) 上 —— 回收看着成功, 弹药却毫无变化 (那 2 发等于凭空消失)。没有迫击炮槽就不补 (弹药不进错枪)。
@@ -146,10 +150,35 @@ if(m){ if(m.grp.parent) world.remove(m.grp); const i=MG42S.indexOf(m); if(i>=0) 
 for(const bb of b.boxes) killBox(bb); // MG 的前掩墙 (sandbagWall reg=false) 一并拆
 }
 else if(b.type==='medkit'){ if(b.crate) removeMedkit(b.crate); }
+else if(b.type==='tower'){
+// ★2026-11-21 B#22: 旧版无此分支 —— 塔的网格/碰撞账原地留场 (占位圈已释放 ⇒ 原地可重叠重建), ZP 不退。
+// 按建账对称摘: 合并网格+独立网格 (engBuildExec 的 meshes 台账) + 碰撞盒; 塔腿/顶棚柱圆柱在共用尾段摘。
+for(const m of b.meshes) if(m.parent) world.remove(m);
+for(const bb of b.boxes) killBox(bb);
+}
+else if(b.type==='ammoc'){
+// ★2026-11-21 B#22: 同上 —— 箱体/盖网格 + 碰撞盒, 另摘 AMMO_CRATES 补给/修车账 (不然隐形箱还能按F补给/修车)
+for(const m of b.meshes) if(m.parent) world.remove(m);
+for(const bb of b.boxes) killBox(bb);
+for(let i=AMMO_CRATES.length-1;i>=0;i--){ const ac=AMMO_CRATES[i]; if(!ac.ship&&Math.hypot(ac.x-b.tx,ac.z-b.tz)<0.6) AMMO_CRATES.splice(i,1); }
+}
+// ★2026-11-21 B#22: 血量组同步下线 (与 destroyStructure 的 g.dead 对账同源; 25-zombies 按 zhpG.dead
+// 下线 BUILDS, 不置旗则残组留在 DESTRUCTIBLES 里当死重)
+if(b.zhpG&&!b.zhpG.dead) b.zhpG.dead=true;
+// ★2026-11-21 B#23: 掩体点按建账摘除 (沙袋×2/拒马×1/机枪前墙×2/瞭望塔×1 —— engBuildExec 建造期 slice
+// 捕获的本件新对象)。按引用 splice 只动局内增量段: 23b 快照 (coverN 长度截断还原) 依赖的只是开局前缀
+// 0..coverN-1, 前缀下标零扰动 ⇒ 还原链安全。
+for(const cp of b.cps){ const i=coverPoints.indexOf(cp); if(i>=0) coverPoints.splice(i,1); }
+// ★2026-11-21 B#22: 圆柱账按建账摘 (瞭望塔腿/顶棚柱; 拒马那条 hedge 分支已置旗, killCyl 重入幂等无害)
+for(const c of b.cyls){ if(c&&!c.dead) killCyl(c); }
 // 占位圈就近释放 (各件 propTake 都在自己中心) ⇒ 原地可重建
 for(let i=PROPS.length-1;i>=0;i--){ const e=PROPS[i]; if(Math.hypot(e.x-b.tx,e.z-b.tz)<1.2) PROPS.splice(i,1); }
-pl.buildCount=(pl.buildCount||0)+b.cost;
-if(pl.isPlayer){ showScorePop(t2('{0} · 已拆除 (退还 {1} 点)',t2(BUILD_NAMES[b.type]),b.cost)); AudioSys.click(600,0.25,0.06); }
+// ★2026-11-21 B#22: 退款按 entry 实记分流不双退 —— 商店件 (zp>0) 退 ZP (engBuildExec 扣的是
+// pzGain(-zp), buildCount 从未扣过; 旧版一律 +b.cost = 150 ZP 蒸发还倒贴建造点); 其余退建造点。
+let back;
+if(b.zp>0){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(b.zp); back=b.zp+' ZP'; }
+else{ pl.buildCount=(pl.buildCount||0)+b.cost; back=b.cost+' 点'; }
+if(pl.isPlayer){ showScorePop(t2('{0} · 已拆除 (退还 {1})',t2(BUILD_NAMES[b.type]),back)); AudioSys.click(600,0.25,0.06); }
 // ★2026-11-19 卡顿审计批二: 拆除完成必须报 NAV —— 旧版从不 markNavDirty, 拆掉的拒马(killCyl 置旗,
 // 2026-11-21 P1-9 前是 CYLS.splice, 两者均无占用直写)/铁丝网(旗翻)/沙袋(killOne 直写但盲置 0)在 NAV
 // 里留陈旧格直到下一次无关事件; 拒马/铁丝两类无直写 ⇒ forceFull=true 走全量重烘 (07-nav 快路径契约)
@@ -249,6 +278,7 @@ if(!tk||!pl.alive) return;
 if(occBlocked(tk.tx,tk.tz)){ showScorePop(t2('位置被占用, 建造取消')); return; }
 const ci=world.children.length;
 const bi=BOXES.length; // 读条回收: 捕获本次建造新增的碰撞盒 (killBox 拆除单源) 与网格
+const cyi=CYLS.length, cpi=coverPoints.length;   // ★2026-11-21 B#22/B#23: 圆柱/掩体点同口基线 (拆除按建账对称摘)
 // ★2026-11-21 P1-10: 各落成函数自带 propFree/propPushOut 落点闸, 失败 return null/undefined (engBuild
 // 起造闸只查 occBlocked, PROPS 占位圈不进 OCC ⇒ 起造/落成两闸不一致) —— 旧版丢弃返回值: 照扣款+
 // 报"建成"+BUILDS 登记空壳。现接住成败: sandbag/wire 读返回值 (失败=null), hedge/mg 无返回值约定按
@@ -282,8 +312,8 @@ riseNewMeshes(ci,0.85);
 if(tk.zp){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(-tk.zp); }   // ZP 扣款 (商店件)
 else pl.buildCount=(pl.buildCount||0)-tk.cost;
 // 读条回收登记 (2026-09-28 阶段三 P1): 记下归属/落点/成本 + 类型专属引用, 拆除时按型走单源
-const entry={type:tk.type,cost:tk.cost,tx:tk.tx,tz:tk.tz,ry:tk.ry,owner:pl,alive:true,
-boxes:BOXES.slice(bi),meshes:world.children.slice(ci),wire:null,crate:null,mg:null};
+const entry={type:tk.type,cost:tk.cost,zp:tk.zp||0,tx:tk.tx,tz:tk.tz,ry:tk.ry,owner:pl,alive:true,
+boxes:BOXES.slice(bi),meshes:world.children.slice(ci),cyls:CYLS.slice(cyi),cps:coverPoints.slice(cpi),wire:null,crate:null,mg:null};
 if(tk.type==='wire') entry.wire=wires.find(w=>w.alive&&Math.hypot(w.x-tk.tx,w.z-tk.tz)<2.5&&w.builder===pl)||null;
 if(tk.type==='medkit') entry.crate=MED_CRATES.find(c=>c.uses>0&&Math.hypot(c.x-tk.tx,c.z-tk.tz)<2.5&&c.owner===pl)||null;
 if(tk.type==='mg') entry.mg=MG42S.find(m=>Math.hypot(m.x-tk.tx,m.z-tk.tz)<3)||null;

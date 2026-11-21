@@ -13,10 +13,13 @@ const MAT_MARK_RED=new THREE.MeshLambertMaterial({color:0xb83028});
 const MAT_CRATER_RIM=new THREE.MeshLambertMaterial({color:0x5d5344});
 
 // ═══════════ 庄稼软遮蔽 (诺曼底农田): 可穿行/子弹穿透/只遮 Bot 视线 (仿烟雾 smokeBlocksLOS) ═══════════
-// CROP_FIELDS 条目: {x0,x1,z0,z1,h} —— 世界 AABB + 作物顶高(相对地面); 由 05c 摆作物时填充
+// CROP_FIELDS 条目: {x0,x1,z0,z1,h,burned?} —— 世界 AABB + 作物顶高(相对地面); 由 05c 摆作物时填充
+// burned (★2026-11-21 B#27): 田块植株已全格烧尽 (04b 烧尽回调按 byCell 按格账判, 23b 还原复位) ——
+// 灰烬田不再软遮蔽 (恒真的旧账会让烧完的空田继续"隐身"玩家)。
 const CROP_FIELDS=[];
 function cropBlocksLOS(ax,ay,az,bx,by,bz){
 for(const f of CROP_FIELDS){
+if(f.burned) continue;   // ★B#27: 灰烬田跳过 (烧尽标记见 04b registerBurnableInst/烧尽回调注)
 const dx=bx-ax, dz=bz-az;
 const L2=dx*dx+dz*dz;
 if(L2<1e-6) continue;
@@ -397,7 +400,7 @@ if(typeof surfaceLane==='function') surfaceLane(m,'decal'); else m.renderOrder=1
 const ttl=runtime?CRATER.freshTtl:CRATER.scarTtl;   // 生命周期: 战斗新坑 150s / 布局旧痕 450s (=3×, 00-config CRATER)
 if(runtime){
 runtimeCraters.push(m);
-if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); world.remove(old); }
+if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); old.geometry.dispose(); old.material.dispose(); world.remove(old); }   // ★2026-11-21: 逐坑 geo+克隆材质 dispose (审计#39; 贴图共享 TEX 不动)
 }
 CRATER_LIFE.push({m,age:0,ttl});
 }
@@ -419,7 +422,7 @@ const e=CRATER_LIFE[i],m=e.m;
 if(!m.parent){ _craterDrop(i); continue; }
 e.age+=dt;
 const rem=e.ttl-e.age;
-if(rem<=0){ world.remove(m); _craterDrop(i); continue; }
+if(rem<=0){ m.geometry.dispose(); m.material.dispose(); world.remove(m); _craterDrop(i); continue; }   // ★2026-11-21: 同上逐坑 dispose (审计#39, 三条移除路径齐)
 if(rem<CRATER.fadeWin) m.material.opacity=0.85*clamp(rem/CRATER.fadeWin,0,1);   // 0.85=craterMat 底版 opacity
 }
 }

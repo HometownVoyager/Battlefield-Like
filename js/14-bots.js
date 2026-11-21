@@ -424,7 +424,7 @@ this.peekPhase='in'; this.peekPos=null; this.coverPt=null; this.supFireT=0;
 this.coverCd=0; this.slideCd=0; this.lastCover=null;
 this.fireFleeT=0; this.fireScanT=rand(0,0.22);
 this.onVehicle=null; this.targetVeh=null; this.chuting=false; this.emCast=null;
-this.bandageT=0;
+this.bandageT=0; this.nadeAnimT=0;   // ★B#14: 投掷前摇残账跨命清零 (die 的掉雷引信继承在其前读旧值, 不受影响) —— 否则重生后 handK=0"双手离枪"整命残留
 this.navFails=0; this.dirT=rand(-0.5,0.5); // 寻路失败退避计数 + 兜底直行的固定偏航 (防一列人排成直线)
 this.vehGoT=0; this.vehFailV=null; this.vehFailT=-99; this.objHoldT=0; // 2026-11-03: 上车触达账 + 目标粘滞跨命复位
 	this.mesh.root.visible=true;
@@ -629,7 +629,7 @@ if(best){
 this.supplyGo={x:best.x,z:best.z,exp:nowT+30};
 this.supplyT=1.2;
 this.path=null; this.setPathTo(best.x,best.z);
-this.state='toSupply'; this.decisionT=rand(0.4,0.7);
+this.state='toSupply'; this.coverPt=null; this.decisionT=rand(0.4,0.7);   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法), 防占用账按幽灵意向加罚
 }else this._dryScavT=10;
 }
 eyePos(){ return V3(this.pos.x,this.pos.y+(this.prone?0.5:this.crouch?1.15:1.62),this.pos.z); }
@@ -661,12 +661,18 @@ if(this.reloadT>0) this.reloadT=0;
 if(this.pReloadT>0) this.pReloadT=0;
 if((this.state==='nade'||this.state==='atnade')&&this.nadeAnimT>0){ if(this.hp<=0) dropHeldNade(this); this.nadeAnimT=0; this.state='combat'; }   // ★2026-11-03 掉雷批: 致命一击(hp 已上方扣减)⇒ 掉雷代替收回; 非致命照旧收回, die() 内钩兜非打断路径
 if(this.bandageT>0) this.bandageT=0;
-if(this.supplyT>0) this.supplyT=0;
+if(this.supplyT>0) this.supplyT=0;   // ★B#15: 打断=取消不结算 (本行是被 parity 探针锚定的原句, 判据跟走)
+if(this.supplyGo){ this.supplyGo=null; this.state='combat'; }   // ★B#15: 连补给意向与执行态一并撤 (与 toSupply 执行段近敌放弃同款) —— 只清计时会变成"跳过站定秒补满"
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
 }
+// ★B#13: 环境伤 (attacker=null: 激流/失温/溺水等每帧 tick) 不入压制/lastHitT/aimSettle 战斗账 —— 否则
+// 每帧 +0.45 一秒钉满 1.6、lastHitT 恒新、aimSettle 钉 0.1, 探头门永闭, 落水兵被"压死"在河里。
+// 只豁免这三样: 血量扣减/读条打断网 (上方)/死亡与击杀归因一律照旧; 出生保护本就不依赖这三样。
+if(attacker){
 this.lastHitT=nowT;
 this.suppression=Math.min(1.6,this.suppression+0.45);
 this.aimSettle=Math.max(0.1,this.aimSettle-0.4);
+}
 if(attacker&&attacker.team!==this.team&&!attacker.spectator){ // 观战者的攻击不会引来还击锁定
 this.noticeThreat(attacker);
 // A#8: 伞降目标的索敌口径同 perceive —— 25m 内才把它当还击目标 (与"远距离看不见伞兵"同一条)
@@ -969,6 +975,10 @@ if(nowT-this.lastSeenT>4) this.lastSeenT=nowT-3.5;
 }
 }
 decide(){
+// ★B#14: 改判走 = 取消在途投掷前摇 —— 各改判分支 (小队令/掩体/侧移/近战等) 只设 state 不碰 nadeAnimT,
+// 残留 >0 会让 handK=0 "双手离枪"整命残留。1869 门挡住进行中的前摇 (能进到这里 nadeAnimT>0 必为冻结残账),
+// 统一在此清零; 门条件即 nadeAnimT>0, 清零后自然放行, 与批A门兼容。atnade/nade 重入分支随后自设 0.8, 不受影响。
+if(this.nadeAnimT>0) this.nadeAnimT=0;
 if(this.state==='toSupply') return;   // 弹尽补给承诺期 (2026-11-03): decide 不抢状态, 放弃条件在执行段与 damage 门里
 const engaged=this.target&&nowT-this.lastSeenT<4;
 const seenNow=this.target&&nowT-this.lastSeenT<1.6;
@@ -1132,7 +1142,7 @@ if(eCraft&&eCraft.alive&&(!eTank||!eTank.alive)) navInfATShip(this,eCraft);
 if(eTank){
 const dTank=Math.hypot(eTank.pos.x-this.pos.x,eTank.pos.z-this.pos.z);
 if(this.atn>0&&this.nadeCd<=0&&dTank<26){
-this.state='atnade'; this.nadeAnimT=0.8; this.atTankTarget=eTank;
+this.state='atnade'; this.nadeAnimT=0.8; this.atTankTarget=eTank; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 return;
 }
 if(dTank<130){
@@ -1145,7 +1155,7 @@ if(empInReach(g,this.pos.x,this.pos.y,this.pos.z,16)&&this.emplMount(g,'at')) re
 }
 }
 if(this.cls===1&&this.atn>0&&dTank<55&&!engaged){
-this.state='hunt';
+this.state='hunt'; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 if(!this.path||this.repathT<=0){
 this.setPathTo(eTank.pos.x+rand(-8,8),eTank.pos.z+rand(-8,8));
 this.repathT=2.5;
@@ -1178,7 +1188,7 @@ if(seenNow){
 // 丧尸不肉搏 (2026-10-28 修复, 指导 §4.3(3)): 人类 Bot 见丧尸贴脸仍切刺刀 = 自杀式冲进尸群白送
 // —— 尸潮口径下近战交换永远亏 (一换多)。守卫后 Bot 保持枪械交战 (perceive 本就把丧尸算敌方);
 // 普通对战无丧尸 ⇒ 条件恒假, 逐位零变化。
-if(distT<2.6&&!(this.target&&this.target.zombie)){ this.state='melee'; return; }
+if(distT<2.6&&!(this.target&&this.target.zombie)){ this.state='melee'; this.coverPt=null; return; }   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 if(this.state==='cover'&&this.coverPt){
 // 掩体驻留: 探头循环接管交战, 不被机动层打断 (旧版0.4s就跳出掩体)
 if(this.coverT>0.4&&(this.reloadT>0||this.suppression>0.55||this.hp<50)) return;
@@ -1208,7 +1218,7 @@ let cluster=0;
 const _tp=this.target.pos;
 for(const e of combatants) if(e.alive&&e.team!==this.team){ const _dx=e.pos.x-_tp.x,_dy=e.pos.y-_tp.y,_dz=e.pos.z-_tp.z; if(_dx*_dx+_dy*_dy+_dz*_dz<7*7*1.000001) cluster++; }
 if((hidden&&Math.random()<0.5)||(cluster>=2&&Math.random()<0.4)){
-this.state='nade'; this.nadeAnimT=0.8;
+this.state='nade'; this.nadeAnimT=0.8; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 return;
 }
 }
@@ -1271,7 +1281,7 @@ if(this.target&&this.target.alive&&this.mag>this.def.mag*0.25&&this.suppression>
 // 掩体内换弹/压制冷却: 视线断了也不贸然冲出去 (探头循环在 update 中继续)
 if(this.state==='cover'&&this.coverPt&&this.coverT>0.4&&(this.reloadT>0||this.suppression>0.55||this.hp<50)&&nowT-this.lastSeenT<9) return;
 if(this.target&&nowT-this.lastSeenT<9){
-this.state='hunt';
+this.state='hunt'; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 if(!this.path||this.repathT<=0){ this.setPathTo(this.lastSeenPos.x+rand(-3,3),this.lastSeenPos.z+rand(-3,3)); this.repathT=3; }
 return;
 }
@@ -1287,7 +1297,7 @@ const dp=nearestDepot(this.pos.x,this.pos.z);
 if(dp&&this.nades>0&&this.nadeCd<=0){
 const dd=Math.hypot(dp.x-this.pos.x,dp.z-this.pos.z);
 if(dd<26){
-this.state='nade'; this.nadeAnimT=0.8;
+this.state='nade'; this.nadeAnimT=0.8; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 this.lastSeenPos.set(dp.x,0,dp.z);
 return;
 }
@@ -1308,7 +1318,7 @@ tv.claimBot=this;
 tv.claimT=nowT;
 this.targetVeh=tv;
 this.vehGoT=0; // 新认领清贴壳计时 (2026-11-03)
-this.state='toVehicle';
+this.state='toVehicle'; this.coverPt=null;   // ★B#17: 弃旧掩体意向 (对照 1216/1230 清法)
 if(!this.path||this.repathT<=0){ this.setPathTo(tv.pos.x,tv.pos.z); this.repathT=2.2; }
 return;
 }
@@ -2366,7 +2376,7 @@ const aimGate=dT>50?0.08:(dT>25?0.11:0.16);
 // 反坦克兵/迫击炮兵近距离改用手枪自卫
 if(this.pReloadT<=0&&this.fireT<=0){
 if(this.pMag<=0&&(!this.slots||!this.slots[1]||this.slots[1].reserve>0)){ this.pReloadT=this.slots[1]?this.slots[1].def.reload*dynReloadFac(this.pMag,this.slots[1].def.mag):2; } // 动态换弹速度 (2026-11-12)
-else {
+else if(this.pMag>0){ // ★B#11: mag 与备弹双尽时不得落进这里空转开火 (与主武器全部分支的 mag>0 门同口径) —— 否则 pMag 扣成负数无限循环
 this.shootAt(this.target,this.slots[1].def);
 this.fireT=(60/this.slots[1].def.rpm)*rand(1.4,2.4);
 }
@@ -2459,7 +2469,7 @@ if(!solve.aligned||g.cd>0) { this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0)
 const er=0.02*DIFF_TABLE[SETTINGS.diff].spreadMul;
 const dir=V3(Math.sin(wantYaw)*Math.cos(wantPit),Math.sin(wantPit),Math.cos(wantYaw)*Math.cos(wantPit));
 dir.x+=rand(-er,er); dir.y+=rand(-er,er)*0.6; dir.z+=rand(-er,er); dir.normalize();
-const o=(typeof g.muzzle==='function')?g.muzzle():V3(g.x,by,g.z).addScaledVector(dir,3.66);
+const o=(typeof g.muzzle==='function')?g.muzzle():V3(g.x,g.y,g.z).addScaledVector(dir,3.66);
 const chk=raycastWorld(o,dir,dh);
 if(chk&&chk.dist<=dh-1.5){ g.cd=BAT_BLOCKED; this.updateMesh(dt,this.emplPinT>0?EMPL_SNAP_SPD:0); return; }
 // 唯一开火入口 (契约 §6 冻结签名 batteryFire(g,dir,owner)); 冷却在 Battery.fire 内部单源重置
@@ -2792,7 +2802,7 @@ truncateConeMesh(m.flGrp.flCone,m.flGrp.baseL||14,occD,0);
 }
 }
 // A#10 审计③: 操作固定炮位/岸防炮时也按"据枪瞄准"姿态持枪 (旧版 engaged 不含 batUse ⇒ 上炮后枪口姿态掉回低持枪)
-const engaged=(this.target&&nowT-this.lastSeenT<4.5)||this.mgUse||this.empUse||this.batUse;
+const engaged=(this.target&&nowT-this.lastSeenT<4.5)||this.mgUse||this.empUse||this.batUse||this.mortUse;   // ★B#17: 补 mortUse —— 迫击炮手操作期间同样按"据枪瞄准"姿态 (A#10 审计③同族漏网)
 const prone=this.prone, crouch=this.crouch&&!prone;
 const sprint=speed>4.4&&!engaged&&!prone;
 const pelY=prone?0.22:crouch?0.6:0.94;
@@ -2900,7 +2910,7 @@ const gunY_t=-m.pelvis.rotation.y+((sprint&&!(_hold&&_hold.noSprintCant))?0.95:0
 const gunZ_t=sprint?0.16:0;
 // A#10 审计①: 枪身挂在骨盆之下, 骨盆前倾 pp 会把枪口一起带偏 —— 旧版只补偿 pitch, 于是"据枪瞄准"时
 // 枪口仰角恒为 pitch - torsoX (实测 站 -0.05 / 蹲 -0.14 / 趴 -0.10 rad ≈ 2.9°/8.0°/5.7°)。减 pp 后仰角 = pitch。
-const gunPitch=(engaged||this.mgUse||this.empUse||this.batUse)?-clamp(this.pitch,-0.7,0.7):(sprint?0.3:0.25);
+const gunPitch=(engaged||this.mgUse||this.empUse||this.batUse||this.mortUse)?-clamp(this.pitch,-0.7,0.7):(sprint?0.3:0.25);   // ★B#17: 枪身俯仰同补 mortUse (与上方 engaged 同口径)
 const gunX_t=gunPitch-pp+(_hold?_hold.gunX:0);   // ★三轮批: 军刀吃持握表 gunX (举刀), 其余 kind=null 加 0 逐位不变
 const handK=(this.state==='melee')?0.35:((this.state==='nade'||this.state==='atnade'||this.nadeAnimT>0||this.bandageT>0)?0:1);
 const handKL=rl?0:handK;
@@ -4328,13 +4338,14 @@ if(!b||!craft||craft.alive===false) return false;
 const d=Math.hypot(craft.pos.x-b.pos.x,craft.pos.z-b.pos.z);
 const cy=(craft.pos.y||0)+0.9;                                   // 艇体干舷中点 (命中圆柱由 15d 的 navalHitCyl 判定)
 const eye=b.eyePos();
-// ① 火箭筒 (与打坦克同一 LOS 门槛 50m / 同一 fireT 3.6s)
+// ① 火箭筒 (与打坦克同一 LOS 口径: 射到目标实际距离, 除贴脸 3m 裕量外被挡不发 / 同一 fireT 3.6s)
 if(b.slots&&b.slots[0]&&b.slots[0].def.rocket){
 const w2=b.slots[0];
 if(w2.mag<=0||b.fireT>0||b.reloadT>0||d>=65) return false;
 const dir2=V3(craft.pos.x-eye.x,cy-eye.y,craft.pos.z-eye.z).normalize();
-const chk=raycastWorld(eye,dir2,65);
-if(chk&&chk.dist<=50) return false;
+// ★B#12: 预检射线打到目标实际距离 (旧 65m 定长+50m 门槛与打坦克分支漂移), 与反坦克枪分支同款 —— 视线中途被挡就不白烧火箭
+const chk=raycastWorld(eye,dir2,d);
+if(chk&&chk.dist<=d-3) return false;
 b.lastFiredT=nowT;
 b.switchVisualGun(w2.key);
 b.visualGunTimer=nowT+1.8;

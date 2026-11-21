@@ -267,7 +267,7 @@ for(const s of c.sprites){
 if(s.flame){
 // 火舌闪烁: 后半段逐渐熄灭
 const fade=clamp((c.dur-c.t)/4,0,1);
-s.sp.material.opacity=(0.4+0.3*Math.sin(nowT*s.fk+s.ph))*fade;
+s.sp.material.opacity=(0.4+0.3*Math.sin(_fireT*s.fk+s.ph))*fade;   // ★2026-11-21: 相位钟 _fireT 火系战斗钟 (2026-11-05 时停批漏网, 原 nowT 墙钟 ⇒ 时停里照闪)
 const w2=s.sp.scale.x+Math.sin(nowT*s.fk*0.7+s.ph)*dt*0.5; s.sp.scale.set(w2,w2*1.6);   // ★2026-11-19: 保纵横比 (spawn 处 1.6 拉伸)
 continue;
 }
@@ -524,7 +524,7 @@ setTimeout(()=>{ sun.intensity=_nBase; },160);
 const dd=rand(90,320);
 // ★2026-11-04b 时停音频批: 远雷是墙钟 setTimeout, 时停前排程的那一声会在冻结期间照响 ——
 //   触发当刻再看一次时停/静默账 (与 01-audio 的 distantMG/bird 同款闸), 冻住的战场不许打雷。
-setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; if(typeof AudioSys!=='undefined'&&AudioSys.isSilenced&&AudioSys.isSilenced()) return; AudioSys.explosion('thunder',dd*0.8); },dd*2.6); // 远雷档 (★2026-11-15c: 天穹闷响)
+setTimeout(()=>{ if(typeof specTimeFrozen==='function'&&specTimeFrozen()) return; if(typeof AudioSys!=='undefined'&&AudioSys.isSilenced&&AudioSys.isSilenced()) return; if(gamePaused||menuHold) return; AudioSys.explosion('thunder',dd*0.8); },dd*2.6); // 远雷档 (★2026-11-15c: 天穹闷响) ★2026-11-21: 补 gamePaused||menuHold 两道 (distantMG/bird 既有, 暂停/主菜单里不炸雷)
 }
 }
 if(stormFlash>0){

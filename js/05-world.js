@@ -885,6 +885,21 @@ continue;
 const mergedMesh = mergeBoxItems(items, mat);
 world.add(mergedMesh);
 for(const item of items){
+// ★2026-11-21 B#24: 合并路径原先吞掉挂在 item.mesh 上的子节点 (addSnowCap 雪盖: 02-scene rm.add(cap))
+// —— item.mesh 只留句柄不入 world ⇒ 子节点永不渲染 (莫斯科教堂钟塔压顶石/碉堡顶/平顶小楼屋顶雪盖静默
+// 丢失)。合并时把子节点改挂 world 独立渲染, 变换按 item (平移 + 绕Y转 ry) 复合补齐; 下面两句句柄
+// (killBox 靠 parent=mergedMesh 走 no-op, 移植风险备注明令禁止"修正") 逐字不动。雪盖不占碰撞盒 ⇒ 坍塌/
+// 还原链语义不变: 带雪盖的建筑 (教堂/平顶小楼/碉堡/瞭望塔) 均无可毁墙组无坍塌链; 开局件由 23b
+// worldKids 台账整体还原, 丧尸塔件在建期入 world ⇒ 同在 engBuildExec 的 meshes slice 窗口内随拆除/击毁摘除。
+const kids=item.mesh.children.slice();
+if(kids.length){
+const cs=Math.cos(item.ry), sn=Math.sin(item.ry);
+for(const c of kids){
+c.position.set(item.x+c.position.x*cs+c.position.z*sn, item.y+c.position.y, item.z-c.position.x*sn+c.position.z*cs);
+if(c.rotation) c.rotation.y=(c.rotation.y||0)+item.ry;
+world.add(c);
+}
+}
 item.mesh.mergedMesh = mergedMesh;
 item.mesh.parent = mergedMesh;
 }

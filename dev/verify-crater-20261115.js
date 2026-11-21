@@ -71,10 +71,10 @@ const SRC={},PATCH_MAP={};
 const NEG_PATCHES=[
 // N1 绕向翻回朝下 (一轮修的坏写法): T1e 法线朝下红
 ['js/05b-props.js','idx.push(a,a+1,b,a+1,b+1,b);','idx.push(a,b,a+1,b,b+1,a+1);'],
-// N2 抬升摘除 (顶点贴弦面无余量): T2 不变式红
-['js/05b-props.js','verts.push(wx-x, surfY(wx,wz)+0.05+lip*edgeFade, wz-z);','verts.push(wx-x, surfY(wx,wz)+lip*edgeFade, wz-z);'],
-// N3 36 上限 shift 账摘除: T4a 红
-['js/05b-props.js','if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); world.remove(old); }',';'],
+// N2 抬升摘除 (顶点贴弦面无余量): T2 不变式红 (★20261121c 跟码: 7fb72eb 弹坑生命周期批把 +0.05 拆成 vr 默认档, 锚跟码)
+['js/05b-props.js','let ySup=tY, vr=0.05;','let ySup=tY, vr=0;'],
+// N3 36 上限 shift 账摘除: T4a 红 (★20261121c 跟码: shift 行已补逐坑 dispose, NEG 锚跟新行)
+['js/05b-props.js','if(runtimeCraters.length>36){ const old=runtimeCraters.shift(); old.geometry.dispose(); old.material.dispose(); world.remove(old); }',';'],
 ];
 if(NEG) for(const [f,from,to] of NEG_PATCHES){
 if(SRC[f]===undefined) SRC[f]=fs.readFileSync(path.join(root,f),'utf8');
@@ -103,7 +103,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261121b'"),'前置: 版本戳 20261121b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261121c'"),'前置: 版本戳 20261121c 在位 (index.html 内联)');
 
 // ── 平坦场地 (法线判据需要平地) ──
 G("_sp=null; { const R=MAP_SIZE/2-60; for(let z=-R;z<=R&&!_sp;z+=7)for(let x=-R;x<=R;x+=7){ const gh=heightAt(x,z); if(gh<1||gh>40) continue; if(occBlocked(x,z)) continue; let flat=true; for(let dx=-3;dx<=3;dx+=3)for(let dz=-3;dz<=3;dz+=3){ if(Math.abs(heightAt(x+dx,z+dz)-gh)>0.3) flat=false; } if(!flat) continue; _sp={x:x,z:z,gh:gh}; break; } }");

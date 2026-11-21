@@ -1931,7 +1931,8 @@ return _rcR;
 // pend 旧字段已由 pendList 取代 (簇表), OCC.pend 不再写入
 const OCC={ res:1, N:0, off:(MAP_SIZE+40)/2, data:null, dirty:null, dirtyList:null, pendList:null, _bA:null, _bB:null };
 // buildOccupancy 之外的**直接写** OCC.data 的登记入口 (registerDynCollider / killDynCollider /
-// 05-world killOne / 04b-fire occMarkFire 四处)。必要性: 差分的基线是"上一次重建出来的网格",
+// 05-world killOne / 04b-fire occMarkFire 四处; ★2026-11-21 B#18 增至七处: 04b 熄灭/烧尽 occUnmarkFire、
+// killCyl 清柱直写 —— 火熄/树倒不再依赖全量重建放行)。必要性: 差分的基线是"上一次重建出来的网格",
 // 而这些路径会直接改活体网格 —— 下一次重建按同一批表算出来的结果与改动后的活体逐格一致,
 // 差分自然为空, 但**导航烘的还是更早那一份** ⇒ 必须把"被直接写过的范围"另行补进脏矩形。
 // 超集无害 (多算几格), 漏登记才会留下陈旧寻路格。

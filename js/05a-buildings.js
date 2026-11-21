@@ -1756,19 +1756,22 @@ wheel.rotation.y=ry; wheel.rotation.z=HPI; // 轮面垂直于地面、法向沿 
 wheel.castShadow=true;
 world.add(wheel);
 // 轮缘
+// ★2026-11-21 B#25: 旧写法 rotation.y=ry + rotation.x=HPI/2 把环面法向转到竖直 = 轮缘平躺成水平圈,
+// 与竖直轮盘矛盾 (叶板"两片悬空、四片插盘"的观感即由此来)。改绕 Y 转 ry+HPI/2: 环法向落到水平
+// (cos ry,0,-sin ry), 与轮盘轴 (-cos ry,0,sin ry) 共线 (环面绕轴对称, 取负等价) ⇒ 竖直环与轮盘共面。
 const rim=new THREE.Mesh(new THREE.TorusGeometry(1.4,0.09,6,16),MAT.woodDark);
 rim.position.set(x,g0+2.0,z);
 rim.rotation.order='YXZ';
-rim.rotation.y=ry; rim.rotation.x=HPI/2;
+rim.rotation.set(0,ry+HPI/2,0);
 rim.castShadow=true;
 world.add(rim);
 }
-// 叶板 ×6 (沿轮缘)
+// 叶板 ×6 (沿轮缘): 竖直圆分布 —— 角度 a 在轮盘平面内转动 (水平沿 (sin ry,cos ry) 向、高度随 a 起伏),
+// 与轮盘/轮缘共面成筒车; 旧版水平圆分布 + a*0 死项是基座时代遗留 (六片全悬在轴高一圈, 与竖直轮脱开)
 for(let k=0;k<6;k++){
 const a=k*TAU/6;
-const lx=Math.cos(a)*1.25, lz=Math.sin(a)*1.25;
-const px=x+lx*Math.cos(ry)+lz*Math.sin(ry), pz=z-lx*Math.sin(ry)+lz*Math.cos(ry);
-mesh(boxGeo(0.32,0.18,0.1),MAT.wood,px,g0+2.0+a*0,pz,ry,false,true);
+const px=x+Math.sin(a)*1.25*Math.sin(ry), pz=z+Math.sin(a)*1.25*Math.cos(ry);
+mesh(boxGeo(0.32,0.18,0.1),MAT.wood,px,g0+2.0+Math.cos(a)*1.25,pz,ry,false,true);
 }
 // 底部水槽 (贴地, 矮掩体, 顺轮切线)
 {
