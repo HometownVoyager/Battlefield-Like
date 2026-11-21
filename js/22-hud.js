@@ -310,10 +310,19 @@ mmC.fillStyle='rgba(24,32,18,.9)'; mmC.fillRect(0,0,S,S);
 const lt=(player.alive&&player.loiter&&!player.loiter.dead)?player.loiter:null;   // 2026-11-07 实机反馈批 (裁定④): 操控巡飞弹 ⇒ 小地图以弹体为中心/朝向 (本体箭头挪到实际位置, 弹体标记常显)
 const cx=player.alive?(lt?lt.pos.x:player.pos.x):0, cz=player.alive?(lt?lt.pos.z:player.pos.z):0;
 const rot=player.alive?(lt?lt.yaw:player.yaw):0;
+// ★20261121d 批C裁定 (审计疑点"自由观战锚原点"): 自由观战档小地图改锚**观察者** —— 视模式 (specView) 观察者
+//   眼位就是 player.pos (specViewTick 逐帧钉宿主 / 自由飞行逐帧推进), 旧写 dead ⇒ cx=cz=0 是死亡镜头时代
+//   旧口径: 自由飞行里整张图钉死在世界原点, 人飞走了地图不跟。三种形态: 真 FPV (alive) 与附身 (specViewHost,
+//   本体位被 specViewTick 逐帧钉到宿主 ⇒ 锚宿主) 走上面原行照旧; 普通死亡镜头 (!specView) 仍锚原点照旧。
+//   有效锚另立 _ax/_az 派生行只改**位置锚**; 旋转档保持 rot 原值 (=0 北向上) —— 裁定只锚"相机位置"+箭头表
+//   朝向, 不含随观察者转图; 且 verify-loiterfreeze 对 cx/rot 三行与两处 rotate 惯用串有源码钉 (×2 处含海军
+//   包装层), 消费点全部保持原样不碰。观察者箭头见第 4 层 (照玩家自机箭头 idiom)。
+const _svObs=(player.specView&&!player.alive);
+const _ax=_svObs?player.pos.x:cx, _az=_svObs?player.pos.z:cz;
 const c=Math.cos(rot), s=Math.sin(rot);
 const invRangeHalf=half/range;
 const toMap=(x,z)=>{
-let dx=x-cx, dz=z-cz;
+let dx=x-_ax, dz=z-_az;
 const rx=dx*c-dz*s, rz=dx*s+dz*c;
 return [half+rx*invRangeHalf, half+rz*invRangeHalf];
 };
@@ -341,7 +350,7 @@ if(!sol.alive||sol.onVehicle) continue;
 const [px,py]=toMap(sol.pos.x,sol.pos.z);
 if(px<-10||py<-10||px>S+10||py>S+10) continue;
 const _mc=solMapDotColor(sol);   // 着色单源 (2026-11-13 观战中立批): 观战态本队不再画小队白点
-if(_mc==='#ff5040'&&!mmEnemyVis(sol.pos.x,sol.pos.z,sol.lastFiredT)) continue; // 夜/雨档: 敌方步兵 = 近距常显 + 开火后显形 (R3)
+if((_mc==='#ff5040'||_mc==='#9ecfa0')&&!mmEnemyVis(sol.pos.x,sol.pos.z,sol.lastFiredT)) continue; // 夜/雨档: 敌方步兵 = 近距常显 + 开火后显形 (R3); ★20261121d 批C: 丧尸 '#9ecfa0' 同规接入 (旧版过滤门只拦 '#ff5040', 丧尸着色≠红 ⇒ 门外夜/雨恒显; mmEnemyVis 内观战/死亡旁路与全图开关自动跟走; 丧尸 lastFiredT 恒 undefined = 只近距常显, 同卡车口径)
 mmC.fillStyle=_mc;
 mmC.beginPath(); mmC.arc(px,py,_mc==='#5a9eff'?2.5:3,0,TAU); mmC.fill();
 }
@@ -472,6 +481,16 @@ mmC.fillStyle='#fff';
 mmC.beginPath(); mmC.moveTo(0,-6); mmC.lineTo(4,5); mmC.lineTo(-4,5); mmC.closePath(); mmC.fill();
 mmC.restore();
 }
+// ★20261121d 批C裁定: 自由观战观察者箭头 —— 照玩家自机箭头既有 idiom (同 translate/rotate(rot-yaw)/三角,
+//   朝向=观察者朝向; rot 保持北向上 ⇒ 箭头在图上随观察者转向摆动, 不随图转)。附身 (specViewHost) 与
+//   普通死亡镜头照旧不画 (维持既有行为面)。
+else if(player.specView&&!player.alive&&!player.specViewHost){
+mmC.save();
+const _pp=toMap(player.pos.x,player.pos.z); mmC.translate(_pp[0],_pp[1]); mmC.rotate(rot-player.yaw);
+mmC.fillStyle='#fff';
+mmC.beginPath(); mmC.moveTo(0,-6); mmC.lineTo(4,5); mmC.lineTo(-4,5); mmC.closePath(); mmC.fill();
+mmC.restore();
+}
 mmC.restore();
 mmC.strokeStyle='rgba(210,200,160,.4)'; mmC.lineWidth=1.5;
 mmC.beginPath(); mmC.arc(half,half,half-2,0,TAU); mmC.stroke();
@@ -576,7 +595,7 @@ for(const s of soldiers){
 if(!s.alive||s.onVehicle) continue;
 const [px,py]=toM(s.pos.x,s.pos.z);
 const _mc=solMapDotColor(s);   // 着色单源 (2026-11-13 观战中立批): 观战态本队不再画小队白点
-if(_mc==='#ff5040'&&!mmEnemyVis(s.pos.x,s.pos.z,s.lastFiredT)) continue; // 夜/雨档: 敌方步兵同小地图规 (R3)
+if((_mc==='#ff5040'||_mc==='#9ecfa0')&&!mmEnemyVis(s.pos.x,s.pos.z,s.lastFiredT)) continue; // 夜/雨档: 敌方步兵同小地图规 (R3); ★20261121d 批C: 丧尸 '#9ecfa0' 同规接入 (与小地图 344 同式, 两图不漂)
 c.fillStyle=_mc;
 c.beginPath(); c.arc(px,py,_mc==='#5a9eff'?2.5:3,0,TAU); c.fill();
 }
@@ -708,7 +727,11 @@ function drawCompass(){
 const W=460,H=26;
 cpC.clearRect(0,0,W,H);
 cpC.fillStyle='rgba(0,0,0,.35)'; cpC.fillRect(0,0,W,H);
-const yaw=player.alive?player.yaw:0;
+// ★20261121d 批C裁定: 视模式 (specView) 罗盘跟**观察者朝向** —— 旧写 dead ⇒ yaw=0 (死亡镜头时代旧口径):
+//   自由观战里朝向读数钉死朝北, 与旗点方位标记 (下方 atan2 吃 player.pos = 观察者眼位, 一直在跟) 自相矛盾。
+//   三种形态: 真 FPV (alive) 照旧; 附身/自由观战 (specView, 本体朝向被 specViewTick 逐帧钉宿主或自由飞行)
+//   跟观察者朝向; 普通死亡镜头 (!specView) 照旧 0。
+const yaw=(player.alive||player.specView)?player.yaw:0;
 cpC.font='12px sans-serif'; cpC.textAlign='center';
 const marks=[[0,'北'],[HPI,'西'],[Math.PI,'南'],[-HPI,'东'],[Math.PI/4,'西北'],[-Math.PI/4,'东北'],[Math.PI*0.75,'西南'],[-Math.PI*0.75,'东南']];
 for(const [a,label] of marks){
@@ -3332,8 +3355,13 @@ const S=190, half=S/2, range=90*Math.max(1,Math.sqrt((CAMPAIGN.mapSize||320)/320
 const lt=(player.alive&&player.loiter&&!player.loiter.dead)?player.loiter:null;   // 2026-11-07 实机反馈批 (裁定④): 操控巡飞弹 ⇒ 小地图以弹体为中心/朝向 (本体箭头挪到实际位置, 弹体标记常显)
 const cx=player.alive?(lt?lt.pos.x:player.pos.x):0, cz=player.alive?(lt?lt.pos.z:player.pos.z):0;
 const rot=player.alive?(lt?lt.yaw:player.yaw):0;
+// ★20261121d 批C裁定: 与 drawMinimap 内联投影同步 —— 自由观战档 (_svObs) 位置锚改观察者 (rot 旋转档照旧)。
+//   本包装层的 toMap 必须与基础函数逐字同式 (见上面"漂移由自检看住"), 基础侧改了锚, 这里不跟 = 海战符号层
+//   在自由观战里画回世界原点, 与底层点位错位。
+const _svObs=(player.specView&&!player.alive);
+const _ax=_svObs?player.pos.x:cx, _az=_svObs?player.pos.z:cz;
 const toMap=(x,z)=>{
-const dx=x-cx, dz=z-cz;
+const dx=x-_ax, dz=z-_az;
 const co=Math.cos(rot), si=Math.sin(rot);
 const rx=dx*co-dz*si, rz=dx*si+dz*co;
 return [half+rx/range*half, half+rz/range*half];

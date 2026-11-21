@@ -1137,10 +1137,11 @@ else if(!crash&&AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){
 else{ if(bld) player._achPilotBld=true; // 成就普查字段 (2026-11-14 用户令): 驾机撞楼而亡 —— 27-achievements 死亡边沿轮询读, 读后即清
 player.damage(999,attacker,false); }
 }
-// 有人机记"机体账"时的折让 (2026-11-14 用户裁定): 有人战机**整体占 3 票** = 机体 (plane-1) 2 + 驾驶员 1
-// (驾驶员走下面 damage(999)→Bot.die 的既有 -1) ; 空机 (含飞行员先跳伞的) 照旧整机 plane(3)。
-// 跳伞驾驶员日后单独阵亡照常 -1 (Bot.die) ⇒ 全寿命上限仍 4 票。TICKET_COST.plane 本身不动 (勿硬编码 3)。
-const hadCrew=!!this.crewBot;
+// ★20261121d 批C裁定 (统一4票, 取代 2026-11-14"有人机整体3票"口径): 驾机票账单源 ——
+// 机体账一律整收 TICKET_COST.plane(3), 驾驶员死亡再走各自既有 -1: AI 驾驶员走下面 damage(999)→Bot.die
+// (14-bots), 玩家走 damage(999)→18-game die 的 -1 ⇒ 有人机 (玩家驾机/AI 有人机) 死亡总账同为 4 票;
+// 空机 (含飞行员先跳伞的) 照旧整机 plane(3), 跳伞驾驶员日后单独阵亡照常 -1 (Bot.die)。
+// TICKET_COST.plane 常量不动 (勿硬编码, aircollide 批纪律); 大厅兵力票池倍率只乘开局票池, 死亡扣票不乘。
 if(this.crewBot){
 const cb=this.crewBot;
 this.crewBot=null;
@@ -1156,7 +1157,7 @@ addKillfeed(attacker,{name:this.name,team:this.team,isPlayer:false},false);
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 击落红档 (2026-09-30 批): 飞机无乘员 die 链兜底 (crewBot 走 damage(999)→Bot.die 有, 空机没有), 统一在此出档
 if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
-tickets[this.team]=Math.max(0,tickets[this.team]-(hadCrew?TICKET_COST.plane-1:TICKET_COST.plane));
+tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);   // ★20261121d 批C: 统一4票 (机体3+驾驶员1), 取代 2026-11-14 hadCrew 折让 (机体2+驾驶员1=3)
 explosionFX(this.pos.clone(),!!bld);   // 撞楼档不盖弹坑 (2026-11-14: 旧版 crater 恒打 heightAt = 爆点在楼面/半空, 坑却盖在正下方地上)
 AudioSys.explosion('planedie',this.pos.distanceTo(camera.position),AudioSys.panOf(this.pos)); // 坠机档 (★2026-11-15c)
 }catch(e){

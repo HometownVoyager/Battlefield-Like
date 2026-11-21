@@ -1073,8 +1073,40 @@ ok(err.p1===1&&err.over===true&&err.w===1,'T21 无点位图归零即结 (自然�
 }
 
 
+// T22: wipeAnnounced 粘性修复 (★20261121d 批C裁定) —— "归零封重生"是动态票数门: 归零方经返票
+//      (assault 占旗 flagReturn / demolition 炸库 depot; 本测以直写 tickets 驱动同一门判定, 真实路径汇入同点)
+//      回到 >0 ⇒ 播报闩复位; 局势再反转 (重新归零) ⇒ "兵力耗尽"文案重新宣布 (旧账闩置位后终生不复位,
+//      二次归零永远静默)。
+function t22(){
+console.log('T22 归零→返票反转→闩复位→再归零重新宣布 (淞沪)');
+const ctx=boot(3);
+const err=vm.runInContext(`${HOOK}
+(()=>{
+try{
+document.getElementById('startBtn').onclick();
+const cnt=()=>__m.msgs.filter(m=>m.indexOf('兵力耗尽')>=0).length;
+tickets[0]=0;
+updateFlags(0.05);
+var r1={w0:wipeAnnounced[0],n:cnt(),mep:matchEndPending,over:matchOver};
+tickets[0]=5;   // 返票反转 (真实路径=占旗/炸库返票, 同一门判定单点)
+updateFlags(0.05);
+var r2={w0:wipeAnnounced[0],mep:matchEndPending,over:matchOver};
+tickets[0]=0;   // 局势再反转
+updateFlags(0.05);
+var r3={w0:wipeAnnounced[0],n:cnt()};
+return [r1,r2,r3];
+}catch(e){ return 'ERR:'+String(e&&e.stack||e); }
+})()`,ctx);
+if(typeof err==='string'&&err.indexOf('ERR:')===0){ ok(false,'T22 '+(err||'')); return; }
+ok(err[0].w0===true&&err[0].n===1,'T22 首次归零: 播报闩置位 + "兵力耗尽"宣布 1 次 (实测 '+err[0].n+')');
+ok(err[1].w0===false&&err[1].mep===null&&err[1].over===false,'T22 返票回 >0: 播报闩复位, 不误触发终局 (动态门保留)');
+ok(err[2].w0===true,'T22 局势再反转: 播报闩重新置位');
+ok(err[2].n===2,'T22 二次归零: "兵力耗尽"文案重新宣布 (实测 '+err[2].n+' 次; 旧账恒 1 次)');
+}
+
+
 // ── 入口 ──
 console.log('== 清场胜利规则沙箱 ==');
-t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15(); t16(); t17(); t18(); t19(); t20(); t21();
+t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); t10(); t11(); t12(); t13(); t14(); t15(); t16(); t17(); t18(); t19(); t20(); t21(); t22();
 console.log(`== 结果: ${PASS.length} 通过 / ${FAILS} 失败 ==`);
 process.exit(FAILS?1:0);

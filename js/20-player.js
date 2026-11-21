@@ -1050,9 +1050,18 @@ if(!cmdLock&&p.onMortar){ updatePlayerMortar(dt); stamRegenTick(p,dt,nowT); retu
 if(!cmdLock&&p.onNaval){ updatePlayerNaval(dt); stamRegenTick(p,dt,nowT); return; }
 // (2026-11-10: 大舰炮位接管座位分派支随大舰子系统下架摘除)
 // 观战模式: 弹药/物资每0.5s回满 (无限补给) + 创造飞行分支 —— 2026-09-01 用户指定
+// ★20261121d 批C裁定 (审计疑点"观战补给账"): 0.5s 回满节流改吃**观察者钟** —— 旧写以 nowT 差值节流
+//   (旧私有账 = 时间戳), 吃世界钟 nowT, 与"冻战场不冻观察者"含补给账的裁定相悖 (时停/布势冻结期补给账不该跟战场一起冻;
+//   24-main:100 已知问题清单里"观战补给节流"混用 nowT 的对账项由本修就地出清)。本函数第一实参就是
+//   观察者帧长 (24-main:171 传 pdt, 时停=真实时间), 照 22-hud hudSlowT (2026-11-08 时停HUD批) 同款累加
+//   计器吃帧长, 不自创新钟; 非时停 pdt≡世界帧长 ⇒ 0.5s 节律逐位不变。暂停期 updatePlayer 整体不跑
+//   (24-main 冻结分支早退) ⇒ 暂停照旧不回账。计器在本体链每帧累计 (含生存期) ⇒ 重进观战首帧即回满 =
+//   旧写"生存期世界钟照走 ⇒ 重进立即回满"的既有可观察行为保住; 首帧初值 0.5 = 立即到期 (旧写
+//   !_specSupT 首帧回满同款)。变量 _specSupT(时间戳)→_specSupAcc(累加计器), 私有账无他处消费。
+p._specSupAcc=((p._specSupAcc===undefined)?0.5:p._specSupAcc)+dt;
 if(p.spectator){
-if(!p._specSupT||nowT-p._specSupT>0.5){
-p._specSupT=nowT;
+if(p._specSupAcc>0.5){
+p._specSupAcc=0;
 for(const s of p.slots){ s.mag=s.def.mag; s.reserve=s.def.reserve; }
 const g2=specGear(); // 观战: 四弹种全给 (2026-10-24 用户指定; 旧版按兵种表 ⇒ 狙击手观战没有 AT雷/燃烧弹)
 p.nadeCount=g2.nades; p.atNades=g2.atn; p.smokeCount=g2.smoke; p.incinCount=g2.incin;

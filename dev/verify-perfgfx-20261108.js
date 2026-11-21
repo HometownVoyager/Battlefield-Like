@@ -136,12 +136,12 @@ section('T1 源码防回退 (新写法在 / 旧写法绝迹)');
 }
 
 // ── T2 版本戳 ──
-section('T2 版本戳 20261121c');
+section('T2 版本戳 20261121d');
 {
  const idx=read('index.html'), gf=read('dev/_game_files.txt');
- assert('T2 index.html ≥48 处 20261121c + __sfStyleVer + _game_files 45 行 + 旧 20261108c 清零 (2026-11-10 海战移除批判据跟码)',
-  [...idx.matchAll(/20261121c/g)].length>=48&&idx.includes("window.__sfStyleVer='20261121c';")
-  &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121c')).length===45
+ assert('T2 index.html ≥48 处 20261121d + __sfStyleVer + _game_files 45 行 + 旧 20261108c 清零 (2026-11-10 海战移除批判据跟码)',
+  [...idx.matchAll(/20261121d/g)].length>=48&&idx.includes("window.__sfStyleVer='20261121d';")
+  &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121d')).length===45
   &&!idx.includes('20261108c')&&!gf.includes('20261108c'));
 }
 
