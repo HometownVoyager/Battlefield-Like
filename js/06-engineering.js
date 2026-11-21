@@ -87,8 +87,8 @@ if(pl.isPlayer){ showScorePop('迫击炮已回收'); AudioSys.click(600,0.22,0.0
 // ── 读条回收 (2026-09-28 阶段三 P1, 用户提议): 工程兵对自己建的东西**读条拆除** ─────────────
 // B 靠近自己工事 = 1.2s 拆除读条 (退全款) / 再按取消 / 受击·离开·开始别的动作都打断;
 // 6 靠近自己迫击炮 = 同一条读条走 recoverMortar。拆除走既有单源: 沙袋/MG killBox (碰撞盒+网格+OCC
-// 脏矩形同拆), 医疗箱 removeMedkit, 铁丝网 alive=false+摘组, 拒马 摘网格+清 CYLS。占位圈 (PROPS)
-// 就近释放让原地可以重建。BUILDS 在 22-hud 换局清理段随 MORTARS 一并清空。
+// 脏矩形同拆), 医疗箱 removeMedkit, 铁丝网 alive=false+摘组, 拒马 摘网格+killCyl 置旗 (条目留 CYLS
+// 表内不删, 下标稳定)。占位圈 (PROPS) 就近释放让原地可以重建。BUILDS 在 22-hud 换局清理段随 MORTARS 一并清空。
 const BUILDS=[];
 const DEMOLISH_T=1.2;
 function nearOwnBuild(pl){
@@ -130,10 +130,13 @@ const b=d.b; b.alive=false;
 if(b.type==='sandbag'){ for(const bb of b.boxes) killBox(bb); }
 else if(b.type==='hedge'){
 for(const m of b.meshes) if(m.parent) world.remove(m);
-for(let i=CYLS.length-1;i>=0;i--){ const c=CYLS[i]; if(Math.hypot(c.x-b.tx,c.z-b.tz)<1.3) CYLS.splice(i,1); }
-// ★splice 使 RGRID.cylCells 里被删圆柱之后的下标集体前移 ⇒ 倒排表失效, 必须全量重建一次
-// (2026-11-11 性能批: NAV.refresh 的 buildSpatialIndex 改按此戳跳过, 见 04-collision _colIdxDirty)
-_colIdxDirty=true;
+// ★2026-11-21 P1-9: 旧版按半径 1.3m CYLS.splice 连邻近地图杆 (电线杆/警示桩 r 0.07~0.2, 建点可近到
+// ~0.5m) 一起删 = 邻杆当局失碰撞 + 23b 圆柱快照按下标还原错位一格 + RGRID 烘进错账 (CYLS 全库唯一
+// splice)。改 killCyl 置旗 (dead+r=0+y1<y0, 弹道/横推/顶面支撑/OCC 烘焙四处消费点全跳过), 与铁丝网
+// "只置旗不删条目"同口径; 拒马圆柱建造时精确落在 (tx,tz) ⇒ 只精确命中自己一条, 邻杆不受累。条目
+// 留表内 ⇒ RGRID 倒排表/23b 快照下标零错位, 无需 _colIdxDirty (拆除尾部 markNavDirty(true) 照旧
+// 强制全量重烘 OCC/NAV, 见下方 2026-11-19 注)。
+for(const c of CYLS){ if(!c.dead&&c.x===b.tx&&c.z===b.tz) killCyl(c); }
 }
 else if(b.type==='wire'){ if(b.wire){ b.wire.alive=false; if(b.wire.grp.parent) world.remove(b.wire.grp); } }
 else if(b.type==='mg'){
@@ -147,9 +150,9 @@ else if(b.type==='medkit'){ if(b.crate) removeMedkit(b.crate); }
 for(let i=PROPS.length-1;i>=0;i--){ const e=PROPS[i]; if(Math.hypot(e.x-b.tx,e.z-b.tz)<1.2) PROPS.splice(i,1); }
 pl.buildCount=(pl.buildCount||0)+b.cost;
 if(pl.isPlayer){ showScorePop(t2('{0} · 已拆除 (退还 {1} 点)',t2(BUILD_NAMES[b.type]),b.cost)); AudioSys.click(600,0.25,0.06); }
-// ★2026-11-19 卡顿审计批二: 拆除完成必须报 NAV —— 旧版从不 markNavDirty, 拆掉的拒马(CYLS.splice 无
-// 占用直写)/铁丝网(旗翻)/沙袋(killOne 直写但盲置 0)在 NAV 里留陈旧格直到下一次无关事件; 拒马/铁丝
-// 两类无直写 ⇒ forceFull=true 走全量重烘 (07-nav 快路径契约)
+// ★2026-11-19 卡顿审计批二: 拆除完成必须报 NAV —— 旧版从不 markNavDirty, 拆掉的拒马(killCyl 置旗,
+// 2026-11-21 P1-9 前是 CYLS.splice, 两者均无占用直写)/铁丝网(旗翻)/沙袋(killOne 直写但盲置 0)在 NAV
+// 里留陈旧格直到下一次无关事件; 拒马/铁丝两类无直写 ⇒ forceFull=true 走全量重烘 (07-nav 快路径契约)
 if(typeof markNavDirty==='function') markNavDirty(true);
 }
 // 迫击炮落点指示圈
@@ -224,8 +227,8 @@ if(occBlocked(tx,tz)){ showScorePop(t2('此处无法建造')); return; }
 const lim=MAP_SIZE/2-4;
 if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop(t2('超出战场边界')); return; }
 if(!player.barStealArmed('KeyB')) return;   // ★2026-10-30 读条交互批: 建造起步=双击确认 (定位在全部早退之后=确认起造; 首按不建不置 pendingBuild, 只亮提示)
+player.stealBar();   // ★2026-10-25 反馈轮①升级: 定位在全部早退之后=确认起造才抢; 读条账目旗(nadeHeld/bandaging)与模型层一起收 —— ★2026-11-21 P1-4: 必须在置 pendingBuild **之前**抢 (pendingBuild 已入 readBarActive 抢占网, 先置后抢会把自己这条新账收掉, 建造静默起步失败; 与 H/R/G/拆卸等全家"先抢后置账"同序)
 pl.pendingBuild={type,cost:isFreeItem?0:cost,zp:zpCost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
-player.stealBar();   // ★2026-10-25 反馈轮①升级: 定位在全部早退之后=确认起造才抢; 读条账目旗(nadeHeld/bandaging)与模型层一起收
 VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmResetSndFlags();
 showScorePop(t2('建造中: {0} … (移动取消)',t2(BUILD_NAMES[type])));
 }
@@ -236,6 +239,7 @@ if(VM.state==='build'){
 VM.state='idle';
 if(VM.gunParts) VM.gunParts.gun.visible=true;
 if(VM.hammerM) VM.hammerM.visible=false;
+if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // ★2026-11-21 P1-5: 回 idle 按当前武器还臂 (持刀藏/持枪现) —— 与 10-viewmodel build 分支两个出口及 vmAbortAction steal 统一块同一行口径; 缺此行持军刀移动取消建造后左臂永久浮空 (build 进态把左臂置真, 军刀态本该整臂藏)
 vmResetSndFlags();
 }
 }
@@ -245,10 +249,16 @@ if(!tk||!pl.alive) return;
 if(occBlocked(tk.tx,tk.tz)){ showScorePop(t2('位置被占用, 建造取消')); return; }
 const ci=world.children.length;
 const bi=BOXES.length; // 读条回收: 捕获本次建造新增的碰撞盒 (killBox 拆除单源) 与网格
-if(tk.type==='sandbag'){ sandbagWall(tk.tx,tk.tz,4,tk.ry); }
-else if(tk.type==='wire'){ barbedWire(tk.tx,tk.tz,tk.ry,4.2,pl); }
-else if(tk.type==='hedge'){ hedgehog(tk.tx,tk.tz); }
-else if(tk.type==='mg'){ mg42(tk.tx,tk.tz,tk.ry,pl.team); }
+// ★2026-11-21 P1-10: 各落成函数自带 propFree/propPushOut 落点闸, 失败 return null/undefined (engBuild
+// 起造闸只查 occBlocked, PROPS 占位圈不进 OCC ⇒ 起造/落成两闸不一致) —— 旧版丢弃返回值: 照扣款+
+// 报"建成"+BUILDS 登记空壳。现接住成败: sandbag/wire 读返回值 (失败=null), hedge/mg 无返回值约定按
+// 登记表长度增量判 (CYLS/MG42S 建造时恰好各 push 一条); 四型失败路径都在动世界之前早退, 无残件可清。
+// 失败处置见下方 !built 块 (medkit 同款早退+提示; 扣款行在早退之后 ⇒ 钱包原封)。
+let built=true;
+if(tk.type==='sandbag'){ built=sandbagWall(tk.tx,tk.tz,4,tk.ry); }
+else if(tk.type==='wire'){ built=barbedWire(tk.tx,tk.tz,tk.ry,4.2,pl); }
+else if(tk.type==='hedge'){ const cn=CYLS.length; hedgehog(tk.tx,tk.tz); built=CYLS.length>cn; }
+else if(tk.type==='mg'){ const mi=MG42S.length; mg42(tk.tx,tk.tz,tk.ry,pl.team); built=MG42S.length>mi; }
 else if(tk.type==='tower'){ watchtower(tk.tx,tk.tz,tk.ry); }          // 丧尸模式商店件: 瞭望塔 (2026-10-06)
 else if(tk.type==='ammoc'){ ammoCrate(tk.tx,tk.tz,true); }            // 丧尸模式商店件: 弹药箱 (force 绕道具互斥)
 else if(tk.type==='medkit'){
@@ -258,6 +268,15 @@ pl.buildCount=(pl.buildCount||0)+tk.cost;
 if(pl.isPlayer) showScorePop(t2('此处放不下医疗箱 · 建造点已退还'));
 return;
 }
+}
+if(!built){
+// 落成失败 (medkit 分支同款早退): 失败在这里 return, **到不了下方扣款行** ⇒ 建造点/ZP 原封不动
+// = "不白扣"的本意。⚠️ 不照抄 medkit 分支字面上的 "+tk.cost 退款" —— 那行在其自身排序下 (退款行
+// 在扣款行之前+失败即 return) 是净**赠**点, 照抄会让失败建造变成 +1/+3 建造点或 +150 ZP 的刷点口。
+// 文案取 placeMedkit 自身失败提示同款 ('此处放不下医疗箱' 的推广), 不再谎称"已退还"; 失败不登记
+// BUILDS 空壳、不播建成音/土屑。
+if(pl.isPlayer) showScorePop(t2('此处放不下{0}',t2(BUILD_NAMES[tk.type])));
+return;
 }
 riseNewMeshes(ci,0.85);
 if(tk.zp){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(-tk.zp); }   // ZP 扣款 (商店件)

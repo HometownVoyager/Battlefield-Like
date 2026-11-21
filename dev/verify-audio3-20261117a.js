@@ -111,7 +111,7 @@ let IDX=0; { const c0=boot(0); IDX=vm.runInContext('CAMPAIGNS.findIndex(c=>c.id=
 const ctx=boot(IDX,true);
 const SH=ctx2=>s=>vm.runInContext(s,ctx2);
 const Gm=SH(ctx);
-ok(html.includes("__sfStyleVer='20261121a'"),'前置: 版本戳 20261121a 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261121b'"),'前置: 版本戳 20261121b 在位 (index.html 内联)');
 ok(Gm('player.alive')===true,'前置: 开局/部署成功 (normandy)');
 
 // ══ T1 契约不破 ══

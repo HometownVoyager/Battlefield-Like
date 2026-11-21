@@ -45,18 +45,23 @@ if(lineOK(x1+px,z1+pz,x2+px,z2+pz)) return 1;
 if(lineOK(x1-px,z1-pz,x2-px,z2-pz)) return 1;
 return 0;
 };
-function bakeGrid(){
-// 格开放 = 格心空 或 四象限采样点中 ≥3 个空 (格心被一件 0.8m 杂物占了, 但格内有 3m 走廊 ⇒ 仍算开放)
-for(let j=0;j<N;j++)for(let i=0;i<N;i++){
-const [x,z]=toW(i,j);
-if(!occBlocked(x,z)){ open[idx(i,j)]=1; continue; }
+// ── 单格开放判定 (2026-11-21 P1-8): 全量 bakeGrid 与增量 bakeRegion ① 共用同一份口径 ──
+// 旧病: 两处各写一遍, 增量只查格心、丢了全量的"四象限放宽" ⇒ 每次火情/建拆工事的增量重烘焙
+//   把"格心有 0.8m 杂物但格内有走廊"的格降级封锁 (死袋局部复发, 下一次全量又恢复, 随事件反复振荡)。
+// 判据: 格心空 ⇒ 开放; 格心被占时数四象限采样点 (±NAV_OPEN_Q, 采样点留在本格内), ≥3 个空 ⇒ 仍算开放。
+const bakeCellOpen=(i,j)=>{
+const x=i*SP-OFF, z=j*SP-OFF;
+if(!occBlocked(x,z)) return 1;
 let q=0;
 if(!occBlocked(x+NAV_OPEN_Q,z+NAV_OPEN_Q)) q++;
 if(!occBlocked(x+NAV_OPEN_Q,z-NAV_OPEN_Q)) q++;
 if(!occBlocked(x-NAV_OPEN_Q,z+NAV_OPEN_Q)) q++;
 if(!occBlocked(x-NAV_OPEN_Q,z-NAV_OPEN_Q)) q++;
-open[idx(i,j)]=q>=3?1:0;
-}
+return q>=3?1:0;
+};
+function bakeGrid(){
+// 格开放判定走 bakeCellOpen (与增量 bakeRegion ① 同一份实现, 防两处各写一遍再漂移)
+for(let j=0;j<N;j++)for(let i=0;i<N;i++) open[idx(i,j)]=bakeCellOpen(i,j);
 for(let j=0;j<N;j++)for(let i=0;i<N;i++){
 const [x,z]=toW(i,j);
 if(i<N-1){ const p2=toW(i+1,j); eH[idx(i,j)]=(open[idx(i,j)]&&open[idx(i+1,j)])?edgeOK(x,z,p2[0],p2[1]):0; }
@@ -188,10 +193,10 @@ if(open[k]&&comp[k]<0){ const nid=allocCompId(); csize[nid]=bfsFill(k,nid); }
 }
 // 局部重建 (i0..i1 / j0..j1 为"脏范围"的 NAV 格坐标, 闭区间)
 function bakeRegion(i0,j0,i1,j1){
-	// ① 格心开放度: 脏范围外扩 2
+	// ① 格开放度: 走 bakeCellOpen (与全量 bakeGrid 同一份判据, 含四象限放宽), 脏范围外扩 2
 	const oi0=clamp(i0-2,0,N-1), oi1=clamp(i1+2,0,N-1);
 	const oj0=clamp(j0-2,0,N-1), oj1=clamp(j1+2,0,N-1);
-	for(let j=oj0;j<=oj1;j++)for(let i=oi0;i<=oi1;i++) open[idx(i,j)]=occBlocked(i*SP-OFF,j*SP-OFF)?0:1;
+	for(let j=oj0;j<=oj1;j++)for(let i=oi0;i<=oi1;i++) open[idx(i,j)]=bakeCellOpen(i,j);
 	// ①b 新变封锁的格必须把分量号抹回 -1 (全量重烘焙靠 comp.fill(-1) 天然成立; 增量只重标"被波及的分量",
 	//     不清理封锁格的旧号 ⇒ 表里会留下"封锁格带着某个分量号"的残值。下游读法虽都先判 open
 	//     (spawnSpotOk 先查 open, findPath 的剪枝只是保守判断), 但表本身的语义是"comp≥0 ⟺ 开放格" ——

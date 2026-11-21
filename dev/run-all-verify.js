@@ -40,6 +40,7 @@ const SANDBOX=[
 ['dev/probe-slope.js',[],'坡度物理'],
 ['dev/probe-menu-hud.js',[],''],
 ['dev/verify-nav-20260926.js',[],'A* 寻路核心: 纯函数 / 无假失败 / 索引式堆 (含 --neg 阴性对照)'],
+['dev/_navincr.js',[],'NAV 增量重烘焙≡全量重烘焙等价性 (2026-11-21 P1-8 修复批恢复重写: bakeRegion① 与 bakeGrid 四象限判据共用 bakeCellOpen; open/四边表/分量划分逐格比对, 走廊格/堵格/拆除/象限阈值逐档/双远簇/图缘/端到端七场景 × 双图, 含 --neg)'],
 ['dev/verify-fixbatch-20260926.js',[],'2026-09-26 修复批: 海战命中·绕向 / 出生死袋闸 / P1 十条 (含 --neg)'],
 ['dev/verify-navspots-20260926.js',[],'出生点·旗点可站立性 + 开局实际落点体检'],
 ['dev/verify-animfix-20260926.js',[],'2026-09-26 动画/模型批: 挂点/腿反解/布娃娃/履带/炮位/建筑 (含 --neg)'],

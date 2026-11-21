@@ -7,7 +7,8 @@ const RGRID={ cell:13, N:0, off:(MAP_SIZE+60)/2, boxCells:null, cylCells:null, s
 // ── 碰撞集合变更戳 (2026-11-11 性能批) ──
 // 旧账: NAV.refresh 每次都全量重灌 RGRID 倒排表 (数千 BOX/CYL 逐个重新 push, 640 图 1~3ms) —— 对
 // "火情蔓延/塌墙/碾铁丝"这类局部事件是**纯冗余**: addBoxCollider 已做增量注册 (spatialIndexAddBox),
-// 运行期唯一会使倒排表下标失效的变更只剩 06-engineering 拆树篱的 CYLS.splice (下标前移)。改为
+// 运行期已无会使倒排表下标失效的变更 (BOXES 只增不删; CYLS 拆除改 killCyl 置旗不删条目=下标终身稳定,
+// ★20261121b P1-9: 旧写 06-engineering 拆树篱 CYLS.splice 下标前移已绝迹)。改为
 // "集合变更才重建": 默认 true (首建/换图), 变更点置 true, NAV.refresh 消费后复位; forceFull
 // (23b-worldrestore 世界还原) 无条件重建。RGRID.idxRebuilds 计数供探针对账。
 let _colIdxDirty=true;

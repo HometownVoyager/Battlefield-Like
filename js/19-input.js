@@ -258,7 +258,7 @@ if(e.code==='KeyR') tryReload(true);
 if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else { player.crouch=!player.crouch; player.prone=false; player._autoCrouch=false; player._autoProne=false; } }   // !player.loiter: 操控巡飞弹本体定身; ★11-18: 手动 C 夺回姿态控制权 (顶头自动压下帧再顶回); ★11-18c: 同时清自动趴旗
 if(e.code==='KeyZ'&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.prone=!player.prone; if(player.prone){ player.crouch=false; player.braced=false; } player._autoProne=false; player._autoCrouch=false; }   // !player.loiter: 操控定身; ★11-18c: 手动 Z 夺回姿态控制权 + 清自动蹲/趴旗
 if(e.code==='KeyX'&&!player.loiter){   // !player.loiter: 操控定身 (2026-11-07) — 撑枪/收枪是身体动作; 读条取消在操控中不可能激活 (读条键全被 loiter 门挡)
-// ★2026-10-12 用户提议② → 2026-10-25 扩容: 读条 (包扎/拆除回收/前摇/举雷待发/换弹) 中 X = 取消读条
+// ★2026-10-12 用户提议② → 2026-10-25 扩容 → ★2026-11-21 P1-4 再收编 (建造/挥砍/出手弧): 读条 (包扎/拆除回收/前摇/举雷待发/换弹/建造锤击/挥砍/出手弧) 中 X = 取消读条
 //   (举雷 = 收雷回袋不消耗; 换弹 = 中止不结算弹药)。
 //   指针锁定时 DOM 上的 ✕ 按钮收不到点击事件 (事件全被 canvas 吃掉), X 是键盘侧唯一"总能按到"的取消键;
 //   撑枪语义只在空闲时生效 —— 读条中本来也撑不了枪, 不会互相抢键。
@@ -666,8 +666,8 @@ if((player.onMG||player.onAT||player.onAA||player.onMortar||player.onBattery)&&(
 if(VM.state!=='idle'){
 // ★2026-10-25 反馈轮①: 读条中按 R = 打断当前读条再装填; **换弹中重按 R 不重启** (同键不抢, 进度不白丢)。
 //   viaKey 只来自按键 (本文件 keydown 三处); 空仓自动换弹 (20-player 的 click/timeout) 不带 ——
-//   系统自动续弹绝不能把玩家举着的雷/包着的绷带抢走。出手弧 (state 'nade' 且 nadeHeld=false) 非读条,
-//   stealBar 不会动它, 二道门照样拦。
+//   系统自动续弹绝不能把玩家举着的雷/包着的绷带抢走。出手弧 (state 'nade' 且 nadeHeld=false) ★2026-11-21
+//   P1-4 起已入取消网 (viaKey 双击确认后 stealBar 同口收手不消耗), 自动换弹 (无 viaKey) 仍被二道门拦。
 // ★2026-10-30 用户裁定②③: 换弹中重按 R = **极少加快** (推进 stateDur 的 2.5%); 其他读条中 R = 双击确认
 //   打断 (第一次只亮"再按一次打断", barStealArmed 单源)。
 // ★2026-11-20 火力点坐姿批: 坐着包扎中按 R 也走这里 = 双击确认打断包扎再换弹 (座位门已放行)。

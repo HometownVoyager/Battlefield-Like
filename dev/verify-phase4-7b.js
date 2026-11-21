@@ -103,7 +103,7 @@ ok(cfg.indexOf('const BOMB_GUIDE_RATE=1.4;')>=0
 &&cbt.indexOf('BOMB_GUIDE_RATE*dt')>=0,'S15 航弹锁定+制导 (30k): dropBomb 挂账玩家锁 (接管代打同吃 —— aiPilotTgt 即玩家锁) + 限角速度掰向目标 (只改速度方向不改模长, 落体/引信/入水全走原链; 目标亡退回诚实弹道), BOMB_GUIDE_RATE 单源 [锚随 2026-09-30 批2 更新: 制导块搬进 nadeStep 单源积分器, 逐枚帧长由调用方形参 dt 传入 (原 *ndt 语义不变)]');
 ok(cbt.indexOf('splashDamage(n.pos,n.thrower,n.team,13,210,1350,true);')>=0
 &&cbt.indexOf('damageStructures(n.pos,12,460,n.thrower);')>=0
-&&cbt.indexOf('crater(n.pos.x,n.pos.z,2.4,true);')>=0
+&&cbt.indexOf('if(n.pos.y-heightAt(n.pos.x,n.pos.z)<2.2) crater(n.pos.x,n.pos.z,2.4,true,n.pos.y);')>=0
 &&cfg.indexOf('const AIR2AIR_BOT_MUL=0.80;')>=0
 &&air.indexOf('(shooter&&shooter.isPlayer)?1:AIR2AIR_BOT_MUL')>=0,'S16 航弹反坦克化/Bot 对空微削钉值 (30k 用户裁定): 半径 9.5→13 · 步兵 170→210 · 载具 260→1350 且 ap=true (旧无 ap=×TANK_ARMOR0.3 挠痒) + 结构 12/460 + 弹坑 2.4 + Bot 航炮空空伤害×0.8 (玩家/接管代打档不减)');
 

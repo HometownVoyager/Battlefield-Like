@@ -133,8 +133,8 @@ const i18n=srcOf('js/00b-i18n.js');
 assert('①14 i18n 新键配英文 (词典闭环)',
  i18n.includes("'新模式 · 指挥官: 右键开指挥地图统一步/坦/空 · E/F/R 下令 · 左键集火 · V 减速':"));
 const sidx=SRC('index.html');
-assert('①15 版本戳已升 20261121a (48 处 ?v= + __sfStyleVer) (2026-11-10 海战移除批判据跟码)',
- (sidx.match(/20261121a/g)||[]).length>=48&&sidx.includes("__sfStyleVer='20261121a'"));
+assert('①15 版本戳已升 20261121b (48 处 ?v= + __sfStyleVer) (2026-11-10 海战移除批判据跟码)',
+ (sidx.match(/20261121b/g)||[]).length>=48&&sidx.includes("__sfStyleVer='20261121b'"));
 }
 
 // ── ② 沙箱行为 ───────────────────────────────────────────────

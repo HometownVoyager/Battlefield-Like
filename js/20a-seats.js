@@ -339,7 +339,8 @@ if(!g) return;
 // 炮位被摧毁 (胸墙组归零) → 同帧下炮: 与 updatePlayerTank 的 `!t.alive ⇒ 解座` 同一纪律。
 // (15f 的 die() 只清炮位自己的占用字段, 不碰玩家座位 —— 座位收尾归本文件)
 if(!g.alive){ batteryDismountPlayer(); return; }
-g.cd-=dt;
+// 冷却递减单源在 15f updateBatteries (`b.cd-=dt`, 注释明言"与谁瞄准/开火无关") —— 旧版此处本地再扣一次 ⇒
+// 玩家射速≈2×契约值 (Bot 侧 updateBatteryGun 无本地扣减, 故只有玩家翻倍; 装填条读同一份 cd 故静默, ★2026-11-21 P1-1)。
 // 转向/俯仰: 与 updatePlayerAT 逐式同构 —— 相机 yaw 为权威, 炮的 yaw 组写"相对 face 的回旋量",
 // 于是 aimYaw()=face+yaw.rotation.y=p.yaw-π 恒等于相机前向 (炮管指向准星)。g.face 是炮位基准朝向
 // (面海, 落位/建模/站位全读它), 不随鼠标改 —— 与 atGun 的 g.face/g.yaw 命名与语义完全一致。
@@ -719,18 +720,20 @@ if(typeof c.muzzle==='function'){
 const mz=c.muzzle('main');
 if(mz&&typeof mz.x==='number'){ mzMain=mz; const dv=_scA.copy(aimP).sub(mz); if(dv.lengthSq()>1e-6) aimDir=dv.normalize(); }
 }
-// ⑦ 开火: 左键主炮 / 右键机炮 (两栖车 secondary=null ⇒ 右键走同轴机枪)。冷却自管 = 与 HUD 装填条同源。
+// ⑦ 开火: 左键主炮 / 右键机炮 (两栖车 secondary=null ⇒ 右键走同轴机枪)。主炮冷却单源在艇体 c.cannonCd
+//    (15d update 递减 / fireMain 写入), 座位闸 st.main 是它的同步镜像 (HUD 装填条读它; 与坦克乘 cd 本体同款)
+//    —— 旧版双闸各写各的, st.main 先到 0 而 fireMain 内 cannonCd>0 静默 false ⇒ 空枪震屏 + 节奏失真 (★2026-11-21 P1-2)。
 const st=p.navalCd||(p.navalCd={main:0,sec:0,torp:0});
 st.main-=dt; st.sec-=dt; st.torp-=dt;
-const mdef=(c.spec&&c.spec.main)||null;
-if(mouseDown&&!matchOver&&st.main<=0&&typeof c.fireMain==='function'){
+if(mouseDown&&!matchOver&&st.main<=0&&c.cannonCd<=0&&typeof c.fireMain==='function'){
 // 瞄准吸附 (2026-09-27 用户要求"载具火力瞄准"): 舰炮主炮 = 直瞄重火力档 (对艇是大目标 ⇒ 收容窗口自然更宽)
 let md=aimDir;
 if(typeof aimAssistDir==='function') md=aimAssistDir(mzMain||V3(c.pos.x,c.pos.y+2,c.pos.z),aimDir,'heavy',{team:c.team,ff:false,self:c});
-c.fireMain(md);
-st.main=(mdef&&mdef.rof)||(c.spec&&c.spec.reload)||1.0;
-if(p.streakBuff) st.main*=p.streakBuff.reloadMul;      // 连杀增益: 主炮装填加速 (与坦克同源, 2026-09-12)
+if(c.fireMain(md)){                                    // false (沉没/残骸/冷却未清) ⇒ 不结算: 不重置 st.main 也不震屏
+if(p.streakBuff){ c.cannonCd*=p.streakBuff.reloadMul; c.cdMax=c.cannonCd; }   // 连杀增益乘艇体 cd 本体 (与 updatePlayerTank 同款, 2026-09-12)
+st.main=c.cannonCd;                                    // 座位闸/HUD 装填条与艇体 cd 单源同步
 addTrauma(0.3);
+}
 }
 const sdef=(c.spec&&c.spec.secondary)||null;
 if(mouse2Down&&!matchOver&&st.sec<=0){

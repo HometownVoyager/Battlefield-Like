@@ -313,8 +313,10 @@ function vmAbortAction(){
 let hit=false;
 if(VM.bandageM&&VM.bandageM.visible){ vmBandageHide(); hit=true; }
 const st=VM.state;
-// steal = 本轮要抢下状态机的态 (收尾后统一回 idle)。举雷只收**哨兵持雷段** (stateDur>10);
-//   出手弧 (松手后 0.55s, nadeHeld 已 false) 里的雷已经/即将脱手, 不属于可中止段, 不在此列。
+// steal = 本轮要抢下状态机的态 (收尾后统一回 idle)。举雷收**哨兵持雷段** (stateDur>10);
+//   出手弧 (松手后 0.55s, nadeHeld 已 false) ★2026-11-21 审计 P1-4 起也收进抢断网 —— 旧口径"不属于可中止段"
+//   让 F 取物等抢占入口对弧空转 (VM.state 被裸抢, releaseNade 永不触发 = 雷静默不出手); 未出手段雷回袋
+//   不消耗 (releaseNade 未触发, 计数未扣), 已出手段弹体已入世界层, 只是提前断掉收尾动画。
 let steal=false;
 if(st==='bandage'){ vmBandageHide(); steal=true; }
 else if(st==='melee'){
@@ -329,7 +331,9 @@ if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);
 if(VM.gunParts&&VM.gunParts.gun){ VM.gunParts.gun.position.set(0,0,0); VM.gunParts.gun.rotation.set(0,0,0); }
 steal=true;
 }
+else if(st==='build'){ if(VM.hammerM) VM.hammerM.visible=false; steal=true; }   // ★2026-11-21 P1-4: 建造锤击收进抢断网 (锤件收起; 枪显隐/还臂/回 idle 走下面 steal 统一块, pendingBuild 账目层由 cancelReadBar→cancelBuild 收)
 else if(st==='nade'&&VM.stateDur>10){ if(VM.nadeM) VM.nadeM.visible=false; steal=true; }   // 收雷回枪 (与状态机哨兵自愈同一份收尾)
+else if(st==='nade'){ if(VM.nadeM) VM.nadeM.visible=false; steal=true; }   // ★2026-11-21 P1-4: 出手弧 (stateDur≤10) 同网 (见上注)
 else if(st==='reload'){ vmReloadRestore(); steal=true; }
 if(steal){
 if(VM.gunParts&&VM.gunParts.gun) VM.gunParts.gun.visible=true;

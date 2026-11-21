@@ -1026,7 +1026,9 @@ if(typeof specRide==='function'&&specRide(this)) return;
 // ★2026-10-06 难度批: Bot→**玩家座机**的伤害改吃 pDmg 列 (0.6/0.8/0.9), AI 互咬维持 dmgMul (烈度不变)。
 if(attacker&&!attacker.isPlayer) amt*=(this.playerDriven?DIFF_TABLE[SETTINGS.diff].pDmg:DIFF_TABLE[SETTINGS.diff].dmgMul); // 7b-甲: Bot→飞机伤害接难度表 (旧全档同值; 高炮/AI 机直检/航弹单点收口在这里)
 this.hp-=amt;
-this.lastHitBy=attacker;
+// ★2026-11-20 批: 有归属受击才重盖章 (与 15-vehicles takeDmg 同款) —— 地雷/油桶等无主溅射 (attacker=null)
+//   不清章, 保住最后一名真正打过它的射手 (旧版无守卫, 无主伤害反而清章)。
+if(attacker) this.lastHitBy=attacker;
 if(this.playerDriven){ dmgFlash=Math.min(1,dmgFlash+0.3); addTrauma(0.2); if(typeof addVehDmgDir==='function') addVehDmgDir(this,attacker); } // 方向指示: D8 (2026-09-28)
 // 7b-丙 热修⑤: 接管中被命中 → 老飞行员打一拍规避 (冷却防连躲; 玩家手打时无 aiPilotOn 不触发)
 // 2026-09-30j: 置窗同时记威胁源与破转方向 —— 敌机打的就朝他转 (反咬段入口), 高炮/航弹随机方向全窗破转。
@@ -1171,6 +1173,7 @@ this.yaw=this.team===0?0:Math.PI; this.pitch=0; this.roll=0;
 this.hp=this.maxHp; this.alive=true; this.crew.alive=true; this.speed=PLANE_FLIGHT.birthSpeed;
 // 起火态随重生复位 (2026-11-09 批): 燃烧账/点燃者不得跨生死携带 (机体模型重生复用)
 this.burning=false; this.burnBy=null; this.burnSrc=null; this.burnFxT=0;
+this.lastHitBy=null; // 2026-11-20 批: 归因章不跨生死携带 (与 15-vehicles respawn 同账) —— 重生后未吃有归属伤害即撞楼/坠地, 不给上一命攻击者白记击杀
 this._bailPend=false;   // 时停期挂账的跳伞不得跨生死携带 (2026-11-14 批, 同上口径)
 this.state='patrol'; this.stateT=rand(5,10); this.target=null;
 this.bombs=this.def.bombs; this.playerDriven=false; this.evadeT=0;

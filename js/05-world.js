@@ -1411,6 +1411,15 @@ function structResetHP(g){
 if(!g) return;
 if(g.hpFull>0) g.hp=g.hpFull;
 else if(g.hpNom!==undefined) g.hp=g.hpNom;
+// ★P1-11 (审计 2026-11-21): 受损档材质必须随血量一并回退 —— 旧版只清 dmgTier 不还材质, 随后
+//   22-hud 的 structSetDamageTier(d.g,1) 因 tier===(g.dmgTier||0) 早退、23b structResetDamage 又因
+//   档位已 0 跳过 ⇒ 重开局满血库挂破档材质, 下一局再受伤以暗色克隆为基再乘 = 逐局复利变暗。
+//   这里按 _mat0 还原原始材质后再清档位 (A案: 单源自洽, 不依赖 22-hud 的调用序); 局内受伤变色
+//   走 damageStructureBy→structSetDamageTier, 不经过本函数, 两不相扰。
+if(g.dmgTier&&g._mat0){
+const ms=g.meshes||[];
+for(let i=0;i<ms.length;i++){ const m=ms[i]; if(m&&g._mat0[i]) m.material=g._mat0[i]; }
+}
 g.dmgTier=0;
 }
 // ── ⑨ 永久件视觉档 (B5): "高 ≥1.6m 且顶面高出地面 ≥1.5m、不在可毁组、不可碾、不是植被"的碰撞盒 ──

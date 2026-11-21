@@ -129,7 +129,11 @@ leanT:0,
 //   ① "打断"的完整语义 = 读条期间做**其他交互动作**会打断读条 (换枪/装填/举雷/包扎/近战/建造拆除/
 //      F 交互栈…各入口在确认起步后调 stealBar 抢占; 同键重按不抢——R 重按不重启换弹、同种雷重举不重烧引信);
 //   ② 受伤打断门槛 = 单次伤害 >READBAR_DMG_GATE (25) 才打断, 刮伤/火蚀/小跳伤不再打断 (damage 内单源门)。
-readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast||!!this.vehRepair||this.seatReload>0
+// ★2026-11-21 审计 P1-4 收编 (中段插一组, 尾组原文不动): pendingBuild / VM'build' / VM'melee' / 手雷出手弧
+//   (松手后 0.55s, VM'nade' 且 !nadeHeld) 也算"身体被占用" —— 旧网漏这四态 ⇒ F 取物等抢占入口对它们
+//   空转 (stealBar 只认 readBarActive), VM.state 被裸改成 'grab' 后锤件/半挥姿态/未出手的雷全无人收。
+readBarActive(){ return this.bandaging>0||!!this.demolish||!!this.useCast||!!this.vehRepair||this.seatReload>0||!!this.pendingBuild
+||(typeof VM!=='undefined'&&(VM.state==='build'||VM.state==='melee'||(VM.state==='nade'&&!this.nadeHeld)))
 ||(typeof VM!=='undefined'&&((VM.state==='nade'&&this.nadeHeld)||VM.state==='reload')); },
 // 读条期间"身体被别的行动占用"的判据 (包扎 tick 每帧问一次, 见 20-player 的包扎段):
 //   上车/上艇/驾巡飞弹/取弹 (grabAction) 任一为真, 或 VM 动作态已被抢走 ⇒ 按被打断收账。
@@ -150,6 +154,9 @@ if(this.bandaging>0){ this.bandaging=0; any=true; }
 if(this.demolish){ if(typeof stopDemolish==='function') stopDemolish(this,true); else this.demolish=null; any=true; }
 if(this.useCast){ if(this.useCast.g&&this.useCast.g.user===this) this.useCast.g.user=null; this.useCast=null; any=true; }
 if(this.vehRepair){ this.vehRepair=null; any=true; }   // 坦克维修读条 (2026-11-16 批1): 并入取消网, X/死亡收口/F 抢占同口清账
+// ★2026-11-21 审计 P1-4 建造并入取消网: 账目层走既有 cancelBuild 单源 (06-engineering; 建造点不扣、工事不出、
+//   拆除起步的 pendingBuild 永久孤儿挡板随之消失); 模型层锤件/回 idle 由上面 vmAbortAction 的 build 分支收。
+if(this.pendingBuild){ if(typeof cancelBuild==='function') cancelBuild(this); else this.pendingBuild=null; any=true; }
 // ★2026-11-20 火力点坐姿批: 原位换弹并入取消网 —— X / 受击>25 / 死亡 / stealBar 抢占 / 换局全自动继承
 //   (账挂 player, 与 VM 无关, 放在 vmAbortAction 之后判也算得准); 弹不结算, 与换弹中止同语义。
 if(this.seatReload>0||this.seatReloadDur>0){ this.seatReload=0; this.seatReloadDur=0; any=true; }
@@ -225,10 +232,12 @@ this.lastDmgT=nowT;
 if(amt>READBAR_DMG_GATE&&this.readBarActive()){
 // ★2026-11-03 死亡掉雷批: 这一击直接致命 (hp 已在上方扣减) ⇒ 捏着的雷**掉落**代替收回 —— dropHeldNade 入
 //   全局 nades 账, 随后的 cancelReadBar 只收玩家侧账目/模型, 碰不到已入账的弹体; 读条余时由厨雷账
-//   nadeFuse 天然继承 (掉落引信=余值)。出手弧 (readBarActive 假, 松手后) 与 ≤25 致命击不走这里 ——
-//   由 die() 内的掉雷钩兜底 (持雷/弧两态判据见 die())。
-if(this.hp<=0&&this.nadeHeld) dropHeldNade(this);
-this.cancelReadBar(this.bandaging>0?'包扎被打断!':(this.demolish?'拆除被打断!':(this.useCast?'使用被打断!':(this.nadeHeld?'举雷被打断!':'换弹被打断!'))));
+//   nadeFuse 天然继承 (掉落引信=余值)。≤25 致命击不走这里, 由 die() 内的掉雷钩兜底 (持雷/弧两态判据见
+//   die()); 出手弧 ★2026-11-21 P1-4 起已入取消网, >25 非致命打断 = 收手不消耗 (releaseNade 未及触发, 计数
+//   未扣) —— 但**致命**击 must 掉雷 (2026-11-03 契约): 弧态判据与 die() 掉雷钩逐字同式, 掉完随后的
+//   cancelReadBar 收 VM 账 ⇒ die() 钩看到 'idle' 不双掉 (★20261121b 回归修复: 弧入网后致命击曾把雷无声吞掉)。
+if(this.hp<=0&&(this.nadeHeld||((typeof VM!=='undefined')&&VM&&VM.state==='nade'&&(this.nadeThrowT||0)<=0))) dropHeldNade(this);
+this.cancelReadBar(this.bandaging>0?'包扎被打断!':(this.demolish?'拆除被打断!':(this.useCast?'使用被打断!':(this.pendingBuild?'建造被打断!':((typeof VM!=='undefined'&&VM.state==='melee')?'挥砍被打断!':(this.nadeHeld?'举雷被打断!':((typeof VM!=='undefined'&&VM.state==='nade')?'投掷被打断!':'换弹被打断!')))))));
 }
 AudioSys.hurt();
 dmgFlash=Math.min(1,dmgFlash+0.5);
@@ -332,8 +341,11 @@ doMeleeHit(kind){
 //   置满 meleeDur, 20-player) 一路衰减, 与 FP 动画天然同轴; 旧重置会把相位曲线从中途"重播一遍引刀"
 //   (斩在 t≈0.175s 命中 ⇒ 扫击相位永远打不完, 实测刀件摆幅被腰斩)。meleeT 只被 3P overlay/thrust 门消费。
 const def=WPN_DEFS.sabre;
-const dir=camForward();
-const o=camera.position.clone();
+// ★2026-11-21 审计 P1-6: 命中判定跟 2026-09-20 三人称出膛点契约 (playerFireOrigin/playerAimDir 单源, 与
+//   枪弹/火箭/手雷同纪律) —— 旧写相机原点+camForward 在 3P 下判定中心悬在玩家身后 TP_DIST=3.6m, range 2.6
+//   的军刀永远打不到眼前目标; 一人称两函数与旧写逐位等价 (fireOrigin=相机位 / aimDir=camForward), FP 零变化。
+const dir=playerAimDir();
+const o=playerFireOrigin();
 // 刺刀摘 ffSpecSniper (2026-09-20 观战连狙批; 2026-11-09 观战中立批后为历史注记): 旧口径"只有观战连狙
 // 可打双方"时, 不摘标记的话观战者握连狙贴队友按 V 会直接把友军捅死。新口径下观战者所有武器对双方生效
 // (coFfFire 的 spectator 门), 摘旗不再阻断观战军刀伤友军; 代码保留 —— 非观战握持态语义不变。

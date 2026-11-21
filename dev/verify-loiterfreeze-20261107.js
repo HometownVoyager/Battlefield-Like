@@ -5,7 +5,7 @@
 //   ③ 退场吞空格边沿: 操控退场瞬间仍按着空格 ⇒ 本体松开前不吃残跳/残升/残加速
 //     (旧写实测: 弹死后按住空格在步行态反复起跳 = 用户实报"在地上不停跳跃"; 悬停态残升)
 //   ④ 小地图: 弹体菱形标记常显 (不开大地图也可见) + 操控中以弹体为中心/朝向 (本体箭头挪实际位置)
-//   ⑤ C/Z/X 姿态键操控中定身 + 面板提示 "本体定身" + 版本戳 20261121a
+//   ⑤ C/Z/X 姿态键操控中定身 + 面板提示 "本体定身" + 版本戳 20261121b
 // 用法: node dev/verify-loiterfreeze-20261107.js [--neg]
 //   --neg = 阴性对照: 单行锚还原旧写法, 行为判据必须报红 (9 处补丁, 累积应用, 对认按红名)。
 // 口径: 与 verify-flyaim-loiterkey-20261106 同款 boot (真 three + index.html 全脚本链 + startBtn 开局)。
@@ -66,7 +66,9 @@ assert('20 _ltSpace 清零上提帧首 (全文恰 1 处, 且在 meleeCd 行之�
 assert('20 跳跃门含 !p._ltSpace (★2026-11-14 跟码; 11-18b 起姿态分流: 站姿 headGrazeBlocked / 蹲趴 headJumpBlocked)',
   s20.includes('if(keys.Space&&!p._ltSpace&&!cmdLock&&p.onGround&&p.stamina>0.1&&_jumpOkay)')
   &&/headGrazeBlocked\(p\.pos\)/.test(s20)&&/headJumpBlocked\(p\.pos,_jumpHH/.test(s20));
-assert('20 悬停升门含 !p._ltSpace (两处: 悬停+自由飞行)',cnt(s20,/if\(keys\.Space&&!p\._ltSpace\) ty\+=1;/g)===2);
+assert('20 升门含吞边沿哨兵 (悬停用局部 p / 自由飞行用 player, ★20261121b P0-1 跟码: 自由观战分支无局部 p, 旧写每帧 ReferenceError)',
+ cnt(s20,/if\(keys\.Space&&!p\._ltSpace\) ty\+=1;/g)===1
+ &&cnt(s20,/if\(keys\.Space&&!player\._ltSpace\) ty\+=1;/g)===1);
 assert('20 气动加速门含 !p._ltSpace',s20.includes('((keys.Space&&!p._ltSpace)?40:13)'));
 assert('13 fireLoiter 气动→悬停切换在 (清速度+_aeroSpd)',
  s13.includes('if(shooter.flying&&shooter.flyAero){ shooter.flyAero=false; shooter.vel.set(0,0,0); shooter._aeroSpd=0; }'));
@@ -88,9 +90,9 @@ assert('22 面板提示含"本体定身" / i18n 新键在旧键已摘',
  &&i18n.includes("'鼠标 制导 · 左键 自爆 · 空格 加速 · 右键 开镜 · U 切换视角 · 本体定身':")
  &&!i18n.includes("'鼠标 制导 · 左键 自爆 · 空格 加速 · 右键 开镜 · U 切换视角':"));
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('版本戳 20261121a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106b 清零 (2026-11-10 海战移除批判据跟码)',
- [...idx.matchAll(/20261121a/g)].length>=48&&idx.includes("window.__sfStyleVer='20261121a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121a')).length===45
+assert('版本戳 20261121b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261106b 清零 (2026-11-10 海战移除批判据跟码)',
+ [...idx.matchAll(/20261121b/g)].length>=48&&idx.includes("window.__sfStyleVer='20261121b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121b')).length===45
  &&!idx.includes('20261106b')&&!gf.includes('20261106b'));
 }
 

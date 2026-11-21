@@ -86,9 +86,9 @@ assert('16-aircraft: updatePlaneCollisions 单源 (BODY_K=1.7 / CLOSE=2 / fwdDir
 assert('05b-props: foliage 标记恰好四处 (树/枯树/垂柳/竹)',(s05b.match(/foliage:true/g)||[]).length===4);
 assert('24-main: 撞机接线在飞机循环之后 (世界帧长 dt 门)',s24.includes('updatePlaneCollisions(dt); // 空中撞机'));
 assert('22-hud: sf_autoexit 注记跟走 (crash 档不读开关)',s22.includes('坠地/撞楼/空中撞机时**不**读此开关'));
-assert('版本戳 20261121a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
- [...ih.matchAll(/20261121a/g)].length>=48&&ih.includes("window.__sfStyleVer='20261121a';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121a')).length===45
+assert('版本戳 20261121b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
+ [...ih.matchAll(/20261121b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261121b';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261121b')).length===45
  &&!ih.includes('20261110a')&&!gf.includes('20261110a'));
 }
 

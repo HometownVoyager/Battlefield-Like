@@ -1866,7 +1866,7 @@ if(this.perceptT<=0){ this.perceptT=0.16; this.perceive(); }
 // 分心去做别的事时释放坦克占用, 避免空车被永久锁定
 if(this.targetVeh&&this.state!=='toVehicle'){ if(this.targetVeh.claimBot===this) this.targetVeh.claimBot=null; this.targetVeh=null; }
 this.decisionT-=dt;
-if(this.decisionT<=0&&!(this.state==='nade'&&this.nadeAnimT>0)){ this.decisionT=rand(0.35,0.6); this.decide(); }
+if(this.decisionT<=0&&!(this.state==='nade'&&this.nadeAnimT>0)&&!(this.state==='atnade'&&this.nadeAnimT>0)){ this.decisionT=rand(0.35,0.6); this.decide(); }   // ★P1-7 atnade 前摇同护: 否则携AT雷近敌坦克<26m 时 decide 每拍重入把 nadeAnimT 重置回 0.8, 前摇永不走完 (举臂站桩死锁)
 this.suppression=Math.max(0,this.suppression-dt*0.35);
 // 弹尽搜刮保底计时 (2026-11-03 弹药账对齐): drySeekSupply 没找到箱时挂 10s, 到点且仍双尽 → 补一个弹匣备弹
 if(this._dryScavT>0){

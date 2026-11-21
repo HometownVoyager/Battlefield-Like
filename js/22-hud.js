@@ -767,6 +767,11 @@ function hudHideReal(id){ const st=el(id).style; if(st.display!=='none') st.disp
 //   两写点交替时失配漏写。killfeed 用 visibility 而非 display: 成就弹框 (27-achievements) 以它的矩形定位,
 //   display:none 会把矩形塌成 0 令弹框顶到左上角; visibility 保持布局, 锚不塌 (淡出计时照走, 只是看不见)。
 function _ltImmHud(hide){
+// ★2026-11-21 P1-17: 自由观战(非附身)早退门 —— specViewHudTick 迁移帧已把 healthPanel 收进 _SV_HUD_HIDE
+// (display='none'), 这里还原向的每帧直写 display='' 会把左下生命面板逐帧"复活"成 hp=0 红档+满体力 (与
+// 视模式"战斗 HUD 收起"清单正面矛盾, 2026-11-13b 批①引入)。只拦还原向: 控弹期 hide=true 与观战收起同向
+// 照常; 附身(specViewHost)/普通死亡/部署页 (specView=false) 全部照旧还原。
+if(!hide&&player.specView&&!player.specViewHost) return;
 const hp=el('healthPanel');
 if(hp&&hp.style.display!==(hide?'none':'')) hp.style.display=hide?'none':'';
 const kf=el('killfeed');
@@ -1536,7 +1541,7 @@ player.burnTimer=0; player.burnTickT=0; player.burnAttacker=null;
 // 之后再没有复位点 —— 结算页改成"逐项比纪录"后这是硬伤: 就地重开的第二局会带着上一局的击杀/得分/阵亡去比纪录
 // (旧版"本局得分"同样把两局累加, 只是没人发现)。落点选在这里 = 与"玩家这一条命复位"同一处。
 player.kills=0; player.deaths=0; player.score=0; player.headKills=0; player.caps=0;
-player.demol=0; // 破坏数 (2026-09-26 破坏得分批): 与上面五项同段复位 —— 否则第二局会带着上一局拆的楼数去比纪录
+player.demol=0; player.vehKills=0; // 破坏数 (2026-09-26 破坏得分批) / 击毁载具 (2026-11-11 数据批): 与上面五项同段复位 —— 否则第二局会带着上一局拆的楼数/毁的车数去比纪录, 且 21-match statsAccumulate 的 LIFE_STATS.veh+=(player.vehKills||0) 会把此前各局击毁数重复累计
 player.lifeKills=0; player.lifeScoreStart=0; player.killerName=''; player.killerSrc='';
 player.lifeStartT=nowT; // 2026-09-25: 本条命的起点也随新对局复位 —— 旧版只在 deployPlayer 写, 于是"没死过就开部署页"的路径会拿上一局的起点算存活时长
 player.vel.set(0,0,0);
@@ -1657,7 +1662,9 @@ SUPPLY_POINTS.length=0; SUPPLY_EXPIRED=false; SUPPLY_START=-1; // 劫道方临�
 CONVOY_STATE=null;                                            // 车队状态 (下一局 startMatch 重建)
 MORTARS.length=0; RISERS.length=0;                            // 已架迫击炮 / 升起动画
 BUILDS.length=0;                                              // 工程兵建造登记 (读条回收, 2026-09-28 阶段三 P1): 上一局的登记不跨局
-for(const g of [...ATGUNS,...AAGUNS]){ g.user=null; g.cd=0; g.cdLock=0; } // 固定炮位解绑 (炮位本身是地图设施, 保留)
+// ★2026-11-21 (P1-3): dead 一并复位 —— 塔顶塌毁 killDeckGuns (17-emplacements) 置 g.dead=true 后全库无还原点
+// (23b 射角还原也不清 dead), 跨局继承 ⇒ 重开局 empReady 恒 false (F 无响应/Bot 不认领)。
+for(const g of [...ATGUNS,...AAGUNS]){ g.user=null; g.cd=0; g.cdLock=0; g.dead=false; } // 固定炮位解绑 (炮位本身是地图设施, 保留)
 // ★2026-09-26E (审计 3): 反舰岸炮 BATTERIES 旧版**不在这一行** —— 上一局被 Bot 操作过的炮位
 // (14-bots 认领时写 g.crewBot) 跨局不清, 新一局 get manned() 恒真 ⇒ 玩家 F 提示与上炮全灭、Bot 不再认领、
 // update() 还留着上一局的 target; **且每个后续对局都继承这次污染**。与上面固定炮位同规清两条占用轨
@@ -2156,8 +2163,12 @@ if(needReload){
 // 若核心环境相同（同一地图、玩法模式与昼夜），天候、阵营、规模、难度完全支持纯内存就地平滑热切
 WEATHER_EFF=calcWeatherEff(CAMPAIGN.id,hubWeather);
 WX_CFG=WEATHER_CFG[WEATHER_EFF];
-ACTIVE_CAMPAIGN=CAMPAIGNS[CAMPAIGN_IDX];
-CAMPAIGN=ACTIVE_CAMPAIGN;
+// ★2026-11-21 P1-13: procgen 生成数据 (flags/bases/roads/fields/river/delta/bridges) 只写在载入期克隆上
+// (00c-procgen 写回段), CAMPAIGNS 里的 procgen 原始条目是 flags:[]/roads:[] 的壳 —— 热切重绑会把 CAMPAIGN
+// 顶回壳条目, beginFreshMatch 重开同一世界但小地图/部署图整层路网消失 (rail 铁路线仍在, 观感割裂)。
+// needReload 五判据已保证同图同种子同规模 ⇒ 现引用就是被 00c 写过的那一份, procgen 分支沿用不重绑;
+// 史战条目数据完整, 重绑无害照旧。
+if(CAMPAIGN.id!=='procgen'){ ACTIVE_CAMPAIGN=CAMPAIGNS[CAMPAIGN_IDX]; CAMPAIGN=ACTIVE_CAMPAIGN; }
 if(typeof applySceneEnvironment==='function') applySceneEnvironment();
 if(typeof applyQuality==='function') applyQuality();
 beginFreshMatch();

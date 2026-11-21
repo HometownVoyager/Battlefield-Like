@@ -804,7 +804,7 @@ const sy=Math.sin(player.yaw), cy=Math.cos(player.yaw);
 const cp=Math.cos(player.pitch), sp=Math.sin(player.pitch);
 const fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0), str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
 let tx=-sy*cp*fwd+cy*str, ty=sp*fwd, tz=-cy*cp*fwd-sy*str;
-if(keys.Space&&!p._ltSpace) ty+=1;   // !p._ltSpace: 巡飞弹操控边界吞边沿 (2026-11-07) — 悬停升/自由飞行升同规, 松开前不吃残空格
+if(keys.Space&&!player._ltSpace) ty+=1;   // !player._ltSpace: 巡飞弹操控边界吞边沿 (2026-11-07) — 悬停升/自由飞行升同规, 松开前不吃残空格 (★2026-11-21 P0-1: 自由观战分支无局部 p, 旧写每帧 ReferenceError 帧管线停摆, 作用域跟悬停飞行分支 :525 对齐)
 if(keys.ShiftLeft) ty-=1;
 const tl=Math.hypot(tx,ty,tz);
 if(tl>0.01){ tx/=tl; ty/=tl; tz/=tl; }

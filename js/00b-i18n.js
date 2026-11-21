@@ -363,7 +363,7 @@ const I18N_EN={
 // 举雷/换弹读条 (★2026-10-25 手雷与换弹并入取消网)
 '手雷 · 引信 {0}s · X 收回':'Frag · fuse {0}s · X to stow','反坦克雷 · X 收回':'AT charge · X to stow',
 '烟雾弹 · X 收回':'Smoke · X to stow','燃烧弹 · X 收回':'Incin. · X to stow','手雷 · X 收回':'Frag · X to stow',
-'换弹中: {0}s':'Reloading: {0}s','原位换弹: {0}s':'In-place reload: {0}s','举雷被打断!':'Grenade raise interrupted!','换弹被打断!':'Reload interrupted!',   // ★2026-11-20 火力点坐姿批: 坐固定火力点给随身武器装填的读条条目
+'换弹中: {0}s':'Reloading: {0}s','原位换弹: {0}s':'In-place reload: {0}s','举雷被打断!':'Grenade raise interrupted!','换弹被打断!':'Reload interrupted!','建造被打断!':'Build interrupted!','挥砍被打断!':'Melee interrupted!','投掷被打断!':'Throw interrupted!',   // ★2026-11-20 火力点坐姿批: 坐固定火力点给随身武器装填的读条条目; ★2026-11-21 P1-4: 建造/挥砍/出手弧入取消网三条新文案
 // ── HUD 顶栏 ──
 '({0}人)':'({0} in field)',
 '拉锯战 · 三路渡河: 大桥/北石桥可通车 · 南徒涉滩可涉渡 · 滩外激流不可徒涉':'Tug of war · 3 river crossings: main & north bridge take tanks · south ford wadeable · rapids elsewhere are deadly',

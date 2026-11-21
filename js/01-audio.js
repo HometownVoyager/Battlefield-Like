@@ -767,17 +767,63 @@ for(const a of ambMutes) a.g.gain.setTargetAtTime(mute?0:a.base,ctx.currentTime,
 for(const e of engines) if(e.nodes){ try{ e.nodes.g.gain.setTargetAtTime(mute?0:e.lastVol,ctx.currentTime,0.12); }catch(err){} }
 }
 let _wxGainNode=null;
+let _wxWindBranch=null;   // 已建层分支型 (true=风声低通+阵风LFO / false=雨声带通 / null=未建) —— 换型重建判据 (★2026-11-21 P1-15)
+let _wxSrcs=[];           // 已建层须真停的源 (噪声源+风声LFO): 换型拆旧时按 engine.stop 口径停源免泄漏
 function updateWeatherAmbient(){
 if(!ctx) return;
-const targetLevel=(audioTimeFrozen())?0:((typeof WX_CFG!=='undefined'&&WX_CFG.audioLevel)?WX_CFG.audioLevel:0);
+const wxLv=(typeof WX_CFG!=='undefined'&&WX_CFG.audioLevel)?WX_CFG.audioLevel:0;   // 天候档真基准 (与冻结无关)
+const targetLevel=(audioTimeFrozen())?0:wxLv;
+// ★2026-11-21 P1-15 天候热切补层: 22-hud 同图同昼夜热切只换 WX_CFG 再经 applySceneEnvironment 调此 ——
+// init 时 audioLevel=0 未建层 → 热切到有声天候在此惰性补建; 层已在但 wind 分支与当前档不符 (rain↔wind
+// 换型错层) → 拆旧建新; audioLevel 归 0 走下方零档 (只压增益不销毁, 保"只建一次"节点账)。
+if(wxLv>0&&(!_wxGainNode||_wxWindBranch!==(!!WX_CFG.wind))){
+teardownWeatherLayer();
+buildWeatherLayer();
+}
 if(_wxGainNode){
 _wxGainNode.gain.setTargetAtTime(targetLevel,ctx.currentTime,0.2);
-// 冻结期别把 base 记成 0 (解冻时 setAmbientMute/restoreAll 要按真基准还原雨声/风声)
-if(!audioTimeFrozen()){
+// base 恒记天候真基准 wxLv (冻结期——hub 热切就在 menuHold 冻结里——不得把 base 记成 0):
+// 解冻时 setAmbientMute/restoreAll/setTimeFrozenMute(false) 按真基准还原雨声/风声
 const mIdx=ambMutes.findIndex(a=>a.g===_wxGainNode);
-if(mIdx>=0) ambMutes[mIdx].base=targetLevel;
+if(mIdx>=0) ambMutes[mIdx].base=wxLv;
 }
 }
+function buildWeatherLayer(){
+// 雨声/风声环境层建层单源 (★2026-11-21 P1-15): startAmbient(init) 与 updateWeatherAmbient(热切惰性补建)
+// 共用; 冻结/静默期照建但静音起步 (gain 0 —— 冻结期新建层不许出声), base 恒记天候真基准
+// WX_CFG.audioLevel (不随起步值走, 避免冻结/解冻错音量)。
+const initGain=(audioTimeFrozen()||silenced)?0:WX_CFG.audioLevel;
+const rn=noiseSrc();
+if(WX_CFG.wind){
+const wl=ctx.createBiquadFilter(); wl.type='lowpass'; wl.frequency.value=520; wl.Q.value=0.6;
+const wg=ctx.createGain(); wg.gain.value=initGain;
+const wLfo=ctx.createOscillator(); wLfo.frequency.value=0.17;
+const wLg=ctx.createGain(); wLg.gain.value=260;
+wLfo.connect(wLg); wLg.connect(wl.frequency);
+rn.connect(wl); wl.connect(wg); wg.connect(comp); rn.start(); wLfo.start();
+_wxGainNode=wg; _wxSrcs=[rn,wLfo];
+ambMutes.push({g:wg,base:WX_CFG.audioLevel});
+}else{
+const rl=ctx.createBiquadFilter(); rl.type='bandpass'; rl.frequency.value=1500; rl.Q.value=0.35;
+const rg=ctx.createGain(); rg.gain.value=initGain;
+rn.connect(rl); rl.connect(rg); rg.connect(comp); rn.start();
+_wxGainNode=rg; _wxSrcs=[rn];
+ambMutes.push({g:rg,base:WX_CFG.audioLevel});
+}
+_wxWindBranch=!!WX_CFG.wind;
+}
+function teardownWeatherLayer(){
+// 换型拆旧 (rain↔wind 才走): ambMutes 摘登记 + 增益斜降归零 + 源真停 (承 engine.stop 口径), 旧节点账清干净
+if(!_wxGainNode) return;
+const mIdx=ambMutes.findIndex(a=>a.g===_wxGainNode);
+if(mIdx>=0) ambMutes.splice(mIdx,1);
+try{
+const t0=ctx.currentTime;
+_wxGainNode.gain.cancelScheduledValues(t0);
+_wxGainNode.gain.setTargetAtTime(0,t0,0.08);
+}catch(err){}
+for(const s of _wxSrcs){ try{ s.stop(ctx.currentTime+0.2); }catch(err){} }
+_wxGainNode=null; _wxSrcs=[]; _wxWindBranch=null;
 }
 function startAmbient(){
 const n=noiseSrc(); const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=280;
@@ -789,25 +835,9 @@ n.connect(lp); lp.connect(g); g.connect(comp); n.start(); lfo.start();
 ambMutes.push({g,base:0.052});
 // 雨声/风声环境层 (天气设计 §5-5): 增益收编 WX_CFG.audioLevel (小雨 0.055 / 暴雨 0.08 = 原校准值);
 // 暴风雪走风声分支 —— 一期复用噪声源变调(低通)+低音量+慢 LFO 阵风, 换真风声资源=二期候选 (设计 §8⑥)。
-if(WX_CFG.audioLevel>0){
-const rn=noiseSrc();
-if(WX_CFG.wind){
-const wl=ctx.createBiquadFilter(); wl.type='lowpass'; wl.frequency.value=520; wl.Q.value=0.6;
-const wg=ctx.createGain(); wg.gain.value=WX_CFG.audioLevel;
-const wLfo=ctx.createOscillator(); wLfo.frequency.value=0.17;
-const wLg=ctx.createGain(); wLg.gain.value=260;
-wLfo.connect(wLg); wLg.connect(wl.frequency);
-rn.connect(wl); wl.connect(wg); wg.connect(comp); rn.start(); wLfo.start();
-_wxGainNode=wg;
-ambMutes.push({g:wg,base:wg.gain.value});
-}else{
-const rl=ctx.createBiquadFilter(); rl.type='bandpass'; rl.frequency.value=1500; rl.Q.value=0.35;
-const rg=ctx.createGain(); rg.gain.value=WX_CFG.audioLevel;
-rn.connect(rl); rl.connect(rg); rg.connect(comp); rn.start();
-_wxGainNode=rg;
-ambMutes.push({g:rg,base:rg.gain.value});
-}
-}
+// ★2026-11-21 P1-15: 建层抽 buildWeatherLayer 单源共用 —— init 时 audioLevel=0 不建层 (静默轻量),
+// 热切到有声天候由 updateWeatherAmbient 惰性补建; rain↔wind 换型错层也在 updateWeatherAmbient 拆旧建新。
+if(WX_CFG.audioLevel>0) buildWeatherLayer();
 // 远处机枪对射: 断续的闷响连射
 setInterval(()=>{ if(Math.random()<0.45) distantMG(); }, 4600);
 // 鸟鸣: 随机间隔的合成啁啾, 左右声道随机

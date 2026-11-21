@@ -16,7 +16,7 @@
 //      (position xyz + quaternion; 沉入动画推下 y, 枯树/椰树的倒伏还改写 x/z 与姿态) +
 //      树木/灌木/草丛/庄稼实例批的 instanceMatrix/instanceColor (倒伏、焦黑、零缩放隐藏全在这里);
 //   ⑤ 火焰网格: FUEL 燃料 + 受热/燃烧/寿命/点火者 (全部清零);
-//   ⑥ 占位与登记表: PROPS / coverPoints / wires / MG42S / runtimeCraters / CROP_FIELDS (运行时只追加),
+//   ⑥ 占位与登记表: PROPS / coverPoints / wires / MG42S / runtimeCraters / CROP_FIELDS / MINES (运行时只追加),
 //      外加固定炮位/地图机枪被操作后残留的射角 (炮位本体是地图设施, 但 yaw/pitch 组会停在最后一帧);
 //   ⑦ 旗面: 归属回中立 + 布料顶点回基线 + 旗高复位 (updateFlags 每帧改写旗布顶点与旗杆位置)。
 // 不拍快照的两类:
@@ -35,7 +35,7 @@
 const WSN={ready:false, worldKids:null, sceneKids:null,
 boxN:0, box:[], cylN:0, cyl:[], dest:[], roof:[],
 flora:[], floraSeen:null, inst:[], fuel:null,
-props:[], coverN:0, wireN:0, mgN:0, craterN:0, cropN:0, flags:[]};
+props:[], coverN:0, wireN:0, mgN:0, craterN:0, cropN:0, mines:[], flags:[]};
 // 逐株植被的可变字段 (被燃烧/倒伏/碾毁/炸没/沉入改写的一切; 其余字段构建期定死)
 const WSN_FLORA_FIELDS=['alive','dead','burnT','burnDur','dmg','fall','charred','sinkQ','igniter','fT','iT','cx','cy','cz','restCrown'];
 const _wsnHas=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
@@ -126,6 +126,10 @@ WSN.wireN=wires.length;
 WSN.mgN=(typeof MG42S!=='undefined')?MG42S.length:0;
 WSN.craterN=(typeof runtimeCraters!=='undefined')?runtimeCraters.length:0;
 WSN.cropN=CROP_FIELDS.length;
+// P1-12 (审计 2026-11-21): 反坦克雷区登记表拍**条目引用** (PROPS 同口径, 不拍长度) —— retireMatchActors
+// (22-hud) 会把 MINES 整表 length=0, 还原侧用长度截断补不回来; 雷是布局期件 (atMine 仅 layoutSteppe
+// 调用, 局内只写 dead/摘网格), 引用写回 + dead 复位即完成重建。
+WSN.mines=(typeof MINES!=='undefined')?MINES.slice():[];
 // ⑥b 固定炮位/地图机枪的指向 (炮位本体是地图设施, 但被操作过之后 yaw/pitch 组停在最后一帧的射角)
 WSN.aimMG=_wsnAimSnap(typeof MG42S!=='undefined'?MG42S:[]);
 WSN.aimAT=_wsnAimSnap(typeof ATGUNS!=='undefined'?ATGUNS:[]);
@@ -191,7 +195,8 @@ try{ FALLING.length=0; BURNING_TREES.length=0; TREE_SINKS.length=0; }catch(e){}
 try{ if(player.loiter) loiterDespawn(player.loiter); player.loiter=null; }catch(e){}
 try{ FIRE_SOURCES.length=0; }catch(e){}
 try{ HEDGE_CRUMBLE.length=0; }catch(e){} // 树篱烧尽二段账 (2026-11-16 批3): 留着会对已还原的原始树篱再碎一次
-try{ MINES.length=0; }catch(e){}
+// (P1-12, 2026-11-21 审计批): MINES 从这条清账链里摘出 —— 雷区是布局期登记表, "清账≠重建"的账,
+// 还原侧按快照引用写回 (见 restorePristineWorld ⑧ 的 MINES 块); 在这里清空 = 新局 checkMinesAt 空转。
 try{ if(typeof BotDebug!=='undefined'&&BotDebug.on) BotDebug.on=false; }catch(e){}
 try{ gunEvents.length=0; }catch(e){}
 // 惰性创建且挂在模块变量上的常驻对象: 台账摘除后引用必须置空, 否则下次不再重建 (小队标记/玩家降落伞)
@@ -207,6 +212,27 @@ else { try{ playerChuteMesh=null; }catch(e){} }
 // visible=true 写在已脱离场景的节点上 = "第三人称隐身 (该中弹还是中弹)"。复位后下次 ensure 原地重建。
 // 23b 是世界还原链、可能在不加载 20-player 的子集沙箱里跑, 故 typeof 守卫退化为旧行为 (与上一行同款)。
 if(typeof playerAvatarReset==='function') playerAvatarReset();
+// 夜战灯链复位 (P1-14, 2026-11-21 审计批, 两代理独立发现互证): 08-effects 的惰性灯件全是
+// "once 建、引用常驻、ensure 守卫只查引用非空" (08-effects.js _hlPoolEnsure/_flareLightPoolEnsure/
+// _ensureFireLightPool/_flareVisual/_searchVisual/_ensurePlayerFlashlight 族) —— 这些灯都在首局运行期才
+// scene.add, 不在开局快照里 ⇒ 台账还原本就会把它们整段摘出 scene; 引用不置空则第二局起 ensure 全短路:
+// 手电不亮/大灯只剩假光锥/旗点照明弹消失/探照灯光柱隐形/火焰无动态光, 本页会话永不自愈; 且
+// _searchHitTick 只读 _searchBeams 坐标不依赖光柱网格 ⇒ 隐形探照灯继续给 Bot 暴露玩家。
+// 与上面 SQUAD.marker/降落伞/第三人称本体同一不变量 (23b:197-209 注释惯例), 复位清单:
+//   ① _hlPool/_flareLightPool/_fireLightPool 三池清空 (旧灯本体无几何, 台账摘除时 disposeActorHierarchy
+//      已回收带几何的伴生件; 池里 SpotLight 的 target 也是独立 scene 子件, 同样被台账摘走, 清数组即孤儿
+//      由 GC 收; _fireLightPool 条目是 {light,seed} 包装件, 连包装一并弃);
+//   ② FLARES 整表清空 + _flaresInit=false (下一局暗光 tick 由 nightFlaresInit 从还原后的旗位重登记;
+//      只复位旗标不清表会双份旗点弹, 只清表不复位旗标则丢登记时机, 两者必须成对);
+//   ③ SEARCHLIGHTS 各项 _beam=null + _searchBeams 清空 (下一局 nightGearTick 每帧 _searchVisual 原地
+//      重建并重新登记, 照中玩家的暴露判定链随登记表恢复);
+//   ④ 玩家手电四件套 _playerFlashlight/_playerFlSpill/_playerFlCone=null (SpotLight 与其 target/溢光/
+//      丁达尔光锥都直接挂 scene, 随台账摘除); _playerVmFlashlight 挂在 vmScene, 世界还原碰不到它 ——
+//      **不置空**, 置空反而会在 vmScene 逐局堆孤儿灯。
+try{ _hlPool.length=0; _flareLightPool.length=0; _fireLightPool.length=0; }catch(e){}
+try{ FLARES.length=0; _flaresInit=false; }catch(e){}
+try{ for(const sl of SEARCHLIGHTS){ if(sl) sl._beam=null; } _searchBeams.length=0; }catch(e){}
+try{ _playerFlashlight=null; _playerFlSpill=null; _playerFlCone=null; }catch(e){}
 }
 // ═════ 就地还原 ═════
 // 返回 true = 世界已回到开局状态; false = 未拍过快照, 只做了"上一局实体退场"(旧行为)
@@ -307,6 +333,13 @@ if(typeof runtimeCraters!=='undefined') _wsnTrim(runtimeCraters,WSN.craterN);
 if(typeof cratersResetLife==='function') cratersResetLife();   // 弹坑寿命清零 (2026-11-18 弹坑批: 布局旧痕随快照回场=全新战场重新计时; 局内战斗坑随台账摘除出账)
 
 _wsnTrim(CROP_FIELDS,WSN.cropN);
+// P1-12 (审计 2026-11-21): 反坦克雷区账写回 —— 网格由上面的台账还原加回 world (mineBlast 摘的是网格,
+// atMine 布的网格在开局快照里), 这里把登记表回填快照引用并复位 dead: 旧版 23b:194 + 22-hud retireMatchActors
+// 两处 MINES.length=0 都只清不建 ⇒ 新局 checkMinesAt 空转, 坦克碾雷不爆 ("坦克屠宰场"引门带变安全通道)。
+if(typeof MINES!=='undefined'){
+MINES.length=0;
+for(const m of WSN.mines){ if(!m) continue; m.dead=false; if(m.mesh&&!m.mesh.parent) world.add(m.mesh); MINES.push(m); }
+}
 // ⑨ 旗面: 归属回快照 (开局=中立), 布料顶点回基线, 旗高回该归属的目标位
 // (旗高不写快照读数而写"目标位": 旗高是每帧向目标阻尼的动画量, 菜单期待机期间一直在动 ——
 //  写目标位才能得到一个稳定且与 updateFlags 同式的复位状态; 快照读数只作字段缺失时的兜底)

@@ -719,7 +719,7 @@ AudioSys.explosion('mortar',n.pos.distanceTo(camera.position)*0.85,AudioSys.panO
 //   载具 150 与 ap=false 不动 (对装甲本来刮痧); 结构半径随爆径同比例 7→5 (伤害 210 不动)。
 splashDamage(n.pos,n.thrower,(n.thrower&&n.thrower.spectator)?-1:n.team,5.25,100,150,false,'explo'); // team: 2026-11-09 观战中立批 —— 观战者本尊的手持迫击炮无差别, Bot 迫击炮不动; 不在弹体上盖章, 保住敌雷接近警告与载具触发圈的旧口径
 damageStructures(n.pos,5,210,n.thrower);   // 4参 = 破坏得分归属 (2026-09-26 破坏得分批)
-crater(n.pos.x,n.pos.z,1.3,true);
+if(n.pos.y-heightAt(n.pos.x,n.pos.z)<2.2) crater(n.pos.x,n.pos.z,1.3,true,n.pos.y);   // 弹坑高度门 (与 08-effects explosionFX 逐字同口径): 半空/楼面引爆不隔空在地上盖坑; supY=爆点支撑面跟随
 return;
 }
 if(n.at){
@@ -729,7 +729,7 @@ AudioSys.explosion('atcharge',n.pos.distanceTo(camera.position),AudioSys.panOf(n
 // 爆圈 5→5.5 (2026-09-30 批, 用户裁定"微量增加手雷爆炸范围"; 反装甲全额/伤害表不动)
 splashDamage(n.pos,n.thrower,-1,5.5,95,340,true,'explo'); // 反坦克炸药: 反装甲全额; team=-1 = 2026-11-09 用户裁定"投掷手雷中立" (与地雷/油桶同约定; 仅爆炸伤害中立, 触发引信仍只认敌方)
 damageStructures(n.pos,5,130,n.thrower);
-crater(n.pos.x,n.pos.z,1.1,true);
+if(n.pos.y-heightAt(n.pos.x,n.pos.z)<2.2) crater(n.pos.x,n.pos.z,1.1,true,n.pos.y);   // 弹坑高度门 (同 explosionFX 口径): 贴车/贴墙高处引爆不隔空在地上盖坑, 贴地照常
 } else if(n.bomb){
 // 2026-09-30k (用户裁定"增大航弹的爆炸范围, 并让其能有效杀伤乃至击杀坦克"): 半径 9.5→13 /
 // 步兵 170→210 / 载具 260→1350 且 **ap=true** —— 旧无 ap: 260×TANK_ARMOR0.3=78 纯挠痒; 现在
@@ -738,7 +738,7 @@ explosionFX(n.pos);
 AudioSys.explosion('bomb',n.pos.distanceTo(camera.position)*0.7,AudioSys.panOf(n.pos)); // 航弹档 (★2026-11-15c: 最重爆炸)
 splashDamage(n.pos,n.thrower,n.team,13,210,1350,true);
 damageStructures(n.pos,12,460,n.thrower);
-crater(n.pos.x,n.pos.z,2.4,true);
+if(n.pos.y-heightAt(n.pos.x,n.pos.z)<2.2) crater(n.pos.x,n.pos.z,2.4,true,n.pos.y);   // 弹坑高度门 (同 explosionFX 口径): 撞 2.2m+ 盒/墙面引爆不隔空在地上盖坑 (2026-11-14 用户令病根)
 explodeAt(n.pos,n.thrower);
 } else {
 explodeAt(n.pos,n.thrower,undefined,true,'frag');   // noFF (2026-11-09 用户裁定"投掷手雷中立"): 普通手雷爆炸伤双方; 触发引信仍只认敌方, 自炸(s!==attacker)照旧; kind=手雷档 (★2026-11-15c)
@@ -1034,7 +1034,7 @@ if(typeof markHitCls==='function') markHitCls('explo'); // 命中标识档: 爆�
 // 攻顶战斗部: 不分敌我的大范围高伤害爆炸 (含发射者自己与友军)
 splashDamage(p,d.owner,-1,9.5,240,560,true,'explo'); // 巡飞弹: 反装甲全额, 无差别 (单源 splashDamage team=-1)
 damageStructures(p,9,300,d.owner);           // 4参 = 破坏得分归属 (观战者操控的弹体同样给自己加分)
-crater(p.x,p.z,1.6,true);
+if(p.y-heightAt(p.x,p.z)<2.2) crater(p.x,p.z,1.6,true,p.y);   // 弹坑高度门 (与 08-effects explosionFX 逐字同口径): 巡飞弹空爆 (打飞机 30-90m 高空/到点/出界引爆) 不再隔空在地上盖坑, 贴地爆照常
 // ★2026-11-14 友伤开关: 关=直击段同队目标不再吃 (溅射段已由 splashDamage 队属归一收口; 开启=照旧不分敌我攻顶)
 const _ltFF=t2=>EXPLO_FF||!d.owner||t2.team!==d.owner.team;
 if(directTank&&_ltFF(directTank)){ directTank.takeDmg(900,d.owner,true); if(d.owner&&d.owner.isPlayer&&directTank.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny('explo'); } // 巡飞弹直击: 反装甲全额

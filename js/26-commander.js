@@ -632,7 +632,14 @@ const wasDeploy=CMD.mapDeploy;
 CMD.mapOn=false; CMD.mapDeploy=false;
 CMD._pauseHid=false;                   // 暂停期临时隐藏的账本随关图归零 (否则下次开图会被静默藏起来)
 cmdMapWrapShow(false);                // ★单源显隐 (见 cmdMapWrapShow 的根因块): 这里**不许**再写 style.display —— 正是它抹掉了 cssText 里的 display:flex
-if(wasDeploy) cmdMapReparent(false);   // 布势版挂 body, 收起时搬回 #ui 压制网
+if(wasDeploy){ cmdMapReparent(false);   // 布势版挂 body, 收起时搬回 #ui 压制网
+// ★2026-11-21 布势整图档退场: 布势入口 (cmdDeployOpen) 把 view 写成整图适配 (scale=cmdMapFitScale≈0.46),
+//   旧写确认开战/撤销只收图不清 view ⇒ 局内战斗图沿用 0.46 档, 窗口≥世界 ⇒ cmdViewClamp 每帧把中心
+//   钳回 (0,0), 玩家跟随与中键平移整局失效且无恢复路径 (滚轮已改派切人)。置 null = 交给战斗期开图链
+//   重起: cmdMapOpen 复暖 _follow, cmdMapDraw 的默认新建兜底 (scale=1 + 中心=玩家)。战斗期关图
+//   (wasDeploy=false) 不动 view —— "缩放档保留"契约 (verify-commander fl.scaleKept) 原样成立。
+CMD.view=null;
+}
 // ★2026-10-26 排查轮二审 修复 (暂停中关图 = 指针被抢回去, 暂停面板点不动):
 //   ①现象: 开图中按 Esc 暂停 (暂停面板盖上来, 地图被 cmdMapPauseGate 藏起), 再按 Esc 关图 ——
 //     地图确实关了, 但指针锁被重新抢回去 ⇒ 鼠标消失, 暂停面板上的「继续/设置/返回主界面」一个都点不动,
