@@ -79,7 +79,9 @@ idx=read('index.html'), i18n=read('js/00b-i18n.js'), cfg=read('js/00-config.js')
 veh=read('js/15-vehicles.js'), air=read('js/16-aircraft.js'), naval=read('js/15d-naval.js'),
 game=read('js/18-game.js'), css=read('css/style.css');
 console.log('  ─ D5 机瞄保留小准星');
-has(hud,'else if(player.alive&&player.ads&&!WPN_DEFS[VM.key]?.scoped&&!player.onVehicle){','D5a 非镜机瞄独立分支 (带镜仍收)');
+// ★2026-11-22b 附身可见批判据跟走: 准星三档存活判据抽 _chAlive 单源 (player.alive||!!player.specViewHost) ——
+//   真附身 (视模式附身者已死) 准星写点与 2026-11-01 "要显示准星"契约对齐; 旧锚 player.alive&&player.ads 随之跟走。
+has(hud,'else if(_chAlive&&player.ads&&!WPN_DEFS[VM.key]?.scoped&&!player.onVehicle){','D5a 非镜机瞄独立分支 (带镜仍收)');
 ok(strip(hud).indexOf("--gap','5px')")>=0,'D5b 分支内 5px 档存在 (源码含 --gap 5px)');
 lacks(hud,'atRifle&&!player.onVehicle','D5c 旧"仅反坦克枪特批"分支已并入 (代码面消失)');
 console.log('  ─ D6 准星残留');

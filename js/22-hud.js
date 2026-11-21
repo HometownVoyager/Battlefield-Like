@@ -1406,14 +1406,20 @@ if(!(player.onVehicle&&player.onVehicle.kind==='tank')&&!player.onNaval){ const 
 if(player.alive&&player.braced){ hudShow('braceInd',true); hudClass('braceInd','on'); hudText('braceInd',t2('▙ 已架枪')); }   // ★20261121c P2#31: 架枪两态走词典
 else if(player.alive&&player.canBrace&&!player.prone&&!player.onVehicle&&SHOW_CTL_HINTS){ hudShow('braceInd',true); hudClass('braceInd',''); hudText('braceInd',t2('[X] 架枪')); }   // 详细操作开关 (2026-11-09 批): 关=不显键位提示 ('▙ 已架枪' 状态保留)
 else hudShow('braceInd',false);
-	if(player.alive&&player.loiter){
+	// ★2026-11-22b 附身可见批 (用户实报"附身Bot信息显示不全"): 准星三档旧写全 player.alive 单条件 ——
+	//   视模式附身者本体已死, specViewHudTick 迁移帧刚还原的准星下一帧就被 hudShow(false) 压回
+	//   (该 tick 只在迁移帧还原一次, updateHUD 每帧都写 ⇒ 稳态恒无准星)。附身 (specViewHost) 并入
+	//   存活判据: 附身中照常显准星 (真附身批 2026-11-01 "要显示…准星"的漏配对半边); ads 已随 die()
+	//   清零, 不用另档; 死态非附身照旧收准星 (else 分支不动)。
+	const _chAlive=player.alive||!!player.specViewHost;
+	if(_chAlive&&player.loiter){
 	hudShow('crosshair',true);
 	hudStyle('crosshair','--gap','7px');
-	} else if(player.alive&&!player.ads&&!player.onVehicle){
+	} else if(_chAlive&&!player.ads&&!player.onVehicle){
 hudShow('crosshair',true);
 const gap=8+player.bloom*26+(Math.hypot(player.vel.x,player.vel.z)>1?6:0);
 hudStyle('crosshair','--gap',gap+'px');
-} else if(player.alive&&player.ads&&!WPN_DEFS[VM.key]?.scoped&&!player.onVehicle){
+} else if(_chAlive&&player.ads&&!WPN_DEFS[VM.key]?.scoped&&!player.onVehicle){
 // 非镜武器机瞄: 保留小型准星 (2026-09-28 D5, 原只有反坦克枪侧偏机瞄特批) —— 逐武器表清零
 // "举镜后无参照"的档: 冲锋枪/步枪等机瞄举镜后屏上仍有 5px 小准星; 带镜武器走镜内分划 (下一分支收掉)。
 hudShow('crosshair',true);
@@ -3685,7 +3691,7 @@ if(_r&&_r.height>0) _svInd.style.top=(Math.round(_r.bottom)+10)+'px';
 }
 function specViewHudTick(){
 const pos=!!player.specViewHost;   // 附身中 (调试/视模式共用一条管线)
-const on=pos||(player.specView&&!player.alive);   // 视模式全程 / 附身中 (2026-11-01)
+const on=!matchOver&&(pos||(player.specView&&!player.alive));   // 视模式全程 / 附身中 (2026-11-01); ★2026-11-22b: 终局即收 —— endMatch 起 matchOver 冻结主循环, 若不在此档掉, 结算 0.9s 空窗指示条还挂着, 且冻结分支的补喂帧 (24-main) 全靠本谓词出迁移把指示条收掉 (结算页/主菜单不再残留)
 if(on!==_svHudOn||pos!==_svHudPos){
 _svHudOn=on; _svHudPos=pos;
 for(let i=0;i<_SV_HUD_HIDE.length;i++){

@@ -149,6 +149,15 @@ renderer.clearDepth();
 renderer.render(vmScene,vmCamera);
 }
 }
+// ★2026-11-22b 观战残留批 (用户实报"'自由观战…'提示条残留到结算页/主菜单"): #specViewInd 直挂 body
+//   (z-index:40 > .screen:20, **不进 #ui** ⇒ 不吃 body.inMenu 的整层隐藏), 它唯一的收起写点是
+//   specViewHudTick 每帧的 _svOverlayOpen 检查; 而本冻结分支 (暂停/结算 matchOver/主菜单 menuHold)
+//   在下面 return, 常规路径的调用点 (updateHUD 旁) 永远跑不到 ⇒ 指示条以最后一帧的样子永久压在
+//   结算页/主菜单/暂停罩上 (22-hud 自己的 _svOverlayOpen 门本就是为"全屏层开着即收起"设计的,
+//   只是冻结期没人喂它)。这里补喂一帧同源对账: 任一全屏层开着 ⇒ 收起, 关闭后自然回来; 稳态零 DOM
+//   写入 (tick 内部有 on!==_svHudOn 迁移门 + 指示条内容串去重)。终局 0.9s 结算空窗的闪回由 22-hud
+//   的 on 谓词 !matchOver 档掉 (同批)。
+if(typeof specViewHudTick==='function') specViewHudTick();
 return;
 }
 { // 出膛事件账原地压实 (2026-11-11 性能批): 旧版 filter 每帧无条件分配新数组 (空表也分配)。
@@ -276,8 +285,8 @@ if(typeof cmdFrameTick==='function') cmdFrameTick(rdt);   // 指挥官层帧 tic
 if(typeof shadowRefreshTick==='function') shadowRefreshTick(); // 阴影半频刷新 (2026-10-24 性能批, q0/q1 30Hz)
 renderer.clear();
 renderer.render(scene,camera);
-if(player.alive&&!player.onMG&&VM.root.visible){
-if(!(typeof thirdPersonOn==='function'&&thirdPersonOn())){ // 第三人称: 不叠渲染视角武器模型 (2026-09-20 第三人称批)
+if((player.alive||player.specViewHost)&&!player.onMG&&VM.root.visible){   // ★2026-11-22b 附身可见批 (用户实报"观战附身Bot不显示手持枪械模型"): 视模式附身者本体已死, 旧写 player.alive 单条件把 vmScene 渲染挡死 —— 2026-11-03 真附身批只放宽了上方 updateViewModel 状态机门 (:262), 这道渲染门漏配对 ⇒ 枪模/换弹/举雷/包扎/开火反馈全部空跑不画 (调试附身是活人不受影响故未暴露)。死态非附身 (死亡镜头/航拍) specViewHost=null 门照旧不渲染, 零行为变化
+if(!(typeof thirdPersonOn==='function'&&thirdPersonOn())){ // 第三人称: 不叠渲染视角武器模型 (2026-09-20 第三人称批; 视模式附身者已死, thirdPersonOn 恒 false ⇒ 不受这半边影响)
 renderer.clearDepth();
 renderer.render(vmScene,vmCamera);
 }
