@@ -90,6 +90,11 @@ function updateCreaturesBurning(dt){
     const s=combatants[si];
     // 观战者不着火 (2026-11-04b): 免疫期间顺手清掉残留账 (从活人切成观战的那条路径), 解冻/关闭调试后不带火
     if(s&&s.spectator&&(s.burnTimer||s.burnTickT)){ s.burnTimer=0; s.burnTickT=0; s.burnAttacker=null; }
+    // ★2026-11-22 上车灭火批 (用户令"上载具消除身上的效果"): 座位本身就是免点单源 —— igniteCreature 的
+    //   seatShielded (onVehicle/onNaval) 门只挡"新点火", 已烧着再上车的照样在车里冒火+0.4s 跳伤+抖屏。
+    //   座位上直接灭火清账 (与 23-deploy 新生清账同一三件套 + _burnAcc), F 上坦克/上艇/上飞机/Bot 入座/
+    //   部署上车全路径覆盖 (账在 tick 侧收, 不逐 boarding 点接线); 下车不回烧, 重燃走正常点火门。
+    if(s&&s.burnTimer&&typeof seatShielded==='function'&&seatShielded(s)){ s.burnTimer=0; s.burnTickT=0; s.burnAttacker=null; s._burnAcc=0; continue; }
     if(!creatureIgnitable(s)||!s.burnTimer||s.burnTimer<=0) continue;
     s._burnAcc=(s._burnAcc||0)+dt;
     if(!(typeof window!=='undefined'&&window.BURN_NO_STAGGER)&&((si+_burnFrame)&1)===0) continue;   // E: 本生物本帧跳过 (账已入 _burnAcc, 下帧一并推进); 回退旗 BURN_NO_STAGGER=旧每帧结算 (d2 仍走 _burnAcc 累积, DPS 等价)

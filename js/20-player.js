@@ -2432,11 +2432,21 @@ if(camera.position.y<gmin) camera.position.y=gmin;
 camera.lookAt(tb.x,tb.y+0.3,tb.z);
 camera.fov=dampF(camera.fov,60,5,dt);
 camera.updateProjectionMatrix();
+// ★2026-11-22 就地倒下可见批 (用户实报"选就地倒下, 死亡时模型直接消失, 看不到倒地动作"): 死亡环绕此前
+//   直接 return 而 updateCamera 顶部每帧 playerAvatarHide() ⇒ avatar 恒隐 (布娃娃档尸体=12-ragdolls
+//   自带网格不受影响; 就地倒下档 deathRag=null 什么都没有)。本行给本体姿态机喂帧: 就地倒下档在环绕机位
+//   看**本体**走 playerAvatarDeath 契约G② 侧倒趴地 (dampF 8/s, 0.8s 环绕内基本落定)。
+updatePlayerAvatar(dt);   // ★2026-11-22 环绕喂帧 (就地倒下档看本体倒地; 布娃娃档 deathRag 分支自隐零变化)
 return;
 }
 }
 // 未落地/阵亡镜头结束后: 无 UI 航拍环绕 (开局前的主菜单背景即此, 与菜单期 updateMenuCamera 同一几何单源)
 aerialCamPose(nowT*0.05);
+// ★2026-11-22 就地倒下可见批: 阵亡航拍段 (环绕结束 → 部署页盖上的空窗) 尸体不能又隐掉 —— 就地倒下档
+//   死亡环绕只有 0.8s, 此前一进航拍 avatar 又被顶部 playerAvatarHide() 收走, 地上空无一物。观战者无尸体
+//   (spectator 门; specView 早退在上方, 观战者不会走到这里, 双保险)。布娃娃档 playerAvatarDeath 的
+//   deathRag 分支自隐本体, 零变化。
+if(!p.spectator) updatePlayerAvatar(dt);
 return;
 }
 // ── 海战载具相机 (2026-09-20N 海战批; 2026-09-21 C 键三态 + 炮手镜) ──

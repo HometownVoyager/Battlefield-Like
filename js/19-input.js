@@ -36,6 +36,23 @@ if(typeof AudioSys!=='undefined'&&AudioSys.click) AudioSys.click(1100,0.25,0.05)
 if(typeof showScorePop==='function')
 showScorePop(t2(p.navalGun?'炮手镜 · 稳像倍镜':(p.thirdPerson?'第三人称: 开':'艏向第一人称')));
 }
+// ★2026-11-22 投掷手感批: 出手弧接续单源 —— 自己的出手弧 (松手后 0.55s 收尾段) 不再吃键。旧链两层卡手
+// (用户实报"连点 G/3/4/6 卡手, 像有前摇"):
+//   ① 20261121 审计 P1-4 把出手弧 (VM'nade' 且 !nadeHeld) 收进 readBarActive 后, 弧中按投掷键先撞上
+//      barStealArmed 双击确认 —— 第一次只记账不放行 = **白吃一键**;
+//   ② 举雷起步门 VM.state==='idle' 在弧内恒 false ⇒ 0.55s 死区内怎么按都没反应。
+// 新口径: 弧中按 G/3/4/6 = 直接接下一轮 —— 未出手段 (k<0.5, releaseNade 还没跑) 先把捏着的雷**立即出手**
+// (引信在弧内已停烧 —— 20-player 只在 nadeHeld 时减 fuse —— 原样出账; 出手点/方向仍走 playerThrowOrigin/
+// playerThrowDir 单源, 与动画相位无关), 已出手段弧纯收尾直接重举。**一次点击 = 一颗雷, 零死区**。
+// 只接管 VM/雷账, **不碰读条账** (不调 stealBar/barStealArmed —— 别的行动键打断弧仍走各自双击确认;
+// demolish 等真读条也不被顺手吃掉)。返回 true=已接管 (调用方接着铺弹种账; flush 可能清零计数 → 空手不自举,
+// nadeHeld 保持 false, 下帧 10-viewmodel 哨兵自愈回 idle, 与"上载具外摘 nadeHeld"同一条自愈路)。
+function nadeArcTakeover(){
+if(player.nadeHeld||(typeof VM==='undefined')||!VM||VM.state!=='nade') return false;
+if(VM.stateDur>0&&VM.stateDur<=10&&(VM.stateT/VM.stateDur)<0.5) player.releaseNade();   // 未出手段: 立即出手 (零吞键)
+VM.state='nade'; VM.stateT=0; VM.stateDur=999; vmSndFlags={};
+return true;
+}
 let lastEscT=0;
 addEventListener('keydown',e=>{
 if(e.code==='Tab'){ e.preventDefault(); if(e.repeat) return;   // 2026-11-13 perf batch: OS key-repeat must not re-run the scoreboard chain
@@ -292,6 +309,12 @@ if(e.code==='KeyG'){
 //   ok=除 VM 态外的全部门 (没雷/座位上本就不会起步, 不白丢读条)。
 const sameHeld=player.nadeHeld&&!player.nadeIsAT&&!player.nadeIsSmoke&&!player.nadeIsIncin;
 const ok=player.nadeCount>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
+// ★2026-11-22 投掷手感批: 出手弧中按 G = 立即接下一轮 (不吃键/不走双击确认, 见 nadeArcTakeover 注);
+//   flush 后计数清零 (最后一颗已被立即出手) 则不自举, 也不落进下面双击确认网 (空手无可举, 下帧自愈回 idle)。
+if(ok&&nadeArcTakeover()&&player.nadeCount>0){
+player.nadeHeld=true; player.nadeFuse=NADE_FUSE_T; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false;   // 新一颗引信全长 (与 idle 起步同账)
+AudioSys.click(1600,0.25,0.04);
+}else{
 if(ok&&!sameHeld){ if(!player.barStealArmed('KeyG')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
@@ -300,10 +323,16 @@ vmSndFlags={};
 AudioSys.click(1600,0.25,0.04);
 }
 }
+}
 if(e.code==='Digit3'){
 // 同键不抢 (举 AT 中再按 3 维持); 异读条/异种雷被 3 打断 = 换举 AT (★2026-10-25 反馈轮①; ok=除 VM 态外全门)
 const sameHeld=player.nadeHeld&&player.nadeIsAT;
 const ok=player.atNades>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
+// ★2026-11-22 投掷手感批: 弧中接续同 KeyG (见 nadeArcTakeover 注); flush 清零则空手不自举。
+if(ok&&nadeArcTakeover()&&player.atNades>0){
+player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=true; player.nadeIsSmoke=false; player.nadeIsIncin=false;   // AT 哨兵引信 (与 idle 起步同账)
+AudioSys.click(1200,0.3,0.05);
+}else{
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit3')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 // 持掷化 (2026-09-30 批, 与 KeyG 同口径): 按住=举雷瞄准 (弹道预演亮出), 松手=出手。AT 保持 nadeFuse=99
@@ -313,6 +342,7 @@ VM.state='nade'; VM.stateT=0; VM.stateDur=999;
 player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=true; player.nadeIsSmoke=false; player.nadeIsIncin=false;
 vmSndFlags={};
 AudioSys.click(1200,0.3,0.05);
+}
 }
 }
 if(e.code==='Digit4'){
@@ -325,12 +355,18 @@ if(VM.state==='idle') switchSlot(player.slots.findIndex(s=>s&&s.def.rocket),true
 }else{
 const sameHeld=player.nadeHeld&&player.nadeIsSmoke;
 const ok=player.smokeCount>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
+// ★2026-11-22 投掷手感批: 弧中接续同 KeyG (见 nadeArcTakeover 注); flush 清零则空手不自举。
+if(ok&&nadeArcTakeover()&&player.smokeCount>0){
+player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.smoke; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;   // 烟雾真引信 (与 idle 起步同账)
+AudioSys.click(1000,0.28,0.05);
+}else{
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit4')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
 player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.smoke; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;   // ★2026-11-17 批2.6: 烟雾弹改可烹饪真引信 (旧 99 哨兵)
 vmSndFlags={};
 AudioSys.click(1000,0.28,0.05);
+}
 }
 }
 }
@@ -341,12 +377,18 @@ if(player.incinCount>0){
 // ★2026-10-30 读条交互批: 打断改双击确认 (barStealArmed 单源)。
 const sameHeld=player.nadeHeld&&player.nadeIsIncin;
 const ok=!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
+// ★2026-11-22 投掷手感批: 弧中接续同 KeyG (见 nadeArcTakeover 注); flush 清零则空手不自举。
+if(ok&&nadeArcTakeover()&&player.incinCount>0){
+player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.incin; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=true;   // 燃烧真引信 (与 idle 起步同账)
+AudioSys.click(880,0.3,0.05);
+}else{
 if(ok&&!sameHeld){ if(!player.barStealArmed('Digit6')) return; player.stealBar(); }
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
 player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.incin; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=true;   // ★2026-11-17 批2.6: 燃烧弹改可烹饪真引信 (旧 99 哨兵)
 vmSndFlags={};
 AudioSys.click(880,0.3,0.05);
+}
 }
 } else if(player.cls===4&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter){
 if(!player.mortarPlaced){
