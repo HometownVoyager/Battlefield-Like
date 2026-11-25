@@ -181,7 +181,12 @@ ok(G('player.deathFallErr')===null,'T2-prep die() 无异常'+(G('player.deathFal
 ok(G('player.alive')===false&&G('player.deathRag')===null&&Math.abs(G('player.deathCamT')-0.8)<1e-6,'T2-prep 就地倒下档: deathRag=null + 死亡环绕 0.8s (deathFallMode 生效)');
 G('for(let i=0;i<10;i++) updateCamera(1/60);');
 ok(G('playerAvatar&&playerAvatar.root.visible')===true,'T2a ★死亡环绕期本体可见 (改前恒隐 = 用户实报"模型直接消失")');
-ok(G('(playerAvatar&&playerAvatar.pelvis?playerAvatar.pelvis.position.y:9)')<0.6,'T2b ★本体倒地中: 骨盆 y='+G('(playerAvatar&&playerAvatar.pelvis?playerAvatar.pelvis.position.y:9)').toFixed(2)+' <0.6 (playerAvatarDeath 契约G② dampF→0.22; 改前姿态机根本没帧)');
+// ★2026-11-25 跟码: 倒地改 (t/0.6)² 重力曲线后, 0.167s (10帧) 时 k≈0.077 骨盆仅小幅下降 —— 起步慢是
+// 重力感的体现, 不再是旧 dampF 的快收敛。判据改为"倒地中确实在下降 + 0.6s 收敛到 0.22"。
+const py10=G('(playerAvatar&&playerAvatar.pelvis?playerAvatar.pelvis.position.y:9)');
+ok(py10<0.94&&py10>0.3,'T2b ★本体倒地中: 骨盆 y='+py10.toFixed(2)+' 介于起始 0.94 与终态 0.22 之间 (重力曲线起步慢; 改前姿态机根本没帧)');
+G('for(let i=0;i<26;i++) updateCamera(1/60);');   // 累计 36 帧 = 0.6s, 倒地弧走满
+ok(Math.abs(G('(playerAvatar&&playerAvatar.pelvis?playerAvatar.pelvis.position.y:9)')-0.22)<0.03,'T2b-2 ★倒地走满收敛到 0.22 (重力曲线终态, 契约G②)');
 ok(G('player.deathCamT')>0&&G('player.deathCamT')<0.8,'T2-prep2 环绕计时已推进 (死亡分支确实在跑)');
 G('player.deathCamT=0; updateCamera(1/60);');
 ok(G('playerAvatar&&playerAvatar.root?playerAvatar.root.visible:false')===true,'T2c ★航拍段 (环绕结束→部署页空窗) 尸体仍可见 (改前一进航拍又被顶部 hide 收走)');

@@ -1859,24 +1859,54 @@ if(!melWind) p._meleeArmed=false;
 //   ② 物理未就绪 (沙箱无 CANNON / ragInit 失败, spawnRagdoll 返回 false) ⇒ 本体自己倒 (侧倒 + 趴地姿态)。
 function playerAvatarDeath(av,p,dt){
 if(p.deathRag){ av.root.visible=false; return av; }
+// ★2026-11-25 就地倒下重力批 (用户实报"空中死亡尸体悬浮 + 倒地不像重力"):
+// ① 竖直坠落: die() 不清 vel.y, 死前在下落就承接该初速; 每帧按 13m/s² (与玩家活体跳跃同 g,
+//    用户裁定) 加速, 落到 standHeight(死亡点) 即钳住不再下沉 —— x/z 钉死 ("就地"倒下)。
+//    不复用 updatePlayer 的活体物理链: 那条链会继续算水平速度/撞墙/摔伤/收伞, 死人不该再触发。
+// ② 姿态进度按 (t/0.6)² 加速: 起步慢、末段快, 符合绕脚跟翻倒的角加速度观感; 用进度 k 直接
+//    插值到终态 (取代旧指数 dampF), 与 Bot/丧尸同一条曲线。
+if(p._deathVy===undefined){
+p._deathVy=(p.vel&&isFinite(p.vel.y))?p.vel.y:0;
+// 首帧钉存起始姿态快照: k=0 严格等于死亡瞬间姿态 (无竖向跳变, 审计纪律), 之后从快照按重力曲线插值
+p._dfPose={
+py:av.pelvis.position.y, px:av.pelvis.rotation.x, pya:av.pelvis.rotation.y,
+tx:av.torsoG.rotation.x, tz:av.torsoG.rotation.z,
+hx:av.headG.rotation.x, hy:av.headG.rotation.y,
+rSx:av.armR.sh.rotation.x,rSz:av.armR.sh.rotation.z,rEx:av.armR.elm.rotation.x,
+lSx:av.armL.sh.rotation.x,lSz:av.armL.sh.rotation.z,lEx:av.armL.elm.rotation.x,
+lHx:av.legL.hip.rotation.x,lKx:av.legL.knee.rotation.x,
+rHx:av.legR.hip.rotation.x,rKx:av.legR.knee.rotation.x,
+gx:av.gunG.rotation.x
+};
+}
+if(p._deathT===undefined) p._deathT=0;
+p._deathT+=dt;
+const gh=standHeight(p.pos.x,p.pos.z,p.pos.y+0.6);
+if(p.pos.y>gh+0.001){
+p._deathVy-=13*dt;
+p.pos.y=Math.max(gh,p.pos.y+p._deathVy*dt);
+if(p.pos.y<=gh) p._deathVy=0;
+}
+const k0=clamp(p._deathT/0.6,0,1), k=k0*k0;
+const s=p._dfPose, L=(a,b)=>lerp(a,b,k);
 av.root.visible=true;
 av.root.position.set(p.pos.x,p.pos.y,p.pos.z);
-av.root.rotation.set(0,p.yaw+Math.PI,0.42);   // 侧倒 0.42rad: 与站立姿态在 root 层就分得开
-av.pelvis.position.y=dampF(av.pelvis.position.y,0.22,8,dt);
-av.pelvis.rotation.x=dampF(av.pelvis.rotation.x,1.54,8,dt);
-av.pelvis.rotation.y=dampF(av.pelvis.rotation.y,0,6,dt);
-av.torsoG.rotation.x=dampF(av.torsoG.rotation.x,0.06,6,dt);
-av.torsoG.rotation.z*=Math.pow(0.02,dt);       // 抽搐残留清零
-av.headG.rotation.x=dampF(av.headG.rotation.x,-0.3,5,dt);
-av.headG.rotation.y=dampF(av.headG.rotation.y,0,5,dt);
+av.root.rotation.set(0,p.yaw+Math.PI,0.42*k);   // 侧倒 0.42rad: 与站立姿态在 root 层就分得开
+av.pelvis.position.y=L(s.py,0.22);
+av.pelvis.rotation.x=L(s.px,1.54);
+av.pelvis.rotation.y=L(s.pya,0);
+av.torsoG.rotation.x=L(s.tx,0.06);
+av.torsoG.rotation.z=L(s.tz,0);                // 抽搐残留清零
+av.headG.rotation.x=L(s.hx,-0.3);
+av.headG.rotation.y=L(s.hy,0);
 // 四肢瘫软: 双臂摊在身侧, 双腿伸直 (与站立/匍匐的动作值都不同, 探针可断言)
-av.armR.sh.rotation.x=dampF(av.armR.sh.rotation.x,-1.35,6,dt); av.armR.sh.rotation.z=dampF(av.armR.sh.rotation.z,-0.55,6,dt); av.armR.elm.rotation.x=dampF(av.armR.elm.rotation.x,-0.35,6,dt);
-av.armL.sh.rotation.x=dampF(av.armL.sh.rotation.x,-1.25,6,dt); av.armL.sh.rotation.z=dampF(av.armL.sh.rotation.z,0.6,6,dt); av.armL.elm.rotation.x=dampF(av.armL.elm.rotation.x,-0.4,6,dt);
-av.legL.hip.rotation.x=dampF(av.legL.hip.rotation.x,0.05,6,dt); av.legL.knee.rotation.x=dampF(av.legL.knee.rotation.x,0.1,6,dt);
-av.legR.hip.rotation.x=dampF(av.legR.hip.rotation.x,0.05,6,dt); av.legR.knee.rotation.x=dampF(av.legR.knee.rotation.x,0.1,6,dt);
+av.armR.sh.rotation.x=L(s.rSx,-1.35); av.armR.sh.rotation.z=L(s.rSz,-0.55); av.armR.elm.rotation.x=L(s.rEx,-0.35);
+av.armL.sh.rotation.x=L(s.lSx,-1.25); av.armL.sh.rotation.z=L(s.lSz,0.6); av.armL.elm.rotation.x=L(s.lEx,-0.4);
+av.legL.hip.rotation.x=L(s.lHx,0.05); av.legL.knee.rotation.x=L(s.lKx,0.1);
+av.legR.hip.rotation.x=L(s.rHx,0.05); av.legR.knee.rotation.x=L(s.rKx,0.1);
 if(av._gun) av._gun.visible=false;             // 尸体不握枪
 avNadeHide();                                  // 尸体也不握雷 (2026-09-30 批2: 举雷期被打死, 手上雷模要收)
-av.gunG.rotation.x=dampF(av.gunG.rotation.x,0.2,5,dt);
+av.gunG.rotation.x=L(s.gx,0.2);
 return av;
 }
 // 挥砍期 IK 抓握点补偿槽 (2026-11-20 实机反馈批, 零分配): gunGripPoint 返回共享槽 _gaGrip 不可原地改,

@@ -1601,6 +1601,7 @@ if(player.readBarActive()) player.cancelReadBar(null,true);
 player.nadeHeld=false; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false;
 player.bandaging=0; player.curSlot=0;
 player.deathRag=null; player.deathCamT=0; player.killerName='';
+player._deathVy=undefined; player._deathT=undefined; player._dfPose=null;   // ★2026-11-25 就地倒下重力批: 跨局清零坠落/姿态账
 respawnCd=0; // 重生冷却 (2026-09-17 P0 同族): 上局阵亡时剩下的部署冷却不该带到新一局 (否则兵种选择页部署键先灰着)
 VM.root.visible=false;
 // 站到本方基地 (高度取地面), 朝向地图中心 —— 兵种选择阶段镜头就在自家的出发点, 与"部署"那一刻接得上

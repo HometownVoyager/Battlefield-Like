@@ -681,6 +681,7 @@ p.bandaging=0;
 p.useCast=null;
 p.grabAction=null;
 p.deathRag=null; p.deathCamT=0;
+p._deathVy=undefined; p._deathT=undefined; p._dfPose=null;   // ★2026-11-25 就地倒下重力批: 坠落/姿态首帧捕获账跨命清零
 p.lifeStartT=nowT; p.lifeKills=0; p.lifeScoreStart=p.score||0;
 p.onMortar=null; p.mortarPlaced=false; p.buildCount=6; p.buildSel=0; p.pendingBuild=null;
 	p.nadeIsAT=false; p.nadeHeld=false; p.nadeIsSmoke=false; p.nadeIsIncin=false;

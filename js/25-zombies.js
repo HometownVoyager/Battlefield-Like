@@ -180,7 +180,18 @@ update(dt){
   // 倒满 90° 贴地, 退场窗已在 die() 放宽盖住全程。布娃娃档由物理接管, 不进这段。
   if(!this.ragdolled&&this.deathAnimT!==undefined&&this.mesh&&this.mesh.root){
    this.deathAnimT-=dt;
-   const k=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
+   // ★2026-11-25 就地倒下重力批 (用户实报"空中死亡尸体悬浮 + 倒地不像重力", 三路统一):
+   // 竖直按 13m/s² (玩家活体跳跃同 g, 用户裁定) 加速坠落, 落到 standHeight 钳住; x/z 钉死亡点。
+   // 姿态进度 (t/0.6)²: 起步慢末段快, 符合绕脚跟翻倒的角加速度观感。
+   if(this._deathVy===undefined) this._deathVy=(this.vel&&isFinite(this.vel.y))?this.vel.y:0;
+   const gh=standHeight(this.pos.x,this.pos.z,this.pos.y+0.6);
+   if(this.pos.y>gh+0.001){
+    this._deathVy-=13*dt;
+    this.pos.y=Math.max(gh,this.pos.y+this._deathVy*dt);
+    if(this.pos.y<=gh) this._deathVy=0;
+   }
+   const k0=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
+   const k=k0*k0;   // 重力加速度曲线 (原线性 k0 改平方)
    if(k>0){
     if(!this.deathDir) this.deathDir=Math.random()<0.5?1:-1;
     const th=HPI*k;
@@ -533,6 +544,7 @@ function zombieInfect(sol,attacker){
  sol.alive=false;
  sol.deaths=(sol.deaths||0)+1;
  sol.deathAnimT=0;
+ sol._deathVy=undefined;   // ★2026-11-25 就地倒下重力批: 尸变复用 Bot 对象, 坠落初速账跨态清零
  let rag=null;
  if(window.CANNON&&typeof spawnRagdoll==='function'&&!deathFallMode()){   // 2026-11-20 批⑦: 就地倒下档走 else 既有倒地
   rag=spawnRagdoll(sol,attacker,false);

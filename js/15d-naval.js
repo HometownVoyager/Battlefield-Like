@@ -1316,7 +1316,9 @@ function navalSplash(p,attacker,team,radius,dmgMax,dmgVeh,ap,fbCls){
     if(!n.alive||n.state==='sinking'||n.state==='wreck') continue;
     if(!ff&&n.team===team&&n!==attacker) continue;
     const d=n.pos.distanceTo(p);
-    if(d<radius+2.5){ n.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5)),attacker,ap); n0++;
+    // ★2026-11-25 舰艇溅射遮挡衰减: 与步兵/陆战载具圈同口径 (13-combat explosionCoverMul 单源, 被墙挡 ×0.25)
+    if(d<radius+2.5){ const cover=(typeof explosionCoverMul==='function')?explosionCoverMul(p,n.pos.x,n.pos.y+1,n.pos.z,d):1;
+      n.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5))*cover,attacker,ap); n0++;
       if(attacker&&attacker.isPlayer&&n.alive&&typeof onPlayerHitAny==='function') onPlayerHitAny(fbCls||'explo'); }
   }
   return n0;

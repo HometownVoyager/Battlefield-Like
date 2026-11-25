@@ -28,7 +28,7 @@ const PATCHES=[
  {f:'js/07-nav.js', from:'const heapPos=new Int32Array(NN*2)', to:'const heapPos=new Int32Array(0)'}, // 索引式堆失效(容量 0 → 全走 NaN 分支? 见下)
  {f:'js/16-aircraft.js', from:'const PLANE_PILOT_WAIT_MAX=10;', to:'const PLANE_PILOT_WAIT_MAX=1e9;'},
  {f:'js/13-combat.js', from:'const nv=navalRayQuery(origin,dir,wallD,shooter);', to:'const nv=null;'},
- {f:'js/13-combat.js', from:'if(block&&block.dist<d-0.5) dmg*=0.25;\n}\ns.damage(dmg,attacker,false);', to:'}\ns.damage(dmg,attacker,false);'},
+  {f:'js/13-combat.js', from:'return (block&&block.dist<dist-0.5)?0.25:1;', to:'return 1;'}, // ★2026-11-25 判据跟码: 抽进 explosionCoverMul 单源, 补丁改为拆单源返回值
  {f:'js/15-vehicles.js', from:'const feedName=(driver&&!spec)?(t(this.name)+\' · \'+t(\'乘员×3\')):t(this.name);', to:'const feedName=t(this.name)+\' · \'+t(\'乘员×3\');'}, // 2026-11-19 判据跟码: 2026-11-17 批1 战报名走词典+观战豁免, 锚点同步 (语义不变: 摘条件=空车/观战也吹乘员×3 的坏状态)
  {f:'js/06-engineering.js', from:'if(occBlocked(x,z)){ if(owner.isPlayer) showScorePop(t2(\'此处无法架设\')); return false; }', to:''},
  {f:'js/15d-naval.js', from:'if(n.kind===\'amph\') topY=(typeof VEH_HIT_TOP===\'number\')?VEH_HIT_TOP:2.6;', to:'if(false&&n.kind===\'amph\') topY=2.6;'},
@@ -78,7 +78,7 @@ assert('16: 生还飞行员走 enterVehicle (松炮位认领)', has(air,'pb.ente
 const cbt=SRC('js/13-combat.js');
 assert('13: 艇体挡弹在步兵裁决之前 (navalRayQuery 收窄 wallD)', has(cbt,'navalRayQuery(origin,dir,wallD,shooter)'));
 assert('13: 弹道终点不得越过艇体', has(cbt,'if(hitNaval&&navalD<endD) endD=navalD;'));
-assert('13: splashDamage 掩体遮挡与 explodeAt 同式', has(cbt,'const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,d);')&&has(cbt,'if(block&&block.dist<d-0.5) dmg*=0.25;'));
+assert('13: splashDamage 掩体遮挡与 explodeAt 同式 (2026-11-25 收进 explosionCoverMul 单源)', has(cbt,'function explosionCoverMul(p,tx,ty,tz,d){')&&has(cbt,'const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,dist);')&&has(cbt,'return (block&&block.dist<dist-0.5)?0.25:1;')&&has(cbt,'*explosionCoverMul(p,s.pos.x,s.pos.y+0.9,s.pos.z,d)'));
 assert('13: 海战命中分支已进裁决链', has(cbt,'} else if(hitNaval&&navalD<=Math.min(tankD,truckD,planeD)){')); // 7c 空对地平衡收口: 近距裁决面收 planeD (2026-09-30)
 
 const veh=SRC('js/15-vehicles.js');

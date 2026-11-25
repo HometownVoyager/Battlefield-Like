@@ -443,6 +443,7 @@ this.vehGoT=0; this.vehFailV=null; this.vehFailT=-99; this.objHoldT=0; // 2026-1
 	this.mesh.root.rotation.set(0,0,0);
 	this.mesh.pelvis.position.y=0.94;
 	this._deathLegs=null;   // 2026-11-21 倒地批: 蹲姿展腿首帧捕获账跨命清零 (否则下一命死亡从上一命的冻结角起展)
+	this._deathVy=undefined; // ★2026-11-25 就地倒下重力批: 坠落初速首帧捕获账跨命清零 (否则下一命尸体承接旧速)
 	// 全局机制 (2026-09-06 用户指定): Bot 部署/重生时若有同队闲置坦克 → 直接部署为车组。
 	// 与玩家部署界面"选载具出生"同一语义 (不限距离, 取最近一辆); 小队成员除外 (随玩家步行);
 	// 战机不在此列 (pilotOf 专属流程), 卡车为劫道模式纯 AI 运输队 (无乘员位) 也不适用。
@@ -476,6 +477,7 @@ this.mesh.root.visible=false;
 this.mesh.root.rotation.set(0,0,0);
 this.mesh.pelvis.position.y=0.94;
 this._deathLegs=null;   // 2026-11-21 倒地批: 蹲姿展腿首帧捕获账跨命清零
+this._deathVy=undefined; // ★2026-11-25 就地倒下重力批: 坠落初速首帧捕获账跨命清零
 	// 契约 §4 v3: 每车 1 名真实 AI 车组 —— crewBot 是唯一跑 AI 的驾驶员; 另 2 个"乘员名额"是
 	// Tank.crewSlots 轻量记录 (tank-core 建/结算), 不进士兵池, 与本文件无关。
 	this.onVehicle=v; v.crewBot=this; v.claimBot=null;
@@ -1619,7 +1621,21 @@ this.updateFlashlightAI();
 if(!this.alive){
 this.deathAnimT-=dt;
 if(!this.ragdolled){
-const k=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
+// ★2026-11-25 就地倒下重力批 (用户实报"空中死亡尸体悬浮 + 倒地不像重力"):
+// ① 竖直坠落: 死亡时 vel.y 保留 (die() 不清账), 死前在下落就承接该初速; 每帧按 13m/s²
+//    (与玩家活体跳跃同 g, 用户裁定) 加速, 落到 standHeight(死亡点) 即钳住不再下沉 —— x/z 钉死
+//    在死亡点 ("就地"倒下, 水平漂移属布娃娃档职责)。站平地原地不动, 站楼顶停楼顶。
+// ② 姿态进度按 (t/0.6)² 加速: 起步慢、末段快, 符合绕脚跟翻倒的角加速度观感;
+//    蹲姿展腿/趴姿小幅瘫倒等既有分支不动, 只换进度曲线。
+if(this._deathVy===undefined) this._deathVy=(this.vel&&isFinite(this.vel.y))?this.vel.y:0;
+const gh=standHeight(this.pos.x,this.pos.z,this.pos.y+0.6);
+if(this.pos.y>gh+0.001){
+this._deathVy-=13*dt;
+this.pos.y=Math.max(gh,this.pos.y+this._deathVy*dt);
+if(this.pos.y<=gh) this._deathVy=0;
+}
+const k0=clamp(1-Math.max(this.deathAnimT,0)/0.6,0,1);
+const k=k0*k0;   // 重力加速度曲线: 起步慢末段快 (原线性 k0 改平方)
 if(k<=1){
 if(!this.deathDir) this.deathDir=Math.random()<0.5?1:-1;
 // A#10 审计⑤ (旧倒地动画分支, = 无 CANNON / 布娃娃链不可用时的交接):
@@ -1652,7 +1668,11 @@ const pEff=_dfU?lerp(p0,0.94,k):p0;
 this.mesh.pelvis.position.y=Math.max(0.14,pEff*Math.cos(th));
 // 残余抬升: 绕脚跟旋转时脚在**倒地中途**会短暂低于地面 (几何量 = pEff·cosθ·(1-cosθ), θ=45° 时最深),
 // 按同一式子给等量抬升 ⇒ 全程最低关节贴地不穿地; θ=0/90° 两端为 0 (起手与落地都不跳)。
-this.mesh.root.position.y=this.pos.y+pEff*Math.cos(th)*(1-Math.cos(th))*1.05;
+// ★2026-11-25 车毁尸体落点修复: 直接部署进载具的 Bot 从创建起 mesh.root 恒在场景原点 (spawnInVehicle
+		//   只写 pos/visible, onVehicle 分支每帧 return 不调 updateMesh), 车毁时 Tank.die 只把 pos 挪到车旁 +
+		//   visible=true, 旧倒地段又只写 rotation/pelvis/position.y —— x/z 从未同步 ⇒ 尸体出现在地图正中且姿态
+		//   诡异 (用户实报)。这里按死亡点一次写全 x/z, y 继续交给下方贴地公式 (两端归零, 不覆盖)。
+		this.mesh.root.position.set(this.pos.x,this.pos.y+pEff*Math.cos(th)*(1-Math.cos(th))*1.05,this.pos.z);
 this.mesh.tag.visible=false;
 }
 }

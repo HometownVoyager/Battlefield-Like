@@ -157,10 +157,15 @@ R('const hp2=_fbHit.set(origin.x+dir.x*endD,origin.y+dir.y*endD,origin.z+dir.z*e
 R('waterSplash(_fbHit.set(origin.x+dir.x*wallD,origin.y+dir.y*wallD,origin.z+dir.z*wallD),0.55);',
   'waterSplash(V3(origin.x+dir.x*wallD,origin.y+dir.y*wallD,origin.z+dir.z*wallD),0.55);');
 R('const rv=camRight(_fbR);','const rv=camRight();');
-R(`const dir=_exDir.set(s.pos.x-p.x,s.pos.y+0.9-p.y,s.pos.z-p.z).normalize();
-const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,d);`,
-  `const dir=V3(s.pos.x-p.x,s.pos.y+0.9-p.y,s.pos.z-p.z).normalize();
-const block=raycastWorld(V3(p.x,p.y+0.25,p.z),dir,d);`,2);
+// ★2026-11-25 判据跟码: 遮挡双槽抽进 explosionCoverMul 单源 (原步兵圈两处 → 现单源函数一处)
+R(`const dir=_exDir.set(tx-p.x,ty-p.y,tz-p.z), dist=dir.length();
+if(!(dist>0.6)) return 1;
+dir.multiplyScalar(1/dist);
+const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,dist);`,
+  `const dir=V3(tx-p.x,ty-p.y,tz-p.z), dist=dir.length();
+if(!(dist>0.6)) return 1;
+dir.multiplyScalar(1/dist);
+const block=raycastWorld(V3(p.x,p.y+0.25,p.z),dir,dist);`,1);
 R(`const eye=_emplA.set(mg.x,mg.y+EMPL_MG_EYE,mg.z);
 const muzz=_emplB.copy(eye).addScaledVector(dir,EMPL_MG_MUZ);`,
   `const eye=V3(mg.x,mg.y+EMPL_MG_EYE,mg.z);

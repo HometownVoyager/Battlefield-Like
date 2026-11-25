@@ -245,6 +245,19 @@ const _fbR=V3();     // fireBullet 声像 pan 的 camRight 槽
 // (曳光出膛点不槽位化: verify-timestopfix T8 以整行字面源码钉 origin.clone() 契约锚, 见下 spawnTracer 行)
 const _exDir=V3();   // explodeAt/splashDamage 逐受害者方向槽 (两函数不嵌套, 共用)
 const _exOrg=V3();   // 爆炸遮挡射线起点槽
+// ★2026-11-25 爆炸遮挡衰减单源: 爆点(p, y+0.25) → 目标点(tx,ty,tz) 打一条世界射线
+// (raycastWorld 只测 BOXES/CYLS 碰撞体, 不吃地形起伏), 被墙/障碍挡住 ⇒ 伤害 ×0.25。
+// 口径与旧 explodeAt/splashDamage 步兵圈逐字一致 —— 现在步兵/坦克/卡车/飞机/舰艇全走本函数,
+// 消除"隔一栋楼手雷满伤、炮弹穿墙炸坦克"的旧口径不一致 (用户令: 爆炸经过墙等障碍会缩减)。
+// 复用 _exDir/_exOrg 两个当帧槽 (本函数同步返回, 调用方不持有 ⇒ 单槽安全)。
+function explosionCoverMul(p,tx,ty,tz,d){
+if(!(d>0.6)) return 1;
+const dir=_exDir.set(tx-p.x,ty-p.y,tz-p.z), dist=dir.length();
+if(!(dist>0.6)) return 1;
+dir.multiplyScalar(1/dist);
+const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,dist);
+return (block&&block.dist<dist-0.5)?0.25:1;
+}
 function fireBullet(shooter,origin,dir,def,visMuzzle){
 // 出生保护清账 (2026-09-28 阶段三 P1): 开火立即解除落地保护 —— fireBullet 是玩家/Bot/炮位共用的
 // 唯一出膛口, 在这里清 = "无敌帧内不许输出"的单源保证 (载具/固定武器射手同样走这里, 字段不存在则空操作)。
@@ -764,10 +777,8 @@ for(const s of victims){
 if(!s.alive||seatShielded(s)) continue;   // 2026-09-26E 审计 2: 含艇上乘员 (旧版只认 onVehicle)
 const d=Math.hypot(s.pos.x-p.x,(s.pos.y+0.9)-p.y,s.pos.z-p.z);
 if(d<R){
-const dir=_exDir.set(s.pos.x-p.x,s.pos.y+0.9-p.y,s.pos.z-p.z).normalize();
-const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,d);
-let dmg=(1-d/R)*135;
-if(block&&block.dist<d-0.5) dmg*=0.25;
+// ★2026-11-25 遮挡衰减收进 explosionCoverMul 单源 (步兵/载具/舰艇同口径, 详见该函数注释)
+let dmg=(1-d/R)*135*explosionCoverMul(p,s.pos.x,s.pos.y+0.9,s.pos.z,d);
 if((!noFF||!EXPLO_FF)&&attacker&&s.team===attacker.team&&s!==attacker) dmg*=0.0;   // ★2026-11-14 友伤开关 (sf_explo_ff): 关=普通手雷(noFF=true)也同队归零; 自炸(s===attacker)任何档照旧不免
 if(dmg>2){
 s.damage(dmg,attacker,false);
@@ -866,30 +877,27 @@ if(d<radius){
 // 旧版只有 explodeAt 做遮挡, 手雷/迫击炮/反坦克炸药/巡飞弹的溅射全无 ⇒ 隔着一整栋楼的手雷照样满伤,
 // 而同一颗航弹 (n.bomb 分支两个模型都调) 前后半段口径还不一致。
 // 口径范围: 只改步兵这一圈 —— 载具/卡车/飞机/舰船不在此列 (explodeAt 没有载具圈, 没有可对齐的口径, 动它就是改平衡)。
-let dmg=lerp(dmgMax,10,d/radius);
-if(d>0.6){
-const dir=_exDir.set(s.pos.x-p.x,s.pos.y+0.9-p.y,s.pos.z-p.z).normalize();
-const block=raycastWorld(_exOrg.set(p.x,p.y+0.25,p.z),dir,d);
-if(block&&block.dist<d-0.5) dmg*=0.25;
-}
+// ★2026-11-25 遮挡衰减收进 explosionCoverMul 单源 (步兵/载具/舰艇同口径)
+let dmg=lerp(dmgMax,10,d/radius)*explosionCoverMul(p,s.pos.x,s.pos.y+0.9,s.pos.z,d);
 s.damage(dmg,attacker,false);
 if(_fbP&&s.alive&&s.team!==attacker.team) _fbAny=true;
 }
 }
+// ★2026-11-25 载具圈遮挡衰减: 与步兵圈同口径 (被墙挡 ×0.25), 消除"隔楼炸坦克满伤" (用户令)
 for(const t of tanks){
 if(!t.alive||(!ff&&t.team===team)) continue;
 const d=t.pos.distanceTo(p);
-if(d<radius+2.5){ t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5)),attacker,ap); if(_fbP&&t.alive) _fbAny=true; }
+if(d<radius+2.5){ const cover=explosionCoverMul(p,t.pos.x,t.pos.y+1,t.pos.z,d); t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5))*cover,attacker,ap); if(_fbP&&t.alive) _fbAny=true; }
 }
 for(const t of trucks){
 if(!t.alive||(!ff&&t.team===team)) continue;
 const d=t.pos.distanceTo(p);
-if(d<radius+2.5){ t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5)),attacker); if(_fbP&&t.alive) _fbAny=true; }
+if(d<radius+2.5){ const cover=explosionCoverMul(p,t.pos.x,t.pos.y+1,t.pos.z,d); t.takeDmg(lerp(dmgVeh,vehFloor,d/(radius+2.5))*cover,attacker); if(_fbP&&t.alive) _fbAny=true; }
 }
 if(ff) for(const pl of planes){
 if(!pl.alive) continue;
 const d=pl.pos.distanceTo(p);
-if(d<radius+planeHitR(pl)){ pl.takeDmg(lerp(dmgVeh,20,d/(radius+planeHitR(pl))),attacker); if(_fbP&&pl.alive) _fbAny=true; } // 7c: 机体半径单源 planeHitR (旧手写 +3)
+if(d<radius+planeHitR(pl)){ const cover=explosionCoverMul(p,pl.pos.x,pl.pos.y,pl.pos.z,d); pl.takeDmg(lerp(dmgVeh,20,d/(radius+planeHitR(pl)))*cover,attacker); if(_fbP&&pl.alive) _fbAny=true; } // 7c: 机体半径单源 planeHitR (旧手写 +3)
 }
 if(_fbAny&&typeof onPlayerHitAny==='function') onPlayerHitAny(fbCls||'explo');
 if(typeof navalSplash==='function') navalSplash(p,attacker,team,radius,dmgMax,dmgVeh,ap,fbCls); // 海战批 (§11.9④): 溅射对艇 —— 衰减口径与上面的坦克圈逐式对齐, 逻辑全在 15d-naval (既有函数体一行未动)
