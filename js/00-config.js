@@ -1195,12 +1195,18 @@ let EXPLO_FF=localStorage.getItem('sf_explo_ff')!=='0';
 // 死亡时手雷落下 (2026-11-16 批4): 默认开=士兵死亡 (玩家/Bot) 手里捏的手雷掉落 + 引信继承 (dropHeldNade
 // 单源 13-combat, 四个调用点全过它); 关=死亡时手里的雷就地消失, 不掉落不入 nades 账。
 let NADE_DEATH_DROP=localStorage.getItem('sf_nadedrop')!=='0';
-// 死亡动画模式 (2026-11-20 批⑦, 游戏内容设置"死亡动画"卡, 用户令): '1'=就地倒下 —— 死亡不 spawn 布娃娃,
-// Bot/玩家/丧尸走各自**既有的**无物理倒地分支 (14-bots A#10 / 20-player playerAvatarDeath 契约G / 25-zombies
-// deathAnimT), 尸体=活体模型本体 (盔/手/靴/背包天然一致), 无刚体/无冻结滞留, Bot 重生前 2.5s 收走;
-// 缺省/其他=布娃娃 (现状, 12-ragdolls 物理账原样)。每次死亡现读 (死亡是低频事件, localStorage 读开销可忽略)
-// ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
+// 死亡动画模式 (2026-11-20 批⑦, 游戏内容设置"死亡动画"卡, 用户令; 2026-11-28 批⑥ 三档化): '1'=就地倒下 ——
+// 死亡不 spawn 布娃娃, Bot/玩家/丧尸走各自**既有的**无物理倒地分支 (14-bots A#10 / 20-player playerAvatarDeath
+// 契约G / 25-zombies deathAnimT), 尸体=活体模型本体 (盔/手/靴/背包天然一致), 无刚体/无冻结滞留, Bot 重生前 2.5s 收走;
+// '2'=布娃娃(加固) —— 走布娃娃但做**关节内加固** (12-ragdolls: 每关节第二条 P2P 副锚, 副锚沿部件自身
+// Y 轴同减 RAG_STIFF_CFG 轴距做**软限位** ⇒ 四肢相对转动限在自然弯折带 (真 cannon 调参台实测 20~60°),
+// 不再叠成麻花但保留自然弯折; 2026-11-28 用户裁定: 加固=限制关节内部, 不限制整体位移 —— 部件阻尼/
+// 初始冲量与普通档同源同值, 二版满轴距全锁"过头"已收短);
+// 缺省/其他=布娃娃 (现状, 12-ragdolls 物理账原样)。每次死亡现读
+// (死亡是低频事件, localStorage 读开销可忽略) ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
 function deathFallMode(){ try{ return localStorage.getItem('sf_deathfx')==='1'; }catch(e){ return false; } }
+// 布娃娃(加固) 档判读 ('2'; 与 deathFallMode 同读一次现算, 语义不变: '1' 优先就地倒下, '2' 才进加固档)
+function deathRagStiff(){ try{ return localStorage.getItem('sf_deathfx')==='2'; }catch(e){ return false; } }
 // 主动优化档 (2026-11-16 批5): 0=关闭 1=标准 2=激进 —— 帧率持续偏低时主动清理战场碎屑
 // (碎块/弹壳/烟云/粒子; 激进档再压布娃娃与弹坑)。决策器 = 24-main perfOptTick (1s 窗均帧率+迟滞防抖)。
 let PERF_OPT=(function(){ const v=parseInt(localStorage.getItem('sf_perfopt'),10); return (v===0||v===1||v===2)?v:1; })();
@@ -1811,7 +1817,7 @@ const EM_CAST_DUR=0.9;   // 固定火力点使用前摇 (玩家 20-player 与 Bo
 // ===== 记分/票数单源 (2026-09-06 B7a/P2-9: 原散布 6 文件的结算字面量收拢) =====
 // smoothstep 单源 (2026-09-06 B7a/P3-8: 旧 03-terrain/06-engineering ≥9 处内联 t*t*(3-2*t))
 const sstep=t=>t*t*(3-2*t);
-const SCORE_TABLE={kill:100,head:125,tank:300,plane:250,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};
+const SCORE_TABLE={kill:100,head:125,tank:300,plane:300,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};   // ★2026-11-28 票账批 (用户裁定): plane 250→300 —— 坦克/飞机车体毁伤统一 300 分
 // ★2026-11-17 批11 (用户裁定): 坦克本身一律占 3 票 (不分轻重/有人无人) —— 车体装备票, 与乘员人命票
 //   (各 1 票, 见 CREW_TICKET_EACH) 分开记。旧口径: 有人车 0 装备票 / 空车 5~6 装备票。
 const TICKET_COST={tank:3,plane:3};
@@ -1860,22 +1866,26 @@ const STRUCT_ROOF={base:260, perSqrtArea:70, min:300, max:1500};
 //   火烧三路 (持续火源圈 / 燃烧草格 / 燃烧弹云) 0.4s 记账 dps ⇒ 烤 7~9s 殉爆 (口径对齐
 //   fireDamageTick 的 0.4s×dps 步调); 殉爆后原地留 poolTtl=360s 火池 (6 分钟, 2026-11-18 用户二令; 整链免天气:
 //   04b noWx —— 暴雨浇灭/受潮减速/蔓延压火/灼烧伤害/燃烧时长全豁免视同晴档, 灼烧圈内单位+点燃植被+烤相邻桶)。
-const BARREL={hp:100, bulletHit:24, atRifleHit:70, blastMul:3, fireDps:14, cellFireDps:12, poolR:2.3, poolTtl:360, poolDps:16};
+const BARREL={hp:100, bulletHit:24, atRifleHit:70, blastMul:3, fireDps:14, cellFireDps:12, poolR:2.3, poolTtl:360, poolDps:16,
+// 碾压殉爆 (2026-11-28 批④, 用户令"油桶被坦克碾压时爆炸, 对坦克"): 坦克碾上 explosive 桶即炸,
+//   对碾压坦克本体给 **破甲伤** (ap 语义 = 走坦克 takeDmg 的破甲减伤通道, 不是溅射 95 那套步兵口径)。
+//   400 = 用户令"≈400 破甲伤"; 接触即爆无车速门 (低速倒车碾上也炸)。attacker=null 自碾无击杀者账。
+//   消费: 15-vehicles _tkCylCb TANK_STEP 内 barrelCrushBlast (05-world, 与 barrelBlast 共享残骸/火池/连锁主体)。
+crushVehDmg:400};
 // ===== 弹坑生命周期单源 (2026-11-18 弹坑批, 用户裁定) =====
 //   两层口径: freshTtl=战斗新坑 (explosionFX/炮火犁地等 runtime crater) 寿命; scarTtl=布局层战场遗迹坑
 //   (05c 布局/散布表建图期摆的旧痕) 寿命 = 3×freshTtl (用户令"开局坑也限时自然消失, 时间不超过人造坑的几倍").
 //   剩余寿命 < fadeWin 线性淡出 (逐坑独立材质写 opacity, 共享 craterMat 只读底版). 消费: 05b crater()/
 //   updateCraters()/cratersResetLife(), 24-main 每帧驱动.
 const CRATER={freshTtl:150, scarTtl:450, fadeWin:45};
-// ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) =====
-// A#7 坦克三人车组: 编制人数 = 3。车毁恒结算 CREW_N 次死亡 / CREW_N 杀 / CREW_N 票 (每票 1 人)。
-//   为什么**乘员**票数不走 TICKET_COST: 用户口径是"三人同死、一次死三个" ⇒ 代价必须按**人命**算,
-//   与"装备损失"票分开 —— 车体装备票 = TICKET_COST.tank=3 (2026-11-17 批11: 有人车也收, 见 15-vehicles die)。
-const CREW_N=3;              // 每车乘员数 (含玩家占位: 玩家上车即顶替原 AI 驾驶员, 车内恒为 3 人)
-// ★2026-09-26 审计复核: 本常量只作编制契约的显式声明 (22-hud 乘员数 / crewRoster 口径);
-//   车毁**有意**不按它乘票乘杀 (见 15-vehicles 里那条"只对真人成立, 故一律不加") —— 不是漏读。
-const CREW_TICKET_EACH=1;    // 每人 1 票
-const CREW_KILL_EACH=1;      // 每人 1 杀 (击杀者战果 = CREW_N 杀)
+// ===== 批次 20260921A 单源 (Lead 冻结, 实现方只读) ★2026-11-28 票账批改版 (用户裁定) =====
+// 车组只算 **1 名驾驶员** (crewBot / 玩家): 车毁时驾驶员走自己的既有死亡链 (1 死 / 1 票 / 1 杀 / 独立战报行),
+//   旧"三人车组 + 2 个轻量乘员名额" (settleCrewSlotDeath) 已删 —— 名额不是真人却按人命扣票记杀, 与新口径矛盾。
+// 车体装备票/杀: 毁一辆坦克/飞机一律 TICKET_COST(3) 票 + TICKET_COST(3) 杀 + SCORE_TABLE 300 分
+//   (有人/空车同价; 有人载具整损 = 车体 3 + 驾驶员 1 = 4 票 4 杀)。
+const CREW_N=1;              // 每车乘员数 = 驾驶员 1 人 (2026-11-28 裁定; 旧 3 人口径作废, crewRoster/22-hud 乘员数随它)
+const CREW_TICKET_EACH=1;    // 驾驶员死亡链照常 1 票 (既有)
+const CREW_KILL_EACH=1;      // 驾驶员死亡链照常 1 杀 (既有)
 // A#3 载具机枪过热: 与固定 MG42 (MG42S 各阵营 def.heatPS=0.014 / 玩家散热 0.22 / AI 散热 0.15) 同档。
 //   71 发到 1.0 (1/0.014 ≈ 71.4); 过热强制停火, 散到 unlock 才解锁 (滞回, 防"1 发 1 停"抖动)。
 const VEH_MG_HEAT={heatPS:0.014, coolPlayer:0.22, coolAI:0.15, unlock:0.35};
@@ -1948,6 +1958,9 @@ const SPAWN_EDGE_MARGIN=20;
 // 不引爆(坡地发射病根护罩); 武装后照旧碰炸/触地炸。单源消费 = 13-combat fireLoiter/updateLoiters。
 // 旧口径是 0.8s 时长豁免 ⇒ 巡航 13m/s 下≈10m 无敌穿墙窗 (可隔着墙/沙袋/单位飞过), 用户实报拆除。
 const LOITER_ARM_DIST=3;
+// 巡飞弹加速耗条倍率 (2026-11-28 批⑤.5, 用户令"加速时续航 1.5× 消耗"): 空格加速时 life 消耗 ×1.5
+//   (速度快续航短)。单源消费 = 13-combat updateLoiters boost 分支; 不碰加速速度逻辑本身 (loiterfreeze 批契约)。
+const LOITER_BOOST_DRAIN=1.5;
 
 // 正弦路 (诺曼底 sineRoad:true 的乡道纵线) 波形单源 —— 03-terrain sineRoadZ 与本公式同源,
 // 22a-menuart 沙盘在 03-terrain 未加载时按同式自算 (改波形只动这两个数, 见 README §五)

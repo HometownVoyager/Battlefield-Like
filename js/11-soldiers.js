@@ -464,6 +464,28 @@ const o=(_legFlip^=1)?_legA:_legB;
 o.hip=hipW; o.knee=kneeUp?-bend:bend;
 return o;
 }
+// ═══ 骑乘姿势硬置 (★2026-11-28 骑姿批, 用户裁定"载具上隐藏但有一个姿势, 对齐迫击炮蹲姿; 死亡倒下沿用") ═══
+// 乘载具期间身体模型隐藏, 但骨架必须保持一个**蹲姿** —— 死亡呈现从它起手:
+//   玩家就地倒下档 = playerAvatarDeath 首帧 _dfPose 快照直接捕获本姿态 (不再"立正在车上倒下");
+//   布娃娃档 = RAG_POSE 读 crouch=true 的蹲档装配 (不再"立正布娃娃从坦克里长出来");
+//   Bot 车毁揭示 = mesh 冻结在本姿态, 倒地动画从蹲姿倒下 (不再"立正持枪尸体")。
+// 数值 = 玩家/Bot 两侧姿态机**蹲姿静止档逐字** (pelY 0.60 / 骨盆俯角 0.14 / 侧身 0.3 / 低持枪臂基准 /
+//   蹲姿 legIKPose 反解 hp=0.60, fy=0.13, dz=0.16, kneeUp=false): 不走 dampF, 上车瞬间一次到位
+//   (乘员期姿态机不跑, 该姿态冻结保留到死亡/下车)。玩家 avatar 与 Bot mesh 共用 buildSoldierMesh
+//   骨架 ⇒ 一个函数两边生效。枪模收起由调用方做 (av._gun / bot.gun, 武器留在车内)。
+function hardPoseCrouch(av){
+if(!av||!av.pelvis) return av;
+av.pelvis.position.y=0.60;
+av.pelvis.rotation.x=0.14;
+av.pelvis.rotation.y=-0.3;
+if(av.headG) av.headG.rotation.y=0.255;   // = -pelvis.rotation.y*0.85 (两侧姿态机同式)
+const L=legIKPose(0.60,0.13,0.16,false), pp=0.14;   // 共享交替槽: 立即消费 (两腿同目标)
+if(av.legL&&av.legL.hip){ av.legL.hip.rotation.x=L.hip-pp; av.legL.knee.rotation.x=L.knee; }
+if(av.legR&&av.legR.hip){ av.legR.hip.rotation.x=L.hip-pp; av.legR.knee.rotation.x=L.knee; }
+if(av.armR&&av.armR.sh){ av.armR.sh.rotation.x=-0.42; av.armR.sh.rotation.z=-0.24; av.armR.elm.rotation.x=-1.3; }
+if(av.armL&&av.armL.sh){ av.armL.sh.rotation.x=-1.08; av.armL.sh.rotation.z=0.5; av.armL.elm.rotation.x=-0.28; }
+return av;
+}
 const _soldierFlBaseL=(typeof NIGHT_GEAR!=='undefined'&&NIGHT_GEAR.flConeL)?NIGHT_GEAR.flConeL:14;
 const _soldierFlGeo=new THREE.ConeGeometry(1.0,_soldierFlBaseL,10,1,true);
 const _soldierFlMat=new THREE.MeshBasicMaterial({color:0xffedd0,transparent:true,opacity:0.12,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,fog:false});

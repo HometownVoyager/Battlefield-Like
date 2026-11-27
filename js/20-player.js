@@ -23,9 +23,13 @@ canopy.scale.set(1,0.75,1);
 canopy.castShadow=true;
 g.add(canopy);
 const lm=new THREE.MeshBasicMaterial({color:0x33352c});
-const rim=2.3*Math.sin(1.05), rimY=2.3*Math.cos(1.05)*0.75;
+// ★2026-11-28 修"伞盖与系绳分离" (用户实报): 绳顶原写 rimY-0.1 —— 悬在伞缘正下方 0.1m 的空气里 (Bot 缩放后
+//   0.078m), 伞冠底面开口又无裙边/内衬面片, 侧视与仰视都看得到四根绳"够不着"伞盖。改钉在**伞面上**:
+//   取 φ=1.0 (<伞缘极角 1.05, 略收进伞内), r/y 同由球冠方程解出 (y 还乘 canopy 的 0.75 压扁系数) ——
+//   绳头精确落在帆布表面, 摇摆刚体旋转不改变这个贴合 (同组同变换)。
+const attP=1.0, attR=2.3*Math.sin(attP), attY=2.3*Math.cos(attP)*0.75;
 for(const a of [0.4,1.97,3.54,5.11]){
-chuteLine(g,V3(Math.sin(a)*rim,rimY-0.1,Math.cos(a)*rim),V3(0,-3.3,0),lm);
+chuteLine(g,V3(Math.sin(a)*attR,attY,Math.cos(a)*attR),V3(0,-3.3,0),lm);
 }
 g.scale.setScalar(scale);
 return g;
@@ -36,6 +40,23 @@ function mkChuteForBot(){ return mkChute(0.78); }
 // typeof 无依赖: 只碰本文件的两个变量 (playerChuteMesh / scene), 不读任何别人作用域的东西。
 function playerChuteClear(){
 if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
+}
+// ★2026-11-28 修"系绳最后落在两脚中间" (用户实报, 要求锚背包): 收敛点 (group 局部 (0,-3.3,0)) 原挂载
+//   p.pos.y+3.8-3.3=脚底上方 0.5m 身体中轴线上 (裆部); Bot 侧 (0,2.5,0)-3.3×0.78 更是贴地两脚间。
+//   改钉**背包** —— 士兵骨架 root 局部 (0,1.24,-0.18) = 背包盒中心 (11-soldiers torsoG (0,0.3,-0.18)
+//   + pelvis 0.94); 玩家伞挂 scene 不能继承 avatar root, 背向偏移手算: 玩家前向=(−sin yaw,−cos yaw)
+//   ⇒ 背向=(sin yaw,cos yaw), 背包世界点 = 脚底 + (0.18sin yaw, 1.24, 0.18cos yaw)。
+//   摇摆仍绕组心 (伞盖+系绳同组刚摆), 但位置按 RX(swx)·RZ(swz)·(0,3.3,0) 解析反解补偿 —— 锚点在摆动中
+//   恒钉背包不荡 (不补偿的话锚点会以 ±0.12rad×3.3m 绕背包打 0.4m 的圈)。Bot 侧同式见 14-bots 伞降分支
+//   (root 子件, root 自带 yaw, 无摇摆 → 直接 position=(0, 1.24+3.3×0.78, -0.18))。
+function playerChuteFollow(nowT){
+const swx=Math.sin(nowT*0.7)*0.12, swz=Math.cos(nowT*0.6)*0.08;
+const _csx=Math.cos(swx), _csz=Math.cos(swz), _ssx=Math.sin(swx), _ssz=Math.sin(swz);
+playerChuteMesh.position.set(
+player.pos.x+Math.sin(player.yaw)*0.18-3.3*_ssz,
+player.pos.y+1.24+3.3*_csz*_csx,
+player.pos.z+Math.cos(player.yaw)*0.18+3.3*_csz*_ssx);
+playerChuteMesh.rotation.set(swx,0,swz);
 }
 // 体能回体单源 (2026-10-06 体能批): "距上次耗体 1s 后按 0.16/s 恢复" 的唯一实现 ——
 // 主步行链 (updatePlayer 体积分支) 与**早退分支** (巡飞弹 TV 制导 / 载具 / 固定火力点 / 海战 / 大舰炮位) 共用。
@@ -93,7 +114,7 @@ p.onNaval=null;
 if(p.onVehicle===v) p.onVehicle=null;
 p.ffAll=false; p.tankView=false; p.navalGun=false;
 p.flying=false; p.flyAero=false; p._aeroSpd=0;
-p.crouch=false; p.prone=false;
+p.crouch=false; p.prone=false; p._ridingSeat=false;   // ★2026-11-28 骑姿批: 观战者安全脱离也清座位旗
 p.vel.set(0,0,0);
 if(v&&v.pos){
 let px=v.pos.x+3.4, pz=v.pos.z;
@@ -112,14 +133,15 @@ return true;
 }
 
 // 自动脱离载具 (2026-11-09 批, sf_autoexit 默认关): 载具被击毁瞬间玩家自动逃生, 代替 damage(999) 死亡链。
-// bail=false (坦克): 落位车旁平地 (与 specRideEject 同款 occBlocked 五向探针), 0 死/0 票 —— 车组其余名额仍
-//   随车结算 (Tank.die crewSlots 口径不变); bail=true (飞机): 与 F 离机跳伞分支同口径 (机下 2.5m + 机头前向
-//   初速 + 开伞)。调用前提: Tank.die/Plane.die 已清 playerDriven/onVehicle 且判过 spec (观战者走 specRideEject)。
+// bail=false (坦克): 落位车旁平地 (与 specRideEject 同款 occBlocked 五向探针), 0 死/0 票 —— 车体票/杀照常
+//   结算 (★2026-11-28 票账批: 3票3杀, 乘员只算驾驶员且玩家已逃生不再走死亡链); bail=true (飞机): 与 F 离机
+//   跳伞分支同口径 (机下 2.5m + 机头前向初速 + 开伞)。调用前提: Tank.die/Plane.die 已清 playerDriven/onVehicle
+//   且判过 spec (观战者走 specRideEject)。
 function autoExitWreck(v,bail){
 const p=player;
 p.ffAll=false; p.tankView=false; p.navalGun=false;
 p.flying=false; p.flyAero=false; p._aeroSpd=0;
-p.crouch=false; p.prone=false;
+p.crouch=false; p.prone=false; p._ridingSeat=false;   // ★2026-11-28 骑姿批: 自动脱离清座位旗
 const so=document.getElementById('scopeOv');
 if(so) so.style.display='none';
 if(bail&&v&&v.pos){
@@ -265,6 +287,8 @@ return;
 if(player.onVehicle){
 const t=player.onVehicle;
 if(player.vehRepair){ player.vehRepair=null; showScorePop('维修被打断: 下车'); } // 坦克修理读条随下车收账 (2026-11-16 批1)
+// ★2026-11-28 骑姿批: 下车/离机还原骑乘前姿态档 (跳伞档也不许带着蹲姿旗落地; 死亡路径不走这里)
+player.crouch=player._crouchSaved||false; player._crouchSaved=false; player._ridingSeat=false;
 if(t.kind==='plane'){
 // 跳伞
 t.playerDriven=false;
@@ -357,6 +381,12 @@ if(!t.alive||t.team!==player.team) continue;
 	if(t.crewBot){ t.crewBot.dismountVehicle(false); showScorePop('你接管了坦克'); }
 t.playerDriven=true; t.isAI=false; t.vel=0;
 player.onVehicle=t;
+// ★2026-11-28 骑姿批 (用户裁定"载具上隐藏但要有姿势, 对齐迫击炮蹲姿; 死亡倒下沿用"): 上车存原姿态档 +
+//   置蹲姿旗 (死亡布娃娃/就地倒下都从它起手; die() 死在座记账 _diedSeated), 三人称本体模型在场就硬置
+//   一次蹲姿 —— 乘员期姿态机不跑 (thirdPersonOn 门排 onVehicle ⇒ updatePlayerAvatar 不喂帧) 冻结保留到
+//   死亡/下车。本体枪不额外藏: playerAvatarDeath 尸体自收枪 (既有), 布娃娃档本体整隐。
+player._crouchSaved=player.crouch; player.crouch=true; player._ridingSeat=true;
+if(playerAvatar&&typeof hardPoseCrouch==='function') hardPoseCrouch(playerAvatar);
 player.ads=false; player.nadeHeld=false;
 player.yaw=t.yaw+t.turretYaw+Math.PI; player.pitch=0;
 VM.root.visible=false;
@@ -988,8 +1018,7 @@ if(p.chute){ p.chute=false; playerChuteClear(); }
 p.landDip=Math.max(0,p.landDip-dt*3);
 if(p.chute){
 if(!playerChuteMesh){ playerChuteMesh=mkChute(); scene.add(playerChuteMesh); }
-playerChuteMesh.position.set(p.pos.x,p.pos.y+3.8,p.pos.z);
-playerChuteMesh.rotation.set(Math.sin(nowT*0.7)*0.12,0,Math.cos(nowT*0.6)*0.08);
+playerChuteFollow(nowT);   // ★2026-11-28: 收敛点钉背包 + 摇摆锚点补偿 (单源, 与主步行链同式)
 } else if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
 stamRegenTick(p,dt,nowT); // TV 制导中本体照常回体 (2026-10-06 体能批: 旧版此分支体能冻结)
 updateInteractHint();
@@ -1195,8 +1224,7 @@ if(p.vel.y<-3.2) p.vel.y=-3.2;
 if(p.onGround){ p.chute=false; playerChuteClear(); }
 // 降落伞模型: 头上打开圆顶+系绳
 if(!playerChuteMesh){ playerChuteMesh=mkChute(); scene.add(playerChuteMesh); }
-playerChuteMesh.position.set(p.pos.x,p.pos.y+3.8,p.pos.z);
-playerChuteMesh.rotation.set(Math.sin(nowT*0.7)*0.12,0,Math.cos(nowT*0.6)*0.08);
+playerChuteFollow(nowT);   // ★2026-11-28: 收敛点钉背包 + 摇摆锚点补偿 (单源, 与 TV 制导链同式)
 } else if(playerChuteMesh){ scene.remove(playerChuteMesh); playerChuteMesh=null; }
 // 坡度物理 (2026-09-12): 地面态水平位移过闸 (上坡>40°减速/>65°封, 下坡不设限; 腾空/伞降/游泳不适用)
 if(p.onGround&&!p.onVehicle&&!swimming){
@@ -1859,6 +1887,10 @@ if(!melWind) p._meleeArmed=false;
 //   ② 物理未就绪 (沙箱无 CANNON / ragInit 失败, spawnRagdoll 返回 false) ⇒ 本体自己倒 (侧倒 + 趴地姿态)。
 function playerAvatarDeath(av,p,dt){
 if(p.deathRag){ av.root.visible=false; return av; }
+// ★2026-11-28 骑姿批: 死在座 (载具/海战座位) ⇒ 首帧先硬置骑乘蹲姿再快照 —— 就地倒下从蹲姿倒地,
+//   不再"立正在车里倒下"。布娃娃档不走这里 (上方 deathRag 分支已 return, spawnRagdoll 读 crouch=true
+//   蹲档装配)。typeof 守卫: 部分沙箱只加载子集脚本。
+if(p._diedSeated&&typeof hardPoseCrouch==='function') hardPoseCrouch(av);
 // ★2026-11-25 就地倒下重力批 (用户实报"空中死亡尸体悬浮 + 倒地不像重力"):
 // ① 竖直坠落: die() 不清 vel.y, 死前在下落就承接该初速; 每帧按 13m/s² (与玩家活体跳跃同 g,
 //    用户裁定) 加速, 落到 standHeight(死亡点) 即钳住不再下沉 —— x/z 钉死 ("就地"倒下)。

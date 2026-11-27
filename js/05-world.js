@@ -1359,6 +1359,30 @@ c.hp-=amt;
 if(c.hp<=0) return barrelBlast(c,attacker);
 return false;
 }
+// ── ⑤c 坦克碾油桶 (★2026-11-28 批④a): 坦克底盘圆柱碾上 explosive 桶 → 当场引爆该桶 + 碾压坦克吃破甲账 ──
+// 效果全走 barrelBlast 主体一行不复制 (killCyl 摘账/残骸/小爆FX/步兵溅射 95/火池 addFireSource/邻桶连锁
+//   damageStructures 全在里面): 按 (x,z) 在 CYLS 里定位该桶 (c.explosive 标记, 05b barrel() 打的) 再传对象。
+// attacker 恒传 null —— barrelBlast 的 attacker 只用于"谁拆的算谁的分/击杀归属" (splashDamage/damageStructures
+//   同规, 见下方 1455 行注), 传 null = 自碾无主, 不记杀不记分。
+// veh.takeDmg 第三参 ap=破甲减伤通道 (Tank.takeDmg 签名 (amt,attacker,ap), true=绕过 TANK_ARMOR 装甲减免,
+//   与 15-vehicles 急流/涉水/炮弹同参) —— ≠ 步兵溅射 95 (那只伤人不伤车), 伤害额读 00-config BARREL.crushVehDmg。
+// 防双爆: barrelBlast 自带 killCyl 置旗 (死桶查不到 = 第一道), 这里再加同桶/同坐标 0.5s cd 兜"同帧多轮
+//   接触" (坦克履带跨两步都判中 _tkCylCb —— 时间戳走全局 nowT (18-game 帧账), 与 15-vehicles _ramT 同口径)。
+let _barrelCrushCd=-9, _barrelCrushX=1e9, _barrelCrushZ=1e9;
+function barrelCrushBlast(x,z,veh){
+if(nowT-_barrelCrushCd<0.5&&Math.abs(x-_barrelCrushX)<0.6&&Math.abs(z-_barrelCrushZ)<0.6) return false;   // 同坐标 0.5s 内不重复触发
+let hit=null;
+for(let i=0;i<CYLS.length;i++){
+const c=CYLS[i];
+if(!c||c.dead||!c.explosive) continue;
+if(Math.abs(c.x-x)<0.25&&Math.abs(c.z-z)<0.25){ hit=c; break; }   // 调用方传的就是桶自身坐标, 0.25m 容差只容浮点/贴边
+}
+if(!hit) return false;
+_barrelCrushCd=nowT; _barrelCrushX=hit.x; _barrelCrushZ=hit.z;
+const ok=barrelBlast(hit,null);
+if(ok&&veh&&typeof veh.takeDmg==='function') veh.takeDmg(BARREL.crushVehDmg,null,true);   // ap=破甲减伤通道, ≠步兵溅射 95
+return ok;
+}
 // ── ⑥ 坍塌碾压 (A4): 落体覆盖范围内的步兵/载具吃一次"被砸" (旧版坍塌是纯视觉事件: 站在楼里不会死) ──
 // 判据: 水平落在覆盖矩形 (外扩 pad) 内 + 高度在 [地面−vBand, 顶面+0.5] 之间。伤害随落体高度加码。
 function collapseCrush(bb,yTop,gy,attacker){

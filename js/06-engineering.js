@@ -150,6 +150,11 @@ if(m){ if(m.grp.parent) world.remove(m.grp); const i=MG42S.indexOf(m); if(i>=0) 
 for(const bb of b.boxes) killBox(bb); // MG 的前掩墙 (sandbagWall reg=false) 一并拆
 }
 else if(b.type==='medkit'){ if(b.crate) removeMedkit(b.crate); }
+else if(b.type==='barrel'){
+// ★2026-11-28 批④b: 油桶拆除 = 只摘网格 (meshes 台账含 barrel() 的整组 Group); 圆柱账走下方通用尾段
+//   killCyl 置旗, 占位圈释放/退款也走通用尾段 (造价 1 建造点, 按通用件逻辑自动对称, 无需特判)。
+for(const m of b.meshes) if(m.parent) world.remove(m);
+}
 else if(b.type==='tower'){
 // ★2026-11-21 B#22: 旧版无此分支 —— 塔的网格/碰撞账原地留场 (占位圈已释放 ⇒ 原地可重叠重建), ZP 不退。
 // 按建账对称摘: 合并网格+独立网格 (engBuildExec 的 meshes 台账) + 碰撞盒; 塔腿/顶棚柱圆柱在共用尾段摘。
@@ -205,13 +210,13 @@ return g2;
 })();
 // 建造菜单 (2026-09-28 阶段三 P1): **医疗箱并入工程兵建造** (用户裁定医护兵删除, 医疗箱=第 5 件建造) ——
 // 建成的医疗箱与原医护兵放置的同一套 (17-emplacements placeMedkit: 8 次/120s, 同队取绷带), 建造点 2。
-const BUILD_MENU=['sandbag','wire','hedge','mg','medkit'];
-const BUILD_NAMES={sandbag:'沙袋墙',wire:'铁丝网',hedge:'拒马',mg:'重机枪',medkit:'医疗箱'};
-const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2};
+const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];   // ★2026-11-28 批④b: 加"油桶"件 (1 建造点, 造得出也碾得爆 —— 15-vehicles _tkCylCb 接触即爆)
+const BUILD_NAMES={sandbag:'沙袋墙',wire:'铁丝网',hedge:'拒马',mg:'重机枪',medkit:'医疗箱',barrel:'油桶'};   // 词条'油桶'由批③统一进 00b-i18n (本文件不碰词典; t2() 缺词条回退原文, 可接受)
+const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2,barrel:1};
 // 丧尸模式商店件 ZP 价 (2026-10-28 单源): 建造弹窗 (19-input Digit5) 与 engBuild 扣款同读此表 ——
 // 旧版价目内联在 engBuild 里, Digit5 提示拿 BUILD_COST[tower/ammoc] 查空 ⇒ "消耗undefined点" 穿帮。
 const BUILD_ZP={mg:150,tower:250,ammoc:80};
-const BUILD_TIME={sandbag:2.2,wire:2.2,hedge:1.8,mg:3.4,medkit:2.0};
+const BUILD_TIME={sandbag:2.2,wire:2.2,hedge:1.8,mg:3.4,medkit:2.0,barrel:1.2};   // ★2026-11-28 批④b: 油桶=轻件快读条
 // 建造升起动画: 新建工事从地里逐渐升起
 const RISERS=[];
 function riseNewMeshes(ci,dur=0.85){
@@ -297,6 +302,24 @@ if(!placeMedkit(pl,tk.tx,tk.tz)){
 pl.buildCount=(pl.buildCount||0)+tk.cost;
 if(pl.isPlayer) showScorePop(t2('此处放不下医疗箱 · 建造点已退还'));
 return;
+}
+}
+else if(tk.type==='barrel'){
+// ★2026-11-28 批④b: 工兵放油桶 —— 直接复用 05b-props 的 barrel() 生成器 (纯函数: propFree 闸 +
+//   propTake 占位 + heightAt 贴地 + CYLS.push{explosive} 一条龙, 无建图期随机/上下文依赖, 运行期可直调)。
+//   barrel() 无返回值 (propFree 失败静默早退) ⇒ 按 hedge 同款"CYLS 增量"判成败; 失败走 !built 通用块
+//   (提示"此处放不下油桶"; 扣款行在其后 ⇒ 钱包原封), 成功则 meshes/cyls 快照照下方通用登记进 BUILDS。
+const cn=CYLS.length; barrel(tk.tx,tk.tz); built=CYLS.length>cn;
+// barrel() 只 push CYLS, 不进 RGRID 倒排表 (无 spatialIndexAddCyl; _colIdxDirty 只在首建/世界还原置位)
+// ⇒ 这里按 04-collision buildSpatialIndex 同款圆柱入格公式直插本条下标 (spatialIndexAddBox 的圆柱版,
+//   O(1) 不动其它账): 不插则工兵桶对弹道 (raycastWorld cyl 档)/爆炸记账 (eachCylNear)/坦克碾爆
+//   (15-vehicles _tkCylCb) 三条链全部不可见 (verify-20261118a 顶部"运行期 barrel() 新增的 CYLS 不进
+//   RGRID"注记的同款坑)。桶殉爆 killCyl 置旗后倒排表条目留存 = 全库"下标终身稳定"既有口径。
+if(built&&RGRID.cylCells){
+const bc=CYLS[CYLS.length-1], N2=RGRID.N;
+const i0=clamp(Math.floor((bc.x-bc.r+RGRID.off)/RGRID.cell),0,N2-1), i1=clamp(Math.floor((bc.x+bc.r+RGRID.off)/RGRID.cell),0,N2-1);
+const j0=clamp(Math.floor((bc.z-bc.r+RGRID.off)/RGRID.cell),0,N2-1), j1=clamp(Math.floor((bc.z+bc.r+RGRID.off)/RGRID.cell),0,N2-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.cylCells[j*N2+i].push(CYLS.length-1);
 }
 }
 if(!built){

@@ -106,9 +106,9 @@ const I18N_EN={
 '兵种':'CLASS','出生点':'SPAWN POINT','战场态势':'TACTICAL MAP',
 // 点位周边补给箱数量 (2026-11-17 批): 游戏内容设置单钮循环 1↔2 + 说明整串 (data-i18n-html 键=innerHTML)
 '点位周边补给箱数量':'SUPPLY CRATES PER POINT',
-// 死亡动画 (2026-11-20 批⑦): 游戏内容设置单钮循环 就地倒下⇄布娃娃 + 说明整串
-'死亡动画':'DEATH ANIMATION','就地倒下':'Fall in Place','布娃娃':'Ragdoll',
-'死亡尸体的呈现方式：布娃娃（默认）＝物理布娃娃，尸体由刚体翻滚落地；就地倒下＝无物理的倒地动画，尸体就是士兵本体模型（头盔/手/靴/背包与活体完全一致），落地后停留至重生前收走。改档即时生效，下一具尸体开始采用新档。':'How corpses are presented: Ragdoll (default) = physics ragdoll, the body tumbles and settles via rigid bodies; Fall in Place = a physics-free falling animation where the corpse IS the soldier model itself (helmet/hands/boots/pack identical to the living model), staying until shortly before respawn. Applies instantly — the next corpse uses the new setting.',
+// 死亡动画 (2026-11-20 批⑦: 就地倒下⇄布娃娃; ★2026-11-28 批⑥: 三档 —— 新增 布娃娃(加固) + 说明整串)
+'死亡动画':'DEATH ANIMATION','就地倒下':'Fall in Place','布娃娃':'Ragdoll','布娃娃(加固)':'Ragdoll (stiff)',
+'死亡尸体的呈现方式：布娃娃（默认）＝物理布娃娃，尸体由刚体翻滚落地；就地倒下＝无物理的倒地动画，尸体就是士兵本体模型（头盔/手/靴/背包与活体完全一致），落地后停留至重生前收走；布娃娃(加固)＝仍是布娃娃，但每个关节额外加固一条副约束（软限位），四肢不再乱折乱甩成麻花，弯折保持在自然范围（约 20~60°），落定姿态保持人形；整体翻滚/滑移等大动作与普通布娃娃一致。改档即时生效，下一具尸体开始采用新档。':'How corpses are presented: Ragdoll (default) = physics ragdoll, the body tumbles and settles via rigid bodies; Fall in Place = a physics-free falling animation where the corpse IS the soldier model itself (helmet/hands/boots/pack identical to the living model), staying until shortly before respawn; Ragdoll (stiff) = still a ragdoll, but every joint gains an extra secondary constraint acting as a soft limit — limbs no longer fold into pretzels, bending stays in a natural band (~20-60°) and the settled pose keeps a human shape; overall tumbling and sliding stay identical to the normal ragdoll. Applies instantly — the next corpse uses the new setting.',
 '每个据点（旗点）周边摆放的弹药补给箱数量：1（默认）或 2。选 2 时每据点周边会有两只错开的补给箱（首只箱位不变，第二只按贴掩体优选另行落位）。换图或重开一局后生效。':'Ammo crates placed around each capture point: 1 (default) or 2. At 2, every point gets a second staggered crate (the first crate keeps its spot; the second picks a covered spot of its own). Applies after changing maps or restarting a match.',
 // 严寒倒计时 (2026-11-18 寒冷批): 游戏内容设置显隐开关 + 说明整串 (data-i18n-html 键=innerHTML)
 '严寒倒计时':'FREEZE COUNTDOWN',
@@ -302,7 +302,7 @@ const I18N_EN={
 '手柄只在战斗中接管, 菜单与部署界面仍用鼠标/触屏; 拔线或回到菜单会自动松开全部按住的键。':'The pad takes over only in combat — menus and the deploy screen stay on mouse/touch; unplugging or leaving to a menu releases every held button.',
 '手柄已连接: {0}':'Gamepad connected: {0}','手柄已断开':'Gamepad disconnected',
 // ── 工事 ──
-'沙袋墙':'Sandbag Wall','铁丝网':'Barbed Wire','拒马':'Hedgehog','重机枪':'HMG',
+'沙袋墙':'Sandbag Wall','铁丝网':'Barbed Wire','拒马':'Hedgehog','重机枪':'HMG','油桶':'Fuel Barrel',   // ★2026-11-28 批④: 工兵 B 菜单新件 (BUILD_NAMES.barrel)
 // ── 载具/据点交互提示 (20-player) ──
 '<b>F</b> 跳伞 · <b>W/S</b>油门 <b>A/D</b>压坡转向 <b>鼠标</b>拉杆 <b>左键</b>机枪 <b>右键/B</b>炸弹':'<b>F</b> bail out · <b>W/S</b> throttle <b>A/D</b> bank <b>Mouse</b> stick <b>LMB</b> guns <b>RMB/B</b> bombs',
 '<b>F</b> 离开坦克 · <b>WASD</b>驾驶 <b>左键</b>主炮 <b>右键</b>机枪 <b>C</b>炮手镜':'<b>F</b> leave tank · <b>WASD</b> drive <b>LMB</b> main gun <b>RMB</b> coax <b>C</b> gunner optic',
@@ -421,7 +421,7 @@ const I18N_EN={
 // ── 2026-11-12 排版批: 游戏说明键位表化 —— 旧整行长串拆成「按键帽→作用」行与要点列表, 词条随之拆分 ──
 // 键位帽 (data-i18n 裸键): 拉丁键名恒等翻 / 中文键名意译
 'WASD':'WASD','Shift':'Shift','空格':'Space','左键':'LMB','右键':'RMB','1 / 2':'1 / 2','R':'R','N':'N','C':'C','Z':'Z','X':'X','Q / E':'Q / E','U':'U',
-'G':'G','3':'3','4':'4','6':'6','H':'H','B':'B','5':'5','F':'F','T':'T','Y':'Y','M':'M','Tab':'Tab','F1':'F1','Esc':'Esc',
+'G':'G','3':'3','4':'4','6':'6','H':'H','B':'B','5':'5','F':'F','T':'T','Y':'Y','M':'M','Tab':'Tab','F1':'F1','F2':'F2','Esc':'Esc',
 'W / S':'W / S','A / D':'A / D','鼠标':'Mouse','右键 / B':'RMB / B','滚轮':'Wheel','E':'E','左键点地图':'LMB on map','中键拖动':'MMB drag',
 'RT':'RT','LT':'LT','A':'A','LB':'LB','RB':'RB','LS 按下':'LS click','RS 按下':'RS click','Back':'Back','Start':'Start',
 '十字键 上':'D-pad ↑','十字键 下':'D-pad ↓','十字键 左':'D-pad ←','十字键 右':'D-pad →','坦克':'Tank','飞机':'Plane',
@@ -454,6 +454,8 @@ const I18N_EN={
 '战局在观战中结束时按<b>开局阵营</b>结算胜利/战败并<b>计入历史记录</b>(与调试模式的区别: 本模式不能干涉战局)':'When the match ends while spectating, victory/defeat is settled by your <b>starting faction</b> and <b>counted into history</b> (difference from debug mode: this mode cannot interfere with the battle)',
 // 小队与指挥
 '标记进攻位置':'Attack marker','令小队跟随':'Squad follow','战场大地图':'Tactical map','战场记分板':'Scoreboard','显示/隐藏战斗HUD':'Toggle combat HUD',
+// ★2026-11-28 批③: F2 截图说明 (index.html 两处键位表的 data-i18n-html 词条, 中文串逐字同源)
+'截图：画面+小地图存入下载':'Screenshot: view + minimap saved to downloads',
 // 指挥官兵种
 '指挥地图 (步行时右键开/关, 手持通讯仪)':'Command map (RMB on foot to toggle, holding the radio)',
 '切换当前高亮的可指挥单位(其余单位在右侧列表里压缩成细条)':'Cycle the highlighted commandable unit (the rest collapse into thin bars in the right-side list)',
@@ -633,7 +635,7 @@ const I18N_EN={
 // 军刀 (2026-11-20 近战重做): 击杀来源/HUD 武器名走 t() 单源; 三式模式串与 N 键说明行中英配对
 '军刀':'Sabre',
 '近战 · 左键刺 / 右键斩 / 中键劈':'Melee · LMB thrust / RMB slash / MMB chop',
-'乘员×3':'crew ×3',
+'乘员×1':'crew ×1',   // ★2026-11-28 票账批: 车组只算驾驶员 1 人, 取代旧 '乘员×3' 词条
 '地面目标':'ground target',
 '运输车突围! 已突围 {0} 辆':'Convoy breakaway! {0} truck(s) through',
 '运输车被摧毁! 剩余 {0} 辆':'Transport destroyed! {0} left',

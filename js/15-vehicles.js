@@ -388,6 +388,18 @@ _tkC.hit=true;
 }
 function _tkCylCb(c){
 const T=_tkC.t; if(!T) return;
+// ★2026-11-28 批④a: 坦克碾油桶 → 接触即爆 (无车速门: 低速/倒车碾上同样引爆), 判定必须放在下面两道
+//   几何早退之前 —— 桶高 1.1≤TANK_STEP=1.3 会被"可跨越"早退吃掉 (建图期桶一直走那条路 = 从不挡车),
+//   放早退之后工兵就永远碾不响桶。油桶是软目标: 碾爆但**不挡车** —— 本分支不产生碰撞位移/不扣车速/
+//   不置 hit, explosive 圆柱对坦克底盘永不参与碰撞响应 (与旧"可跨越"口径一致, 只多出"接触即引爆")。
+//   判中调 barrelCrushBlast (05-world 单源: 爆桶+对碾压坦克 takeDmg 破甲账; T=_tkC.t 即本坦克 —— 本
+//   回调是 2026-11-11 性能批的模块级函数, 没有内联闭包时代的 this)。防重复触发 (每帧每圆柱都进、履带
+//   跨两步同帧判中两次) 靠 barrelCrushBlast 内部的同坐标 0.5s cd + barrelBlast 主体 killCyl 置旗。
+if(c&&!c.dead&&c.explosive){
+const dx=_tkC.cx-c.x, dz=_tkC.cz-c.z, rr=c.r+1.5;   // 接触门与下方圆柱碰撞同口径 (车体圆 r1.5 + 桶 r)
+if(dx*dx+dz*dz<rr*rr) barrelCrushBlast(c.x,c.z,T);
+return;
+}
 if(c.r<0.3) return;
 if(c.y1-c.y0<=TANK_STEP) return;
 const cxp=_tkC.cx, czp=_tkC.cz;
@@ -797,22 +809,12 @@ function vehMgHeatAdd(v){ v.heat=Math.min(1.2,v.heat+VEH_MG_HEAT.heatPS); if(v.h
 function vehMgCanFire(v){ return !v.heatLock&&v.heat<1; }
 // 开火入口第一行调用 (必须早于冷却早退): 记录"本帧有开火请求" ⇒ 玩家按住扳机时 update() 不散热
 function vehMgTrigger(v){ v.mgTrig=true; }
-// ═══════════ 三人车组 · 名额结算 (2026-09-21 A#7 契约 §4 v3) ═══════════
-// 车组 = 1 名**真人驾驶员** (crewBot / 玩家, 唯一跑 AI 且唯一有死亡链) + 2 个**轻量乘员名额** (Tank.crewSlots)。
-// 为什么名额不是 Bot (Lead 2026-09-21 用户二次裁定): 各图 tankN 是 2~8 而 BOTS_PER_TEAM=11 —— 每车真配 3 名 Bot
-//   会让一队从 11 人涨到 21 人 (斯大林格勒 14→30), 属于用户未要求的平衡破坏。名额因此**不进 soldiers/combatants**
-//   (进去会被索敌、被子弹命中、被主循环更新), 只是记账记录 (v2 的 crewMates 真 Bot 编制作废)。
-// 名额没有死亡链 ⇒ 由本函数汇总结算 1 死 / 1 票 / 击杀者 +1 杀; 玩家击杀走 onPlayerKill 单源 (不双计)。
-function settleCrewSlotDeath(s,attacker,team){
-if(!s||!s.alive) return;
-s.alive=false; s.deaths=(s.deaths||0)+1;
-tickets[team]=Math.max(0,tickets[team]-CREW_TICKET_EACH);
-if(attacker){
-attacker.kills=(attacker.kills||0)+CREW_KILL_EACH;
-if(!attacker.isPlayer) attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
-else if(typeof onPlayerKill==='function') onPlayerKill(s,false); // 玩家记分唯一入口 (21-match): 走名额不双计
-}
-}
+// ═══════════ 车毁结算口径 (★2026-11-28 票账批, 用户裁定; 取代 2026-09-21 A#7 三人车组名额结算) ═══════════
+// 车组只算 **1 名驾驶员** (crewBot / 玩家, 唯一跑 AI 且唯一有死亡链): 车毁时走自己的既有死亡链
+//   (1 死 / 1 票 / 1 杀 / 独立战报行, 见 die() 内注释)。
+// 旧"2 个轻量乘员名额" (Tank.crewSlots + settleCrewSlotDeath) **整体删除** —— 名额不是真人 (不进
+//   soldiers/combatants, 无模型无死亡链), 却按人命扣票记杀; 新口径"载具=3票3杀300分、乘员只算驾驶员1人"
+//   下这两个隐形名额不再参与任何账目。
 class Tank {
 constructor(team,variant){
 this.kind='tank';
@@ -826,11 +828,7 @@ this.hp=this.def.hp; this.maxHp=this.def.hp; this.alive=true;
 this.pos=V3(); this.yaw=0; this.turretYaw=0; this.turretPitch=0; this.vel=0;
 this.playerDriven=false; this.isAI=true;
 this.crew={ name:this.name, team, kills:0, deaths:0, score:0, isPlayer:false, isCrew:true, pos:this.pos, alive:true, lastFiredT:-99, damage(){}, vel:V3() };
-// A#7 v3 (2026-09-21 契约 §4): 三人车组 = 1 名真人驾驶员 (crewBot / 玩家, 唯一跑 AI) + 2 个**轻量乘员名额**。
-// 名额是记账记录 (不进 soldiers/combatants ⇒ 不被索敌/不被子弹命中/不占 BOTS_PER_TEAM 编制), 车毁时由
-// settleCrewSlotDeath 汇总结算。玩家上车仍走既有 crewBot.dismountVehicle 归建路径 ⇒ 车内 = 玩家 + 2 名额 = 3。
-this.crewSlots=[{name:'乘员甲',deaths:0,kills:0,score:0,alive:true,isCrew:true,damage(){}},
-                {name:'乘员乙',deaths:0,kills:0,score:0,alive:true,isCrew:true,damage(){}}];
+// ★2026-11-28 票账批: 旧 crewSlots 轻量名额数组删除 (车内编制 = 驾驶员 1 人, 见文件头 2026-11-28 口径注释)。
 this.cannonCd=0; this.mgT=0; this.mgBurst=0; this.mgPause=0;
 // A#3 载具机枪过热 (契约 A): 0..1 热量 + 过热强制停火锁; mgTrig = 本帧是否有开火请求 (开火入口置位, update 消费)
 this.heat=0; this.heatLock=false; this.mgTrig=false;
@@ -892,18 +890,11 @@ const a=this.yaw+this.turretYaw;
 const sn=Math.sin(a),cs=Math.cos(a);
 return V3(this.pos.x+cs*0.42+sn*2.2,this.pos.y+1.88,this.pos.z-sn*0.42+cs*2.2); // 前向 2.2 与视觉管口对齐 (P2-20: 旧 1.25 缩在管中)
 }
-// A#7 v3 只读: 车内实际在编的乘员 = 驾驶员 (crewBot / 玩家) + 2 个名额; **空车返回 []**。
-// sea-hud 的 #vehHpNum 读它显示 " · 乘员 ×N" (有车组时恒 3)。
+// ★2026-11-28 票账批: 车内在编乘员 = 驾驶员 (crewBot / 玩家) 1 人; **空车返回 []**。
+// sea-hud 的 #vehHpNum 读它显示 " · 乘员 ×N" (有车组时恒 1)。
 crewRoster(){
 const drv=this.playerDriven?(player.alive?player:null):(this.crewBot||null);
-if(!drv) return [];
-return [drv].concat(this.crewSlots?this.crewSlots.filter(Boolean):[]);
-}
-// A#7 v3: 名额成立的前提 = 驾驶员在场 (与 crewRoster 同一口径); 空车 0
-crewSlotsAlive(){
-const drv=this.playerDriven?(player.alive?player:null):(this.crewBot||null);
-if(!drv) return 0;
-return this.crewSlots?this.crewSlots.filter(s=>s&&s.alive!==false).length:0;
+return drv?[drv]:[];
 }
 update(dt){
 // 炮管可见性单点维护: 仅玩家乘本车且开车长镜(炮手镜)时隐藏防穿模, 其余状态(下车/第三人称跟车/残骸)一律恢复
@@ -1725,12 +1716,10 @@ const spec=(typeof specRide==='function')&&specRide(this); // 观战者座驾: �
 this.alive=false;
 this.respawnT=rand(40,52);
 this.vel=0; this.crew.alive=false;
-// ── A#7 三人车组车毁结算 (2026-09-21 契约 §4 v3 定稿) ──
-// 车组 = 1 名真人驾驶员 + 2 个轻量名额:
-//   驾驶员 (crewBot/玩家) 走**自己的既有死亡链** (1 死 / 1 票 / 1 杀), 这里一行汇总都不加 —— v2 的双计事故
-//     (attacker.kills+=CREW_N / tickets-=CREW_N 会变 6 死 6 杀 6 票) 只对真人成立, 故一律不加;
-//   2 个名额不是真人、没有死亡链 ⇒ 必须由 settleCrewSlotDeath 汇总结算 (各 1 死 / 1 票 / +1 杀), 否则 3 死变 1 死。
-// 空车 (无 crewBot 且无玩家): 没有人可杀 ⇒ 保留旧"装备票"口径 (TICKET_COST), 0 死 0 杀。
+// ── 车毁结算 (★2026-11-28 票账批, 用户裁定; 取代 A#7 三人车组名额结算) ──
+// 车组只算 **1 名驾驶员** (crewBot/玩家): 走**自己的既有死亡链** (1 死 / 1 票 / 1 杀 / 独立战报行)。
+//   旧"2 个轻量乘员名额" (settleCrewSlotDeath) 已删 —— 名额不是真人却按人命扣票记杀, 与新口径矛盾。
+// 车体装备票/杀: 一律 TICKET_COST.tank(3), 有人/空车同价 (下面 credit 块) ⇒ 有人车整损 4 票 4 杀, 空车 3 票 3 杀。
 const driver=this.playerDriven?(player.alive?player:null):(this.crewBot||null);
 const cb=this.crewBot;
 this.crewBot=null; this.claimBot=null;
@@ -1744,31 +1733,41 @@ if(driver===player){
 if(spec){ if(typeof specRideEject==='function') specRideEject(this); }
 // 自动脱离载具 (2026-11-09 批, sf_autoexit 默认关): 车毁瞬间自动下车逃生, 代替死亡链 (乘员名额仍随车结算)
 else if(AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){ autoExitWreck(this,false); }
-else player.damage(999,attacker,false);              // 既有链: 自己 -1 票 +1 死 + 击杀者 +1 杀 + 记分
+else{
+// ★2026-11-28 骑姿批: 死在车里把死亡落点弹出车旁 1.5m (与下面 crewBot 阵亡落点同口径) —— 否则就地倒下
+//   的尸体与死亡环绕镜头都埋在车体模型里 (playerAvatarDeath 从骑乘蹲姿快照倒地, 见 11-soldiers hardPoseCrouch)。
+player.pos.set(this.pos.x+Math.sin(this.yaw)*1.5,this.pos.y,this.pos.z+Math.cos(this.yaw)*1.5);
+player.damage(999,attacker,false);              // 既有链: 自己 -1 票 +1 死 + 击杀者 +1 杀 + 记分
+}
 }else{
 if(cb){ // 阵亡落点: 沿车体轴线前移 1.5m (别把尸体压在残骸中心), 并保住"尸体可见"观感
 cb.onVehicle=null;
 cb.mesh.root.visible=true;
+if(cb.gun) cb.gun.visible=true;   // ★2026-11-28 骑姿批: 乘员期收起的枪随揭示还原 (尸体持枪口径与步行阵亡一致)
 cb.pos.set(this.pos.x+Math.sin(this.yaw)*1.5,this.pos.y,this.pos.z+Math.cos(this.yaw)*1.5);
 }
-if(typeof driver.crewKill==='function') driver.crewKill(attacker); // bots: 走 die() 全链, 只压掉本条 killfeed
+if(typeof driver.crewKill==='function') driver.crewKill(attacker); // bots: 走 die() 全链 ★2026-11-28 起不再压战报行 (与飞机驾驶员行数统一)
 else driver.damage(999,attacker,false);                            // 兜底: 数字一致
 }
-for(const s of this.crewSlots) if(!spec) settleCrewSlotDeath(s,attacker,this.team); // 2 个名额: 各 1 死/1 票/+1 杀 (观战者座驾不结算, 见上)
 }
-// ★2026-11-17 批11 (用户裁定): 坦克本身一律占 3 票 (TICKET_COST.tank) —— 车体装备票不再只对空车收
-//   5~6 票, 而是有人车/空车都收 3 票; 乘员照旧各自 1 票 (驾驶员死亡链 + 2 个名额, 上面已结算)。
-//   有人车整损 = 3 车体 + 3 人命, 空车 = 3 车体 (旧: 有人车 3 / 空车 5~6)。观战者座驾照旧零票 (观战无反噬)。
+// ★2026-11-17 批11 (用户裁定) + ★2026-11-28 票账批改版: 车体装备票恒 TICKET_COST.tank(3), 有人/空车同价;
+//   乘员只算驾驶员 1 人 (死亡链 -1, 上面已结算) ⇒ 有人车整损 = 3 车体 + 1 驾驶员 = 4 票, 空车 = 3 票。
+//   观战者座驾照旧零票 (观战无反噬)。
 if(!spec) tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.tank);
 if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力, 毁"己方"载具不记分不播报)
-// 一次车毁只出一条战报 (victim 写清 3 名乘员; 玩家在内时死亡链另有 1 行 ⇒ 合计 ≤2 行)
-// ★2026-09-26 修: **空车**不吹"乘员×3" —— 上面空车分支明确"没有人可杀 (0 死 0 杀)", 战报却照写 3 名乘员,
-// 观感是"打死三个人的战报、记分板上零击杀" (与被炸毁的无人坦克对不上)。有人才写乘员数, 空车只报车名。
-// 2026-09-26H 同规: 观战者座驾同样不写乘员数 (上面 spec 分支不结算任何乘员)。
-const feedName=(driver&&!spec)?(t(this.name)+' · '+t('乘员×3')):t(this.name);   // ★2026-11-17 批1: 战报名走词典 (动态拼接串查不到表; addKillfeed 侧 t() 对英文回退原样)
+// ★2026-11-28 票账批 (用户裁定): 车体杀 = 车体票 = TICKET_COST.tank(3) —— 毁一辆坦克一律 +3 杀 (有人/空车
+//   同价); 有人车的驾驶员另走自己的死亡链 +1 杀 ⇒ 有人车整损 4 杀。取代旧"车体不记杀"口径 (空车 0 杀)。
+attacker.kills=(attacker.kills||0)+TICKET_COST.tank;
+// 一次车毁只出一条战报 (victim 写清乘员数; 玩家/AI 驾驶员死亡链另有 1 行 ⇒ 合计 2 行, 与飞机同构)。
+// ★2026-09-26 修: **空车**不吹乘员数 —— 没有人可杀 (0 死), 战报照写乘员的观感是"打死人的战报、零击杀"。
+//   2026-09-26H 同规: 观战者座驾同样不写乘员数 (spec 分支不结算任何乘员)。
+// ★2026-11-28: 乘员只算驾驶员 1 人 (旧"乘员×3"口径作废, 词典词条换 '乘员×1')。
+const feedName=(driver&&!spec)?(t(this.name)+' · '+t('乘员×1')):t(this.name);   // ★2026-11-17 批1: 战报名走词典 (动态拼接串查不到表; addKillfeed 侧 t() 对英文回退原样)
 addKillfeed(attacker,{name:feedName,team:this.team,isPlayer:false},false);
-// 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); 与"3 杀"的击杀分是两回事, 只结算这一处
+// 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 拿基础分
+// ★2026-11-28: Bot 击毁者也结算基础分 (对齐飞机/舰艇/卡车既有 else 分支 —— 旧版只有 isPlayer 分支)。
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁坦克',SCORE_TABLE.tank);
+else attacker.score=(attacker.score||0)+SCORE_TABLE.tank;
 if(attacker.isPlayer&&typeof onPlayerWreck==='function') onPlayerWreck(); // 屏中击毁红档 (2026-09-30 批): 空车击毁旧口径无任何屏中反馈; 有人车另有乘员 die 链的红档, 同帧合并为一响
 if(attacker.isPlayer) attacker.vehKills=(attacker.vehKills||0)+1; // 终身击毁载具账 (2026-11-11 数据批): 结算随 sf_stats 累计 (坦克/卡车/战机/舰艇四处同款钩)
 }
@@ -1856,7 +1855,7 @@ this.turretYaw=0; this.turretPitch=0;
 this.hp=this.maxHp; this.alive=true; this.isAI=true; this.playerDriven=false;
 this.crew.alive=true;
 // A#7 v3 重生: 2 个名额复位 alive=true (deaths **累计保留** —— 同一个人再上车); 驾驶员由 23-deploy/14-bots 重配。
-if(this.crewSlots) for(const s of this.crewSlots){ if(s) s.alive=true; }
+// ★2026-11-28 票账批: 旧 crewSlots 名额复位行删除 (名额数组已不存在)。
 // A#3 重生 = 新车新枪管: 热量/过热锁/扳机请求一律清零 (不带着上一辆车的枪管热量复活)
 this.heat=0; this.heatLock=false; this.mgTrig=false;
 this.crewBot=null; this.claimBot=null; this.noEnterT=0;

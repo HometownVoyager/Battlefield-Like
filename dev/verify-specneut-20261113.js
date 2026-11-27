@@ -378,7 +378,7 @@ return {k0:k0,specK:specK,plainK:plainK};
 })()`);
 if(t5.err){ ok(false,'T5 异常 '+t5.err); }
 else{
-ok(t5.specK===t5.k0+1,'T5 ★观战火力毁"己方"战机照常记分 (kills '+t5.k0+' → '+t5.specK+') —— 归因补齐核心判据');
+ok(t5.specK===t5.k0+3,'T5 ★观战火力毁"己方"战机照常记分 (kills '+t5.k0+' → '+t5.specK+') —— 归因补齐核心判据 (判据跟走 2026-11-28 票账批: Plane.die 车体杀+3, 旧口径+1)');
 ok(t5.plainK===t5.specK,'T5 阴性: 非观战玩家毁己方战机不记分 (旧门未写死拆掉, kills 保持 '+t5.plainK+')');
 }
 

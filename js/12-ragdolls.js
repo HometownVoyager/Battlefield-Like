@@ -26,6 +26,17 @@ const RAG_STILL_T=2.5;
 const RAG_STILL_D2=6.25e-6;   // (0.0025m)²/帧
 const RAG_ACTIVE_MAX=6;
 const RAG_THAW_V2=0.81;       // (0.9m/s)²
+// ★2026-11-28 批⑥三版 (用户裁定两轮: ①加固=限制布娃娃**内部**/各关节相对转动, 避免扭得不像人样,
+//   不是限制整体位移 —— 一版整体阻尼/初始冲量×0.4/maxForce 450 全撤销; ②二版满轴距全锁"有点过头" —
+//   副锚轴距收短成**软限位**): 布娃娃(加固)档单源参数 (判读=deathRagStiff, 00-config sf_deathfx==='2')。
+//   做法 = 每条关节在主锚之外再加一条 P2P 副锚, 副锚 = 主锚沿**部件自身 Y 轴**下移 d (父子两侧同减
+//   同一局部向量 ⇒ 装配位姿下是同一个世界平移, 主锚 A4"同源零初错"性质原样继承)。两锚点连线=肢体轴,
+//   副锚以轴距 d 为力臂限制相对转动 —— **d 即"度"旋钮** (真 cannon 调参台 dev/_tune-ragdoll.js 实测,
+//   maxForce 150~1200 与默认 1e6 无差别, 弯折度只由 d 决定): 死亡冲量/落地冲击下四肢弯出 20~60°
+//   自然角度 (普通档 173~179°=叠麻花; 满轴距 0.20~0.24 档 6~30°=人形木板), 落定姿态保持人形。
+//   spine/neck/arm/leg = 四类关节的副锚轴距。RAG_POSE 姿态表/ST 站位表/部件阻尼/初始冲量/maxForce
+//   (副锚不传=cannon 默认 1e6)/solver.iterations 全部不动 (性能红线)。
+const RAG_STIFF_CFG={spine:0.10, neck:0.08, arm:0.09, leg:0.12};
 function freezeRagdoll(r){
 if(!r||r.frozen) return;
 r.frozen=true; r.stillT=0;
@@ -48,6 +59,9 @@ RAG.world.solver.iterations=5;
 function spawnRagdoll(bot,attacker,isHead){
 ragInit();
 if(!RAG.world) return false;
+// ★2026-11-28 批⑥: 布娃娃(加固)档开关 —— spawnRagdoll 入口算一次; typeof 守卫跟随本文件对可选
+//   依赖的习惯 (沙箱探针可能没加载 00-config, 缺函数时按普通布娃娃走, 不炸生成路径)。
+const stiff=(typeof deathRagStiff==='function')&&deathRagStiff();
 if(RAG.list.length>=8) removeRagdoll(RAG.list[0]);
 const U=uniformMats[bot.team];
 const yaw=bot.yaw, p=bot.pos;
@@ -150,6 +164,22 @@ return c;
 // (2026-09-26 A4: 锚点按"装配即零误差"重算 —— 臂/腿/头盔三处原本各差 0.072/0.110/0.048m, 同样是初错
 //  进求解器被换算成弹射冲量。现在七条约束的初始间距都是 0, 与上面 ST 站位表逐条对应。)
 cons=[P2P(torso,[0,-0.26,0],pelvis,[0,0.13,0]),P2P(head,[0,-0.13,0],torso,[0,0.27,0]),P2P(armL,[0,0.24,0],torso,[-ST.armX,0.2,0]),P2P(armR,[0,0.24,0],torso,[ST.armX,0.2,0]),P2P(legL,[0,0.47,0],pelvis,[-ST.legX,0,0]),P2P(legR,[0,0.47,0],pelvis,[ST.legX,0,0])];
+// ★2026-11-28 批⑥二版 (用户裁定: 加固=限制关节内部的相对转动, 不是限制整体位移): 每条关节加第二条
+//   P2P 副锚 —— secP = 把主锚 a1/b1 沿**部件自身 Y 轴**同减轴距 d 得 a2/b2。父子两侧减的是同一局部向量,
+//   两部件在装配位姿下朝向相同 ⇒ 这是同一个世界平移 ⇒ 副锚两侧仍重合, 主锚 A4"同源零初错"性质原样
+//   继承 (不喂 Baumgarte 位置误差, 见上方 A4 注)。几何效果: 同一关节上两个锚点对连线 = 部件自身 Y 轴
+//   (肢体轴), 副锚以轴距 d 为力臂把相对转动**软限位**在自然弯折带 (实测 20~60°, 见 RAG_STIFF_CFG 头注
+//   调参台数据) —— 四肢不再乱折乱甩成麻花, 但死亡冲量下仍弯出自然角度, 不是人形木板; 整体的翻滚/
+//   滑移与初始冲量全部保持普通档。push 进 cons ⇒ removeRagdoll 既有回收链一并摘除, 零泄漏。
+if(stiff){
+const secP=(A,a1,B,b1,d)=>cons.push(P2P(A,[a1[0],a1[1]-d,a1[2]],B,[b1[0],b1[1]-d,b1[2]]));
+secP(torso,[0,-0.26,0],pelvis,[0,0.13,0],RAG_STIFF_CFG.spine);        // 躯干↔骨盆: 副锚 (0,-0.36)/(0,0.03)
+secP(head,[0,-0.13,0],torso,[0,0.27,0],RAG_STIFF_CFG.neck);           // 头↔躯干: 副锚 (0,-0.21)/(0,0.19)
+secP(armL,[0,0.24,0],torso,[-ST.armX,0.2,0],RAG_STIFF_CFG.arm);       // 左臂↔躯干: 副锚 (0,0.15)/(-armX,0.11)
+secP(armR,[0,0.24,0],torso,[ST.armX,0.2,0],RAG_STIFF_CFG.arm);        // 右臂↔躯干: 同上镜像
+secP(legL,[0,0.47,0],pelvis,[-ST.legX,0,0],RAG_STIFF_CFG.leg);        // 左腿↔骨盆: 副锚 (0,0.35)/(-legX,-0.12)
+secP(legR,[0,0.47,0],pelvis,[ST.legX,0,0],RAG_STIFF_CFG.leg);         // 右腿↔骨盆: 同上镜像
+}
 { const ptarr=[pelvis,torso,head,armL,armR,legL,legR].filter(Boolean);
 for(const pt2 of ptarr){
 // 尸体继承角色移动惯性 + 被命中方向冲量 (旧"爆炸额外推力"死分支已删: window._lastExplosion 全库无写入, 2026-09-06 D3=a)
@@ -162,8 +192,12 @@ ix=dx/dl; iz=dz/dl; imp=rand(2.8,5.5);
 if(isHead) imp*=1.4;
 pt2.velocity.set(bot.vel.x*0.6+ix*imp*rand(0.7,1.3),rand(0.5,3.5),bot.vel.z*0.6+iz*imp*rand(0.7,1.3));
 pt2.angularVelocity.set(rand(-5,5),rand(-4,4),rand(-5,5));
+// (★2026-11-28 批⑥二版: 初始冲量压收撤销 —— 用户裁定加固档不限制整体位移, 死亡冲量与普通档同源同值。)
 }
-if(isHead){ head.velocity.y+=2.2; head.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9)); }
+if(isHead){
+head.velocity.y+=2.2;
+head.angularVelocity.set(rand(-9,9),rand(-9,9),rand(-9,9));
+}
 }
 entry={parts,cons,t:9,bodies:parts.map(p=>p.body),frozen:false,stillT:0,
 last:parts.map(p=>[p.body.position.x,p.body.position.y,p.body.position.z])};

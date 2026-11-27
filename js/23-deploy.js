@@ -727,6 +727,11 @@ vehSpawn.playerDriven=true;
 if(vehSpawn.kind==='tank'){ vehSpawn.isAI=false; vehSpawn.vel=0; p.yaw=vehSpawn.yaw+vehSpawn.turretYaw+Math.PI; }
 else { p.yaw=vehSpawn.yaw+Math.PI; p.pitch=vehSpawn.pitch; }
 p.onVehicle=vehSpawn;
+// ★2026-11-28 骑姿批 (用户裁定"载具上隐藏但要有姿势, 对齐迫击炮蹲姿; 死亡倒下沿用"): 部署上车/登机同规 ——
+//   存原姿态档 + 置蹲姿旗 (die() 死在座记账 ⇒ 死亡呈现从蹲姿起手), 三人称本体模型在场就硬置一次蹲姿
+//   (乘员期姿态机不跑, 冻结保留到死亡/下车; F 下车/跳伞还原骑乘前档)。
+p._crouchSaved=p.crouch; p.crouch=true; p._ridingSeat=true;
+if(typeof playerAvatar!=='undefined'&&playerAvatar&&typeof hardPoseCrouch==='function') hardPoseCrouch(playerAvatar);
 p.pos.copy(vehSpawn.pos);
 VM.root.visible=false;
 document.getElementById('heatWrap').style.display='block';
@@ -976,9 +981,8 @@ s.pickObjective();
 	// (2026-11-10: 大舰编制生成段随大舰子系统下架摘除 —— CAMPAIGN.capital 已随两海战图取消)
 // 劫道模式: 沿公路生成护运车队 (纯AI, 不可驾驶)
 	if(GAMEMODE==='convoy'&&CAMPAIGN.convoy) spawnConvoy(CAMPAIGN.convoy);
-// 每车 1 名真实 AI 车组 (契约 §4 **v3 修订**: 三人的"人"不从士兵池里出)。
-// v3 口径: 每车 = 1 名真实 Bot 驾驶员 (crewBot, 唯一跑 AI 的) + 2 个"乘员名额"(Tank.crewSlots 轻量记录,
-// 由 tank-core 建/结算, 不算独立士兵) —— 所以这里**只创建 1 名 Bot**。
+// 每车 1 名真实 AI 车组 (契约 §4 **v3 修订**; ★2026-11-28 票账批: 旧 crewSlots 名额记账已删, 车内只算驾驶员)。
+// 口径: 每车 = 1 名真实 Bot 驾驶员 (crewBot, 唯一跑 AI 的) —— 所以这里**只创建 1 名 Bot**。
 // 为什么: 各图 tankN=2~8 而 BOTS_PER_TEAM=11, 若每车配 3 名真 Bot, 诺曼底一队 11→21 人、斯大林格勒 14→30 人,
 // 是用户未要求的平衡破坏。**全队 soldiers.length 必须与改造前一致** (本条的验收红线之一)。
 for(const t of tanks){

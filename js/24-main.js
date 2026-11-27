@@ -5,6 +5,7 @@
 'use strict';
 var lastT=performance.now(); let fpsAcc=0, fpsN=0, fpsShow=0, deployRefreshT=0;
 var _loopErrN=0; // ★2026-11-14 批④: 帧内异常护栏的节流计数器 (见 loop 尾部 catch)
+let _shotCv=null; // ★2026-11-28 批③: F2 截图离屏画布 (懒建一次复用; 请求标志 screenshotReq 在 19-input 置位)
 // ── 主动优化 (2026-11-16 批5, sf_perfopt: 0=关闭 1=标准 2=激进, 单源 00-config PERF_OPT) ──
 // 用户口径"帧率降低的时候迅速清除一些碎块等"。决策器 = 1s 滑窗均帧率, 连续 2 窗低于档位阈值 → 清一次场
 // (碎块/弹壳/烟云/40% 粒子; 激进档再冻结超额布娃娃 + 删旧弹坑贴花), 随后 8 窗冷却 + 迟滞 (回升到 阈值+8
@@ -290,6 +291,51 @@ if(!(typeof thirdPersonOn==='function'&&thirdPersonOn())){ // 第三人称: 不�
 renderer.clearDepth();
 renderer.render(vmScene,vmCamera);
 }
+}
+// ★2026-11-28 批③: F2 截图消费点 (置位在 19-input F2 分支, 与 F1 同门)。必须在**主循环这对渲染**
+// (scene+vmScene 两遍 render) 之后**同一 JS 任务内**读回画布 —— renderer 未开 preserveDrawingBuffer,
+// 但同一任务内 render 刚结束时后台缓冲仍有效, drawImage 到离屏 canvas 即可拿到像素; 跨任务/下一帧
+// 就会被浏览器清空, 这是 02-scene 不加该开关的前提下本方案成立的唯一窗口。
+if(screenshotReq){
+screenshotReq=false;   // 先复位: 截图失败不重试 (防每帧重入; 冻结分支不消费, 解冻后的首个正常帧接手)
+try{
+const src=renderer.domElement;
+if(!_shotCv) _shotCv=document.createElement('canvas');   // 懒建一次, 复用
+const cv=_shotCv;
+if(cv.width!==src.width||cv.height!==src.height){ cv.width=src.width; cv.height=src.height; }   // src 尺寸已含 setPixelRatio (02-scene applyQuality), 1:1 拷贝
+const sctx=cv.getContext('2d');
+sctx.drawImage(src,0,0);   // 必须紧跟上面 render 调用 (同任务内读回, 见块首注释)
+// 小地图叠加: #minimap (190×190 2D canvas) 包在 #minimapWrap (CSS 左上角 18px 处)。取它的
+// getBoundingClientRect (CSS 像素) 换算进 scratch 画布坐标 —— 口径说明: renderer.domElement.width
+// 已含 setPixelRatio 乘数 (可能 ≠ devicePixelRatio, 有渲染缩放档), 所以这里不用裸 devicePixelRatio,
+// 而是用"画布像素/CSS像素"实比 (= src.width/src.clientWidth) 换算, 与底图逐像素对位; HUD 被
+// body.hudHide/inMenu 等整体藏起时 getBoundingClientRect 宽为 0 ⇒ 自然跳过叠加, 只存 3D 画面。
+const wrap=document.getElementById('minimapWrap');
+const mmc=document.getElementById('minimap');
+if(wrap&&mmc){
+const mr=wrap.getBoundingClientRect();
+if(mr.width>0&&mr.height>0){
+const pr=(src.width/Math.max(1,src.clientWidth))||window.devicePixelRatio||1;
+const sx=mr.left*pr, sy=mr.top*pr, sw=mr.width*pr, sh=mr.height*pr;
+sctx.save();
+sctx.fillStyle='rgba(10,14,8,.72)';   // 底色矩形: 视觉近似 CSS 的圆角半透明底板 (圆角 API 缺失时直角兜底)
+if(typeof sctx.roundRect==='function'){ sctx.beginPath(); sctx.roundRect(sx,sy,sw,sh,4*pr); sctx.fill(); }
+else sctx.fillRect(sx,sy,sw,sh);
+sctx.drawImage(mmc,sx,sy,sw,sh);      // 小地图内容按同比例缩放画上 (含它的边框内区)
+sctx.restore();
+}
+}
+// 合成完毕 → PNG 下载 (浏览器直接落盘; 5s 后回收 objectURL 防泄漏)
+cv.toBlob(b=>{
+if(!b) return;
+const a=document.createElement('a');
+a.href=URL.createObjectURL(b);
+const _sn=new Date(), _p2=x=>(x<10?'0':'')+x;   // 时间戳现拼 YYYYMMDD-HHMMSS
+a.download='battlefield-'+_sn.getFullYear()+_p2(_sn.getMonth()+1)+_p2(_sn.getDate())+'-'+_p2(_sn.getHours())+_p2(_sn.getMinutes())+_p2(_sn.getSeconds())+'.png';
+a.click();
+setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+},'image/png');
+}catch(e){ console.warn('[截图] F2 合成/下载失败 (已护栏, 不炸主循环):', e&&e.message||e); }
 }
 if(!player.alive&&player.deployed&&!matchOver){
 respawnCd=Math.max(0,respawnCd-dt);

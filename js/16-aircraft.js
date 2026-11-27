@@ -1137,11 +1137,12 @@ else if(!crash&&AUTO_EXIT_VEH&&player.alive&&typeof autoExitWreck==='function'){
 else{ if(bld) player._achPilotBld=true; // 成就普查字段 (2026-11-14 用户令): 驾机撞楼而亡 —— 27-achievements 死亡边沿轮询读, 读后即清
 player.damage(999,attacker,false); }
 }
-// ★20261121d 批C裁定 (统一4票, 取代 2026-11-14"有人机整体3票"口径): 驾机票账单源 ——
+// ★20261121d 批C裁定 (统一4票, 取代 2026-11-14"有人机整体3票"口径) + ★2026-11-28 票账批改版: 驾机票账单源 ——
 // 机体账一律整收 TICKET_COST.plane(3), 驾驶员死亡再走各自既有 -1: AI 驾驶员走下面 damage(999)→Bot.die
 // (14-bots), 玩家走 damage(999)→18-game die 的 -1 ⇒ 有人机 (玩家驾机/AI 有人机) 死亡总账同为 4 票;
 // 空机 (含飞行员先跳伞的) 照旧整机 plane(3), 跳伞驾驶员日后单独阵亡照常 -1 (Bot.die)。
-// TICKET_COST.plane 常量不动 (勿硬编码, aircollide 批纪律); 大厅兵力票池倍率只乘开局票池, 死亡扣票不乘。
+// ★2026-11-28: 机体杀 = 机体票 = TICKET_COST.plane(3) (取代旧 +1; 驾驶员死亡链另 +1 ⇒ 有人机整损 4 杀,
+//   与坦克同构); 乘员只算驾驶员 1 人。TICKET_COST.plane 常量不动 (勿硬编码, aircollide 批纪律)。
 if(this.crewBot){
 const cb=this.crewBot;
 this.crewBot=null;
@@ -1149,7 +1150,7 @@ cb.onVehicle=null;
 cb.damage(999,attacker,false);
 }
 if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力)
-attacker.kills=(attacker.kills||0)+1;
+attacker.kills=(attacker.kills||0)+TICKET_COST.plane;   // ★2026-11-28 票账批: 机体 +3 杀 (空机也有; 取代旧 +1)
 // 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('击落战机',SCORE_TABLE.plane);
 else attacker.score=(attacker.score||0)+SCORE_TABLE.plane;

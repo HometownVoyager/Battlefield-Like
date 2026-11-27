@@ -1350,6 +1350,18 @@ hudStyle('lowOv','opacity',_hv?(_hhp<35?(1-_hhp/35)*0.85:0):(player.alive&&playe
 	const agl=Math.max(0,Math.round(d.pos.y-heightAt(d.pos.x,d.pos.z)));
 	const boost=(keys.Space&&!player._ltSpace);   // ★2026-11-13b 批②: 尾推加速判定 (与 updateLoiters boost 同判据; ▸▸标/状态类/尾推本体三处共用一条)
 	const zoom=!!(mouse2Down&&!player._ltRClick);  // 开镜判定 (2026-11-10 OSD 批既有判据, 提出共用)
+	// ★2026-11-28 批⑤.5: TV 专属 OSD 门 —— 四角框+分划只在"画面是 TV 弹头第一视角"时画。画面档判定与
+	//   20-player updateCamera 同源 (`third=lz?0:p.loiterView`): TV = 开镜强制(zoom) 或 未开背追档
+	//   (!player.loiterView; 本仓口径 loiterView=1=背追第三人称 / 0=TV)。背追档里四角框/分划压在追尾
+	//   画面上是错层, 收起; 存续条/离地/速度/时钟等读数两档都画。元素懒缓存一次 (tvOv 是 index.html
+	//   静态 DOM, NodeList 不失效), 写入"变了才写"去重 (与 hudStyle 同纪律); U 键飞行中切档逐帧跟随。
+	const _tvMode=zoom||!player.loiterView;
+	if(tvEl){   // 缺 #tvOv 的极端沙箱不炸 (与上方 display 对账的 if(tvEl&&…) 同守卫)
+	if(!tvEl._tvOsd){ tvEl._tvOsd={cs:tvEl.querySelectorAll('.tvC'), ret:el('tvReticle')}; }
+	const _tvo=tvEl._tvOsd;
+	for(let _ci=0;_ci<_tvo.cs.length;_ci++){ const _vd=_tvMode?'':'none'; if(_tvo.cs[_ci].style.display!==_vd) _tvo.cs[_ci].style.display=_vd; }
+	if(_tvo.ret){ const _vd2=_tvMode?'':'none'; if(_tvo.ret.style.display!==_vd2) _tvo.ret.style.display=_vd2; }
+	}
 	hudText('tvBotL',t2('离地')+' '+agl+'m · '+t2('速度')+' '+Math.round(d.spd)+'m/s'+(boost?' ▸▸ '+t2('加速'):''));
 	hudText('tvBotR',t2('离机')+' '+Math.round(d.pos.distanceTo(player.pos))+'m');
 	const _tc=Math.max(0,nowT), _tm=Math.floor(_tc/60)%100, _ts=Math.floor(_tc%60);
@@ -2600,19 +2612,24 @@ syncMenuButtons();
 		};
 		}
 		}
-		// 死亡动画 (2026-11-20 批⑦, 用户令): 单钮循环 就地倒下⇄布娃娃 —— 单源 deathFallMode() (00-config)。
+		// 死亡动画 (2026-11-20 批⑦, 用户令): 单钮循环 —— ★2026-11-28 批⑥ 改三档: 就地倒下('1') → 布娃娃(缺省,'0') → 布娃娃(加固)('2') → 回就地倒下。
 		// 就地倒下=死亡不 spawn 布娃娃, 三路各自走**既有的**无物理倒地分支 (Bot=14-bots A#10 倒地动画 /
 		// 玩家=playerAvatarDeath 契约G / 丧尸=25-zombies deathAnimT), 尸体即活体模型本体 (盔/手/靴/背包
-		// 天然一致), 无刚体/无冻结滞留, 重生前 2.5s 收走 (Bot 死亡分支既有账)。布娃娃=缺省档 (现状)。
-		// 每次死亡现读开关 ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
+		// 天然一致), 无刚体/无冻结滞留, 重生前 2.5s 收走 (Bot 死亡分支既有账)。布娃娃=缺省档 (现状);
+		// 布娃娃(加固)=仍是布娃娃, 但单源 deathRagStiff() (00-config) 判档, 12-ragdolls 每关节加副锚**软限位**
+// 相对转动 (2026-11-28 用户裁定三轮: 加固=限制关节内部不限整体位移; 二版全锁过头 → 轴距收短为软限位,
+// 整体阻尼/冲量与普通档同值)。
+		// 循环与写盘跟 sf_crates 单钮范式同构: 直读 localStorage 判档 (不再走 deathFallMode, 沙箱缺函数也安全);
+		// 缺省档写盘沿用旧版口径写 '0' (不删键)。每次死亡现读开关 ⇒ 改档即时生效 (下一具尸体起采用), 不需重载。
 		{
 		const dfb=el('deathFxBtn');
 		if(dfb){
-		const syncDf=()=>{ const fall=deathFallMode(); dfb.textContent='💀 '+t('死亡动画')+': '+t(fall?'就地倒下':'布娃娃'); dfb.classList.toggle('sel',fall); };
+		const syncDf=()=>{ const v=localStorage.getItem('sf_deathfx'), fall=v==='1', stiff=v==='2'; dfb.textContent='💀 '+t('死亡动画')+': '+t(fall?'就地倒下':(stiff?'布娃娃(加固)':'布娃娃')); dfb.classList.toggle('sel',fall||stiff); };   // sel=非缺省档高亮 (与 sf_crates 的 sel 同义)
 		syncDf();
 		dfb.onclick=()=>{
 		AudioSys.resume&&AudioSys.resume();
-		localStorage.setItem('sf_deathfx',deathFallMode()?'0':'1');
+		const cur=localStorage.getItem('sf_deathfx');   // '1'→'0'→'2'→'1'…; 未写过(null)=布娃娃档 ⇒ 顺环进加固档
+		localStorage.setItem('sf_deathfx',cur==='1'?'0':(cur==='2'?'1':'2'));
 		syncDf();
 		};
 		}
@@ -3540,10 +3557,9 @@ if(c.onVehicle&&c.onVehicle.kind==='tank') return c.onVehicle;   // 坦克乘员
 for(const t of tanks){                                            // 兜底: 从坦克侧反查编制
 if(!t) continue;
 if(t.crewBot===c) return t;
-// 2026-09-21 A#7 契约 v3: 原 t.crewMates 兜底读已随"真 Bot 编制"作废删除 ——
-//   车内 3 人 = 1 名真人驾驶员 (crewBot / 玩家) + 2 个**轻量乘员名额** (crewSlots),
-//   名额**不进 combatants** (否则会被索敌/被子弹命中), 所以这里不可能出现"名额当 c 传进来"的情形;
-//   真驾驶员的识别由上一行 t.crewBot===c 与 crewRoster() 兜底共同保证 (crewRoster 现为 3 人口径)。
+// 2026-09-21 A#7 契约 v3 → ★2026-11-28 票账批: 车内只算驾驶员 1 人 (旧 crewSlots 名额数组已删) ——
+//   名额本就不进 combatants (否则会被索敌/被子弹命中); 真驾驶员的识别由上一行 t.crewBot===c
+//   与 crewRoster() 兜底共同保证 (crewRoster 现为 1 人口径)。
 if(typeof t.crewRoster==='function'){ try{ const r=t.crewRoster(); if(r&&r.indexOf(c)>=0) return t; }catch(e){} }
 }
 return null;

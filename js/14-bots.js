@@ -461,7 +461,9 @@ this.vehGoT=0; this.vehFailV=null; this.vehFailT=-99; this.objHoldT=0; // 2026-1
 	this.decisionT=rand(0,0.25);
 }
 spawnInVehicle(v){
-this.hp=100; this.alive=true; this.crouch=false; this.prone=false;
+// ★2026-11-28 骑姿批: 出生即入车 = 蹲姿旗直置 (车内乘员姿态, 与 enterVehicle 同规; _crouchSaved 无骑乘前
+//   姿态可存 —— 下一命复活由 spawn() 复位)
+this.hp=100; this.alive=true; this.crouch=true; this.prone=false; this._crouchSaved=false;
 this.ragdolled=false;
 this.mag=this.def.mag; this.reloadT=0; this.suppression=0;
 this.target=null; this.lastSeenT=-99; this.path=null;
@@ -478,8 +480,11 @@ this.mesh.root.rotation.set(0,0,0);
 this.mesh.pelvis.position.y=0.94;
 this._deathLegs=null;   // 2026-11-21 倒地批: 蹲姿展腿首帧捕获账跨命清零
 this._deathVy=undefined; // ★2026-11-25 就地倒下重力批: 坠落初速首帧捕获账跨命清零
-	// 契约 §4 v3: 每车 1 名真实 AI 车组 —— crewBot 是唯一跑 AI 的驾驶员; 另 2 个"乘员名额"是
-	// Tank.crewSlots 轻量记录 (tank-core 建/结算), 不进士兵池, 与本文件无关。
+// ★2026-11-28 骑姿批: 车内乘员蹲姿硬置 (压掉上面 pelvis 0.94 的站立复位) + 枪收起; 揭示/下车还原
+hardPoseCrouch(this.mesh);
+if(this.gun) this.gun.visible=false;
+	// 契约 §4 v3 → ★2026-11-28 票账批: 每车 1 名真实 AI 车组 —— crewBot 是唯一跑 AI 的驾驶员, 也是
+	// 车内唯一乘员 (旧 Tank.crewSlots 名额记账已删), 不占士兵池。
 	this.onVehicle=v; v.crewBot=this; v.claimBot=null;
 	this.pos.copy(v.pos);
 	this.crewStillT=0; this.navFails=0;
@@ -504,11 +509,11 @@ this.mesh.root.visible=true;
 this.path=null; this.state='idle'; this.target=null;
 }
 // A#7 契约 §4 v3: AI 驾驶员的车毁连带死亡入口 (tank-core 的 Tank.die 对 crewBot 调用) ——
-// 走既有死亡链 (1 死 / 1 票 / 1 杀), 只压掉**本乘员那条 killfeed**: 车毁由 Tank.die 记一条
-// "坦克名 · 乘员×3", 否则同一辆车会刷 2 行 (驾驶员 1 条 + 坦克 1 条)。
+// ★2026-11-28 票账批 (用户裁定"战报行数统一"): 不再压本条 killfeed —— 驾驶员走完整死亡链出**独立战报行**,
+//   与飞机 AI 驾驶员 (Plane.die 直接 damage(999) 不压行) 同构; 车毁本体另由 Tank.die 记一条
+//   "坦克名 · 乘员×1" ⇒ 有人车整损 2 行 (驾驶员行 + 车体行), 空车 1 行。
 crewKill(attacker){
-this._noFeed=true;
-try{ this.die(attacker,false); } finally{ this._noFeed=false; }
+this.die(attacker,false);
 }
 enterVehicle(v){
 if(v.crewBot||v.playerDriven) return;
@@ -523,17 +528,27 @@ this.exitSlide=null;
 this.crewStillT=0; this.navFails=0;
 this.targetVeh=null; this.path=null;
 this.state='idle';
-this.crouch=false; this.prone=false; this.bandageT=0;
+// ★2026-11-28 骑姿批 (用户裁定"载具上隐藏但要有姿势, 对齐迫击炮蹲姿; 死亡倒下沿用"): 上车存原姿态档 +
+//   置蹲姿旗 —— 死亡呈现从蹲姿起手 (就地倒下 _deathLegs 捕到蹲姿展腿 / 布娃娃 RAG_POSE 读 crouch=true
+//   蹲档装配), 不再"立正持枪从车里长出来"。下车 dismountVehicle 还原。
+this._crouchSaved=this.crouch; this.crouch=true; this.prone=false; this.bandageT=0;
 if(this.mgUse){ releaseEmpl(this.mgUse,true); this.mgUse=null; }
 if(this.empUse){ releaseEmpl(this.empUse,true); this.empUse=null; }
 if(this.mortUse){ releaseEmpl(this.mortUse,true); this.mortUse=null; }
 if(this.batUse){ this.releaseBattery(); }   // A#9: 上车/入座即松开岸防炮
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
 this.mesh.root.visible=false;
+// 乘员期姿态机不跑 (updateMesh 的 onVehicle 分支同帧 return) ⇒ 硬置一次蹲姿冻结保留到死亡/下车;
+// 枪收起 (乘员无枪), 车毁揭示 (Tank.die) / 下车 / die() 还原。
+hardPoseCrouch(this.mesh);
+if(this.gun) this.gun.visible=false;
 }
 dismountVehicle(bailing){
 const v=this.onVehicle;
 this.onVehicle=null; this.chuting=false;
+// ★2026-11-28 骑姿批: 下车还原骑乘前姿态档 + 枪归位 (姿态机下一帧从蹲姿平滑起立)
+this.crouch=this._crouchSaved||false; this._crouchSaved=false;
+if(this.gun) this.gun.visible=true;
 // A#8 契约: 跳伞途中下车/被投放 → 一致地收伞并回到"落地"口径
 this.chuteClear();
 this.onGround=true;
@@ -709,6 +724,9 @@ this.flashlight=false; if(this.mesh&&this.mesh.flGrp) this.mesh.flGrp.visible=fa
 // A#8 契约 §7: 空中死亡必须**同帧**摘伞 —— 旧版只把 chuting 置 false, 伞模型留在 mesh 上跟到重生/下一局
 // (实测: damage(999) 后 chuteMesh!==null)。这里走收伞单源。
 this.chuteClear(); this.onGround=true;
+// ★2026-11-28 骑姿批: 车毁/坠机死亡时枪在乘员期被收起 (enterVehicle/spawnInVehicle) ⇒ 死亡统一还原,
+//   尸体持枪口径与步行阵亡一致 (Tank.die 揭示另有还原, 此处兜底覆盖飞机等无揭示链路径)。
+if(this.gun) this.gun.visible=true;
 // A#9: 死在炮位上 → 松开岸防炮占用 (与 mg/emp/mortUse 同一处理)
 if(this.batUse){ this.releaseBattery(); }
 // 清理战斗残留: 尸体不再携带交战状态/目标/机动 (调试层与探针口径一致)
@@ -731,14 +749,15 @@ if(this.empUse){ releaseEmpl(this.empUse,true); this.empUse=null; }
 if(this.mortUse){ releaseEmpl(this.mortUse,true); this.mortUse=null; }
 if(this.emCast){ if(this.emCast.g&&this.emCast.g.user===this) this.emCast.g.user=null; this.emCast=null; }
 this.supplyGo=null; this.supplyT=0; this._dryScavT=0;
-// A#7 契约 §4: 车毁连带的乘员死亡由 Bot.crewKill() 调进来 —— 死亡/票/杀**照常各记一次**, 只压掉战报行
-// (车毁由 Tank.die 记一条"坦克 · 乘员×3", 否则一辆车刷 4 行)。
+// A#7 契约 §4 → ★2026-11-28 票账批: 车毁连带的驾驶员死亡由 Bot.crewKill() 调进来 —— 死亡/票/杀照常各记
+// 一次, 战报行**不再压** (与飞机驾驶员行数统一; 车毁本体另由 Tank.die 记一条"坦克 · 乘员×1")。
+// 旧 _noFeed 压行机制随 crewKill 简化一并摘除 (全库无写入点, 2026-11-28 复核)。
 tickets[this.team]=Math.max(0,tickets[this.team]-1);   // (2026-11-10: capCrew 免票豁免随大舰子系统下架摘除)
 if(attacker){
 attacker.kills=(attacker.kills||0)+1;
 // 玩家记分唯一入口=onPlayerKill (21-match): 此处只给 Bot/乘员加分, 否则玩家击杀双计 200 (2026-09-06 P0-1)
 if(!attacker.isPlayer) attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
-if(!this._noFeed) addKillfeed(attacker,this,isHead);
+addKillfeed(attacker,this,isHead);
 if(attacker.isPlayer){ onPlayerKill(this,isHead); }
 else if(typeof player!=='undefined'&&player&&attacker===player.specViewHost&&typeof onHostKill==='function'){ onHostKill(); }   // 真附身: 宿主击杀只出红档+音 (不记分, 2026-11-01)
 }
@@ -1730,7 +1749,11 @@ if(this.chuting){
 this.vel.set(0,0,0);
 this.chute=true; this.onGround=false;   // A#8: 与 chuteAirborne() 的口径对账 (伞降中 = chute && !onGround)
 this.pos.y-=7*dt;
-if(!this.chuteMesh){ this.chuteMesh=mkChuteForBot(); this.mesh.root.add(this.chuteMesh); this.chuteMesh.position.set(0,2.5,0); }
+// ★2026-11-28 修"系绳收在两脚中间" (用户令锚背包): 旧 (0,2.5,0)-3.3×0.78 → root 局部 (0,-0.074,0) 贴地
+//   两脚间。改钉背包盒中心 (root 局部 (0,1.24,-0.18), 11-soldiers torsoG (0,0.3,-0.18)+pelvis 0.94):
+//   收敛点 root 局部 = position + (0,-3.3×0.78,0) ⇒ position=(0, 1.24+3.3×0.78, -0.18)。root 自带 yaw
+//   (14-bots updateMesh), -0.18 即背后; 玩家侧同式见 20-player playerChuteFollow (挂 scene 手算背向)。
+if(!this.chuteMesh){ this.chuteMesh=mkChuteForBot(); this.mesh.root.add(this.chuteMesh); this.chuteMesh.position.set(0,1.24+3.3*0.78,-0.18); }
 const gh=standHeight(this.pos.x,this.pos.z,this.pos.y);
 // 海图水面地板 (★2026-10-03, 与玩家同批修"跳伞下到海底才解除伞"): 深水上空触水面即收伞转游泳
 //   (浮位给到 wy-FLOAT_PAD 下, 下一帧水态块按 dampF 接管), 不再坠到海床才"落地"。

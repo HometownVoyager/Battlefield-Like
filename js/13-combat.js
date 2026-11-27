@@ -835,7 +835,13 @@ player._ltClick=true; player._ltRClick=true; player._ltSpace=!!keys.Space;
 // 操控期间本体定身 (updatePlayer 制导分支), 消灭旧写"操控中本体继续 specFlightMove 沿视线 40m/s 前飞"
 // (= 用户实报"巡飞弹视角内自己一个人向前飞出"); _aeroSpd 一并清零, 退场后再按 H 从巡航 13 起步不吃残 40。
 if(shooter.flying&&shooter.flyAero){ shooter.flyAero=false; shooter.vel.set(0,0,0); shooter._aeroSpd=0; }
-player.loiterView=0;
+// ★2026-11-28 批⑤ 发射视角播种 (用户令"发射巡飞弹时第三人称→背追视角"): 第三人称发射进背追档,
+// 第一人称发射照旧 TV 开镜档。极性以本仓口径为准 —— loiterView=1 = 背追第三人称 (20-player
+// updateCamera 的 `third=lz?0:p.loiterView` 追尾分支即现成背追相机; 08-effects "背追档(loiterView)"
+// 光柱锚同口径), loiterView=0 = TV 弹头第一视角 (下一行旧注释"TV档默认藏"记的正是 0 档);
+// 旧版恒写 0 = 发射恒 TV。U 键飞行中切换保留不动 (19-input KeyU 原地翻转, 零改);
+// 20-player 背追相机 / 08-effects 光柱 / updateLoiters 弹体可见性均已按 loiterView 门, 本行之外零改。
+player.loiterView=player.thirdPerson?1:0;
 d.mesh.visible=!(shooter.alive&&!player.loiterView); // 初始可见性 = 单写者同式 (updateLoiters 逐帧接管, 2026-11-05 批): TV档默认藏, 真观战(alive=false)出膛即可见
 VM.root.visible=false;
 const ov=document.getElementById('tvOv');
@@ -912,9 +918,12 @@ if(!d||d.dead) return;
 // 且 19-input 制导期间 J/K 让位 ⇒ 制导中既不能解时停也不能动, 是死局)。非时停时 ldt≡dt (零漂移)。
 const ldt=(typeof specTimeShotDt==='function')?specTimeShotDt(d.owner,rdt,dt):dt;
 if(!(ldt>0)) return;                 // 世界冻结且这枚不属于玩家 ⇒ 整枚停住 (不推进也不判定)
-d.t+=ldt; d.life-=ldt;
 // 空格加速 (2026-11-06 右键→空格, 右键让位开镜放大): 尾推引擎全速冲刺 (3×巡航 13=40 m/s), 松开后回落到巡航速度 (转向角速度不变, 高速下盘旋半径更大)
+// ★2026-11-28 批⑤.5: boost 判据提到 life 消耗之前 —— 加速冲刺期存续按 LOITER_BOOST_DRAIN (00-config 单源, 1.5) 倍速消耗
+//   (加速是白拿的机动优势, 存续条同步买单; 22-hud OSD 的 boost 判据同一条 `keys.Space&&!player._ltSpace`);
+//   速度阻尼逻辑一行不动, 退场吞空格等既有逻辑不动。
 const boost=keys.Space&&!player._ltSpace;
+d.t+=ldt; d.life-=ldt*(boost?LOITER_BOOST_DRAIN:1);
 d.spd=dampF(d.spd, boost?40:13, boost?2.2:3.0, ldt);
 // ── TV制导 (2026-09-28 重做): 鼠标增量**直接**转成弹体姿态, 逐帧限角速度; 超出的增量**丢弃**。 ──
 // 用户实报: "现在巡飞弹转向十分生硬还随机失控，原因不明。" 原因就是旧版这两行 ——

@@ -71,7 +71,7 @@ console.log('── T11 先行: 非 procgen 图零副作用 (normandy) ──');
 {
 const {G}=bootStart(0,null,'T11');
 ok(G('ZOMBIE_MODE')===''&&G('TEAM_FACTION.length')===2,'T11 ZOMBIE_MODE 空 / TEAM_FACTION 双队');
-ok(G('BUILD_MENU.length')===5,'T11 建造菜单保持 5 件');
+ok(G('BUILD_MENU.length')===6,'T11 建造菜单保持 6 件 (判据跟走 2026-11-28 碾桶批④b: 工兵菜单加油桶件, 5→6)');
 ok(G('ZOMBIES.length')===0,'T11 无丧尸实体');
 }
 console.log('── 单队模式 (procgen · solo) ──');

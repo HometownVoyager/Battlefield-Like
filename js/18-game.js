@@ -263,6 +263,11 @@ this.killerSrc=killSrcLabel(attacker); // 击杀来源: 载具/固定火力点/�
 if(attacker&&attacker!==this){ attacker.kills=(attacker.kills||0)+1; attacker.score=(attacker.score||0)+SCORE_TABLE.kill; addKillfeed(attacker,this,!!isHead); } // ★2026-11-01 判定批: 爆头位透传 (旧硬编码 false —— Bot die 链 14-bots 传 isHead, 唯独玩家被爆头击杀时播报永远不出 ☠)
 if(typeof resetKillStreak==='function') resetKillStreak(); // 阵亡清空连杀计数
 const _pInfAct=(attacker&&attacker.zombie)||(typeof isFullInfectionActive==='function'&&isFullInfectionActive());
+	// ★2026-11-28 骑姿批: 死在座记账 —— 读 _ridingSeat (上车路径置/各下车路径清的持久旗) 而不是 onVehicle/
+	//   onNaval 字段: Tank.die 已在 damage(999) 之前清掉 player.onVehicle, 字段判恒 false。必须在座位
+	//   清账链之前收账; playerAvatarDeath 首帧按骑乘蹲姿起手快照 (hardPoseCrouch), 布娃娃读 crouch=true。
+	this._diedSeated=!!this._ridingSeat;
+	this._ridingSeat=false;
 	if(this.onMG){ releaseEmpl(this.onMG,true); this.onMG=null; }
 	if(this.onAT){ releaseEmpl(this.onAT,true); this.onAT=null; }
 	if(this.onAA){ releaseEmpl(this.onAA,true); this.onAA=null; }
@@ -288,6 +293,9 @@ const _pInfAct=(attacker&&attacker.zombie)||(typeof isFullInfectionActive==='fun
 	}
 		this.onVehicle=null;
 		this.nadeHeld=false;
+	// ★2026-11-28 骑姿批: 座位交还链 (navalSeatRelease) 会还原骑乘前姿态档 ⇒ 死在座时重断言蹲姿旗,
+	//   保证布娃娃/就地倒下都从骑乘蹲姿起手 (与 Bot 车毁同构; 坦克座位只清字段不还姿态, 重断言无害)。
+	if(this._diedSeated) this.crouch=true;
 	// (2026-09-21 A#2 契约G) 动作计时随死亡清零: 死亡姿态由布娃娃/倒地接手, 不留开火后坐/换弹/投掷的残余
 	this.fireAnimT=0; this.reloadT=0; this.nadeThrowT=0; this.meleeT=0;
 	// ★2026-10-12 读条随死亡一次收口 (与上面动作计时同规, quiet: 死亡反馈已经够多, 不再叠一条"已取消"):

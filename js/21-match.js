@@ -810,8 +810,8 @@ if(ZOMBIE_MODE&&victim&&victim.zombie) pzGain(victim.kind==='brute'?ZCFG.zp.brut
 if(isHead) player.headKills=(player.headKills||0)+1; // 爆头数: 结算卡 (2026-09-13)
 player.lifeKills=(player.lifeKills||0)+1;
 hmShow(_hitCls,true);
-// 车毁连带的多杀 (驾驶员 Bot die + 2 个名额 settleCrewSlotDeath) 会三连进这里: 0.25s 内的红档音
-// 合并为一响 (标记仍逐杀刷新), 否则击杀音三重叠置成噪音 (2026-09-28 D7 顺带)。
+// 车毁连带的多杀 (★2026-11-28 票账批后: 有人车=驾驶员 die + 车体 +3 杀; 旧名额三连已随 crewSlots 删除)
+// 会在短窗内连进这里: 0.25s 内的红档音合并为一响 (标记仍逐杀刷新), 否则击杀音叠置成噪音 (2026-09-28 D7 顺带)。
 const now=nowT;
 if(now-_lastKillSndT>=0.25){ _lastKillSndT=now; AudioSys.hitmarkSnd(true); }
 }

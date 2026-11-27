@@ -86,9 +86,9 @@ assert('16-aircraft: updatePlaneCollisions 单源 (BODY_K=1.7 / CLOSE=2 / fwdDir
 assert('05b-props: foliage 标记恰好四处 (树/枯树/垂柳/竹)',(s05b.match(/foliage:true/g)||[]).length===4);
 assert('24-main: 撞机接线在飞机循环之后 (世界帧长 dt 门)',s24.includes('updatePlaneCollisions(dt); // 空中撞机'));
 assert('22-hud: sf_autoexit 注记跟走 (crash 档不读开关)',s22.includes('坠地/撞楼/空中撞机时**不**读此开关'));
-assert('版本戳 20261122b: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
- [...ih.matchAll(/20261122b/g)].length>=48&&ih.includes("window.__sfStyleVer='20261122b';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261122b')).length===45
+assert('版本戳 20261128a: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110a 清零 (判据跟码: 本批 a→b)',
+ [...ih.matchAll(/20261128a/g)].length>=48&&ih.includes("window.__sfStyleVer='20261128a';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128a')).length===45
  &&!ih.includes('20261110a')&&!gf.includes('20261110a'));
 }
 
@@ -216,7 +216,7 @@ assert('⑥-1 迎头对冲双亡 (NEG N4 转: 双活互穿)',G('!PA.alive&&!PB2.
 assert('⑥-2 双残骸 (+2)',G('planeWrecks.length')===G('_wrD')+2);
 assert('⑥-3 双票各-TICKET_COST.plane (机毁人亡全链; 装备票口径 plane=3, 判据跟码)',G('tickets[PA.team]')===G('_tkA-TICKET_COST.plane')&&G('tickets[PB2.team]')===G('_tkB-TICKET_COST.plane'),
  'A '+G('tickets[PA.team]')+'/'+G('_tkA')+'  B '+G('tickets[PB2.team]')+'/'+G('_tkB'));
-assert('⑥-4 互记击杀 (归因=对方机组; 同队互撞 die 内 ff 门不记分)',G('PA.crew.kills===1&&PB2.crew.kills===1')===true,
+assert('⑥-4 互记击杀 (归因=对方机组; 同队互撞 die 内 ff 门不记分; 判据跟走 2026-11-28 票账批: 车体杀+3 入账, 旧口径+1)',G('PA.crew.kills===3&&PB2.crew.kills===3')===true,
  'PA.crew='+G('PA.crew.kills')+' PB2.crew='+G('PB2.crew.kills'));
 // D2: crash 档 — 玩家座机撞机 = 机毁人亡不跳伞 (AUTO_EXIT_VEH 开)
 G("PA.respawn(); PB2.respawn(); PA.playerDriven=true; PA.crewBot=null; PA.alive=true; PB2.playerDriven=false; PB2.crewBot=null; PB2.alive=true; AUTO_EXIT_VEH=true; player.alive=true; player.spectator=false; player.chute=false; player.onVehicle=PA;");

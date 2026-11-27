@@ -5,6 +5,9 @@
 'use strict';
 const keys={};
 let pointerLocked=false;
+// ★2026-11-28 批③: F2 截图请求标志 (顶层 let 全局, 24-main 主循环消费后复位) —— 键盘侧只置位不干活,
+// 合成/下载都在 24-main 渲染对之后做 (必须紧跟 render 调用, 同一 JS 任务内读回 WebGL 画布, 见 24-main)。
+let screenshotReq=false;
 // 第三人称切换单源 (2026-09-20 第三人称批 + 集成修正): 桌面 U 键与移动端触控键 #tView 共用这一份。
 //
 // 【为什么必须在**模块级**而不是 keydown 回调里】: 触控键由 24-main 的 bindBtn 直接调用本函数
@@ -114,6 +117,14 @@ if(e.code==='F1'&&player.deployed){
  tip.style.opacity=1;
  clearTimeout(tip._t); tip._t=setTimeout(()=>{ tip.style.opacity=0; },1600);
  if(typeof AudioSys!=='undefined'&&AudioSys.click) AudioSys.click(off?520:880,0.18,0.05);
+ return;
+}
+// ★2026-11-28 批③: F2 截图 (紧邻 F1, 门与 F1 逐字同构: 已部署才响应 + preventDefault 抑制浏览器默认
+// 行为)。这里只置 screenshotReq 标志 (文件顶层声明, 24-main 可读); 真正的合成 (3D 画面+小地图) 与
+// 下载在 24-main 主循环渲染对之后消费 —— 截图必须"紧跟 render 调用、同一 JS 任务内读回"画布才有像素。
+if(e.code==='F2'&&player.deployed){
+ e.preventDefault();   // 抑制浏览器默认行为
+ screenshotReq=true;   // 记账即走, 消费点在 24-main (渲染完当帧后合成+下载+复位)
  return;
 }
 keys[e.code]=true;

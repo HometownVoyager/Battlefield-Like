@@ -576,6 +576,9 @@ p.curW=null;   // 收起手持武器: 24-main 的视角武器门 + 22-hud 的弹
 p.navalTP0=p.thirdPerson; p.thirdPerson=true;          // 默认追尾第三人称 (C 三态: 第三人称 → 炮手镜 → 艏向第一人称)
 p.navalGun=false;                                      // 上艇一律从第三人称起 (C 键三态的单源开关, 见 navalCycleView)
 p.swim=false; p.wading=false; p.ads=false; p.prone=false; p.braced=false; p.tankView=false;
+// ★2026-11-28 骑姿批 (用户裁定"载具上隐藏但要有姿势, 对齐迫击炮蹲姿; 死亡倒下沿用"): 上艇存原姿态档 +
+//   置蹲姿旗 (die() 死在座记账 _ridingSeat ⇒ 布娃娃/就地倒下从蹲姿起手), 下艇 navalSeatRelease 还原。
+p._crouchSaved=p.crouch; p.crouch=true; p._ridingSeat=true;
 // ★2026-09-26E (审计 15): 上艇必须**同时复位潜水态字段** —— 旧版只清 swim/wading, 而 oxy/headDepth 只在
 // 步行水态块里推进 ⇒ 游泳后上艇: 呼吸条按"上次的 headDepth>0"长期挂在屏幕上且永不回满 (对照: 15d crewOut
 // 专门重置了 player.oxy, 说明作者知道该字段需要交接, 上艇这条路漏了)。
@@ -605,6 +608,8 @@ p.curW=(p.slots&&p.slots[p.curSlot])?p.slots[p.curSlot]:(p.navalW||null);   // �
 p.navalW=null; p.navalCd=null; p.navalFire=null;
 p.navalGun=false;                                   // 炮手镜开关随座位一起清 (22-hud 的每帧兜底也会清, 这里是主路径)
 if(p.navalTP0!==undefined){ p.thirdPerson=p.navalTP0; p.navalTP0=undefined; } // 还原上艇前的视角开关
+// ★2026-11-28 骑姿批: 下艇还原骑乘前姿态档 (die() 死在座路径在其后有蹲姿重断言, 不受这里影响)
+p.crouch=p._crouchSaved||false; p._crouchSaved=false; p._ridingSeat=false;
 p.vel.set(0,0,0);
 VM.root.visible=true;
 const hw=document.getElementById('heatWrap'); if(hw) hw.style.display='none';

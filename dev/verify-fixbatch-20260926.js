@@ -29,7 +29,7 @@ const PATCHES=[
  {f:'js/16-aircraft.js', from:'const PLANE_PILOT_WAIT_MAX=10;', to:'const PLANE_PILOT_WAIT_MAX=1e9;'},
  {f:'js/13-combat.js', from:'const nv=navalRayQuery(origin,dir,wallD,shooter);', to:'const nv=null;'},
   {f:'js/13-combat.js', from:'return (block&&block.dist<dist-0.5)?0.25:1;', to:'return 1;'}, // ★2026-11-25 判据跟码: 抽进 explosionCoverMul 单源, 补丁改为拆单源返回值
- {f:'js/15-vehicles.js', from:'const feedName=(driver&&!spec)?(t(this.name)+\' · \'+t(\'乘员×3\')):t(this.name);', to:'const feedName=t(this.name)+\' · \'+t(\'乘员×3\');'}, // 2026-11-19 判据跟码: 2026-11-17 批1 战报名走词典+观战豁免, 锚点同步 (语义不变: 摘条件=空车/观战也吹乘员×3 的坏状态)
+ {f:'js/15-vehicles.js', from:'const feedName=(driver&&!spec)?(t(this.name)+\' · \'+t(\'乘员×1\')):t(this.name);', to:'const feedName=t(this.name)+\' · \'+t(\'乘员×1\');'}, // 2026-11-19 判据跟码 (★2026-11-28 票账批改钉: 乘员只算驾驶员 1 人, 乘员×3→乘员×1): 战报名走词典+观战豁免, 锚点同步 (语义不变: 摘条件=空车/观战也吹乘员数的坏状态)
  {f:'js/06-engineering.js', from:'if(occBlocked(x,z)){ if(owner.isPlayer) showScorePop(t2(\'此处无法架设\')); return false; }', to:''},
  {f:'js/15d-naval.js', from:'if(n.kind===\'amph\') topY=(typeof VEH_HIT_TOP===\'number\')?VEH_HIT_TOP:2.6;', to:'if(false&&n.kind===\'amph\') topY=2.6;'},
 ];

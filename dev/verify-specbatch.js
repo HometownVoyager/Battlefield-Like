@@ -411,7 +411,7 @@ ok(r.eject.alive===true&&r.eject.deaths===r.d0&&r.eject.tickets===r.tk0&&r.eject
 ok(r.eject.dist<=8,'T4 安全脱离落点在车旁 ('+r.eject.dist+'m)');
 ok(r.norm.alive===false&&r.norm.deaths===r.dN0+1&&r.norm.tickets<r.tkN0,
 'T4 阴性对照: 普通玩家驱动的车被毁照旧走死亡链 (阵亡 +1, 本方掉票 '+r.tkN0+'→'+r.norm.tickets
-+' = 1 驾驶员 + 2 轻量乘员名额, 与旧口径一致)');
++' = 车体3票+驾驶员1票 ★2026-11-28 票账批口径)');
 }
 
 // ═════ T5 幽灵坦克按需召唤 (开场/部署不预置) ═════
