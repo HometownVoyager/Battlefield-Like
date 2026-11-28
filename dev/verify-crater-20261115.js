@@ -103,7 +103,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261128d'"),'前置: 版本戳 20261128d 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128e'"),'前置: 版本戳 20261128e 在位 (index.html 内联)');
 
 // ── 平坦场地 (法线判据需要平地) ──
 G("_sp=null; { const R=MAP_SIZE/2-60; for(let z=-R;z<=R&&!_sp;z+=7)for(let x=-R;x<=R;x+=7){ const gh=heightAt(x,z); if(gh<1||gh>40) continue; if(occBlocked(x,z)) continue; let flat=true; for(let dx=-3;dx<=3;dx+=3)for(let dz=-3;dz<=3;dz+=3){ if(Math.abs(heightAt(x+dx,z+dz)-gh)>0.3) flat=false; } if(!flat) continue; _sp={x:x,z:z,gh:gh}; break; } }");

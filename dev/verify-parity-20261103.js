@@ -128,10 +128,10 @@ assert('20a 玩家迫击炮位逐帧蹲姿兜底 (updatePlayerMortar)',
 
 // 版本戳 (随批升 20261128d: index.html 全量 + __sfStyleVer + _game_files 全行)
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261128d/g)].length;
-assert('版本戳 20261128d: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
- stamps>=44&&idx.includes("window.__sfStyleVer='20261128d';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128d')).length===45
+const stamps=[...idx.matchAll(/20261128e/g)].length;
+assert('版本戳 20261128e: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
+ stamps>=44&&idx.includes("window.__sfStyleVer='20261128e';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128e')).length===45
  &&!idx.includes('20261102b')&&!gf.includes('20261102b'));
 }
 

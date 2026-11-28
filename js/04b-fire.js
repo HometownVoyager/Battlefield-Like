@@ -1062,6 +1062,7 @@ if(rec.kind==='tree'||rec.kind==='willow'||rec.kind==='bamboo'){   // 竹 (2026-
 if(!rec.alive) continue;
 if(d<rad+0.35*rec.s){
 treeFall(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2));
+t._crushDragT=nowT+CRUSH_DRAG.dur;   // ★20261128e 碾碎迟滞置窗 (用户令范围含压倒树木/竹; 消费 15-vehicles Tank.update)
 hitAny=true;
 spawnP(PT.dirt,rec.x,rec.g0+0.6,rec.z,rand(-1.5,1.5),rand(1,3),rand(-1.5,1.5),0.3,0.6,0.5,0.85,3);
 }
@@ -1074,6 +1075,7 @@ spawnP(PT.dirt,rec.x,rec.g0+0.6,rec.z,rand(-1.5,1.5),rand(1,3),rand(-1.5,1.5),0.
 if(rec.alive===false) continue;
 if(d<rad+0.3){
 floraTopple(rec,sn*mv+rand(-0.2,0.2),cs*mv+rand(-0.2,0.2));
+t._crushDragT=nowT+CRUSH_DRAG.dur;   // ★20261128e 枯树倒伏同入迟滞带
 hitAny=true;
 spawnP(PT.dirt,rec.x,rec.g0+0.5,rec.z,rand(-1.5,1.5),rand(1,2.5),rand(-1.5,1.5),0.3,0.6,0.5,0.85,3);
 }

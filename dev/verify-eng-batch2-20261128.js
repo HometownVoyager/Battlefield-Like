@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// dev/verify-eng-batch2-20261128.js —— 2026-11-28 工程兵系统第二批 (戳 20261128d):
+// dev/verify-eng-batch2-20261128.js —— 2026-11-28 工程兵系统第二批 (戳 20261128e):
 //   ①建造点池: BUILD_POOL_INIT=10/CAP 10(工程15)/60s 回 1 点/25 杀回 1 点 (21-match updateBuildPool 单源,
 //     24-main:267 接线; 局级复位在 22-hud resetPlayerForNewMatch, deploy 不再每命刷新 23-deploy 兜底);
 //   ②建造得分: SCORE_TABLE.build=50/建造点, 实得分=(BUILD_COST[type]||1)×50 只给实际扣账件 (06 engBuildExec);
@@ -148,7 +148,7 @@ G(POPS_SRC);                // showScorePop 包一层捕获弹字 (非侵入: �
 G('for(const s of soldiers){ if(!s.isPlayer){ s.pos.x+=400; s.pos.z+=400; s.pos.y=heightAt(s.pos.x,s.pos.z); if(s.path) s.path.length=0; } }');
 G('__planesFrozen=[]; for(const pl of planes){ if(pl&&pl.alive){ pl.alive=false; pl.respawnT=1e9; __planesFrozen.push(pl); } }');
 G('player.protUntil=1e9;');
-ok(html.includes("__sfStyleVer='20261128d'")&&(html.match(/\?v=20261128d/g)||[]).length>=1,'前置: 版本戳 20261128d 在位 (index.html ?v= ×'+(html.match(/\?v=20261128d/g)||[]).length+' + __sfStyleVer)');
+ok(html.includes("__sfStyleVer='20261128e'")&&(html.match(/\?v=20261128e/g)||[]).length>=1,'前置: 版本戳 20261128e 在位 (index.html ?v= ×'+(html.match(/\?v=20261128e/g)||[]).length+' + __sfStyleVer)');
 
 // ══ T0 源码锚 ══
 console.log('T0 源码锚');

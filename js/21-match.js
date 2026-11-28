@@ -221,9 +221,12 @@ addKillMsg(t('{0} 占领了 {1} 点',teamStr,f.id),attacker);
 for(const c of combatants){
 if(c.alive&&c.team===attacker&&(c.pos.x-f.x)*(c.pos.x-f.x)+(c.pos.z-f.z)*(c.pos.z-f.z)<_fr2){   // ★2026-11-18 卡顿审计: 同上平方距离
 c.score=(c.score||0)+SCORE_TABLE.flag;
-if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; if(ZOMBIE_MODE) pzGain(ZCFG.zp.flag); } // caps: 结算占领数 (2026-09-13); ZP: 丧尸模式占旗给点 (2026-10-06 裁定④)
+if(c.isPlayer){ showKillPop(t('占领 {0} 点',f.id),SCORE_TABLE.flag); player.caps=(player.caps||0)+1; if(ZOMBIE_MODE&&ZOMBIE_MODE!=='teams') pzGain(ZCFG.zp.flag); } // caps: 结算占领数 (2026-09-13); ZP: 丧尸模式占旗给点 (2026-10-06 裁定④; ★20261128e teams 局改走下方整队分池, 避免双发)
 }
 }
+// ★20261128e 双队分池: teams 局占旗整队入账 (+flag 一次) —— 玩家队经 zTeamZPGain→pzGain 同账, 对方队入 zFoeZP;
+//   solo 局不走此行 (玩家占旗的 ZP 仍由上方 isPlayer 分支给, 口径逐位不变)。
+if(ZOMBIE_MODE==='teams'&&(attacker===0||attacker===1)&&typeof zTeamZPGain==='function') zTeamZPGain(attacker,ZCFG.zp.flag);
 	// 占满全部旗点 → 敌方兵力立即归零进入清场 (2026-09-04 用户指定: 攻防/征服任一方占满都生效 —
 	// 修复淞沪会战防守方(国军)占满全旗毫无反应的旧缺陷, 旧版只认进攻方)
 	// 丧尸模式: 占满全旗不触发兵力归零 (胜负只认 撑过时限/全灭出局, 2026-10-06 设计 §3.5)
@@ -831,7 +834,7 @@ function resetKillStreak(){ killStreakN=0; player.streakBuff=null; killStreakRef
 function onPlayerKill(victim,isHead){
 const got=registerKillScore(isHead?'爆头击杀':'击杀',isHead?SCORE_TABLE.head:SCORE_TABLE.kill);
 player.score+=got;
-if(ZOMBIE_MODE&&victim&&victim.zombie) pzGain(victim.kind==='brute'?ZCFG.zp.bruteKill:(victim.kind==='boomer'?ZCFG.zp.boomerKill:ZCFG.zp.kill)); // ZP: 击杀丧尸给点 (2026-10-06 裁定④; boomer 2026-10-07d)
+if(ZOMBIE_MODE&&victim&&victim.zombie) pzGain(zKillZPOf(victim.kind)); // ZP: 击杀丧尸给点 (2026-10-06 裁定④; boomer 2026-10-07d; ★20261128e 价单源抽 zKillZPOf, 与 25 Zombie.die Bot 分支共用)
 if(isHead) player.headKills=(player.headKills||0)+1; // 爆头数: 结算卡 (2026-09-13)
 player.lifeKills=(player.lifeKills||0)+1;
 hmShow(_hitCls,true);

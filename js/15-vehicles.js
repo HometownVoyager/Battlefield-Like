@@ -352,6 +352,7 @@ const ramG=(b.dGroup&&!b.dGroup.dead)?b.dGroup:null;
 if(b.crush&&Math.abs(T.vel)>1.5){
 crushCoverBox(b);
 T.vel*=0.92;
+T._crushDragT=nowT+CRUSH_DRAG.dur;   // ★20261128e 碾碎迟滞置窗 (消费在 Tank.update 位移段; 连碾每件刷新)
 T.suspPV-=Math.sign(T.vel)*0.25;
 if(T.playerDriven) addTrauma(0.12);
 return;
@@ -378,6 +379,7 @@ T._ramT=nowT;
 damageStructureBy(ramG,STRUCT_RAM.k*T.vel*T.vel,T.playerDriven?player:(T.crewBot||T.crew),
 {x:(b.minX+b.maxX)/2,y:(b.minY+b.maxY)/2,z:(b.minZ+b.maxZ)/2});
 T.vel*=STRUCT_RAM.velAbsorb;
+T._crushDragT=nowT+CRUSH_DRAG.dur;   // ★20261128e 撞塌建筑同入迟滞带 (42% 即时扣速之上再挂 0.8s 恢复段)
 T.suspPV-=Math.sign(T.vel)*0.9;
 if(T.playerDriven) addTrauma(0.28);
 return;
@@ -1015,6 +1017,15 @@ let mvx=sn*this.vel*dt, mvz=cs*this.vel*dt;
 // 对玩家驾驶同样生效 (AI/玩家同车物理); 碾压清尸后 _zClingN 归零自动恢复。
 if(this._zClingN>=4){ mvx*=0.55; mvz*=0.55; }
 else if(this._zClingN>=2){ mvx*=0.78; mvz*=0.78; }
+// 碾碎迟滞 (2026-11-28e 用户令"碾碎可碾地物/建筑时稍微迟滞减速一下"): 碾毁 crush 件/压倒树木/撞塌建筑
+// 后的短减速带 (_crushDragT 由 _tkBoxCb 两分支与 04b floraCrushTank 置窗) —— 只缩**位移积分** (与
+// _zClingN 同口径), 车速账 vel 不动 ⇒ crush 车速门/STRUCT_RAM 动量账/履带滚动/引擎音全部照旧; 系数
+// 自 ×(1-CRUSH_DRAG.mul)=0.55 起随剩余窗口线性恢复到 ×1, 每次新碾毁刷新 (连排树篱/林区持续吃减速)。
+if(this._crushDragT&&nowT<this._crushDragT){
+const _cgk=1-(this._crushDragT-nowT)/CRUSH_DRAG.dur;
+const _cgf=1-CRUSH_DRAG.mul*(1-_cgk);
+mvx*=_cgf; mvz*=_cgf;
+}
 {
 const dist=Math.hypot(mvx,mvz);
 if(dist>1e-5){

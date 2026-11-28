@@ -162,7 +162,8 @@ die(attacker,isHead){
  else { this.deathAnimT=0.6; }
  if(attacker){
   attacker.kills=(attacker.kills||0)+1;
-  if(!attacker.isPlayer) attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
+  if(!attacker.isPlayer){ attacker.score=(attacker.score||0)+SCORE_TABLE.kill;
+  if(attacker.team===0||attacker.team===1) zTeamZPGain(attacker.team,zKillZPOf(this.kind)); }   // ★20261128e 双队分池: Bot 杀丧尸入本队 ZP 池 (宿主附身击杀同账; solo 局 zTeamZPGain 恒 no-op)
   else if(typeof player!=='undefined'&&player&&attacker===player.specViewHost&&typeof onHostKill==='function'){ onHostKill(); }   // 真附身: 宿主杀丧尸红档 (无分, 2026-11-01)
   else { addKillfeed(attacker,this,isHead); onPlayerKill(this,isHead); }   // ZP 结算在 onPlayerKill
  }
@@ -639,8 +640,14 @@ let zSurgeState=0,zSurgeT=0,zSurgeLeft=0,zSurgeCd=0;
 let zFullInfectWarned=false;
 const zElim=[false,false];
 let zHudEl=null,zHudT=0;
+// ★20261128e 双队对抗 ZP 分池 (用户令"阵营对抗的时候分别显示双方的ZP"): teams 局两支人类队各一池 ——
+//   玩家队池 = player.pz (pzGain 同账单源: 玩家本人击杀/占旗/建造扣退款全走它, 建造点兜底同), 对方队池 =
+//   zFoeZP (Bot 击杀丧尸/占旗入账, 只进不出 —— Bot 不建造)。入账单源 = zTeamZPGain (按队分流), solo 局
+//   不分区恒 no-op, 单队计费口径逐位不变。显示 = updateZpHud teams 分支双读 (词典键'☣ 我方 {0} · 敌方 {1} ZP')。
+let zFoeZP=0;
 function zombieMatchStart(){
  zInit=true; zSurviveT=0; zPhase=-1; zSpawnCd=2; zElim[0]=zElim[1]=false;
+ zFoeZP=ZCFG.zp.start;   // ★20261128e: 对方队池与玩家队池 (player.pz, 下一行) 同起 200
  zSurgeState=0; zSurgeT=0; zSurgeLeft=0; zSurgeCd=0;   // zSurgeT=0: 过 firstT 后立即可预警 (首次波不被静默期再拖 90s)
  zFullInfectWarned=false;
  ZOMBIES.length=0;
@@ -834,7 +841,10 @@ function updateZpHud(){
   mid=t('存活 {0} 队 · 活到最后',String(alive));
  }
  const infBadge=isFullInfectionActive()?' · ☣ '+t('全域感染'):'';
- zHudEl.textContent='☣ '+(player.pz|0)+' ZP · '+t(ZCFG.phaseNames[pi])+' · '+mid+infBadge;
+ // ★20261128e 双队对抗分池双显 (用户令"阵营对抗的时候分别显示双方的ZP"): teams 局顶栏药丸同时读两队池
+ //   (玩家队=player.pz, 对方队=zFoeZP); solo 局维持单池串逐位不变。
+ const _zpSeg=(ZOMBIE_MODE==='teams')?t('☣ 我方 {0} · 敌方 {1} ZP',String(player.pz|0),String(zFoeZP|0)):('☣ '+(player.pz|0)+' ZP');
+ zHudEl.textContent=_zpSeg+' · '+t(ZCFG.phaseNames[pi])+' · '+mid+infBadge;
 }
 function zombieFrameTick(dt){
  if(!zInit||matchOver||(typeof matchRunning!=='undefined'&&!matchRunning)) return;
@@ -932,6 +942,19 @@ function zombieFrameTick(dt){
 // ═══ ZP 经济 (裁定④): 击杀丧尸 +15/+40, 占领旗点 +100 (占领钩子在 21-match), 商店在 06-engineering ═══
 function pzGain(n){
  player.pz=Math.max(0,(player.pz===undefined?ZCFG.zp.start:player.pz)+n);
+}
+// ★20261128e 击杀 ZP 价单源 (brute 40 / boomer 25 / 其余 15): 21-match onPlayerKill 与 25 Zombie.die 的
+//   Bot 分支共用 —— 两处手写同款三元会漂。
+function zKillZPOf(kind){
+ return kind==='brute'?ZCFG.zp.bruteKill:(kind==='boomer'?ZCFG.zp.boomerKill:ZCFG.zp.kill);
+}
+// ★20261128e 双队分池入账单源 (用户令"阵营对抗分别显示双方的ZP", 见 zFoeZP 注): teams 局按队分流 ——
+//   玩家队走 pzGain (player.pz 同账), 对方队走 zFoeZP; solo 局恒 no-op (单队计费口径逐位不变)。
+//   消费点: 25 Zombie.die Bot 分支 (杀丧尸) + 21-match 占旗钩 (teams 分支整队 +flag)。
+function zTeamZPGain(team,n){
+ if(ZOMBIE_MODE!=='teams') return;
+ if((team|0)===(player.team|0)) pzGain(n);
+ else zFoeZP=Math.max(0,zFoeZP+n);
 }
 // ═══ 工事商店件 + 工事血量 (裁定④/⑧) ═══
 if(ZOMBIE_MODE){

@@ -1855,6 +1855,14 @@ const STRUCT_HIT={pad:3, falloff:0.6, vGate:3.4};
 //   10 m/s 正面撞 ≈ 220 伤害 (一次全速撞推倒默认墙段 230); 慢蹭 2 m/s 只剩 ~9 ⇒ 不再"轻推拆一层楼"。
 //   cd = 同一辆车的两次撞塌最小间隔 (s) —— 没有它, 一次持续接触会在每帧重复结算。
 const STRUCT_RAM={minSpeed:1.9, k:2.2, velAbsorb:0.58, face:0.35, cd:0.32};
+// ★20261128e 碾碎迟滞 (用户令"坦克碾碎可被碾碎的地物/建筑的时候, 稍微迟滞减速一下"): 碾毁 crush 掩体件
+//   (沙袋墙/木箱/矮石墙/树篱/倒木/残骸车/街灯)/压倒树木·竹·枯树/撞塌建筑后进入一段短减速带 ——
+//   dur=减速带时长 (s), mul=起手位移系数削减量 (位移 ×(1-mul)=0.55 起步, dur 秒内线性恢复到 ×1)。
+//   每次新碾毁都刷新窗口 ⇒ 连排树篱/林区/连续撞墙期间持续吃减速, 穿完自然回油门。消费点:
+//   15-vehicles _tkBoxCb 两分支置窗 (crush 件 + STRUCT_RAM 撞塌) + Tank.update 位移段消费 (与 _zClingN
+//   卡尸减速同口径: 只缩 mvx/mvz 位移积分, 车速账 vel 不动 ⇒ crush 车速门/STRUCT_RAM 动量/履带滚动/
+//   引擎音全部照旧) + 04b floraCrushTank 树/竹/枯树置窗 (灌木碾没不触发)。
+const CRUSH_DRAG={dur:0.8, mul:0.45};
 // ③ 坍塌碾压: 落体水平矩形内的步兵/载具吃一次"被砸"伤害 (随落体高度线性加码, 顶到 infMax)。
 const STRUCT_CRUSH={infBase:70, infPerM:9, infMax:200, vehMul:0.55, pad:0.6, vBand:4.0};
 // ④ 血量按组规模归一: 名义 hp (写在各建筑构建处) = "ref 盒标准件"的厚度, 实际血量 = 名义 × scale(n),

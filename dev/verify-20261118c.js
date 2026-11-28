@@ -86,15 +86,15 @@ else { FAILN++; console.log('  ✘ '+label); }
 }
 
 // ══ T0 版本戳 ══
-console.log('T0 版本戳 20261128d');
+console.log('T0 版本戳 20261128e');
 {
-const stamps=[...html.matchAll(/20261128d/g)].length;
-ok(stamps>=48&&html.includes("window.__sfStyleVer='20261128d';")
-&&html.includes('css/style.css?v=20261128d')
-&&!html.includes('20261118b'),'T0a ★版本戳 20261128d: index.html '+stamps+' 处 + __sfStyleVer + css 链 + 旧 20261118b 清零');
+const stamps=[...html.matchAll(/20261128e/g)].length;
+ok(stamps>=48&&html.includes("window.__sfStyleVer='20261128e';")
+&&html.includes('css/style.css?v=20261128e')
+&&!html.includes('20261118b'),'T0a ★版本戳 20261128e: index.html '+stamps+' 处 + __sfStyleVer + css 链 + 旧 20261118b 清零');
 const gf=fs.readFileSync(path.join(root,'dev/_game_files.txt'),'utf8');
 const gl=gf.split(/\r?\n/).filter(l=>l.includes('?v='));
-ok(gl.length===45&&gl.every(l=>l.endsWith('?v=20261128d'))&&!gf.includes('20261118b'),'T0b ★_game_files.txt 45 行全 20261128d (旧戳清零)');
+ok(gl.length===45&&gl.every(l=>l.endsWith('?v=20261128e'))&&!gf.includes('20261118b'),'T0b ★_game_files.txt 45 行全 20261128e (旧戳清零)');
 }
 
 // ══ T1 批① 低弹变红 ══

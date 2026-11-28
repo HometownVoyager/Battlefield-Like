@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// dev/verify-keys-rotation-20261128.js —— 2026-11-28 键位轮换批 (戳 20261128d):
+// dev/verify-keys-rotation-20261128.js —— 2026-11-28 键位轮换批 (戳 20261128e):
 //   用户令: 投掷/近战/选号键组 3→4→5→N 循环一圈 —— 3=军刀(原N) / 4=AT雷(原3) / 5=烟雾+反坦克兵
 //   火箭筒切换(原4, 整块搬) / N=工程兵选工事型号(原5); **6 (燃烧弹/迫击炮) 与 G (普通手雷) 不动**。
 //   改动面 (全库盘点): ①19-input 四块 e.code 轮换 + 块内 barStealArmed 键标识跟走 + keyup 持掷松手
@@ -54,7 +54,7 @@ const NEG_PATCHES=[
 // N3 烟雾键还原 (19-input): Digit5 烟雾块 → 挂回 Digit4 ⇒ T0c 红 + T1d 红 (按5不举烟; T1e 前置链同红)
 ['js/19-input.js',"if(e.code==='Digit5'){","if(e.code==='Digit4'){"],
 // N4 选号键还原 (19-input): KeyN 选号门 → 挂回 Digit5 ⇒ T0d 红 + T1g 红 (按N不换号)
-['js/19-input.js',"if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){","if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE)){"],
+['js/19-input.js',"if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE||player.spectator)){","if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE)){"],
 // N5 keyup 持掷松手列表还原 (19-input): (D4,D5,D6)→(D3,D4,D6) ⇒ T0e 红 + T1j 红 (军刀键松手误出手雷)
 ['js/19-input.js',"if((e.code==='Digit4'||e.code==='Digit5'||e.code==='Digit6')&&player.nadeHeld){","if((e.code==='Digit3'||e.code==='Digit4'||e.code==='Digit6')&&player.nadeHeld){"],
 // N6 手柄还原 (19b-gamepad): RS=KeyN / 十字左=(工程?Digit5:Digit4) / 十字右=Digit3 ⇒ T0f 红
@@ -110,7 +110,7 @@ if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
 G('pointerLocked=true;');   // 19-input 战斗键总门 (!alive||!pointerLocked, :208) — 沙箱无 pointerlockchange, 直置 (throwq 批同款)
 G('__step(3);');            // 等 VM 回 idle (部署装备链跑完)
-ok(html.includes("__sfStyleVer='20261128d'"),'前置: 版本戳 20261128d 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128e'"),'前置: 版本戳 20261128e 在位 (index.html 内联)');
 
 // ══ T0 源码锚 ══
 console.log('T0 源码锚');
@@ -133,7 +133,7 @@ ok(i5>=0&&iSM>i5&&s19.slice(i5,i5+40).includes('观战不切火箭筒'),'T0c ★
 ok(i5>=0&&iRK>i5&&iRK<s19.indexOf("if(e.code==='Digit6')"),'T0c2 ★反坦克兵 cls3 火箭筒切换分支随块搬入 Digit5 (原 4 键整块语义)');
 }
 // ④ 工程选号 = KeyN (原 Digit5)
-ok(s19.includes("if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){")&&s19.includes('const _ml=engMenuList(player);')&&s19.includes('player.buildSel=((player.buildSel||0)+1)%_ml.length;'),'T0d ★工程选号块挂 KeyN (cls4||ZOMBIE 门原样; ★20261128d 循环走 engMenuList 单源=丧尸非工程兵只基础三件)');
+ok(s19.includes("if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE||player.spectator)){")&&s19.includes('const _ml=engMenuList(player);')&&s19.includes('player.buildSel=((player.buildSel||0)+1)%_ml.length;'),'T0d ★工程选号块挂 KeyN (cls4||ZOMBIE 门原样; ★20261128d 循环走 engMenuList 单源=丧尸非工程兵只基础三件)');
 ok(!s19.includes('%BUILD_MENU.length'),'T0d3 旧全量菜单循环 %BUILD_MENU.length 绝迹 (负向; 菜单收窄走 engMenuList)');
 ok(!s19.includes("if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE))"),'T0d2 旧 Digit5 选号门绝迹 (负向)');
 // ⑤ keyup 持掷松手列表 (D3,D4,D6)→(D4,D5,D6)

@@ -1515,7 +1515,7 @@ const tip=document.getElementById('clsTip');
 if(player.loiter) tt=player.spectator
 ?t2('<b>左键</b> 自爆 · <b>空格</b> 加速 · <b>右键</b> 开镜 · <b>鼠标</b> 制导 · <b>U</b> 切换视角 · <b>T</b> 弃弹传送')
 :t2('<b>左键</b> 自爆 · <b>空格</b> 加速 · <b>右键</b> 开镜 · <b>鼠标</b> 制导 · <b>U</b> 切换视角');
-else if(player.spectator) tt=t2('调试模式 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(空格加速·右键瞄准) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌 · <b>F</b> 召唤幽灵坦克 · <b>Q</b> 附身准星Bot · <b>E</b> 脱离');
+else if(player.spectator) tt=t2('调试模式 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(空格加速·右键瞄准) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌 · <b>F</b> 召唤幽灵坦克 · <b>Q</b> 附身准星Bot · <b>E</b> 脱离 · <b>N</b>/<b>B</b> 免费建造');   // ★20261128e: 调试观战开放全免费建造 (00b-i18n 词典键值同步改)
 	else if(player.onMortar) tt=t2('<b>左键</b> 发射 · <b>鼠标</b> 调弹道 · <b>F</b> 离开');
 	else if(player.cls===4||ZOMBIE_MODE){
 	// ★20261128d 建造点池 + 丧尸菜单收窄: 丧尸非工程兵也见此行 (无迫击炮短句); 价格随计费显示

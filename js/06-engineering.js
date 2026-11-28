@@ -215,6 +215,7 @@ const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];   // ★2026
 // 25-zombies 丧尸局追加进 BUILD_MENU 的 tower/ammoc 对非工程兵不可见 (建账/退款/塔血量链路不动)。
 // 消费点: engBuild 选型 / 19-input KeyN 循环+选择提示 / 22-hud 菜单渲染 / 20-player 提示行。
 function engMenuList(pl){
+if(pl&&pl.spectator) return BUILD_MENU;   // ★20261128e 调试观战全菜单 (用户令"调试模式开放全部建造,全部免费"): 丧尸收窄/兵种门都让位 —— tower/ammoc 等商店件对调试观战可见
 if(!ZOMBIE_MODE||!pl||pl.cls===4) return BUILD_MENU;
 return BUILD_MENU.filter(t=>t==='sandbag'||t==='wire'||t==='hedge');
 }
@@ -246,17 +247,19 @@ if(k>=1){ r.m.position.y=r.ty; RISERS.splice(i,1); }
 // 工程兵建造: 按B开始锤击建造, 动画结束后工事落成
 function engBuild(pl){
 if(VM.state!=='idle') return;
+if(!pl.alive) return;   // ★20261128e 观战/死亡不得起造 (用户令"观战模式应当无法建造"): 自由观战 alive=false —— KeyB 的 19-input alive 总门之外的账目层保险, 尸体/合成入口/未来调用点一律过这道
+const _specFree=!!(pl.isPlayer&&pl.spectator);   // ★20261128e 调试观战全免费 (用户令"开放全部建造,全部免费"): 全菜单 (engMenuList 放行) + 零支付 (cost/zp 双零进 pendingBuild ⇒ exec 端扣款/建造得分/拆除退款自然全走零, ZP 与建造点池都不沾)
 const bc=pl.buildCount||0;
-const _ml=engMenuList(pl);   // ★20261128d 菜单收窄单源: 非工程兵丧尸只基础三件 (buildSel 越界回退首件)
+const _ml=engMenuList(pl);   // ★20261128d 菜单收窄单源: 非工程兵丧尸只基础三件 (buildSel 越界回退首件; ★20261128e 调试观战放行全菜单)
 const type=_ml[pl.buildSel||0]||_ml[0];
-const cost=BUILD_COST[type]||1;
+const cost=_specFree?0:(BUILD_COST[type]||1);
 // 丧尸模式计费 ★20261128d 改版 (用户裁定): 基础三件不再全职业免费 (2026-10-28 指导 §4.6(2) 规则废止 ——
 // 用户令"建造点数在丧尸模式要有存在感"): BUILD_ZP 统一定价 (基础三件 2 ZP/件, 机枪150/塔250/弹药箱80 不变),
 // 支付 = ZP 优先, ZP 不够兜底扣建造点 (BUILD_COST[type], 本批给 tower/ammoc 补兜底价), 两边都不够才拒绝。
 // pendingBuild.zp=定价 / .cost=兜底价 双记: exec 端读条中 ZP 被花掉会转扣建造点; 拆除退款按 entry 实付货币退。
 // 普通模式 (非丧尸) 零变化: 工程兵独占 + 建造点支付。菜单范围同步收窄: 丧尸非工程兵只见基础三件 (engMenuList)。
 let zpCost=0;
-if(ZOMBIE_MODE&&pl.isPlayer&&BUILD_ZP[type]!==undefined){
+if(!_specFree&&ZOMBIE_MODE&&pl.isPlayer&&BUILD_ZP[type]!==undefined){
 zpCost=BUILD_ZP[type];
 if((player.pz|0)>=zpCost){
  // ZP 优先支付: zp=定价进 pendingBuild; cost 同时留兜底价 (exec 端转扣用)

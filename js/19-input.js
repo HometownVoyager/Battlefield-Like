@@ -462,7 +462,10 @@ AudioSys.metalSlide(0.14,0.25,400,700);
 // 尸潮守备局里人人需要沙袋/铁丝。ZOMBIE_MODE 放行全职业 (基础件免费/商店件扣 ZP, 见 06-engineering
 // engBuild 单源); 座位门不变。普通模式仍 cls===4 独占, 逐位零变化。
 if(e.code==='KeyB'){
-if((player.cls===4||ZOMBIE_MODE)&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar){
+// ★20261128e: 门加 player.spectator —— 调试观战开放建造 (用户令"调试模式开放全部建造,全部免费"; 支付
+//   豁免/全菜单在 06 engBuild/engMenuList 单源)。自由观战 (alive=false) 到不了这里 (上方 alive 总门),
+//   engBuild 头部 !pl.alive 保险双挡。
+if((player.cls===4||ZOMBIE_MODE||player.spectator)&&!player.onVehicle&&!player.onMG&&!player.onAT&&!player.onAA&&!player.onMortar){
 // ★2026-10-30 用户裁定②: 拆除/回收读条中再按 B = **极少加快** (推进 DEMOLISH_T 的 2.5%), 不再取消 ——
 //   取消仍有 X / 左键 / 受击>25 / 走远 (>3.6m updateDemolish 自收)。
 if(player.demolish){ player.demolish.t+=DEMOLISH_T*BAR_PRESS_BOOST; }
@@ -470,15 +473,15 @@ else if(player.pendingBuild){ if(typeof VM!=='undefined'&&VM.state==='build') VM
 else { const nb=nearOwnBuild(player); if(nb){ if(!player.barStealArmed('KeyB')) return; player.stealBar(); startDemolish(player,nb); } else engBuild(player); }   // ★2026-10-25 反馈轮①: 拆除起步前抢读条 (nb 找到=确认起步); 建造的抢占在 engBuild 全部早退之后 (06-engineering) —— ★2026-10-30: 两条路都改双击确认
 }
 }
-if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){
-const _ml=engMenuList(player);   // ★20261128d 丧尸菜单收窄单源 (engMenuList): 非工程兵只循环基础三件
+if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE||player.spectator)){   // ★20261128e: 调试观战选号放行 (与 KeyB 门同批)
+const _ml=engMenuList(player);   // ★20261128d 丧尸菜单收窄单源 (engMenuList): 非工程兵只循环基础三件 (★20261128e 调试观战全菜单)
 player.buildSel=((player.buildSel||0)+1)%_ml.length;
 const bt=_ml[player.buildSel];
 const bn=bt==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt];
 // 消耗提示单源 (2026-10-28): 商店三件读 BUILD_ZP (ZP 点), 其余读 BUILD_COST (建造点) ——
-// 旧版 tower/ammoc 查 BUILD_COST 落空 ⇒ "消耗undefined点"。
-const isZP=ZOMBIE_MODE&&BUILD_ZP[bt]!==undefined;
-if(SHOW_CTL_HINTS) showScorePop(t2('建造选择: {0} (消耗{1}{2} · 按B放置)',t2(bn),isZP?BUILD_ZP[bt]:BUILD_COST[bt],isZP?'ZP':'')); // 详细操作开关 (2026-11-09 批): 关=键位提示不弹
+// 旧版 tower/ammoc 查 BUILD_COST 落空 ⇒ "消耗undefined点"。★20261128e: 调试观战全免费, 提示单走免费串。
+const isZP=!player.spectator&&ZOMBIE_MODE&&BUILD_ZP[bt]!==undefined;
+if(SHOW_CTL_HINTS) showScorePop(player.spectator?t2('建造选择: {0} (免费 · 按B放置)',t2(bn)):t2('建造选择: {0} (消耗{1}{2} · 按B放置)',t2(bn),isZP?BUILD_ZP[bt]:BUILD_COST[bt],isZP?'ZP':'')); // 详细操作开关 (2026-11-09 批): 关=键位提示不弹
 }
 if(e.code==='KeyF'){
 // 巡飞弹视角切换已挪 U (2026-11-06 飞行瞄准批); 制导中按 F 落 tryInteract 在其第一行被 loiter 门吞掉, 无误触

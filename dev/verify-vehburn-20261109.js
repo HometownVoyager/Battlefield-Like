@@ -121,7 +121,7 @@ assert('23-deploy/26-commander/19-input: 部署键位提示/指挥官提示/建�
  s23.includes('if(p.spectator&&SHOW_CTL_HINTS) showScorePop(\'调试模式')
  &&s23.includes('if(SHOW_CTL_HINTS){')&&s23.includes('if(p.cls===4) showScorePop')
  &&s26.includes('if(typeof SHOW_CTL_HINTS!==\'undefined\'&&!SHOW_CTL_HINTS) return;')
- &&s19.includes("if(SHOW_CTL_HINTS) showScorePop(t2('建造选择"));
+ &&s19.includes("if(SHOW_CTL_HINTS) showScorePop(player.spectator?t2('建造选择"));   // ★20261128e 跟走: KeyN 提示行加调试观战免费档三元 (SHOW_CTL_HINTS 开关管住整条两档不变)
 assert('index.html: #vehBurnTip 元素 + 两开关按钮 + i18n 词条 + CSS 规则',
  ih.includes('<div id="vehBurnTip"></div>')&&ih.includes('id="showCtlHintsBtn"')&&ih.includes('id="autoExitVehBtn"')
  &&s18.includes('\'游戏中显示详细操作\':\'SHOW IN-GAME CONTROL TIPS\'')&&s18.includes('\'自动脱离载具\':\'AUTO-EXIT DESTROYED VEHICLE\'')
@@ -131,9 +131,9 @@ const iCtrl=ih.indexOf('>操作方式<'), iLang=ih.indexOf('>语言 / Language<'
 assert('页签顺序: 操作方式→语言→性能与画面→游戏内容 (用户裁定)',iCtrl>=0&&iLang>iCtrl&&iPerf>iLang&&iGame>iPerf,
  `idx 控=${iCtrl} 语=${iLang} 性=${iPerf} 游=${iGame}`);
 const idx0=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-assert('版本戳 20261128d: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261109b 清零 (2026-11-10 海战移除批判据跟码)',
- [...idx0.matchAll(/20261128d/g)].length>=48&&idx0.includes("window.__sfStyleVer='20261128d';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128d')).length===45
+assert('版本戳 20261128e: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261109b 清零 (2026-11-10 海战移除批判据跟码)',
+ [...idx0.matchAll(/20261128e/g)].length>=48&&idx0.includes("window.__sfStyleVer='20261128e';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128e')).length===45
  &&!idx0.includes('20261109b')&&!gf.includes('20261109b'));
 }
 
