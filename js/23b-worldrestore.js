@@ -230,6 +230,12 @@ if(typeof playerAvatarReset==='function') playerAvatarReset();
 //      丁达尔光锥都直接挂 scene, 随台账摘除); _playerVmFlashlight 挂在 vmScene, 世界还原碰不到它 ——
 //      **不置空**, 置空反而会在 vmScene 逐局堆孤儿灯。
 try{ _hlPool.length=0; _flareLightPool.length=0; _fireLightPool.length=0; }catch(e){}
+// ★2026-11-28 修 (用户实报"上一局油桶火焰光残留"): 火光**分配槽**随池一并弃 —— _fireAssign 四槽是池的配套
+//   状态 (2026-10-24 性能批"分配槽持久化"), 槽里攥着上一局火源候选的引用; 只清池不清槽, 新局灯池重建后
+//   第一帧就被旧候选占位 (旧候选 ttl 冻结>0, 0.2s 扫描的 _fireCandAlive 又只认 ttl ⇒ 判活), 旧火光原位
+//   复亮。P1-14 (2026-11-21) 清池时漏了这份配套账, 本行补齐; 配合 08-effects _fireCandAlive 的成员资格
+//   修 (fs 候选必须在 FIRE_SOURCES 活账里) 双保险。
+try{ if(typeof _fireAssign!=='undefined') for(let _fai=0;_fai<_fireAssign.length;_fai++) _fireAssign[_fai]=null; }catch(e){}
 try{ FLARES.length=0; _flaresInit=false; }catch(e){}
 try{ for(const sl of SEARCHLIGHTS){ if(sl) sl._beam=null; } _searchBeams.length=0; }catch(e){}
 try{ _playerFlashlight=null; _playerFlSpill=null; _playerFlCone=null; }catch(e){}

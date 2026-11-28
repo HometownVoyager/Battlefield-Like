@@ -556,7 +556,10 @@ class NavalCraft {
     const wm=navalWreckMaterial();
     this.grp.traverse(o=>{ if(o.isMesh){ if(!o.userData.mat0) o.userData.mat0=o.material; o.material=wm; } });
     // 计分/播报 (与 Tank.die 同口径: 分档取 SCORE_TABLE.tank, 票代价取 spec.ticket)
-    if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 观战本尊照常记分 (★2026-11-13 批, 与 Tank/Plane.die 三处同批补齐)
+    // ★2026-11-28 友伤记账批 (与 Tank/Plane.die 三处同构): 旧门 coFfFire||异队 漏友军 FF 击沉 (EXPLO_FF 时代
+    //   友军爆炸伤得到己方舰艇, 却零击杀零得分零战报, 与步兵 die 链无队属门劈叉) —— 改"任何有归属击沉都记账",
+    //   唯一排除=自毁 (attacker===船上玩家本人; 舰艇无"驾驶员死亡链", 乘员落水生还不涉杀账); 观战火力语义不变。
+    if(attacker&&attacker!==(this.playerDriven?player:null)){
       attacker.kills=(attacker.kills||0)+1;
       if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('摧毁舰艇',SCORE_TABLE.tank);
       else attacker.score=(attacker.score||0)+SCORE_TABLE.tank;

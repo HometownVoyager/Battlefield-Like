@@ -1082,6 +1082,7 @@ die(attacker,crash,bld){
 // bld (2026-11-14 用户令): 撞楼档 —— 坠机演出分两档: 撞楼 = 楼面一炸 (无弹坑) + 残骸贴楼/贴地 +
 // 燃烧 restT 后二次爆炸消失; 坠地 = 触地一炸 + 弹坑 + 残骸沉入地下。bld 仅 16-aircraft 撞楼扫掠传 true。
 const spec=(typeof specRide==='function')&&specRide(this); // 观战者座驾: 车可以毁, 人绝不死 (2026-09-26H, 见下)
+const _pilot=this.playerDriven?player:(this.crewBot||null); // 自毁排除用 (与 Tank.die driver 同口径) —— 必须在下面 playerDriven/crewBot 清账之前取
 this.alive=false; this.respawnT=rand(35,48); this.crew.alive=false;
 // (2026-11-10: 拦阻账清理随大舰子系统下架摘除)
 // 7b-丙: 锁定/接管/缠斗目标随本体退场一并清 (目标引用不许过夜 —— 与 userData 禁对象引用同一族纪律)
@@ -1149,7 +1150,10 @@ this.crewBot=null;
 cb.onVehicle=null;
 cb.damage(999,attacker,false);
 }
-if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力)
+// ★2026-11-28 友伤记账批 (与 Tank.die 同批同构): 旧门 coFfFire||异队 漏友军 FF 击毁 (EXPLO_FF 时代友军爆炸
+//   伤得到己方战机, 却零击杀零得分零战报, 与步兵 die 链无队属门劈叉) —— 改"任何有归属击毁都记账", 唯一
+//   排除=自毁 (attacker===驾驶员本人 _pilot, 与步兵链自炸不给杀同规); 观战火力语义不变。
+if(attacker&&attacker!==_pilot){
 attacker.kills=(attacker.kills||0)+TICKET_COST.plane;   // ★2026-11-28 票账批: 机体 +3 杀 (空机也有; 取代旧 +1)
 // 玩家得分取 registerKillScore 返回值 (含连杀倍率, 2026-09-11); Bot 仍按基础分
 if(attacker.isPlayer) attacker.score=(attacker.score||0)+registerKillScore('击落战机',SCORE_TABLE.plane);

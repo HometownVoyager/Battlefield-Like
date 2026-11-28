@@ -1754,7 +1754,13 @@ else driver.damage(999,attacker,false);                            // 兜底: �
 //   乘员只算驾驶员 1 人 (死亡链 -1, 上面已结算) ⇒ 有人车整损 = 3 车体 + 1 驾驶员 = 4 票, 空车 = 3 票。
 //   观战者座驾照旧零票 (观战无反噬)。
 if(!spec) tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.tank);
-if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){ // coFfFire: 幽灵坦克 ffAll + 观战本尊步战火力照常记分 (2026-09-17; ★2026-11-13 批补齐: 旧门漏观战步行火力, 毁"己方"载具不记分不播报)
+// ★2026-11-28 友伤记账批 (用户实报"炸毁己方坦克没有记录和得分"): 旧门 coFfFire||异队 只放行观战火力/异队
+//   击毁 —— 而 EXPLO_FF (sf_explo_ff, 默认开) 时代友军爆炸本就伤得到己方载具 (splashDamage/loiterDetonate
+//   三总口), 毁己方坦克却零击杀零得分零战报, 与步兵 die 链"友军击杀照常记账" (18-game, 无队属门) 劈叉。
+//   现与步兵链对齐: **任何**有归属击毁都记账记分 (含友军 FF); 唯一排除=自毁 (attacker===驾驶员本人 ——
+//   与步兵链 attacker!==this 的"自炸不给杀"同规, 自己炸掉自己坐的车不得 +3 杀)。飞机/舰艇两处同构写点同批对齐。
+//   观战火力 (coFfFire 三态) 自然落入"任何有归属"分支, 2026-09-17/11-13 两批的记分语义不变。
+if(attacker&&attacker!==driver){
 // ★2026-11-28 票账批 (用户裁定): 车体杀 = 车体票 = TICKET_COST.tank(3) —— 毁一辆坦克一律 +3 杀 (有人/空车
 //   同价); 有人车的驾驶员另走自己的死亡链 +1 杀 ⇒ 有人车整损 4 杀。取代旧"车体不记杀"口径 (空车 0 杀)。
 attacker.kills=(attacker.kills||0)+TICKET_COST.tank;

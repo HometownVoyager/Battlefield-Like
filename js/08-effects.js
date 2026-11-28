@@ -1201,7 +1201,11 @@ function _fireTaken(key){
 }
 function _fireCandAlive(c){
   if(c.kind==='smoke') return typeof SMOKES!=='undefined'&&SMOKES.indexOf(c.src)>=0&&c.src.incin&&c.src.t<c.src.dur-0.5;
-  if(c.kind==='fs') return c.src.ttl>0;
+  // ★2026-11-28 修 (用户实报"上一局油桶的火焰光残留"): 'fs' 候选必须仍**在 FIRE_SOURCES 活账里**才算活 ——
+  //   旧判据只看 src.ttl>0, 而换局 clearMatchEffects 是 FIRE_SOURCES.length=0 整表清账, 旧火源**对象**的 ttl
+  //   从此冻结不再递减 (没人 tick 它了) ⇒ 分配槽里的旧候选被判"永远活着", 灯池在新局重建后被旧候选占位,
+  //   上一局的火光原位常亮 (smoke/cell 两档本就有成员资格检查, 唯 fs 漏配对)。indexOf 才是真活判据。
+  if(c.kind==='fs') return typeof FIRE_SOURCES!=='undefined'&&FIRE_SOURCES.indexOf(c.src)>=0&&c.src.ttl>0;
   return typeof FIRE_ACTIVE!=='undefined'&&FIRE_ACTIVE.indexOf(c.ci)>=0;
 }
 // 活取候选当前位置 (候选只存 src 引用不烤死坐标 —— addFireSource 的 follow 源随舰航行,

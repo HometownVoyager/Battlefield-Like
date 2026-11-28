@@ -98,7 +98,7 @@ function ok(cond,label){
 if(cond){ PASS.push(label); console.log('  ✔ '+label); }
 else { FAILN++; console.log('  ✘ '+label); }
 }
-ok(/__sfStyleVer='202611(1[89]|2[0-9])[a-z]'/.test(html),'前置: 版本戳 20261118x-20261129x 在位 (index.html 内联, 正则兼容本批升戳; 2026-11-28 批扩窗 20261128a)');
+ok(/__sfStyleVer='202611(1[89]|2[0-9])[a-z]'/.test(html),'前置: 版本戳 20261118x-20261129x 在位 (index.html 内联, 正则兼容本批升戳; 2026-11-28 批扩窗 20261128b)');
 
 // ── 源码钉 (无需 boot) ──
 const s07=srcOf('js/07-nav.js'),s03=srcOf('js/03-terrain.js'),s15=srcOf('js/15-vehicles.js'),

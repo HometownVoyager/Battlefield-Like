@@ -582,6 +582,17 @@ showScorePop('落地 · 行走状态');
 //   player.team 全程不动 ⇒ 附身敌我 Bot 都只是"借眼睛", 结算阵营恒为开局阵营。
 function enterSpecView(){
 if(typeof matchOver!=='undefined'&&matchOver) return;
+// ★2026-11-28 修 (用户实报"观战模式下按 ESC 导致重部署页面 UI 残留"): 自由观战中按 ESC 呼出的部署页, 唯一
+//   出口「观 战」按钮 (deployBtn.onclick 票尽分流, 22-hud) 走的也是本函数 —— 而视模式里 spectator/specView
+//   早已置真, 旧进门门 `player.alive||player.spectator` 把这次重进当非法入**静默早退**: 部署页收不掉、指针不
+//   回锁, 玩家被留在重部署页面上 (24-main 逐帧保活还把按钮钉在「观 战」—— 点了没反应)。重进 = 幂等收尾:
+//   只收屏 + 回锁, 不重放入场段 (相机种子位/killcam/提示词都是首入一次性账, 重刷反而跳机位/刷屏)。
+if(player.specView&&!player.alive){
+document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+if(typeof syncDeployHud==='function') syncDeployHud();
+if(typeof lockPointer==='function') lockPointer();
+return;
+}
 if(player.alive||player.spectator) return;
 if(tickets[player.team]>0) return;               // 还有票 ⇒ 只能走正常部署 (按钮此时就是「部署」)
 if(player.specWant===true) return;               // 调试观战待生效 ⇒ 那条路走部署入场, 不进视模式

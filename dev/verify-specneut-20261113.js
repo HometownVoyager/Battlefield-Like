@@ -66,9 +66,10 @@ const NEG_PATCHES=[
 ['js/13-combat.js','planeHitTest(origin,dir,wallD,coFfFire(shooter)?-1:shooter.team);','planeHitTest(origin,dir,wallD,shooter.team);'],
 // N3 投掷物出手 team=-1 盖章拆: T4 红
 ['js/13-combat.js','thrower,team:(thrower.spectator?-1:thrower.team),','thrower,team:thrower.team,'],
-// N4 载具击杀归因 coFfFire 拆 (战机+坦克两处): T5 红
-['js/16-aircraft.js','if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){','if(attacker&&(attacker.ffAll||attacker.team!==this.team)){'],
-['js/15-vehicles.js','if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){','if(attacker&&(attacker.ffAll||attacker.team!==this.team)){'],
+// N4 载具击杀归因记账拆 (战机+坦克两处): T5 红 (★2026-11-28 友伤记账批跟走: 门已改"任何有归属击毁
+//   +自毁排除" — from 换新门行, to 仍回 2026-11-13 前的 ffAll||异队 窄门, 观战步战火力毁车不再记分=T5 红)
+['js/16-aircraft.js','if(attacker&&attacker!==_pilot){','if(attacker&&(attacker.ffAll||attacker.team!==this.team)){'],
+['js/15-vehicles.js','if(attacker&&attacker!==driver){','if(attacker&&(attacker.ffAll||attacker.team!==this.team)){'],
 // N5 残骸建筑扫掠拆: T6 红 (穿楼落地)
 ['js/16-aircraft.js','if(_wkmv>0.01){','if(false){'],
 // N6 撞楼死亡位拉回拆: T7 红 (残骸出生在墙内)
@@ -358,7 +359,9 @@ ok(t4.plainGroundBlow===true,'T4 阴性: 非观战 AT雷对己方坦克照旧穿
 }
 
 // ══ T5 载具击杀归因: 观战步战火力照常记分 ══
-console.log('T5 击杀归因: Plane.die(attacker) 门收进 coFfFire —— 观战毁"己方"战机 kills+1, 非观战阴性');
+// ★2026-11-28 友伤记账批跟走: 门改"任何有归属击毁+自毁排除" (attacker!==_pilot) —— 观战/非观战毁"己方"
+//   载具**都记账** (旧"非观战不记分"阴性随 EXPLO_FF 时代推翻), 见下方阴性翻转注释。
+console.log('T5 击杀归因: Plane.die(attacker) 记账门 —— 观战毁"己方"战机 kills+3, 非观战同账+3');
 const t5=G(`(function(){
 try{
 var pl=planes.find(function(p){return p.team===player.team;});
@@ -379,7 +382,10 @@ return {k0:k0,specK:specK,plainK:plainK};
 if(t5.err){ ok(false,'T5 异常 '+t5.err); }
 else{
 ok(t5.specK===t5.k0+3,'T5 ★观战火力毁"己方"战机照常记分 (kills '+t5.k0+' → '+t5.specK+') —— 归因补齐核心判据 (判据跟走 2026-11-28 票账批: Plane.die 车体杀+3, 旧口径+1)');
-ok(t5.plainK===t5.specK,'T5 阴性: 非观战玩家毁己方战机不记分 (旧门未写死拆掉, kills 保持 '+t5.plainK+')');
+// ★2026-11-28 友伤记账批跟走 (用户实报"炸毁己方坦克没有记录和得分"): 旧阴性"非观战毁己方载具不记分"
+//   是 11-13 当年"观战中立"批的口径, 随 EXPLO_FF 时代友军爆炸可伤己方载具与步兵链无队属门记账被本批
+//   **有意推翻** (空机 attacker!==_pilot=null ⇒ +3)。阴性改为"与观战档同账"。
+ok(t5.plainK===t5.specK+3,'T5 阴性翻转: 非观战毁己方战机**照常记账** +3 (kills '+t5.specK+' → '+t5.plainK+'; 20261128b 友伤记账批, 旧"不记分"口径作废)');
 }
 
 // ══ T6 残骸建筑扫掠: 楼顶迫降 ══
@@ -567,9 +573,11 @@ ok(s22.includes('if(SQUAD.members.length&&player.deployed&&!player.spectator){')
 ok(s23.includes("(typeof solMapDotColor==='function')?solMapDotColor(s):")&&s23.includes("(typeof spawnEdgeOk!=='function'||spawnEdgeOk(wx,wz))"),'T11 锚4 23-deploy 部署图着色单源+小队铺开离边门在位');
 ok(s13.includes('planeHitTest(origin,dir,wallD,coFfFire(shooter)?-1:shooter.team);'),'T11 锚5 13-combat 对空链观战放行在位');
 ok(s13.includes('thrower,team:(thrower.spectator?-1:thrower.team),'),'T11 锚6 13-combat 投掷物出手中立盖章在位');
-ok(s15.includes('if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){'),'T11 锚7 15-vehicles 坦克归因 coFfFire 在位');
-ok(s16.includes('if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){'),'T11 锚8 16-aircraft 战机归因 coFfFire 在位');
-ok(s15d.includes('if(attacker&&(coFfFire(attacker)||attacker.team!==this.team)){'),'T11 锚9 15d-naval 舰艇归因 coFfFire 在位');
+// ★2026-11-28 友伤记账批跟走: 三处门改"任何有归属击毁+自毁排除" (attacker!==driver/_pilot/船上玩家)
+//   — 旧 coFfFire||异队 锚随之退役, 新锚保住同一语义 (有归属毁车必记账, 观战火力记分语义由新门自然覆盖)
+ok(s15.includes('if(attacker&&attacker!==driver){'),'T11 锚7 15-vehicles 坦克归因记账门在位 (20261128b 跟走)');
+ok(s16.includes('if(attacker&&attacker!==_pilot){'),'T11 锚8 16-aircraft 战机归因记账门在位 (20261128b 跟走)');
+ok(s15d.includes('if(attacker&&attacker!==(this.playerDriven?player:null)){'),'T11 锚9 15d-naval 舰艇归因记账门在位 (20261128b 跟走)');
 ok(s16.includes('if(_wkmv>0.01){')&&s16.includes('_plSwHit.t=_wkmv+(w.size||3)*1.5;'),'T11 锚10 16-aircraft 残骸建筑扫掠在位');
 ok(s16.includes('this.pos.set(_plSwHit.x-_plSwD.x*0.5,_plSwHit.y-_plSwD.y*0.5,_plSwHit.z-_plSwD.z*0.5);'),'T11 锚11 16-aircraft 撞楼死亡位拉回在位');
 ok(s16.includes('size:this.def.size, ageT:0')&&s16.includes("if(w.state==='fall'&&w.pos.y<=gh+0.6){"),'T12 锚12 残骸 size/ageT 账+地面档 state 门在位');
