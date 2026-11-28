@@ -333,16 +333,21 @@ const I18N_EN={
 '<b>F</b> 上炮 · <b>B</b> 靠近回收':'<b>F</b> man mortar · <b>6</b> recover near it',
 '观战中 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(空格加速·右键瞄准) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌':'Spectating · <b>double-tap Space</b> hover · <b>H</b> glide (Space dash · RMB aim) · <b>LMB</b> fire · secondary = semi-auto sniper · invulnerable · undetected',
 '<b>左键</b> 发射巡飞弹(TV制导) · <b>6</b> 燃烧弹':'<b>LMB</b> launch loiter round (TV) · <b>6</b> incendiary',
-'<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点':'<b>N</b> piece: {0} ({1} pts) · <b>B</b> build · <b>6</b> deploy mortar · {2} left',
-'<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点':'<b>N</b> piece: {0} ({1} pts) · <b>B</b> build · <b>6</b> recover mortar · <b>F</b> man it · {2} left',
+'<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点':'<b>N</b> piece: {0} ({1}) · <b>B</b> build · <b>6</b> deploy mortar · {2} left',   // ★20261128d: 价格位改双价串 (ZP 定价件显 N·ZP / 其余 N点), 词典键随调用点同步
+'<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点':'<b>N</b> piece: {0} ({1}) · <b>B</b> build · <b>6</b> recover mortar · <b>F</b> man it · {2} left',
+'<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · 剩 {2} 点':'<b>N</b> piece: {0} ({1}) · <b>B</b> build · {2} left',   // ★20261128d: 丧尸非工程兵无迫击炮短句 (提示行走 engMenuList 双价串)
 '<b>F</b> 拿取绷带':'<b>F</b> take bandages',
 '迫击炮已架设 (F 上炮 · 6 靠近回收)':'Mortar deployed (F man · 6 recover near it)',
 '需靠近自己的迫击炮才能回收':'Move closer to your mortar to recover it','迫击炮已回收':'Mortar recovered',
 '此处无法架设':'Cannot emplace here',   // 2026-09-26: 迫击炮落点门 (06-engineering deployMortar) 的提示
-'建造点数不足 ({0}/{1}) — 弹药箱旁按F补给可回满':'Not enough build pts ({0}/{1}) — resupply at an ammo crate',
+'建造点数不足 ({0}/{1})':'Not enough build pts ({0}/{1})',   // ★20261128d: "弹药箱旁按F补给可回满"假话摘除 (旧词条随调用点一并换新键)
 '此处无法建造':'Cannot build here','超出战场边界':'Outside the battlefield',
-'建造中: {0} … (移动取消)':'Building: {0} … (move to cancel)','位置被占用, 建造取消':'Spot taken, build cancelled',
+'建造中: {0} … (X/移动取消)':'Building: {0} … (X/move to cancel)','位置被占用, 建造取消':'Spot taken, build cancelled',   // ★20261128d: X 取消并进口径 (键值两侧同步换, 否则英文回退穿帮)
 '{0} · 建成 (剩余 {1} 点)':'{0} · built ({1} pts left)',
+'{0} · 建成 +{1}分 (剩余 {2} 点)':'{0} · built +{1} score ({2} pts left)',   // ★20261128d: 建造得分版弹字 (有扣账件才走这条)
+'ZP 不足 ({0}/{1}) 且建造点不足 ({2}/{3})':'Not enough ZP ({0}/{1}) nor build pts ({2}/{3})',   // ★20261128d: 丧尸 ZP 优先+建造点兜底 双不足合并提示 (旧 'ZP 点数不足…' 词条随调用点废止)
+'ZP 已不足 · 改扣建造点':'ZP ran out · paying build pts',   // ★20261128d: exec 端转扣兜底弹字
+'击杀×25 · 建造点 +1':'25 kills · build pt +1',   // ★20261128d: 建造点池击杀奖励弹字
 // 读条回收 (2026-09-28 阶段三 P1)
 '拆除中: {0} … (受击/移动取消 · 再按B加快)':'Demolishing: {0} … (hit/move cancels · press B to speed up)',   // ★2026-10-30 读条交互批: 同键再按=加快不取消
 '回收中: 迫击炮 … (受击/移动取消 · 再按6加快)':'Recovering: mortar … (hit/move cancels · press 6 to speed up)',
@@ -661,7 +666,7 @@ const I18N_EN={
 '交还控制':'controls returned',
 '已收藏种子: {0}':'Seed favorited: {0}',
 '已取消收藏':'Favorite removed',
-'ZP 点数不足 ({0}/{1}) — 击杀丧尸 / 占领旗点可得':'Not enough ZP ({0}/{1}) — kill zombies / capture flags to earn',
+// ★20261128d 词条废止: 'ZP 点数不足 ({0}/{1}) — 击杀丧尸 / 占领旗点可得' → 合并进 'ZP 不足 ({0}/{1}) 且建造点不足 ({2}/{3})' (ZP优先+建造点兜底)
 '[战地整备受限: 需在友方补给箱 2.8m 内方可调配装备]':'[Field refit restricted: within 2.8m of a friendly supply crate]',
 '调试模式不可在战地整备中切换':'Debug mode cannot be toggled during field refit',   // ★2026-11-20 补 ④批欠账: 22-hud 战地整备调试开关拦截提示的 EN 配对 (原缺)
 '[补给站整备完成: 换装已生效]':'[Supply station refit complete: loadout applied]',

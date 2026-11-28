@@ -61,12 +61,12 @@ assert('14 换弹真扣备弹 (主武器+手枪双账, 槽位三账同步写)',
  s14.includes('const _take=Math.min(_need,_s0.reserve);')&&s14.includes('const _take=Math.min(_need,_s1.reserve);')
  &&s14.includes('_s0.mag=this.mag; _s0.reserve=Math.max(0,_s0.reserve-_take);')
  &&s14.includes('_s1.mag=this.pMag; _s1.reserve=Math.max(0,_s1.reserve-_take);'));
-assert('14 开火槽位账同步 (aimShot 主/副 + AT 枪 + 迫击炮 + 舰船反坦克枪 ≥4 处)',
- (s14.match(/this\.slots\[0\]\.mag=this\.mag/g)||[]).length>=3
+assert('14 开火槽位账同步 (aimShot 主/副 + AT 枪 + 迫击炮 + 舰船反坦克枪 — ★20261128d 手抛迫击炮死分支删除 (8→5 合并无 Bot 主武器带 mortar), 其槽位账同步副本随之摘除, 计数判据 3→2 跟走)',
+ (s14.match(/this\.slots\[0\]\.mag=this\.mag/g)||[]).length>=2
  &&s14.includes('if(this.slots&&this.slots[1]) this.slots[1].mag=this.pMag;')
  &&s14.includes('if(b.slots&&b.slots[0]) b.slots[0].mag=b.mag;'));
-assert('14 换弹起手全部过 canReload 门 (备弹尽不再起永久 reloadT 循环)',
- (s14.match(/canReload\(\)/g)||[]).length>=6
+assert('14 换弹起手全部过 canReload 门 (备弹尽不再起永久 reloadT 循环 — ★20261128d 死分支 canReload 副本随之摘除, 计数判据 6→5 跟走)',
+ (s14.match(/canReload\(\)/g)||[]).length>=5
  &&s14.includes('canReload(){'));
 assert('14 弹尽寻补给 (drySeekSupply: 箱≤45m / 舰箱跳过 / 搜刮保底 10s) + toSupply 执行段 + decide 承诺门',
  s14.includes('drySeekSupply(){')&&s14.includes("if(ac.ship) continue;")
@@ -126,12 +126,12 @@ assert('22 附身投掷物行带宿主雷账 (旧"只显绷带"口径已扩)',
 assert('20a 玩家迫击炮位逐帧蹲姿兜底 (updatePlayerMortar)',
  srcOf('js/20a-seats.js').includes('p.crouch=true; p.prone=false;   // 命中体 parity (2026-11-03)'));
 
-// 版本戳 (随批升 20261128c: index.html 全量 + __sfStyleVer + _game_files 全行)
+// 版本戳 (随批升 20261128d: index.html 全量 + __sfStyleVer + _game_files 全行)
 const idx=SRC('index.html'), gf=SRC('dev/_game_files.txt');
-const stamps=[...idx.matchAll(/20261128c/g)].length;
-assert('版本戳 20261128c: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
- stamps>=44&&idx.includes("window.__sfStyleVer='20261128c';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128c')).length===45
+const stamps=[...idx.matchAll(/20261128d/g)].length;
+assert('版本戳 20261128d: index.html 全量唯一 + __sfStyleVer + _game_files 全行 (2026-11-10 海战移除批判据跟码)',
+ stamps>=44&&idx.includes("window.__sfStyleVer='20261128d';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128d')).length===45
  &&!idx.includes('20261102b')&&!gf.includes('20261102b'));
 }
 

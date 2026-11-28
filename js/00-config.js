@@ -1215,6 +1215,13 @@ let PERF_OPT=(function(){ const v=parseInt(localStorage.getItem('sf_perfopt'),10
 // 主炮/同轴机枪开火 / 下车 / 起火 / 远离补给点 (1.35×R 迟滞) / 单次受伤 >VEH_REPAIR_DMG_FRAC×maxHp。
 // Bot 坦克不修理 (无人要求)。读条 UI 复用 22-hud _demolishBar, 账挂 player.vehRepair (进 readBarActive 取消网)。
 const VEH_REPAIR_R=5.5, VEH_REPAIR_TIME=8, VEH_REPAIR_HEAL=0.25, VEH_REPAIR_DMG_FRAC=0.26, VEH_REPAIR_MOVE=0.6;   // ★2026-11-20 批 (用户令⑤): 维修起始距离 4.5→5.5 略微放宽 (远离迟滞 1.35×R=7.4 自动跟随, 玩家/Bot 两路门同源)
+const ENG_VEH_REPAIR_R=3.2;   // ★20261128d 工程兵场外维修 (用户令"和补给箱附近维修机制相同"): 步行工程兵贴近受损友军坦克按 R 起修 (18-game tryEngVehRepair), 起步半径 3.2m (远离迟滞 1.35×R=4.3); 读条时长/治疗量/打断网与箱修同源 (同账 player.vehRepair)
+// ★20261128d 建造点池 (用户令): 初始 10/局 (不论兵种), 上限 工程兵 15 / 其他 10; 回复 60 秒/点 + 每 25 击杀/点;
+//   拆除自己工事无损退款 (封顶截断); 复活/换兵不刷新 (换兵种仅隐藏仍保留)。
+const BUILD_POOL_INIT=10, BUILD_POOL_CAP=10, BUILD_POOL_CAP_ENG=15, BUILD_POOL_REGEN_SEC=60, BUILD_POOL_KILL_STEP=25;
+// ★20261128d 工程兵车内修理时长系数 (用户令"略微"): 有补给箱 ×0.8 (比普通修快), 无补给箱 ×1.25 (略慢);
+//   其他兵种仍须补给箱原 8s; 所有修理另按损血比例缩时 (损血<25%=VEH_REPAIR_HEAL 线性, 分母单源)。
+const ENG_REPAIR_MUL_CRATE=0.8, ENG_REPAIR_MUL_FIELD=1.25;
 // 动态换弹时长系数单源: 关=1 (原时长); 开=clamp(已耗/容量,0,1)。已耗<=0 (满弹匣, 正常被换弹门拦) 或容量非法回退 1, 防零时长瞬间换弹
 function dynReloadFac(mag,cap){ if(!DYN_RELOAD||!cap||cap<=0) return 1; const used=cap-Math.max(0,mag); return used<=0?1:clamp(used/cap,0,1); }
 const THEMES={
@@ -1817,7 +1824,7 @@ const EM_CAST_DUR=0.9;   // 固定火力点使用前摇 (玩家 20-player 与 Bo
 // ===== 记分/票数单源 (2026-09-06 B7a/P2-9: 原散布 6 文件的结算字面量收拢) =====
 // smoothstep 单源 (2026-09-06 B7a/P3-8: 旧 03-terrain/06-engineering ≥9 处内联 t*t*(3-2*t))
 const sstep=t=>t*t*(3-2*t);
-const SCORE_TABLE={kill:100,head:125,tank:300,plane:300,truck:150,flag:150,depot:35,flagReturn:10,medkit:10};   // ★2026-11-28 票账批 (用户裁定): plane 250→300 —— 坦克/飞机车体毁伤统一 300 分
+const SCORE_TABLE={kill:100,head:125,tank:300,plane:300,truck:150,flag:150,depot:35,flagReturn:10,medkit:10,build:50};   // ★2026-11-28 票账批 (用户裁定): plane 250→300 —— 坦克/飞机车体毁伤统一 300 分; ★20261128d: build=50/建造点 = 工程建造落成得分单价 (engBuildExec 单源: 实得分=(BUILD_COST[type]||1)×本值, 用户二令"需要建造点数*50"; 只给实际扣账件)
 // ★2026-11-17 批11 (用户裁定): 坦克本身一律占 3 票 (不分轻重/有人无人) —— 车体装备票, 与乘员人命票
 //   (各 1 票, 见 CREW_TICKET_EACH) 分开记。旧口径: 有人车 0 装备票 / 空车 5~6 装备票。
 const TICKET_COST={tank:3,plane:3};

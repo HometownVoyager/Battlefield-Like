@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// dev/verify-keys-rotation-20261128.js —— 2026-11-28 键位轮换批 (戳 20261128c):
+// dev/verify-keys-rotation-20261128.js —— 2026-11-28 键位轮换批 (戳 20261128d):
 //   用户令: 投掷/近战/选号键组 3→4→5→N 循环一圈 —— 3=军刀(原N) / 4=AT雷(原3) / 5=烟雾+反坦克兵
 //   火箭筒切换(原4, 整块搬) / N=工程兵选工事型号(原5); **6 (燃烧弹/迫击炮) 与 G (普通手雷) 不动**。
 //   改动面 (全库盘点): ①19-input 四块 e.code 轮换 + 块内 barStealArmed 键标识跟走 + keyup 持掷松手
@@ -110,7 +110,7 @@ if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
 G('pointerLocked=true;');   // 19-input 战斗键总门 (!alive||!pointerLocked, :208) — 沙箱无 pointerlockchange, 直置 (throwq 批同款)
 G('__step(3);');            // 等 VM 回 idle (部署装备链跑完)
-ok(html.includes("__sfStyleVer='20261128c'"),'前置: 版本戳 20261128c 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128d'"),'前置: 版本戳 20261128d 在位 (index.html 内联)');
 
 // ══ T0 源码锚 ══
 console.log('T0 源码锚');
@@ -133,7 +133,8 @@ ok(i5>=0&&iSM>i5&&s19.slice(i5,i5+40).includes('观战不切火箭筒'),'T0c ★
 ok(i5>=0&&iRK>i5&&iRK<s19.indexOf("if(e.code==='Digit6')"),'T0c2 ★反坦克兵 cls3 火箭筒切换分支随块搬入 Digit5 (原 4 键整块语义)');
 }
 // ④ 工程选号 = KeyN (原 Digit5)
-ok(s19.includes("if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){")&&s19.includes('player.buildSel=((player.buildSel||0)+1)%BUILD_MENU.length;'),'T0d ★工程选号块挂 KeyN (cls4||ZOMBIE 门原样)');
+ok(s19.includes("if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){")&&s19.includes('const _ml=engMenuList(player);')&&s19.includes('player.buildSel=((player.buildSel||0)+1)%_ml.length;'),'T0d ★工程选号块挂 KeyN (cls4||ZOMBIE 门原样; ★20261128d 循环走 engMenuList 单源=丧尸非工程兵只基础三件)');
+ok(!s19.includes('%BUILD_MENU.length'),'T0d3 旧全量菜单循环 %BUILD_MENU.length 绝迹 (负向; 菜单收窄走 engMenuList)');
 ok(!s19.includes("if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE))"),'T0d2 旧 Digit5 选号门绝迹 (负向)');
 // ⑤ keyup 持掷松手列表 (D3,D4,D6)→(D4,D5,D6)
 ok(s19.includes("if((e.code==='Digit4'||e.code==='Digit5'||e.code==='Digit6')&&player.nadeHeld){"),'T0e ★keyup 持掷松手列表改 D4/D5/D6 (4=AT 5=烟雾 6=燃烧)');
@@ -148,7 +149,7 @@ ok(s23.includes("t('AT雷[4]×{0}'")&&s23.includes("t('烟雾弹[5]×{0}'")&&s23
 ok(s20p.includes("t2('<b>N</b> 工事: {0}")&&!s20p.includes('<b>5</b> 工事'),'T0j ★20-player 工程 HUD 常驻提示 5→N (旧锚绝迹)');
 // ⑨ 词典键值同步 (key 即中文原文, 词典与调用点必须同步改 —— 只改一侧=英文回退穿帮)
 ok(s00b.includes("'AT雷[4]×{0}'")&&s00b.includes("'烟雾弹[5]×{0}'")&&s00b.includes("'AT雷[4] ×{0}'")&&s00b.includes("'烟雾[5] ×{0}'")&&!s00b.includes("'AT雷[3]×{0}'")&&!s00b.includes("'烟雾弹[4]×{0}'"),'T0k ★i18n 弹种键号词条四处同步 (旧键绝迹)');
-ok(s00b.includes("'<b>N</b> 工事: {0} ({1}点)")&&s00b.includes("'G / 4 / 5 / 6'")&&s00b.includes("'烟雾(5) / 工程兵选工事(N)'")&&s00b.includes("'AT雷(4)'")&&s00b.includes("'近战(军刀)'"),'T0k2 ★i18n 工程提示/键位帽/十字键说明/近战帽词条同步');
+ok(s00b.includes("'<b>N</b> 工事: {0} ({1})")&&s00b.includes("'G / 4 / 5 / 6'")&&s00b.includes("'烟雾(5) / 工程兵选工事(N)'")&&s00b.includes("'AT雷(4)'")&&s00b.includes("'近战(军刀)'"),'T0k2 ★i18n 工程提示/键位帽/十字键说明/近战帽词条同步 (★20261128d 价格位双价串改键: ({1}点)→({1}), 词典随调用点同步)');
 // ⑩ index.html 两套说明面板 + 06 注释
 ok(html.includes('<span class="hkKey" data-i18n>3</span><span class="hkDesc" data-i18n-html>近战(军刀)')&&html.includes('<span class="hkKey" data-i18n>4</span><span class="hkDesc" data-i18n-html>反坦克雷')&&html.includes('<span class="hkKey" data-i18n>5</span><span class="hkDesc" data-i18n-html>烟雾弹')&&html.includes('<span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>切换工事'),'T0l ★index.html 说明面板键帽轮换 (近战3/AT4/烟雾5/工事N)');
 ok(html.includes('G / 4 / 5 / 6')&&html.includes('<b>4</b> AT雷 · <b>5</b> 烟雾弹')&&html.includes('烟雾(5) / 工程兵选工事(N)')&&html.includes('按<b>N</b>选到后'),'T0l2 ★index.html 调试模式四弹种/手柄十字键/医疗箱说明同步');

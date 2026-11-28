@@ -282,6 +282,9 @@ return;
 //   (旧版 R 在任何座位都被 tryReload 的座位门吞成 no-op, 无冲突)。重按不重启 (tryVehRepair 内早退);
 //   X 键取消 (readBarActive 已含 vehRepair, 下面的 KeyX 分支照常覆盖)。
 if(e.code==='KeyR'&&player.onVehicle&&player.onVehicle.kind==='tank'&&typeof player.tryVehRepair==='function'){ player.tryVehRepair(); return; }
+// ★20261128d 工程兵场外维修: R 优先于换弹 —— 贴受损友军坦克起步维修读条 (true=已起步/加速即吞键);
+//   不适用 (非工程/无目标/VM 非空闲) 回落 tryReload, 换弹与各读条双击确认网零损失。
+if(e.code==='KeyR'&&!player.onVehicle&&player.cls===4&&typeof player.tryEngVehRepair==='function'&&player.tryEngVehRepair()) return;
 if(e.code==='KeyR') tryReload(true);
 if(e.code==='KeyC'&&!player.loiter){ if(player.onVehicle&&(player.onVehicle.kind==='tank'||player.onVehicle.kind==='ghost')){ player.tankView=!player.tankView; } else if(!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.crouch=!player.crouch; player.prone=false; player._autoCrouch=false; player._autoProne=false; } }   // !player.loiter: 操控巡飞弹本体定身; ★11-18: 手动 C 夺回姿态控制权 (顶头自动压下帧再顶回); ★11-18c: 同时清自动趴旗; ★2026-11-21 批B#6: 座位上不给切蹲姿 (MG/AT/AA/迫击炮与飞机等 onVehicle 座位 — 上炮瞬间强制 crouch=false 的口径, 下炮不残留蹲姿; 海战/岸防炮已在上游座位门拦死)
 if(e.code==='KeyZ'&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){ player.prone=!player.prone; if(player.prone){ player.crouch=false; player.braced=false; } player._autoProne=false; player._autoCrouch=false; }   // !player.loiter: 操控定身; ★11-18c: 手动 Z 夺回姿态控制权 + 清自动蹲/趴旗
@@ -463,12 +466,14 @@ if((player.cls===4||ZOMBIE_MODE)&&!player.onVehicle&&!player.onMG&&!player.onAT&
 // ★2026-10-30 用户裁定②: 拆除/回收读条中再按 B = **极少加快** (推进 DEMOLISH_T 的 2.5%), 不再取消 ——
 //   取消仍有 X / 左键 / 受击>25 / 走远 (>3.6m updateDemolish 自收)。
 if(player.demolish){ player.demolish.t+=DEMOLISH_T*BAR_PRESS_BOOST; }
+else if(player.pendingBuild){ if(typeof VM!=='undefined'&&VM.state==='build') VM.stateT=Math.min(VM.stateDur,(VM.stateT||0)+VM.stateDur*BAR_PRESS_BOOST); }   // ★20261128d: 建造同键再按=极少加快 (VM.stateT 同时驱动锤击动画与落成, 通用读条口径; X/移动取消照旧)
 else { const nb=nearOwnBuild(player); if(nb){ if(!player.barStealArmed('KeyB')) return; player.stealBar(); startDemolish(player,nb); } else engBuild(player); }   // ★2026-10-25 反馈轮①: 拆除起步前抢读条 (nb 找到=确认起步); 建造的抢占在 engBuild 全部早退之后 (06-engineering) —— ★2026-10-30: 两条路都改双击确认
 }
 }
 if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){
-player.buildSel=((player.buildSel||0)+1)%BUILD_MENU.length;
-const bt=BUILD_MENU[player.buildSel];
+const _ml=engMenuList(player);   // ★20261128d 丧尸菜单收窄单源 (engMenuList): 非工程兵只循环基础三件
+player.buildSel=((player.buildSel||0)+1)%_ml.length;
+const bt=_ml[player.buildSel];
 const bn=bt==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt];
 // 消耗提示单源 (2026-10-28): 商店三件读 BUILD_ZP (ZP 点), 其余读 BUILD_COST (建造点) ——
 // 旧版 tower/ammoc 查 BUILD_COST 落空 ⇒ "消耗undefined点"。

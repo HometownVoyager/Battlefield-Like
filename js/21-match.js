@@ -146,6 +146,31 @@ matchEndPending=winner; matchEndT=MATCH_END_DELAY;
 //   "胜利在望/败局在即"是错的 —— 观战者不属于任何一方; 改出中性"胜方 X"。普通存活玩家保持原样。
 addKillMsg(t('胜负已定 · {0} · {1} 秒后结算',winner===-1?t('平局'):(player.spectator?t('胜方')+' '+t(TEAM_FACTION[winner].short):(winner===player.team?t('胜利在望'):t('败局在即'))),MATCH_END_DELAY),winner);
 }
+// ★20261128d 建造点池 tick (用户令): 每 60s 回 1 点 + 每 25 击杀回 1 点, 上限 工程兵15/其他10
+// (BUILD_POOL_*)。放 updateFlags 同层吃世界 dt —— 暂停/结算随 24-main 冻结分支整段跳过, 观战时停/
+// 布势冻结 dt=0 自然停走; 玩家死亡期间照常积累 (池是局级资产, "复活不刷新"同精神: 只回不受命 cycle 影响)。
+// 击杀账用 player.kills 阈值差值 (tank/plane 车体 +3 杀也按同一计数器走); 满池时阈值记号照常推进但
+// 不发点 (溢出丢弃, 与拆除退款封顶同口径)。
+function updateBuildPool(dt){
+if(typeof matchRunning!=='undefined'&&!matchRunning) return;
+if(!player||!player.deployed) return;
+const cap=player.cls===4?BUILD_POOL_CAP_ENG:BUILD_POOL_CAP;
+const km=Math.floor((player.kills||0)/BUILD_POOL_KILL_STEP);
+if(km>(player._poolKillMark||0)){
+player._poolKillMark=km;
+if((player.buildCount||0)<cap){
+player.buildCount=Math.min(cap,(player.buildCount||0)+1);
+showScorePop(t2('击杀×25 · 建造点 +1'));
+}
+}
+if((player.buildCount||0)<cap){
+player._poolT=(player._poolT||0)+dt;
+if(player._poolT>=BUILD_POOL_REGEN_SEC){
+player._poolT-=BUILD_POOL_REGEN_SEC;
+player.buildCount=Math.min(cap,(player.buildCount||0)+1);
+}
+}else player._poolT=0;
+}
 function updateFlags(dt){
 if(typeof matchRunning!=='undefined'&&!matchRunning) return;
 let owned=[0,0,0];

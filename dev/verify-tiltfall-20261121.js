@@ -80,7 +80,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261128c'"),'前置: 版本戳 20261128c 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128d'"),'前置: 版本戳 20261128d 在位 (index.html 内联)');
 
 // ══ T0 源码锚 ══
 console.log('T0 源码锚');

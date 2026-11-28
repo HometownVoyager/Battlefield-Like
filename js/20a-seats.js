@@ -57,8 +57,8 @@ const vr=p.vehRepair;
 if(vr.tank!==t||!t.alive||t.burning){ p.vehRepair=null; if(t.burning) showScorePop('维修被打断: 起火'); }
 else if(fwd!==0||Math.abs(t.vel)>VEH_REPAIR_MOVE){ p.vehRepair=null; showScorePop('维修被打断: 移动'); }
 else{
-let near=false;
-if(typeof AMMO_CRATES!=='undefined') for(const ac of AMMO_CRATES){ if(ac.ship) continue; if(Math.hypot(ac.x-t.pos.x,ac.z-t.pos.z)<=VEH_REPAIR_R*1.35){ near=true; break; } }
+let near=!!vr.noCrate;   // ★20261128d: 工程兵无箱车内修理 (18-game 起步记 noCrate) 免"远离补给点"打断 — 起修时就没箱, 距离门不适用 (移动/开火/起火/重伤/下车打断照常)
+if(!near&&typeof AMMO_CRATES!=='undefined') for(const ac of AMMO_CRATES){ if(ac.ship) continue; if(Math.hypot(ac.x-t.pos.x,ac.z-t.pos.z)<=VEH_REPAIR_R*1.35){ near=true; break; } }
 if(!near){ p.vehRepair=null; showScorePop('维修被打断: 远离补给点'); }
 else{
 vr.t+=dt;

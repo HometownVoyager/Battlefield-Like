@@ -122,7 +122,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261128c'"),'前置: 版本戳 20261128c 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128d'"),'前置: 版本戳 20261128d 在位 (index.html 内联)');
 
 // ══ T0 源码锚 (七任务全量) ══
 console.log('T0 源码锚');
@@ -158,7 +158,7 @@ ok(i18.includes("'截图：画面+小地图存入下载':'Screenshot: view + min
 ok(s05.includes('function barrelCrushBlast(x,z,veh){')&&s05.includes('veh.takeDmg(BARREL.crushVehDmg,null,true);'),'T0-④ barrelCrushBlast 单源+破甲伤 (05-world)');
 ok(s00.includes('crushVehDmg:400};'),'T0-④2 BARREL.crushVehDmg=400 (00-config)');
 ok(s15.includes('if(c&&!c.dead&&c.explosive){')&&s15.includes('barrelCrushBlast(c.x,c.z,T);'),'T0-④3 _tkCylCb 接触即爆前置 (15-vehicles, 早退之前)');
-ok(s06.includes("const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];")&&s06.includes('barrel:1};')&&s06.includes("else if(tk.type==='barrel'){")&&s06.includes('if(built&&RGRID.cylCells){'),'T0-④4 工兵油桶件 (06-engineering: 菜单/造价/执行/RGRID 直插)');
+ok(s06.includes("const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];")&&s06.includes('barrel:1,tower:3,ammoc:2};')&&s06.includes("else if(tk.type==='barrel'){")&&s06.includes('if(built) rgridAddLastCyl();')&&s06.includes('function rgridAddLastCyl(){'),'T0-④4 工兵油桶件 (06-engineering: 菜单/造价/执行/RGRID 直插 — ★20261128d 直插抽 rgridAddLastCyl 单源, 拒马共用)');
 ok(s05.includes('function barrelBlast(c,attacker){')&&s05.includes('killCyl(c);'),'T0-④5 barrelBlast 主体回归钉 (复用不复刻)');
 // ⑤ 巡飞
 ok(s13.includes('player.loiterView=player.thirdPerson?1:0;'),'T0-⑤ 发射视角播种 thirdPerson?1:0 (13-combat; ★极性 1=背追)');

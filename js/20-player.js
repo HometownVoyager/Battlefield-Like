@@ -1122,6 +1122,27 @@ if(p.flying){ p.stamina=1; specFlightMove(p,dt); playerFireTick(dt,true); update
 const fwd=cmdLock?0:(keys.KeyW?1:0)-(keys.KeyS?1:0);
 const str=cmdLock?0:(keys.KeyD?1:0)-(keys.KeyA?1:0);
 if(p.pendingBuild&&VM.state==='build'&&(fwd!==0||str!==0||keys.Space)){ cancelBuild(p); showScorePop('建造已取消'); }
+// ★20261128d 工程兵场外维修步行 tick (2026-11-16 箱修同账同规, 起步口 18-game tryEngVehRepair): 账同挂
+//   player.vehRepair ⇒ 22-hud 读条条 / cancelReadBar (X/受击>25/抢占) / Tank.takeDmg 重伤钩 /
+//   fireCannon·firePlayerMG 开火钩全自动共用; 这里只补步行侧三件: 移动输入打断 / 距离迟滞打断 /
+//   读条推进+完成结算 (完成回 VEH_REPAIR_HEAL×maxHp, 箱修同款文案)。前进/侧移/跳任一输入立即打断
+//   (vel 阻尼爬升慢, 与 20a 箱修 tick 同理由); 坐进任何座位后交回 20a 座位 tick 收口 (坦克不匹配/远离
+//   补给点两门自动清账), 步行分支不再接管。
+if(p.vehRepair&&!p.onVehicle&&!p.onNaval&&!p.onMG&&!p.onAT&&!p.onAA&&!p.onMortar&&!p.onBattery&&!p.loiter){
+const vt=p.vehRepair.tank;
+if(fwd!==0||str!==0||keys.Space){ p.vehRepair=null; showScorePop('维修被打断: 移动'); }
+else if(!vt.alive||vt.burning){ p.vehRepair=null; if(vt.burning) showScorePop('维修被打断: 起火'); }
+else if(Math.hypot(vt.pos.x-p.pos.x,vt.pos.z-p.pos.z)>ENG_VEH_REPAIR_R*1.35){ p.vehRepair=null; showScorePop('维修被打断: 远离坦克'); }
+else{
+p.vehRepair.t+=dt;
+if(p.vehRepair.t>=p.vehRepair.dur){
+p.vehRepair=null;
+vt.hp=Math.min(vt.maxHp,vt.hp+vt.maxHp*VEH_REPAIR_HEAL);
+showScorePop('维修完成 +25%');
+if(typeof AudioSys!=='undefined'&&AudioSys.metalSlide) AudioSys.metalSlide(0.5,0.4,260,120);
+}
+}
+}
 // ── 水体状态 (2026-09-18 塔拉瓦批, 全库通用; 与 Bot 同规则 —— 纲领第 2 条) ──
 // 涉水 (0.5~1.35m): 减速但可开火(精度下降); 游泳 (>1.35m): 浮于水面, 不可冲刺/卧倒/开火, Shift=下潜
 const WS=waterStateAt(p.pos.x,p.pos.y,p.pos.z);
@@ -1496,12 +1517,17 @@ if(player.loiter) tt=player.spectator
 :t2('<b>左键</b> 自爆 · <b>空格</b> 加速 · <b>右键</b> 开镜 · <b>鼠标</b> 制导 · <b>U</b> 切换视角');
 else if(player.spectator) tt=t2('调试模式 · <b>双击空格</b> 悬停飞行 · <b>H</b> 气动飞行(空格加速·右键瞄准) · <b>左键</b> 开火 · 副武器=观战连狙 · 免伤·不被索敌 · <b>F</b> 召唤幽灵坦克 · <b>Q</b> 附身准星Bot · <b>E</b> 脱离');
 	else if(player.onMortar) tt=t2('<b>左键</b> 发射 · <b>鼠标</b> 调弹道 · <b>F</b> 离开');
-	else if(player.cls===4){
-	const bt2=BUILD_MENU[player.buildSel||0];
+	else if(player.cls===4||ZOMBIE_MODE){
+	// ★20261128d 建造点池 + 丧尸菜单收窄: 丧尸非工程兵也见此行 (无迫击炮短句); 价格随计费显示
+	// (ZP 定价件显 '2ZP', 其余显 '1点'); 工事列表走 engMenuList 单源 (buildSel 越界回退首件)。
+	const _ml2=engMenuList(player);
+	const bt2=_ml2[player.buildSel||0]||_ml2[0];
 	const bn2=bt2==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt2];
-	tt=player.mortarPlaced
-	?t2('<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0))
-	:t2('<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0));   // ★2026-11-28 键位轮换: 选工事 5→N
+	const _cs=(ZOMBIE_MODE&&BUILD_ZP[bt2]!==undefined)?BUILD_ZP[bt2]+'ZP':BUILD_COST[bt2]+'点';
+	if(player.cls!==4) tt=t2('<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · 剩 {2} 点',t2(bn2),_cs,(player.buildCount||0));
+	else tt=player.mortarPlaced
+	?t2('<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点',t2(bn2),_cs,(player.buildCount||0))
+	:t2('<b>N</b> 工事: {0} ({1}) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点',t2(bn2),_cs,(player.buildCount||0));   // ★2026-11-28 键位轮换: 选工事 5→N
 	}
 	else if(isLoiterClass()) tt=t2('<b>左键</b> 发射巡飞弹(TV制导) · <b>6</b> 燃烧弹');
 }

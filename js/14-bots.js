@@ -2409,13 +2409,13 @@ const aimGate=dT>50?0.08:(dT>25?0.11:0.16);
 	if(Math.abs(angDiff(this.yaw,wantYaw))<aimGate){
 	if(!tgtVis){
 	// 压制射击: 朝最后目击位泼点射 (筒子/迫击炮保留弹药)
-	if(!this.def.rocket&&!this.def.mortar&&this.mag>0){
+	if(!this.def.rocket&&this.mag>0){
 	this.shootAtPos(V3(tp.x+rand(-1.6,1.6),tp.y+rand(0.2,1.4),tp.z+rand(-1.6,1.6)));
 	this.fireT=this.def.type==='auto'?60/this.def.rpm:rand(0.55,0.95);
 	this.supFireT-=0.4;
 	}
 	}
-	else if(this.def.rocket||(this.def.mortar&&dT<22)){
+	else if(this.def.rocket){
 // 反坦克兵/迫击炮兵近距离改用手枪自卫
 if(this.pReloadT<=0&&this.fireT<=0){
 if(this.pMag<=0&&(!this.slots||!this.slots[1]||this.slots[1].reserve>0)){ this.pReloadT=this.slots[1]?this.slots[1].def.reload*dynReloadFac(this.pMag,this.slots[1].def.mag):2; } // 动态换弹速度 (2026-11-12)
@@ -2425,29 +2425,9 @@ this.fireT=(60/this.slots[1].def.rpm)*rand(1.4,2.4);
 }
 }
 }
-else if(this.def.mortar){
-// 迫击炮曲射: 朝最后目击位吊射, 无需直瞄
-if(this.mag>0&&this.fireT<=0&&dT>22&&dT<100){
-const eye=this.eyePos();
-const tx=this.lastSeenPos.x+rand(-7,7), tz=this.lastSeenPos.z+rand(-7,7);
-const dist2=Math.hypot(tx-this.pos.x,tz-this.pos.z);
-// 2026-09-28 阶段三 P1: tof 单源化到 mortarArcTof (13-combat) —— 高抛越障 (顶点 3.7~11m),
-// 与玩家迫击炮座(emplMortarShell)同一支解算器; 旧 dist2/30 平抛会被田块缓坡/树篱半路吃掉 (取证见 _farm-block-probe)
-const tof=mortarArcTof(dist2);
-const dy=(heightAt(tx,tz)+0.05)-eye.y;   // 高差项 (2026-09-28): 落点解在任何地形恒精确
-const v=mortarVel(eye.x,eye.z,tx,tz,tof,dy);
-const m=new THREE.Mesh(nadeGeoAT,vmMats.gun);
-m.position.copy(eye); scene.add(m);
-nades.push({m,pos:eye.clone(),vel:v,fuse:9,thrower:this,team:this.team,spin:V3(4,0,1),bounces:0,mortar:true,src:'迫击炮'});
-AudioSys.mortarThunk(this.pos.distanceTo(camera.position));
-this.mag--;
-if(this.slots&&this.slots[0]) this.slots[0].mag=this.mag;   // 弹药账对齐 (2026-11-03)
-this.fireT=rand(4.5,6.5);
-if(this.mag<=0&&this.canReload()) this.reloadT=this.def.reload;
-this.mesh.armR.sh.userData.swing=0.3;
-this.crouch=true;
-}
-}
+// ★20261128d: 手抛迫击炮分支删除 —— 兵种 8→5 合并 (2026-09-28) 后没有任何 Bot 主武器带 mortar:true
+//   (工程兵 Bot 拿骑枪族, 丧尸/指挥官/实验模式均不改 Bot 配装), 本分支 2026-09-28 起恒不可达 = 死代码;
+//   Bot 曲射火力只走 MORTARS 架设-emplMount 链 (14-bots 防守分支)。压制/自卫两行的 def.mortar 谓词随之摘除。
 else if(this.def.type==='auto'){
 if(this.mag>0&&this.burstPause<=0){
 // 距离化点射节奏: 近距离长点射泼弹, 远距离两三发短点

@@ -82,10 +82,9 @@ MORTARS.splice(MORTARS.indexOf(m),1);
 // 还原的开局前缀下标零扰动。
 if(m.cp){ const i=coverPoints.indexOf(m.cp); if(i>=0) coverPoints.splice(i,1); }
 pl.mortarPlaced=false;
-// ★2026-09-26 修: 旧写法 `find(mortar) || slots[0]` 在"玩家身上已无迫击炮槽"时把 2 发炮弹记到**主武器**
-// (卡宾枪) 上 —— 回收看着成功, 弹药却毫无变化 (那 2 发等于凭空消失)。没有迫击炮槽就不补 (弹药不进错枪)。
-const w=pl.slots.find(s=>s&&s.def.mortar);
-if(w){ w.reserve=Math.min(w.reserve+2,w.def.reserve); }
+// ★20261128d: 2026-09-26 的"回收补 2 发炮弹"账删除 —— 兵种 8→5 合并后没有任何 slots 带 def.mortar
+// ( mounted 炮弹药无限, 20a-seats 只走 cd ), 原 find 永远落空 = 纯 no-op 残账 (当年修的"补进主武器"
+// 病根随合并消失; 未来若给工程兵回配迫击炮槽, 在此处按 w.def.reserve 顶格补弹即可)。
 if(pl.isPlayer){ showScorePop('迫击炮已回收'); AudioSys.click(600,0.22,0.05); }
 }
 // ── 读条回收 (2026-09-28 阶段三 P1, 用户提议): 工程兵对自己建的东西**读条拆除** ─────────────
@@ -182,7 +181,7 @@ for(let i=PROPS.length-1;i>=0;i--){ const e=PROPS[i]; if(Math.hypot(e.x-b.tx,e.z
 // pzGain(-zp), buildCount 从未扣过; 旧版一律 +b.cost = 150 ZP 蒸发还倒贴建造点); 其余退建造点。
 let back;
 if(b.zp>0){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(b.zp); back=b.zp+' ZP'; }
-else{ pl.buildCount=(pl.buildCount||0)+b.cost; back=b.cost+' 点'; }
+else{ pl.buildCount=Math.min(pl.cls===4?BUILD_POOL_CAP_ENG:BUILD_POOL_CAP,(pl.buildCount||0)+b.cost); back=b.cost+' 点'; }   // ★20261128d 建造点池退款封顶 (工程兵15/其他10; 满池拆除的溢出点丢弃)
 if(pl.isPlayer){ showScorePop(t2('{0} · 已拆除 (退还 {1})',t2(BUILD_NAMES[b.type]),back)); AudioSys.click(600,0.25,0.06); }
 // ★2026-11-19 卡顿审计批二: 拆除完成必须报 NAV —— 旧版从不 markNavDirty, 拆掉的拒马(killCyl 置旗,
 // 2026-11-21 P1-9 前是 CYLS.splice, 两者均无占用直写)/铁丝网(旗翻)/沙袋(killOne 直写但盲置 0)在 NAV
@@ -211,11 +210,19 @@ return g2;
 // 建造菜单 (2026-09-28 阶段三 P1): **医疗箱并入工程兵建造** (用户裁定医护兵删除, 医疗箱=第 5 件建造) ——
 // 建成的医疗箱与原医护兵放置的同一套 (17-emplacements placeMedkit: 8 次/120s, 同队取绷带), 建造点 2。
 const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];   // ★2026-11-28 批④b: 加"油桶"件 (1 建造点, 造得出也碾得爆 —— 15-vehicles _tkCylCb 接触即爆)
+// ★20261128d 丧尸菜单范围收窄 (用户裁定"非工程兵只留基础三件"): 全菜单=工程兵 (普通+丧尸); 丧尸非工程兵
+// 只见沙袋/铁丝/拒马 —— 机枪/医疗箱/油桶/瞭望塔/弹药箱回工程兵专属。普通模式非工程兵本就无菜单 (19-input 门)。
+// 25-zombies 丧尸局追加进 BUILD_MENU 的 tower/ammoc 对非工程兵不可见 (建账/退款/塔血量链路不动)。
+// 消费点: engBuild 选型 / 19-input KeyN 循环+选择提示 / 22-hud 菜单渲染 / 20-player 提示行。
+function engMenuList(pl){
+if(!ZOMBIE_MODE||!pl||pl.cls===4) return BUILD_MENU;
+return BUILD_MENU.filter(t=>t==='sandbag'||t==='wire'||t==='hedge');
+}
 const BUILD_NAMES={sandbag:'沙袋墙',wire:'铁丝网',hedge:'拒马',mg:'重机枪',medkit:'医疗箱',barrel:'油桶'};   // 词条'油桶'由批③统一进 00b-i18n (本文件不碰词典; t2() 缺词条回退原文, 可接受)
-const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2,barrel:1};
+const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2,barrel:1,tower:3,ammoc:2};   // ★20261128d: tower/ammoc 补兜底价 (丧尸 ZP 不足扣建造点 + 建造得分=件价×SCORE_TABLE.build 的分母); 普通模式无此二件零波及
 // 丧尸模式商店件 ZP 价 (2026-10-28 单源): 建造弹窗 (19-input Digit5, ★2026-11-28 键位轮换后=KeyN) 与 engBuild 扣款同读此表 ——
 // 旧版价目内联在 engBuild 里, 选号键提示拿 BUILD_COST[tower/ammoc] 查空 ⇒ "消耗undefined点" 穿帮。
-const BUILD_ZP={mg:150,tower:250,ammoc:80};
+const BUILD_ZP={mg:150,tower:250,ammoc:80,sandbag:2,wire:2,hedge:2};   // ★20261128d 丧尸计费改版 (用户裁定): 基础三件 2 ZP/件进表 (免费规则废止, ZP 优先→建造点兜底见 engBuild); 探针/zombie 局 BUILD_ZP 键数判定同走
 const BUILD_TIME={sandbag:2.2,wire:2.2,hedge:1.8,mg:3.4,medkit:2.0,barrel:1.2};   // ★2026-11-28 批④b: 油桶=轻件快读条
 // 建造升起动画: 新建工事从地里逐渐升起
 const RISERS=[];
@@ -240,19 +247,25 @@ if(k>=1){ r.m.position.y=r.ty; RISERS.splice(i,1); }
 function engBuild(pl){
 if(VM.state!=='idle') return;
 const bc=pl.buildCount||0;
-const type=BUILD_MENU[pl.buildSel||0];
+const _ml=engMenuList(pl);   // ★20261128d 菜单收窄单源: 非工程兵丧尸只基础三件 (buildSel 越界回退首件)
+const type=_ml[pl.buildSel||0]||_ml[0];
 const cost=BUILD_COST[type]||1;
-// 丧尸模式点数商店 (2026-10-06 裁定④): mg/瞭望塔/弹药箱走 ZP 点数 (击杀丧尸/占旗所得), 不吃建造点;
-// 基础工事免费件 (2026-10-28 修复, 指导 §4.6(2)): 沙袋/铁丝/拒马在丧尸模式**全职业免费** ——
-// 不扣建造点不扣 ZP (读条建造照旧), 医疗箱仍吃建造点。普通模式 (非丧尸) 零变化。
+// 丧尸模式计费 ★20261128d 改版 (用户裁定): 基础三件不再全职业免费 (2026-10-28 指导 §4.6(2) 规则废止 ——
+// 用户令"建造点数在丧尸模式要有存在感"): BUILD_ZP 统一定价 (基础三件 2 ZP/件, 机枪150/塔250/弹药箱80 不变),
+// 支付 = ZP 优先, ZP 不够兜底扣建造点 (BUILD_COST[type], 本批给 tower/ammoc 补兜底价), 两边都不够才拒绝。
+// pendingBuild.zp=定价 / .cost=兜底价 双记: exec 端读条中 ZP 被花掉会转扣建造点; 拆除退款按 entry 实付货币退。
+// 普通模式 (非丧尸) 零变化: 工程兵独占 + 建造点支付。菜单范围同步收窄: 丧尸非工程兵只见基础三件 (engMenuList)。
 let zpCost=0;
-const isFreeItem=ZOMBIE_MODE&&(type==='sandbag'||type==='wire'||type==='hedge');
-if(isFreeItem){
- // 免费放行: pendingBuild 记 cost:0 ⇒ 落成扣款/拆除退款都按 0 对账
-}else if(ZOMBIE_MODE&&pl.isPlayer&&BUILD_ZP[type]!==undefined){
+if(ZOMBIE_MODE&&pl.isPlayer&&BUILD_ZP[type]!==undefined){
 zpCost=BUILD_ZP[type];
-if((player.pz|0)<zpCost){ showScorePop(t2('ZP 点数不足 ({0}/{1}) — 击杀丧尸 / 占领旗点可得',player.pz|0,zpCost)); return; }
-}else if(bc<cost){ showScorePop(t2('建造点数不足 ({0}/{1}) — 弹药箱旁按F补给可回满',bc,cost)); return; }
+if((player.pz|0)>=zpCost){
+ // ZP 优先支付: zp=定价进 pendingBuild; cost 同时留兜底价 (exec 端转扣用)
+}else if(bc>=cost){
+zpCost=0;   // 兜底: ZP 不足 → 扣建造点 (pendingBuild.zp=0 ⇒ 扣款/拆除退款全走建造点账)
+}else{
+showScorePop(t2('ZP 不足 ({0}/{1}) 且建造点不足 ({2}/{3})',player.pz|0,zpCost,bc,cost)); return;
+}
+}else if(bc<cost){ showScorePop(t2('建造点数不足 ({0}/{1})',bc,cost)); return; }   // ★20261128d: "弹药箱旁按F补给可回满"假话摘除; 恢复机制已裁定=建造点池 (60s/点+25杀/点+拆退无损)
 const o=pl.pos.clone(); const dir=camForward(); dir.y=0;
 if(dir.lengthSq()<0.1) return;
 dir.normalize();
@@ -262,9 +275,9 @@ const lim=MAP_SIZE/2-4;
 if(Math.abs(tx)>lim||Math.abs(tz)>lim){ showScorePop(t2('超出战场边界')); return; }
 if(!player.barStealArmed('KeyB')) return;   // ★2026-10-30 读条交互批: 建造起步=双击确认 (定位在全部早退之后=确认起造; 首按不建不置 pendingBuild, 只亮提示)
 player.stealBar();   // ★2026-10-25 反馈轮①升级: 定位在全部早退之后=确认起造才抢; 读条账目旗(nadeHeld/bandaging)与模型层一起收 —— ★2026-11-21 P1-4: 必须在置 pendingBuild **之前**抢 (pendingBuild 已入 readBarActive 抢占网, 先置后抢会把自己这条新账收掉, 建造静默起步失败; 与 H/R/G/拆卸等全家"先抢后置账"同序)
-pl.pendingBuild={type,cost:isFreeItem?0:cost,zp:zpCost,tx,tz,ry:Math.atan2(dir.x,dir.z)};
+pl.pendingBuild={type,cost,zp:zpCost,tx,tz,ry:Math.atan2(dir.x,dir.z)};   // ★20261128d: cost 恒=兜底价 (免费件规则废止, ZP 路由 zp 字段承担)
 VM.state='build'; VM.stateT=0; VM.stateDur=BUILD_TIME[type]||2.2; vmResetSndFlags();
-showScorePop(t2('建造中: {0} … (移动取消)',t2(BUILD_NAMES[type])));
+showScorePop(t2('建造中: {0} … (X/移动取消)',t2(BUILD_NAMES[type])));   // ★20261128d: X 取消并进口径 (P1-4 起建造就在取消网; 本批读条条可视化, 22-hud 同键文案)
 }
 function cancelBuild(pl){
 if(!pl.pendingBuild) return;
@@ -277,9 +290,28 @@ if(VM.arms) VM.arms.L.visible=!(WPN_DEFS[VM.key]&&WPN_DEFS[VM.key].melee);   // 
 vmResetSndFlags();
 }
 }
+// ★20261128d 单源: 运行期 CYLS.push 的工程件圆柱直插 RGRID 倒排表 (04-collision buildSpatialIndex 同款
+// 入格公式, O(1) 不动其它账)。地图件建图期随全量重建灌账; 运行期新增**必须直插** —— 否则 eachCylNear
+// (移动横推/爆炸记账)/raycastWorld (弹道 cyl 档)/15-vehicles _tkCylCb (坦克碰撞碾爆) 全部查不到这条圆柱
+// (verify-20261118a 顶部"运行期 barrel() 新增的 CYLS 不进 RGRID"注记同款坑; 油桶件批④b 首用内联版,
+// 拒马漏配 = 用户实报"人工建造的拒马不能阻拦人"病根)。killCyl 置旗后倒排表条目留存 = "下标终身稳定"口径。
+function rgridAddLastCyl(){
+if(!RGRID.cylCells) return;
+const c=CYLS[CYLS.length-1], N2=RGRID.N;
+const i0=clamp(Math.floor((c.x-c.r+RGRID.off)/RGRID.cell),0,N2-1), i1=clamp(Math.floor((c.x+c.r+RGRID.off)/RGRID.cell),0,N2-1);
+const j0=clamp(Math.floor((c.z-c.r+RGRID.off)/RGRID.cell),0,N2-1), j1=clamp(Math.floor((c.z+c.r+RGRID.off)/RGRID.cell),0,N2-1);
+for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.cylCells[j*N2+i].push(CYLS.length-1);
+}
 function engBuildExec(pl){
 const tk=pl.pendingBuild; pl.pendingBuild=null;
 if(!tk||!pl.alive) return;
+// ★20261128d exec 端再校验 (ZP 优先计费配套): 读条期间 ZP 可能变动 (击杀入账/商店花销) — zp 路不足则
+// 转兜底扣建造点; 连兜底价都不够则取消 (本行在世界未动之前 ⇒ 无残件无扣账, 与 !built 早退同性质)。
+if(tk.zp&&pl.isPlayer&&(player.pz|0)<tk.zp){
+const _zpn=tk.zp; tk.zp=0;
+if((pl.buildCount||0)<tk.cost){ showScorePop(t2('ZP 不足 ({0}/{1}) 且建造点不足 ({2}/{3})',player.pz|0,_zpn,pl.buildCount||0,tk.cost)); return; }
+showScorePop(t2('ZP 已不足 · 改扣建造点'));
+}
 if(occBlocked(tk.tx,tk.tz)){ showScorePop(t2('位置被占用, 建造取消')); return; }
 const ci=world.children.length;
 const bi=BOXES.length; // 读条回收: 捕获本次建造新增的碰撞盒 (killBox 拆除单源) 与网格
@@ -292,14 +324,14 @@ const cyi=CYLS.length, cpi=coverPoints.length;   // ★2026-11-21 B#22/B#23: 圆
 let built=true;
 if(tk.type==='sandbag'){ built=sandbagWall(tk.tx,tk.tz,4,tk.ry); }
 else if(tk.type==='wire'){ built=barbedWire(tk.tx,tk.tz,tk.ry,4.2,pl); }
-else if(tk.type==='hedge'){ const cn=CYLS.length; hedgehog(tk.tx,tk.tz); built=CYLS.length>cn; }
+else if(tk.type==='hedge'){ const cn=CYLS.length; hedgehog(tk.tx,tk.tz); built=CYLS.length>cn; if(built) rgridAddLastCyl(); }   // ★20261128d 拒马直插 RGRID 倒排表 (漏配=用户实报"人工拒马不能阻拦人"病根; 与油桶件同款)
 else if(tk.type==='mg'){ const mi=MG42S.length; mg42(tk.tx,tk.tz,tk.ry,pl.team); built=MG42S.length>mi; }
 else if(tk.type==='tower'){ watchtower(tk.tx,tk.tz,tk.ry); }          // 丧尸模式商店件: 瞭望塔 (2026-10-06)
 else if(tk.type==='ammoc'){ ammoCrate(tk.tx,tk.tz,true); }            // 丧尸模式商店件: 弹药箱 (force 绕道具互斥)
 else if(tk.type==='medkit'){
 // 医疗箱: placeMedkit 自带落点避让 (多偏移兜底), 仍失败则**退还点数** (锤击动画已播, 不白扣)
 if(!placeMedkit(pl,tk.tx,tk.tz)){
-pl.buildCount=(pl.buildCount||0)+tk.cost;
+pl.buildCount=Math.min(pl.cls===4?BUILD_POOL_CAP_ENG:BUILD_POOL_CAP,(pl.buildCount||0)+tk.cost);   // ★20261128d 池退款封顶同拆除
 if(pl.isPlayer) showScorePop(t2('此处放不下医疗箱 · 建造点已退还'));
 return;
 }
@@ -310,17 +342,8 @@ else if(tk.type==='barrel'){
 //   barrel() 无返回值 (propFree 失败静默早退) ⇒ 按 hedge 同款"CYLS 增量"判成败; 失败走 !built 通用块
 //   (提示"此处放不下油桶"; 扣款行在其后 ⇒ 钱包原封), 成功则 meshes/cyls 快照照下方通用登记进 BUILDS。
 const cn=CYLS.length; barrel(tk.tx,tk.tz); built=CYLS.length>cn;
-// barrel() 只 push CYLS, 不进 RGRID 倒排表 (无 spatialIndexAddCyl; _colIdxDirty 只在首建/世界还原置位)
-// ⇒ 这里按 04-collision buildSpatialIndex 同款圆柱入格公式直插本条下标 (spatialIndexAddBox 的圆柱版,
-//   O(1) 不动其它账): 不插则工兵桶对弹道 (raycastWorld cyl 档)/爆炸记账 (eachCylNear)/坦克碾爆
-//   (15-vehicles _tkCylCb) 三条链全部不可见 (verify-20261118a 顶部"运行期 barrel() 新增的 CYLS 不进
-//   RGRID"注记的同款坑)。桶殉爆 killCyl 置旗后倒排表条目留存 = 全库"下标终身稳定"既有口径。
-if(built&&RGRID.cylCells){
-const bc=CYLS[CYLS.length-1], N2=RGRID.N;
-const i0=clamp(Math.floor((bc.x-bc.r+RGRID.off)/RGRID.cell),0,N2-1), i1=clamp(Math.floor((bc.x+bc.r+RGRID.off)/RGRID.cell),0,N2-1);
-const j0=clamp(Math.floor((bc.z-bc.r+RGRID.off)/RGRID.cell),0,N2-1), j1=clamp(Math.floor((bc.z+bc.r+RGRID.off)/RGRID.cell),0,N2-1);
-for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) RGRID.cylCells[j*N2+i].push(CYLS.length-1);
-}
+// ★20261128d: 内联直插版抽成 rgridAddLastCyl 单源 (拒马件共用; 链路说明见函数注)。
+if(built) rgridAddLastCyl();
 }
 if(!built){
 // 落成失败 (medkit 分支同款早退): 失败在这里 return, **到不了下方扣款行** ⇒ 建造点/ZP 原封不动
@@ -334,6 +357,11 @@ return;
 riseNewMeshes(ci,0.85);
 if(tk.zp){ if(pl.isPlayer&&typeof pzGain==='function') pzGain(-tk.zp); }   // ZP 扣款 (商店件)
 else pl.buildCount=(pl.buildCount||0)-tk.cost;
+// ★20261128d 建造得分 (用户裁定"给"+二令改公式): 得分 = 件价建造点数 × SCORE_TABLE.build(50/点) —— 只给
+//   **实际扣账**的件 (普通 cost>0 / 丧尸 zp>0 或兜底扣点)。拆建循环防刷分用户裁定: 建造+拆除读条本身
+//   就是时间成本, 不另设扣回 (拆除退款走 updateDemolish 无损)。
+const _bScore=(tk.zp>0||tk.cost>0)?(BUILD_COST[tk.type]||1)*SCORE_TABLE.build:0;
+if(_bScore) pl.score=(pl.score||0)+_bScore;
 // 读条回收登记 (2026-09-28 阶段三 P1): 记下归属/落点/成本 + 类型专属引用, 拆除时按型走单源
 const entry={type:tk.type,cost:tk.cost,zp:tk.zp||0,tx:tk.tx,tz:tk.tz,ry:tk.ry,owner:pl,alive:true,
 boxes:BOXES.slice(bi),meshes:world.children.slice(ci),cyls:CYLS.slice(cyi),cps:coverPoints.slice(cpi),wire:null,crate:null,mg:null};
@@ -350,7 +378,7 @@ for(let b=bi;b<BOXES.length;b++) spatialIndexAddBox(b);
 if(ZOMBIE_MODE&&typeof registerFortHP==='function') registerFortHP(entry,bi);
 const gy=heightAt(tk.tx,tk.tz);
 for(let i=0;i<7;i++) spawnP(PT.dirt,tk.tx+rand(-1.6,1.6),gy+rand(0.1,0.4),tk.tz+rand(-1.6,1.6),rand(-1,1),rand(0.5,1.6),rand(-1,1),rand(0.3,0.5),0.8,rand(0.5,0.9),0.85,2);
-if(pl.isPlayer){ showScorePop(t2('{0} · 建成 (剩余 {1} 点)',t2(BUILD_NAMES[tk.type]),pl.buildCount)); AudioSys.metalSlide(0.25,0.2,300,150); }
+if(pl.isPlayer){ showScorePop(_bScore?t2('{0} · 建成 +{1}分 (剩余 {2} 点)',t2(BUILD_NAMES[tk.type]),_bScore,pl.buildCount):t2('{0} · 建成 (剩余 {1} 点)',t2(BUILD_NAMES[tk.type]),pl.buildCount)); AudioSys.metalSlide(0.25,0.2,300,150); }
 markNavDirty();
 }
 // 铁丝网减速/伤害区域: 每帧检测 combatants (WIRES 专门存储)

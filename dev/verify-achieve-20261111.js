@@ -146,10 +146,10 @@ assert('00b-i18n: 弹窗位置词条',i18.includes("'成就弹窗位置':'Achiev
 assert('css: 成就列表 + Toast 样式在册 (#dataAchPane/.achRow/.achState/#achToast)',
  css.includes('#dataAchPane')&&css.includes('.achRow')&&css.includes('.achState')&&css.includes('#achToast'));
 assert('run-all 已登记本探针',ra.includes('verify-achieve-20261111.js'));
-assert('版本戳 20261128c: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110c 清零 (本批 c→d, 新文件+1)',
- [...ih.matchAll(/20261128c/g)].length>=48&&ih.includes("window.__sfStyleVer='20261128c';")
- &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128c')).length===45
- &&gf.includes('27-achievements.js?v=20261128c')
+assert('版本戳 20261128d: index.html ≥48 处 + __sfStyleVer + _game_files 45 行 + 旧 20261110c 清零 (本批 c→d, 新文件+1)',
+ [...ih.matchAll(/20261128d/g)].length>=48&&ih.includes("window.__sfStyleVer='20261128d';")
+ &&gf.split(/\r?\n/).filter(l=>l.includes('?v=20261128d')).length===45
+ &&gf.includes('27-achievements.js?v=20261128d')
  &&!ih.includes('20261110c')&&!gf.includes('20261110c'));
 }
 

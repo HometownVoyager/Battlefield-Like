@@ -1189,7 +1189,8 @@ const rb=((player.alive||player.specViewHost)&&!hudBlocked)   // ★2026-11-03: 
 :(player.specViewHost&&typeof VM!=='undefined'&&VM.state==='bandage')?{lab:t2('宿主 · 包扎 …'),k:clamp((VM.stateT||0)/Math.max(0.01,VM.stateDur||0.01),0,1)}
 :player.demolish?{lab:player.demolish.mortar?t2('回收中: 迫击炮 …'):t2('拆除中: {0} …',t2(BUILD_NAMES[player.demolish.b.type])),k:clamp(player.demolish.t/DEMOLISH_T,0,1)}
 :player.useCast?{lab:t2(EMCAST[player.useCast.kind]||'使用中: 火力点 …'),k:clamp(player.useCast.t/Math.max(0.01,player.useCast.dur),0,1)}
-:player.vehRepair?{lab:t2('坦克维修中: {0}s · 移动/开火打断',Math.max(0,(player.vehRepair.dur||0)-(player.vehRepair.t||0)).toFixed(1)),k:clamp((player.vehRepair.t||0)/Math.max(0.01,(player.vehRepair.dur||0.01)),0,1)}   // 坦克补给箱修理 (2026-11-16 批1): 8s 读条回 25%×maxHp, 打断网见 18-game tryVehRepair
+:player.vehRepair?{lab:t2('坦克维修中: {0}s · 移动/开火打断',Math.max(0,(player.vehRepair.dur||0)-(player.vehRepair.t||0)).toFixed(1)),k:clamp((player.vehRepair.t||0)/Math.max(0.01,(player.vehRepair.dur||0.01)),0,1)}   // 坦克补给箱修理 (2026-11-16 批1): 8s 读条回 25%×maxHp, 打断网见 18-game tryVehRepair; ★20261128d 场外维修 (tryEngVehRepair) 同账同条
+:player.pendingBuild?{lab:t2('建造中: {0} … (X/移动取消)',t2(BUILD_NAMES[player.pendingBuild.type])),k:clamp((typeof VM!=='undefined'&&VM.state==='build')?((VM.stateT||0)/Math.max(0.01,VM.stateDur||0.01)):0,0,1)}   // ★20261128d 建造通用读条条 (用户令): pendingBuild 账 P1-4 起就在取消网 (X/✕/受击>25/抢占全通), 本条只补可视化 —— 进度读 VM.stateT/stateDur (锤击动画同源); B 同键再按=加速 (19-input), 移动取消在 20-player
 :player.bandaging>0?{lab:t2('包扎中: {0}s',Math.max(0,player.bandaging).toFixed(1)),k:clamp(1-player.bandaging/BANDAGE_T,0,1)}
 :player.seatReload>0?{lab:t2('原位换弹: {0}s',Math.max(0,player.seatReload).toFixed(1)),k:clamp(1-player.seatReload/Math.max(0.01,player.seatReloadDur),0,1)}   // ★2026-11-20 火力点坐姿批: 坐固定火力点给随身武器装填 (账在 player 不在 VM, 不吃 _seated 门 — VM 分支的座位门不适用)
 :(_nk&&typeof VM!=='undefined'&&VM.state==='nade'&&player.nadeHeld)?(_nk!=='at'   // ★2026-11-17 批2.6: 引信倒数扩到烟雾/燃烧 (at 撞炸无引信, 保持满条"已举起")
@@ -1585,6 +1586,7 @@ player.burnTimer=0; player.burnTickT=0; player.burnAttacker=null;
 // (旧版"本局得分"同样把两局累加, 只是没人发现)。落点选在这里 = 与"玩家这一条命复位"同一处。
 player.kills=0; player.deaths=0; player.score=0; player.headKills=0; player.caps=0;
 player.demol=0; player.vehKills=0; // 破坏数 (2026-09-26 破坏得分批) / 击毁载具 (2026-11-11 数据批): 与上面五项同段复位 —— 否则第二局会带着上一局拆的楼数/毁的车数去比纪录, 且 21-match statsAccumulate 的 LIFE_STATS.veh+=(player.vehKills||0) 会把此前各局击毁数重复累计
+player.buildCount=BUILD_POOL_INIT; player._poolT=0; player._poolKillMark=0;   // ★20261128d 建造点池 (用户令): 每局 10 点起步 (上限 工程兵15/其他10, 60s/点+25杀/点 见 21-match updateBuildPool) —— 只在此局级复位点重置, deploy 不再每命刷新 (23-deploy 置 null 兜底)
 player.lifeKills=0; player.lifeScoreStart=0; player.killerName=''; player.killerSrc='';
 player.lifeStartT=nowT; // 2026-09-25: 本条命的起点也随新对局复位 —— 旧版只在 deployPlayer 写, 于是"没死过就开部署页"的路径会拿上一局的起点算存活时长
 player.vel.set(0,0,0);

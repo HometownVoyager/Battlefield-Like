@@ -683,7 +683,8 @@ p.grabAction=null;
 p.deathRag=null; p.deathCamT=0;
 p._deathVy=undefined; p._deathT=undefined; p._dfPose=null;   // ★2026-11-25 就地倒下重力批: 坠落/姿态首帧捕获账跨命清零
 p.lifeStartT=nowT; p.lifeKills=0; p.lifeScoreStart=p.score||0;
-p.onMortar=null; p.mortarPlaced=false; p.buildCount=6; p.buildSel=0; p.pendingBuild=null;
+p.onMortar=null; p.mortarPlaced=false; p.buildSel=0; p.pendingBuild=null;
+if(p.buildCount==null) p.buildCount=BUILD_POOL_INIT;   // ★20261128d 建造点池 (用户令): 一局 10 点不随复活刷新, 换兵种隐藏仍保留; 上限 工程兵15/其他10, 回复 60s/点+25杀/点 (21-match tick), 拆除无损退款封顶
 	p.nadeIsAT=false; p.nadeHeld=false; p.nadeIsSmoke=false; p.nadeIsIncin=false;
 	if(p.loiter){ loiterDetonate(p.loiter,p.loiter.pos.clone()); }
 // 海战舰船座位随部署复位 (2026-09-20N 海战批): 在艇上阵亡/直接改部署点时, 座位必须交还 ——

@@ -6,7 +6,7 @@
 //     有人战机整体占 TICKET_COST.plane(3) 票 = 机体 (plane-1) 2 + 驾驶员 1 (Bot.die 既有 -1);
 //     空机 (含飞行员先跳伞) 照旧整机 3; 跳伞驾驶员单独阵亡照常 -1 (全寿命上限仍 4)。
 //     旧账 = 机体 3 + 驾驶员 1 = 4 票/架。TICKET_COST.plane 常量不动 (勿硬编码 3, aircollide 批纪律)。
-//     ★20261128c 批C裁定: 统一4票取代20261114口径 —— 玩家驾机/AI 有人机死亡总账一律 4 票 (机体整收
+//     ★20261128d 批C裁定: 统一4票取代20261114口径 —— 玩家驾机/AI 有人机死亡总账一律 4 票 (机体整收
 //     plane(3) + 驾驶员各自既有 -1, 与玩家驾机死亡同账); 本文件 T1a/A1/N1 已按判据跟走改钉统一口径。
 //   ②冻结世界 AI 不得行动 (用户实报"时停中残血坦克乘员主动下车"):
 //     ②a 坦克乘员起火弃车加 dt>0 门 (14-bots; 乘员 Bot 走 onVehicle 旁路每帧都进 update, 旧判定不吃 dt
@@ -20,7 +20,7 @@
 //     ②布势洞 —— cmdDtGate 布势冻结回 0 从没进过音频账。
 //   ④兵力票池倍率选择加回大厅 (旧版主菜单 hmulBtn 行随菜单改版被删, 机制单源一直在):
 //     index.html #hubHmulSeg ×0.5/×1/×2 + 22-hud 接线写 sf_hmul; startGame 开局读档 (83/165/330)。
-// 判据: T1 票数 (有人机 die Δ票=TICKET_COST.plane+1★20261128c 统一4票 / 空机 Δ照旧★ / 驾驶员确实阵亡);
+// 判据: T1 票数 (有人机 die Δ票=TICKET_COST.plane+1★20261128d 统一4票 / 空机 Δ照旧★ / 驾驶员确实阵亡);
 //   T2 坦克乘员 (时停冻结 10 帧仍在车上★ / 解冻 8 帧内弃车 / 无时停对照照常弃车);
 //   T3 飞行员跳伞 (时停里挂账不跳★ / 冻结帧账不动 / 解冻 3 帧内补跳 / 无时停对照立即跳);
 //   T4 音频冻结账 (时停转静音★ / 稳态零写入 / 时停+暂停不再恢复轰鸣★ / 暂停解除仍静 / 解冻还原
@@ -62,7 +62,7 @@ console.log('载入清单: 解析 index.html 得 '+FILES.length+' 个脚本');
 const NEG=process.argv.includes('--neg');
 const SRC={},PATCH_MAP={};
 const NEG_PATCHES=[
-// N1 ①拆: 有人机回 20261114 折让账 (机体2+驾驶员1=3票) ★20261128c 批C裁定: 统一4票取代20261114口径: T1a+A1 红
+// N1 ①拆: 有人机回 20261114 折让账 (机体2+驾驶员1=3票) ★20261128d 批C裁定: 统一4票取代20261114口径: T1a+A1 红
 //   (两段链式: 折让式引用的 hadCrew 已随统一口径退场, 先在 crewBot 判定行前重挂声明再还原折让算式)
 ['js/16-aircraft.js','if(this.crewBot){','if(this.crewBot){ var hadCrew=!!this.crewBot;'],
 ['js/16-aircraft.js','tickets[this.team]=Math.max(0,tickets[this.team]-TICKET_COST.plane);','tickets[this.team]=Math.max(0,tickets[this.team]-(hadCrew?TICKET_COST.plane-1:TICKET_COST.plane));'],
@@ -111,7 +111,7 @@ G('for(const s of soldiers) s.protUntil=0; player.protUntil=0;');
 ok(G('soldiers.length')>0,'前置: 战场已开局并部署 (soldiers='+G('soldiers.length')+', tanks='+G('tanks.length')+', planes='+G('planes.length')+')');
 
 // ═════ T1 ①飞机票数: 有人机整体 3 票 ═════
-console.log('T1 ① 飞机票数 (★20261128c 批C裁定统一4票: 有人机 = 机体 plane(3) + 驾驶员 1, 与玩家驾机同账; 空机照旧整机 3)');
+console.log('T1 ① 飞机票数 (★20261128d 批C裁定统一4票: 有人机 = 机体 plane(3) + 驾驶员 1, 与玩家驾机同账; 空机照旧整机 3)');
 {
 const r=G(`
 (function(){
@@ -134,7 +134,7 @@ return out;
 })()
 `);
 ok(r&&r.gotBot&&r.planeCost===3,'前置: 拿到自由 Bot 且 TICKET_COST.plane===3 (单源, 不硬编码)');
-ok(r&&r.crewedDelta===TICKET_COST_PLANE_SAFE(r)+1,'T1a 有人机 die Δ票 = '+r.crewedDelta+' (期望 = TICKET_COST.plane+1='+(r.planeCost+1)+' = 机体3+驾驶员1 ★20261128c 批C裁定: 统一4票取代20261114口径; 与玩家驾机死亡同账)');
+ok(r&&r.crewedDelta===TICKET_COST_PLANE_SAFE(r)+1,'T1a 有人机 die Δ票 = '+r.crewedDelta+' (期望 = TICKET_COST.plane+1='+(r.planeCost+1)+' = 机体3+驾驶员1 ★20261128d 批C裁定: 统一4票取代20261114口径; 与玩家驾机死亡同账)');
 ok(r&&r.pilotDead,'T1a 驾驶员随 die 链确实阵亡 (Bot.die -1 照常)');
 ok(r&&r.emptyDelta===r.planeCost,'T1b 空机 die Δ票 = '+r.emptyDelta+' (期望 = TICKET_COST.plane, 照旧不变)');
 }
@@ -305,7 +305,7 @@ ok(t0===exp&&t1===exp,'T5c 开局票池 sf_hmul='+(hm||'缺省')+' ⇒ 双方 '+
 
 // ═════ T6 源码防回退锚 (与 NEG 补丁一一对应) ═════
 console.log('T6 源码防回退锚 (A1~A5 ↔ N1~N5)');
-ok(srcOf('js/16-aircraft.js').includes('tickets[this.team]-TICKET_COST.plane);')&&!srcOf('js/16-aircraft.js').includes('hadCrew?TICKET_COST.plane-1'),'A1 有人机机体账整收算式在/折让已退场 (↔N1) ★20261128c 批C裁定: 统一4票取代20261114口径');
+ok(srcOf('js/16-aircraft.js').includes('tickets[this.team]-TICKET_COST.plane);')&&!srcOf('js/16-aircraft.js').includes('hadCrew?TICKET_COST.plane-1'),'A1 有人机机体账整收算式在/折让已退场 (↔N1) ★20261128d 批C裁定: 统一4票取代20261114口径');
 ok(srcOf('js/14-bots.js').includes("if(v.burning&&v.kind==='tank'&&dt>0){"),'A2 弃车 dt>0 门在 (↔N2)');
 ok(srcOf('js/16-aircraft.js').includes("if(typeof specTimeFrozen==='function'&&specTimeFrozen()) this._bailPend=true;"),'A3 跳伞挂账门在 (↔N3)');
 ok(srcOf('js/24-main.js').includes('AudioSys.setTimeFrozenMute((rdt>0&&dt<=0)||gamePaused||matchOver||menuHold);'),'A4 权威冻结账喂入在 (↔N4)');

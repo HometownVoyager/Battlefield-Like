@@ -180,12 +180,39 @@ if(!this.alive||this.spectator) return;
 const t=this.onVehicle;
 if(!t||t.kind!=='tank'||!t.alive||t.burning) return;
 if(t.hp>=t.maxHp) return;
-if(this.vehRepair) return;
-// 距离门走 15-vehicles 单源 vehRepairCrateNear (2026-11-17 Bot 车组起步门共用; 舰上箱除外)
-if(typeof vehRepairCrateNear!=='function'||!vehRepairCrateNear(t.pos.x,t.pos.z)){ showScorePop('附近没有补给箱, 无法维修'); return; }
+if(this.vehRepair){ this.vehRepair.t=Math.min(this.vehRepair.dur,(this.vehRepair.t||0)+this.vehRepair.dur*BAR_PRESS_BOOST); return; }   // ★20261128d: 同键再按=极少加快 (2026-10-30 通用读条口径; 场外维修同款)
+// ★20261128d (用户令①) 工程兵车内修理不再要求补给箱: 有箱 ×ENG_REPAIR_MUL_CRATE (比普通修快), 无箱
+//   ×ENG_REPAIR_MUL_FIELD (略慢); 其他兵种仍必须箱在旁 (原门原样, 提示不变)。时长另按损血比例缩
+//   (用户令③: 损血不足 25% → 实际损血比例/25% × 全长; VEH_REPAIR_HEAL=0.25 即 25% 分母单源)。
+const _isEng=this.cls===4;
+const _crate=(typeof vehRepairCrateNear==='function')&&vehRepairCrateNear(t.pos.x,t.pos.z);   // 距离门走 15-vehicles 单源 vehRepairCrateNear (2026-11-17 Bot 车组起步门共用; 舰上箱除外)
+if(!_isEng&&!_crate){ showScorePop('附近没有补给箱, 无法维修'); return; }
 this.stealBar();   // 确认起步才抢 (2026-10-25 纪律): 旧读条安静收账
-this.vehRepair={t:0,dur:VEH_REPAIR_TIME,tank:t};
+this.vehRepair={t:0,dur:VEH_REPAIR_TIME*(_isEng?(_crate?ENG_REPAIR_MUL_CRATE:ENG_REPAIR_MUL_FIELD):1)*Math.min(1,(t.maxHp-t.hp)/t.maxHp/VEH_REPAIR_HEAL),tank:t,noCrate:_isEng&&!_crate};
 showScorePop('维修中… 移动/开火将打断');
+},
+// ★20261128d 工程兵场外维修 (起步口; 用户令"和补给箱附近维修机制相同"): 步行工程兵贴近受损**友军坦克**
+//   (活着/未起火/未满血, ENG_VEH_REPAIR_R 内) 按 R 起修 —— 同账 player.vehRepair ⇒ 22-hud 读条条 /
+//   cancelReadBar (X/受击>25/抢占) / Tank.takeDmg 重伤钩 / fireCannon·firePlayerMG 开火钩全部自动共用;
+//   差别只在起步门 (不要补给箱) 与打断网步行侧 (20-player 移动输入/距离迟滞 tick, 20a 座位 tick 收口)。
+//   返回 true=已起步或已在读条 (同键再按=加速), false=不适用 ⇒ 调用方 (19-input KeyR) 回落 tryReload,
+//   换弹语义零损失。不适用清单: 非工程兵 / 任何座位 / VM 非空闲 (举雷·包扎·换弹·锤击各有自己的双击确认网)。
+tryEngVehRepair(){
+if(!this.alive||this.spectator||this.cls!==4) return false;
+if(this.onVehicle||this.onNaval||this.onMG||this.onAT||this.onAA||this.onMortar||this.onBattery||this.loiter) return false;
+if(typeof VM!=='undefined'&&VM.state!=='idle') return false;
+if(this.vehRepair){ this.vehRepair.t=Math.min(this.vehRepair.dur,(this.vehRepair.t||0)+this.vehRepair.dur*BAR_PRESS_BOOST); return true; }   // 同键再按=加速 (与箱修统一)
+let best=null,bd=ENG_VEH_REPAIR_R;
+if(typeof tanks!=='undefined') for(const t of tanks){
+if(!t||!t.alive||t.burning||t.team!==this.team||t.hp>=t.maxHp) continue;
+const d=Math.hypot(t.pos.x-this.pos.x,t.pos.z-this.pos.z); if(d<bd){ bd=d; best=t; }
+}
+if(!best) return false;   // 无维修对象 ⇒ R 保持换弹原语义, 不武装确认 (探目标在确认网之前)
+if(this.readBarActive()&&!this.barStealArmed('KeyR')) return true;   // 拆除/前摇等读条中 R = 双击确认打断: 第一按只武装+吞键 (22-hud 亮 ▶), 不落换弹
+this.stealBar();   // 确认起步才抢 (2026-10-25 纪律)
+this.vehRepair={t:0,dur:VEH_REPAIR_TIME*Math.min(1,(best.maxHp-best.hp)/best.maxHp/VEH_REPAIR_HEAL),tank:best};   // ★20261128d 损血<25% 按比例缩时 (三路修理同规)
+showScorePop('维修中… 移动/开火将打断');
+return true;
 },
 // ★2026-10-30 读条交互批 (用户裁定③) 打断确认单源: 读条中按**其他动作键**第一次 = 只记键**不抢** (22-hud
 //   的读条上会亮"再按一次打断"提示), BAR_ARM_WIN 秒内**同键**再按才放行。放行后抢占仍由调用方在

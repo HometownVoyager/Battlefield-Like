@@ -1363,7 +1363,7 @@ this.thinkCD-=dt; this.repathT-=dt;
 	const _tt0=this.tTarget, _tv0=this.tVehTgt;
 	if(!_ct0&&!(_tt0&&_tt0.alive!==false)&&!(_tv0&&_tv0.alive&&_tv0.team!==this.team)
 	&&typeof vehRepairCrateNear==='function'&&vehRepairCrateNear(this.pos.x,this.pos.z)){
-	this.vehRepair={t:0,dur:VEH_REPAIR_TIME};
+	this.vehRepair={t:0,dur:VEH_REPAIR_TIME*Math.min(1,(this.maxHp-this.hp)/this.maxHp/VEH_REPAIR_HEAL)};   // ★20261128d 损血<25% 按比例缩时 (与玩家三路修理同规)
 	this.path=null; this.aiOrder=null; this.aiCover=null;
 	return;
 	}
