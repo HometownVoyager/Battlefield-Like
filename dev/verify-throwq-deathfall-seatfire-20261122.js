@@ -96,7 +96,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261128b'"),'前置: 版本戳 20261128b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128c'"),'前置: 版本戳 20261128c 在位 (index.html 内联)');
 
 // ══ T0 源码锚 ══
 console.log('T0 源码锚');
@@ -104,8 +104,8 @@ const src19=srcOf('js/19-input.js'),src20=srcOf('js/20-player.js'),src04b=srcOf(
 ok(src19.includes('function nadeArcTakeover(){')===true,'T0a ★nadeArcTakeover 出手弧接续单源函数在位 (19-input)');
 ok(src19.includes('if(VM.stateDur>0&&VM.stateDur<=10&&(VM.stateT/VM.stateDur)<0.5) player.releaseNade();')===true,'T0b ★未出手段 flush 行 verbatim (19-input)');
 ok(src19.includes('if(ok&&nadeArcTakeover()&&player.nadeCount>0){')===true,'T0c ★KeyG 弧中接线 verbatim');
-ok(src19.includes('if(ok&&nadeArcTakeover()&&player.atNades>0){')===true,'T0d ★Digit3 弧中接线 verbatim');
-ok(src19.includes('if(ok&&nadeArcTakeover()&&player.smokeCount>0){')===true,'T0e ★Digit4(烟雾) 弧中接线 verbatim');
+ok(src19.includes('if(ok&&nadeArcTakeover()&&player.atNades>0){')===true,'T0d ★AT键弧中接线 verbatim (键位轮换后=Digit4)');
+ok(src19.includes('if(ok&&nadeArcTakeover()&&player.smokeCount>0){')===true,'T0e ★烟雾键弧中接线 verbatim (键位轮换后=Digit5)');
 ok(src19.includes('if(ok&&nadeArcTakeover()&&player.incinCount>0){')===true,'T0f ★Digit6(燃烧) 弧中接线 verbatim');
 ok(src20.includes('updatePlayerAvatar(dt);   // ★2026-11-22 环绕喂帧 (就地倒下档看本体倒地; 布娃娃档 deathRag 分支自隐零变化)')===true,'T0g ★死亡环绕喂帧行 verbatim (20-player)');
 ok(src20.includes('if(!p.spectator) updatePlayerAvatar(dt);')===true,'T0h ★航拍段喂帧行 verbatim (20-player)');
@@ -141,18 +141,18 @@ ok(G('player.__rnN')===1,'T1c-prep 第二颗雷弧内未出手');
 G(`dispatchEvent(new KeyboardEvent('keydown',{code:'KeyG'}));`);
 ok(G('player.__rnN')===2&&G('player.nadeCount')===1,'T1c ★未出手段弧中按 G = flush 立即出手 (rnN 1→2, 计数 2→1) + 重举');
 ok(G('player.nadeHeld')===true&&Math.abs(G('player.nadeFuse')-G('NADE_FUSE_T'))<1e-6,'T1c-2 重举=新雷引信全长 (NADE_FUSE_T)');
-// (c) 异键弧中接续: frag 弧中按 3 = frag 立即出手 + 换举 AT
+// (c) 异键弧中接续: frag 弧中按 AT键(4, ★2026-11-28 键位轮换 Digit3→Digit4) = frag 立即出手 + 换举 AT
 G(`dispatchEvent(new KeyboardEvent('keyup',{code:'KeyG'}));`);
 G(`updateViewModel(1/60, player);`);
-G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit3'}));`);
-ok(G('player.__rnN')===3&&G('player.nadeCount')===0,'T1d ★frag 弧中按 3 = frag 立即出手 (rnN→3, frag 计数 1→0) + 换举 AT');
+G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit4'}));`);
+ok(G('player.__rnN')===3&&G('player.nadeCount')===0,'T1d ★frag 弧中按 4(AT键) = frag 立即出手 (rnN→3, frag 计数 1→0) + 换举 AT');
 ok(G('player.nadeIsAT')===true&&G('player.nadeFuse')===99&&G('player.nadeHeld')===true,'T1d-2 AT 账就位 (哨兵引信 99)');
 // (d) 最后一颗 flush 后空手不自举 (哨兵自愈契约)
 G(`player.atNades=1;`);
-G(`dispatchEvent(new KeyboardEvent('keyup',{code:'Digit3'}));`);
+G(`dispatchEvent(new KeyboardEvent('keyup',{code:'Digit4'}));`);
 G(`updateViewModel(1/60, player);`);
-G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit3'}));`);
-ok(G('player.__rnN')===4&&G('player.atNades')===0,'T1e ★最后一颗弧中按 3 = flush 出手 (atNades 1→0) 后空手不自举');
+G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit4'}));`);
+ok(G('player.__rnN')===4&&G('player.atNades')===0,'T1e ★最后一颗弧中按 4(AT键) = flush 出手 (atNades 1→0) 后空手不自举');
 ok(G('player.nadeHeld')===false&&G('VM.stateDur')===999,'T1e-2 空手态 = nadeHeld 保持 false + 哨兵段 (下帧 10-viewmodel 自愈回 idle, 与上载具外摘同路)');
 // (e) 旧契约回归: idle 起步 / 同键重按不重置引信 / 持雷异键双击确认
 G(`VM.state='idle'; VM.stateT=0; VM.stateDur=0; vmSndFlags={}; player.nadeFuse=0; player.nadeIsAT=false; player.nadeIsSmoke=false; player.nadeIsIncin=false; player.nadeCount=2; player.atNades=2;`);
@@ -161,9 +161,9 @@ ok(G('player.nadeHeld')===true&&G('VM.stateDur')===999,'T1f idle 起步回归 (n
 G(`player.nadeFuse=2.0;`);
 G(`dispatchEvent(new KeyboardEvent('keydown',{code:'KeyG'}));`);
 ok(Math.abs(G('player.nadeFuse')-2.0)<1e-6,'T1f-2 持雷同键重按不重置引信 (烹饪契约, 2026-10-25 保留)');
-G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit3'}));`);
+G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit4'}));`);
 ok(G('player.nadeIsAT')===false,'T1f-3 持雷异键首按只武装不吃雷 (双击确认保留)');
-G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit3'}));`);
+G(`dispatchEvent(new KeyboardEvent('keydown',{code:'Digit4'}));`);
 ok(G('player.nadeIsAT')===true&&G('player.nadeHeld')===true,'T1f-4 持雷异键次按确认 = 换举 AT (2026-10-30 契约保留)');
 G(`delete player.releaseNade;`);
 

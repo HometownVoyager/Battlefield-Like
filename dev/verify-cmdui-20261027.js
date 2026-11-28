@@ -80,11 +80,11 @@ const PATCHES=[
   ";"],
  // L 近战键退场: 24-main 触控键改回 KeyV ⇒ 近战键判据红
  ['js/24-main.js',
-  "bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));",
+  "bindBtn('tMelee',()=>kd('Digit3'),()=>ku('Digit3'));",   // ★2026-11-28 键位轮换: 近战 KeyN→Digit3
   "bindBtn('tMelee',()=>kd('KeyV'),()=>ku('KeyV'));"],
  // M 手柄近战键退场 ⇒ 手柄键判据红
  ['js/19b-gamepad.js',
-  "{b:11,dn:()=>padKd('KeyN'),  up:()=>padKu('KeyN')},",
+  "{b:11,dn:()=>padKd('Digit3'),up:()=>padKu('Digit3')},",   // ★2026-11-28 键位轮换
   "{b:11,dn:()=>padKd('KeyV'),  up:()=>padKu('KeyV')},"],
  // N 19-input 三命令键转发退场 ⇒ 接线判据红
  ['js/19-input.js',
@@ -94,7 +94,7 @@ const PATCHES=[
  // ★2026-11-20 判据跟走 (军刀近战重做批): 旧 N 分支是"刺刀瞬刺"多行块 (锚带 读条注释), 本批整段退役换成
  //   单行 switchSlot 切军刀槽 —— 锚换成新 N 行首 (if(e.code==='KeyN'){), 键位退场语义不变 (改回 KeyV)。
  ['js/19-input.js',
-  "if(e.code==='KeyN'){",
+  "if(e.code==='Digit3'){",   // ★2026-11-28 键位轮换
   "if(e.code==='KeyV'){"],
  // P Esc 分支退场 (2026-10-27 排查批: 布势期 Esc=确认开战的上提修复):
  //    回到旧写「cmdMapUIOpen 分支嵌在 deployed&&alive 门内」⇒ 布势期 (deployed/alive 皆 false) 永远
@@ -211,10 +211,10 @@ assert('19-input: Esc 的 cmdMapUIOpen 分支上提到 deployed 门之外 + 暂�
  s19.includes('cmdMapUIOpen()&&!gamePaused){')
  &&s19.indexOf('cmdMapUIOpen()&&!gamePaused')<s19.indexOf('if(player.deployed&&player.alive&&!matchOver){')
  &&/cmdMapUIOpen\(\)&&!gamePaused\)\{\s*if\(typeof cmdDeployPhase==='function'&&cmdDeployPhase\(\)&&typeof cmdDeployConfirm==='function'\) cmdDeployConfirm\(true\);[^\n]*\r?\n\s*else if\(typeof cmdMapClose==='function'\) cmdMapClose\(true\);/.test(s19));   // ★2026-11-17 批6 判据跟码: esc=true ⇒ 盖章只看 CMD.deployTouched (没布过势的 ESC 不锁兵种); 2026-11-18 行尾注释容错 ([^\n]* 吞行内批注再换行)
-assert('19-input: 近战键改成 KeyN (V 让给减速)',
- s19.includes("if(e.code==='KeyN'){")&&!s19.includes("if(e.code==='KeyV'){"));
-assert('24-main tMelee 触控键 → KeyN',s24.includes("bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));"));
-assert('19b-gamepad RS 近战 → KeyN',s19b.includes("{b:11,dn:()=>padKd('KeyN'),  up:()=>padKu('KeyN')}"));
+assert('19-input: 近战键(军刀)改成 Digit3 (★2026-11-28 键位轮换; 2026-10-26 批曾 KeyN)',
+ s19.includes("if(e.code==='Digit3'){")&&!s19.includes("if(e.code==='KeyV'){"));
+assert('24-main tMelee 触控键 → Digit3 (键位轮换跟走)',s24.includes("bindBtn('tMelee',()=>kd('Digit3'),()=>ku('Digit3'));"));
+assert('19b-gamepad RS 近战 → Digit3 (键位轮换跟走)',s19b.includes("{b:11,dn:()=>padKd('Digit3'),up:()=>padKu('Digit3')}"));
 
 const i18n=srcOf('js/00b-i18n.js');
 const keys=['按住 V 减速 (消耗读条)','防守此处','进攻此处','向此处投弹','自由推进','↩ 撤销布势 (重选兵种)',
@@ -224,8 +224,8 @@ assert('i18n 本批新键全配英文 (词典闭环)',keys.every(k=>i18n.include
  '缺: '+keys.filter(k=>!i18n.includes(`'${k}':`)).join(' / '));
 assert('i18n 旧 N 键词条已全部退场 (无残留)',!i18n.includes('N=减速')&&!i18n.includes('按住 N '));
 const sidx=srcOf('index.html');
-assert('index.html 帮助面板: 近战键标 N + 减速键标 V (2026-11-17 批9 暂停面板键帽表化判据跟码: <b>N</b> 旧标记 → hkRow 键帽行; 刺刀描述并入「近战」)',
- sidx.includes('<span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>近战</span>')
+assert('index.html 帮助面板: 近战键标 3 + 减速键标 V (2026-11-17 批9 键帽表化判据跟码; ★2026-11-28 键位轮换: 近战帽 N→3)',
+ sidx.includes('<span class="hkKey" data-i18n>3</span><span class="hkDesc" data-i18n-html>近战(军刀)</span>')
  &&sidx.includes('按住 <b>V</b> 时间减速'));
 assert('index.html 帮助面板新增「指挥官兵种」整节 (三命令键/集火/减速/布势撤销) (2026-11-12 键位表化判据跟码)',
  sidx.includes('指挥官兵种</div>')&&sidx.includes('<span class="hkKey" data-i18n>左键点地图</span><span class="hkDesc" data-i18n-html>集火该点'));

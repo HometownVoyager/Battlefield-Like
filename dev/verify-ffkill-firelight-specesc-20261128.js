@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// dev/verify-ffkill-firelight-specesc-20261128.js —— 2026-11-28 实机三症状批 (戳 20261128b):
+// dev/verify-ffkill-firelight-specesc-20261128.js —— 2026-11-28 实机三症状批 (戳 20261128c):
 //   ① 炸毁己方坦克没有记录和得分 (用户实报): Tank/Plane/舰艇三处 die 记分块旧门
 //      `coFfFire(attacker)||attacker.team!==this.team` 只放行观战火力/异队击毁 —— EXPLO_FF
 //      (sf_explo_ff, 默认开) 时代友军爆炸本就伤得到己方载具, 毁己方坦克却零击杀零得分零战报,
@@ -106,7 +106,7 @@ let err0=null;
 try{ G("document.getElementById('startBtn').onclick();"); }catch(e){ err0=String(e&&e.stack||e); }
 if(!err0){ try{ G('if(!player.alive||!player.deployed) deployPlayer();'); }catch(e){ err0='deployPlayer: '+String(e&&e.stack||e); } }
 if(err0||!G('player.alive')){ console.log('  ✘ 开局/部署失败 '+(err0||'player.alive=false')); process.exit(1); }
-ok(html.includes("__sfStyleVer='20261128b'"),'前置: 版本戳 20261128b 在位 (index.html 内联)');
+ok(html.includes("__sfStyleVer='20261128c'"),'前置: 版本戳 20261128c 在位 (index.html 内联)');
 
 // ══ T0 源码锚 (三任务全量) ══
 console.log('T0 源码锚');

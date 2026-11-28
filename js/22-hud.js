@@ -1129,8 +1129,8 @@ hudStyle('magN','color',(!player.onMG&&!w.def.melee&&w.mag<=Math.floor(w.def.mag
 hudText('nadeN',_hv?(t2('绷带[H] ×{0}',_hv.bandages||0)   // ★2026-11-03: 宿主有雷账 (弹药账对齐后随补给消耗/补充), 随绷带一并显示
 +(_hv.nades>0?' · '+t2('手雷 ×{0}',_hv.nades):'')+(_hv.atn>0?' · '+t2('AT雷 ×{0}',_hv.atn):''))   // 附身: 宿主读数 (真附身批 2026-11-01)
 :(t2('手雷 ×{0}',player.nadeCount)+' · '+t2('绷带[H] ×{0}',player.bandages)
-+(player.atNades>0?' · '+t2('AT雷[3] ×{0}',player.atNades):'')   // 2026-10-05: 按携带量显隐 (步枪兵新增 AT雷×2, 原来只认突击兵)
-+(CLASSES[player.cls].smoke?' · '+t2('烟雾[4] ×{0}',player.smokeCount):'')
++(player.atNades>0?' · '+t2('AT雷[4] ×{0}',player.atNades):'')   // 2026-10-05: 按携带量显隐 (步枪兵新增 AT雷×2, 原来只认突击兵); ★2026-11-28 键位轮换 3→4
++(CLASSES[player.cls].smoke?' · '+t2('烟雾[5] ×{0}',player.smokeCount):'')   // ★2026-11-28 键位轮换 4→5
 +(player.incinCount>0?' · '+t2('燃烧[6] ×{0}',player.incinCount):'')));
 }
 // 读条进度条 (2026-09-28 阶段三 P1 建 → ★2026-10-12 用户提议② 扩成"通用读条 + ✕ 取消" → ★2026-10-25 扩容):

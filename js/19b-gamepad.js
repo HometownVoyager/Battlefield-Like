@@ -7,8 +7,8 @@
 // 键位 (standard mapping, Xbox 布局):
 //   RT 开火 · LT 瞄准(机瞄/同轴/机炮) · 左摇杆 移动(推满外圈=疾跑) · 右摇杆 视角 / TV制导
 //   A 跳跃/上浮 · B 蹲/站 · X 互动(F) · Y 换弹(R) · LB 疾跑(按住) · RB 手雷(按住烹饪)
-//   LS按 切枪 · RS按 近战(V) · Back 战况(按住) · Start 暂停
-//   十字键: 上 绷带/观战气动飞行(H) · 下 趴(Z) · 左 烟雾(4; 工程兵=选工事5) · 右 AT雷(3)
+//   LS按 切枪 · RS按 近战(军刀槽) · Back 战况(按住) · Start 暂停
+//   十字键: 上 绷带/观战气动飞行(H) · 下 趴(Z) · 左 烟雾(5; 工程兵=选工事N) · 右 AT雷(4)  (★2026-11-28 键位轮换批)
 // ─────────────────────────────────────────────
 'use strict';
 const PAD={on:false,idx:-1,prev:[],held:{}};
@@ -58,11 +58,11 @@ const PAD_MAP=[   // i = standard mapping 按钮号; dn 在"战斗中"的按下�
 {b:8, dn:()=>padKd('Tab'),   up:()=>padKu('Tab')},                                     // Back 战况 (按住)
 {b:9, dn:()=>{ if(gamePaused||(player.deployed&&player.alive&&!matchOver)) togglePause(); }, up:null}, // Start 暂停
 {b:10,dn:()=>{ if(player.alive&&player.deployed) switchSlot(player.curSlot===0?1:0,true); }, up:null},   // LS 切枪 (viaKey: 读条中切枪=打断读条, 2026-10-25 反馈轮①)
-{b:11,dn:()=>padKd('KeyN'),  up:()=>padKu('KeyN')},                                    // RS 近战 (2026-10-26 交互重做批: 近战键 V→N, V 让给减速)
+{b:11,dn:()=>padKd('Digit3'),up:()=>padKu('Digit3')},                                  // RS 近战 (★2026-11-28 键位轮换: 军刀 3 键, 原派 KeyN; 更早 2026-10-26 批近战键 V→N, V 让给减速)
 {b:12,dn:()=>padKd('KeyH'),  up:()=>padKu('KeyH')},                                    // 十字上 绷带/气动飞行
 {b:13,dn:()=>padKd('KeyZ'),  up:()=>padKu('KeyZ')},                                    // 十字下 趴
-{b:14,dn:()=>padKd(player.cls===4?'Digit5':'Digit4'), up:()=>{padKu('Digit4'); padKu('Digit5');}},      // 十字左 烟雾/选工事 (2026-09-28 兵种8→5: 工程=4; 迫击炮走 Digit6)
-{b:15,dn:()=>padKd('Digit3'),up:()=>padKu('Digit3')},                                  // 十字右 AT雷
+{b:14,dn:()=>padKd(player.cls===4?'KeyN':'Digit5'), up:()=>{padKu('KeyN'); padKu('Digit5');}},  // 十字左 烟雾/选工事 (★2026-11-28 轮换: 烟雾=5, 工程选号=N; 迫击炮走 Digit6)
+{b:15,dn:()=>padKd('Digit4'),up:()=>padKu('Digit4')},                                  // 十字右 AT雷 (★2026-11-28 轮换: 3→4)
 ];
 // 逐帧轮询 (pdt = 本体帧长: 观战时停下观察者仍可转头, 与键鼠同规)
 window.updateGamepad=function(pdt){

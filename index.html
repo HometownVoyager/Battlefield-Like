@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>钢铁前线 · 战役合集</title>
-<link rel="stylesheet" href="css/style.css?v=20261128b">
+<link rel="stylesheet" href="css/style.css?v=20261128c">
 <script>
 // 首屏引导 (必须在 <body> 内容之前执行):
 // ① 语言: EN 存档时给 <html> 加 lang-en, 配合 CSS 把中文原文先藏起来等 applyI18n() 盖章, 消除"先中文后英文";
@@ -14,7 +14,7 @@
 //    (菜单期 HUD 不隐藏即是)。这里在 DOMContentLoaded 后实测新样式是否生效 (#menuArt 的计算 display
 //    在新版是 flex、旧版是 block), 没生效就换一个 URL 把样式表重新载入一次。
 //    ④ 本文件所有 css/js 引用统一带 ?v=<版本>; 改样式或脚本后把下面的版本号与引用一起 +1。
-window.__sfStyleVer='20261128b';
+window.__sfStyleVer='20261128c';
 // ⑤ boot 异常屏上可见 (2026-09-30 Ctrl+F5 事故教训): three/cannon 曾走 CDN, 硬刷新时 CDN 拉不到 ⇒
 //    脚本链首用 THREE 处即抛 ⇒ 页面只剩页尾 bootFail 兜底摘 inMenu (HUD 全裸+黑屏), 报错只在控制台。
 //    这里把全局错误尽早记进 __sfErrs, 页尾 bootFail 分支负责把它们写到 #bootErr 浮层上 ——
@@ -483,7 +483,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="hkRow"><span class="hkKey" data-i18n>右键</span><span class="hkDesc" data-i18n-html>机瞄/瞄准镜</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>R</span><span class="hkDesc" data-i18n-html>装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断)</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>1 / 2</span><span class="hkDesc" data-i18n-html>切换武器</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>近战</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>3</span><span class="hkDesc" data-i18n-html>近战(军刀)</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>C</span><span class="hkDesc" data-i18n-html>蹲</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>Z</span><span class="hkDesc" data-i18n-html>卧倒</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>X</span><span class="hkDesc" data-i18n-html>在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消)</span></div>
@@ -499,14 +499,14 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="helpCard">
 <div class="helpKeys">
 <div class="hkRow"><span class="hkKey" data-i18n>G</span><span class="hkDesc" data-i18n-html>手雷(可按住烹饪引信, 举雷中按<b>X</b>收回; 单次受创>25或改做其他动作会打断)</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>3</span><span class="hkDesc" data-i18n-html>反坦克雷</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>4</span><span class="hkDesc" data-i18n-html>烟雾弹</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>4</span><span class="hkDesc" data-i18n-html>反坦克雷</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>5</span><span class="hkDesc" data-i18n-html>烟雾弹</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>6</span><span class="hkDesc" data-i18n-html>燃烧弹</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>H</span><span class="hkDesc" data-i18n-html>绷带包扎(+45生命, 单次受创>25会打断)</span></div>
 </div>
 <div class="helpDoc">
 <div data-i18n-html>燃烧弹: 红色烈焰烟云, 同样遮蔽视线, 云内步兵持续灼烧(突击兵/巡飞弹兵携带)。</div>
-<div data-i18n-html>医疗箱: 工程兵建造菜单第5件(按<b>5</b>选到后<b>B</b>建造), 放下后队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
+<div data-i18n-html>医疗箱: 工程兵建造菜单第5件(按<b>N</b>选到后<b>B</b>建造), 放下后队友靠近按 <b>F</b> 取绷带; 受伤后脱战只会缓慢回血到70。</div>
 </div>
 </div>
 <div class="secLabel" data-i18n-html>载具与固定武器</div>
@@ -553,7 +553,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="hkSub" data-i18n>工程兵</div>
 <div class="helpKeys">
 <div class="hkRow"><span class="hkKey" data-i18n>B</span><span class="hkDesc" data-i18n-html>建造; 靠近自己工事=读条拆除(退点)</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>5</span><span class="hkDesc" data-i18n-html>切换工事(沙袋墙/铁丝网/拒马/MG42/医疗箱)</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>切换工事(沙袋墙/铁丝网/拒马/MG42/医疗箱)</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>6</span><span class="hkDesc" data-i18n-html>架设/回收迫击炮</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>F</span><span class="hkDesc" data-i18n-html>操作架好的迫击炮(全员可用)</span></div>
 </div>
@@ -573,7 +573,7 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <ul class="helpPts">
 <li data-i18n-html><b>双击空格</b>悬停飞行 / <b>H</b> 气动飞行(空格加速), 两种飞行中<b>左键都能开火 · 右键都能瞄准</b></li>
 <li data-i18n-html>副武器位换成 <b>观战连狙</b>(全自动·4x, 可开镜)</li>
-<li data-i18n-html>投掷物<b>四种全配</b>(<b>G</b> 手雷 · <b>3</b> AT雷 · <b>4</b> 烟雾弹 · <b>6</b> 燃烧弹, 持雷有弹道预演, 自动回满)</li>
+<li data-i18n-html>投掷物<b>四种全配</b>(<b>G</b> 手雷 · <b>4</b> AT雷 · <b>5</b> 烟雾弹 · <b>6</b> 燃烧弹, 持雷有弹道预演, 自动回满)</li>
 <li data-i18n-html>操控巡飞弹时按 <b>T</b>: 弹体立刻消失并把自身传送到弹体位置</li>
 <li data-i18n-html>观战者<b>不指挥小队</b>(T/Y 关闭); 出生列表里的坦克/战机/舰艇/两栖车<b>一律标注「观战不可征用」</b>(想开艇请走近按 <b>F</b> 上艇)</li>
 <li data-i18n-html><b>F</b> = 按需召唤<b>幽灵坦克</b>(全白 · 免伤 · 弹丸穿透 · 可对双方开火, 开场不预置)</li>
@@ -661,8 +661,8 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
 <div class="hkRow"><span class="hkKey" data-i18n>Start</span><span class="hkDesc" data-i18n-html>暂停</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>十字键 上</span><span class="hkDesc" data-i18n-html>绷带(H)</span></div>
 <div class="hkRow"><span class="hkKey" data-i18n>十字键 下</span><span class="hkDesc" data-i18n-html>趴(Z)</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>十字键 左</span><span class="hkDesc" data-i18n-html>烟雾(4) / 工程兵选工事(5)</span></div>
-<div class="hkRow"><span class="hkKey" data-i18n>十字键 右</span><span class="hkDesc" data-i18n-html>AT雷(3)</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>十字键 左</span><span class="hkDesc" data-i18n-html>烟雾(5) / 工程兵选工事(N)</span></div>
+<div class="hkRow"><span class="hkKey" data-i18n>十字键 右</span><span class="hkDesc" data-i18n-html>AT雷(4)</span></div>
 </div>
 </div>
 <div class="center" style="margin-top:18px"><button class="bigBtn backBtn" data-i18n>返 回</button></div>
@@ -770,8 +770,8 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
         <div class="hkRow"><span class="hkKey" data-i18n>右键</span><span class="hkDesc" data-i18n-html>机瞄/瞄准镜</span></div>
         <div class="hkRow"><span class="hkKey" data-i18n>R</span><span class="hkDesc" data-i18n-html>装填(读条中<b>X</b>取消; 单次受创>25或改做其他动作会打断)</span></div>
         <div class="hkRow"><span class="hkKey" data-i18n>1 / 2</span><span class="hkDesc" data-i18n-html>切换武器</span></div>
-        <div class="hkRow"><span class="hkKey" data-i18n>G / 3 / 4 / 6</span><span class="hkDesc" data-i18n-html>手雷 / 反坦克雷 / 烟雾弹 / 燃烧弹 (均可按住烹饪引信, 举雷中按<b>X</b>收回)</span></div>
-        <div class="hkRow"><span class="hkKey" data-i18n>N</span><span class="hkDesc" data-i18n-html>近战</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>G / 4 / 5 / 6</span><span class="hkDesc" data-i18n-html>手雷 / 反坦克雷 / 烟雾弹 / 燃烧弹 (均可按住烹饪引信, 举雷中按<b>X</b>收回)</span></div>
+        <div class="hkRow"><span class="hkKey" data-i18n>3</span><span class="hkDesc" data-i18n-html>近战(军刀)</span></div>
         <div class="hkRow"><span class="hkKey" data-i18n>C</span><span class="hkDesc" data-i18n-html>蹲</span></div>
         <div class="hkRow"><span class="hkKey" data-i18n>Z</span><span class="hkDesc" data-i18n-html>卧倒</span></div>
         <div class="hkRow"><span class="hkKey" data-i18n>X</span><span class="hkDesc" data-i18n-html>在掩体上架枪(大幅提升精度; 读条/举雷/换弹中按=取消)</span></div>
@@ -795,59 +795,59 @@ console.warn('[CSS] 样式表疑似缓存旧版, 已换 URL 重新载入: '+fres
      一起绕缓存重拉, CDN 抽风 (国内常态) ⇒ THREE 未定义 ⇒ 脚本链首用即抛 ⇒ bootFail (HUD 全裸+黑屏)。
      现收编进仓库 lib/ (three r152 + cannon 0.6.2, 与 dev/vendor 探针副本同源), file:// 离线可用。
      版本戳与 js/ 同纪律统一 ?v= (verify-spec T8 把守), 且禁止改回外链 (T8 有 cdn 断言)。 -->
-<script src="lib/three.min.js?v=20261128b"></script>
-<script src="lib/cannon.min.js?v=20261128b"></script>
+<script src="lib/three.min.js?v=20261128c"></script>
+<script src="lib/cannon.min.js?v=20261128c"></script>
 
-<script src="js/00-config.js?v=20261128b"></script>
-<script src="js/00b-i18n.js?v=20261128b"></script>
-<script src="js/00c-procgen.js?v=20261128b"></script>
-<script src="js/01-audio.js?v=20261128b"></script>
-<script src="js/02-scene.js?v=20261128b"></script>
-<script src="js/03-terrain.js?v=20261128b"></script>
-<script src="js/04-collision.js?v=20261128b"></script>
-<script src="js/04b-fire.js?v=20261128b"></script>
-<script src="js/05-world.js?v=20261128b"></script>
-<script src="js/05a-buildings.js?v=20261128b"></script>
-<script src="js/05b-props.js?v=20261128b"></script>
-<script src="js/05c-layouts.js?v=20261128b"></script>
-<script src="js/06-engineering.js?v=20261128b"></script>
-<script src="js/07-nav.js?v=20261128b"></script>
-<script src="js/08-effects.js?v=20261128b"></script>
-<script src="js/09a-defs.js?v=20261128b"></script>
-<script src="js/09-weapons.js?v=20261128b"></script>
-<script src="js/10-viewmodel.js?v=20261128b"></script>
-<script src="js/11-soldiers.js?v=20261128b"></script>
-<script src="js/12-ragdolls.js?v=20261128b"></script>
-<script src="js/13-combat.js?v=20261128b"></script>
-<script src="js/14-bots.js?v=20261128b"></script>
-<script src="js/15-vehicles.js?v=20261128b"></script>
-<script src="js/15b-trucks.js?v=20261128b"></script>
-<script src="js/15c-specveh.js?v=20261128b"></script>
+<script src="js/00-config.js?v=20261128c"></script>
+<script src="js/00b-i18n.js?v=20261128c"></script>
+<script src="js/00c-procgen.js?v=20261128c"></script>
+<script src="js/01-audio.js?v=20261128c"></script>
+<script src="js/02-scene.js?v=20261128c"></script>
+<script src="js/03-terrain.js?v=20261128c"></script>
+<script src="js/04-collision.js?v=20261128c"></script>
+<script src="js/04b-fire.js?v=20261128c"></script>
+<script src="js/05-world.js?v=20261128c"></script>
+<script src="js/05a-buildings.js?v=20261128c"></script>
+<script src="js/05b-props.js?v=20261128c"></script>
+<script src="js/05c-layouts.js?v=20261128c"></script>
+<script src="js/06-engineering.js?v=20261128c"></script>
+<script src="js/07-nav.js?v=20261128c"></script>
+<script src="js/08-effects.js?v=20261128c"></script>
+<script src="js/09a-defs.js?v=20261128c"></script>
+<script src="js/09-weapons.js?v=20261128c"></script>
+<script src="js/10-viewmodel.js?v=20261128c"></script>
+<script src="js/11-soldiers.js?v=20261128c"></script>
+<script src="js/12-ragdolls.js?v=20261128c"></script>
+<script src="js/13-combat.js?v=20261128c"></script>
+<script src="js/14-bots.js?v=20261128c"></script>
+<script src="js/15-vehicles.js?v=20261128c"></script>
+<script src="js/15b-trucks.js?v=20261128c"></script>
+<script src="js/15c-specveh.js?v=20261128c"></script>
 <!-- 2026-09-20N 海战批: 15e(剪影建模) 必须在 15d(载具本体) 之前 —— 15d 的构造器调用 15e 的
      navBuildModel, 两者都走 const/函数声明, 倒序会在 TDZ 里抛错。15f(反舰炮位) 依赖 15d 的
      navalNear 索敌接口, 故排在其后、17-emplacements 之前 (炮位在布局期由 17 架设)。 -->
-<script src="js/15e-navmodels.js?v=20261128b"></script>
-<script src="js/15d-naval.js?v=20261128b"></script>
-<script src="js/15f-battery.js?v=20261128b"></script>
+<script src="js/15e-navmodels.js?v=20261128c"></script>
+<script src="js/15d-naval.js?v=20261128c"></script>
+<script src="js/15f-battery.js?v=20261128c"></script>
 <!-- 2026-11-10: 纯海战图 (coral/ironbottom) 与大舰子系统 (15g/15h) 整体下架 → archive/naval-coral-ironbottom-20261110/。
      15d/15e/15f (小艇/两栖建模/岸炮) 为塔拉瓦环礁 (island) 共用, 保留。 -->
-<script src="js/16-aircraft.js?v=20261128b"></script>
-<script src="js/17-emplacements.js?v=20261128b"></script>
-<script src="js/18-game.js?v=20261128b"></script>
-<script src="js/19-input.js?v=20261128b"></script>
-<script src="js/19b-gamepad.js?v=20261128b"></script>
-<script src="js/20-player.js?v=20261128b"></script>
-<script src="js/20a-seats.js?v=20261128b"></script>
-<script src="js/21-match.js?v=20261128b"></script>
-<script src="js/22-hud.js?v=20261128b"></script>
-<script src="js/22a-menuart.js?v=20261128b"></script>
-<script src="js/22b-speclayer.js?v=20261128b"></script>
-<script src="js/23-deploy.js?v=20261128b"></script>
-<script src="js/23b-worldrestore.js?v=20261128b"></script>
-<script src="js/25-zombies.js?v=20261128b"></script>
-<script src="js/26-commander.js?v=20261128b"></script>
-<script src="js/27-achievements.js?v=20261128b"></script>
-<script src="js/24-main.js?v=20261128b"></script>
+<script src="js/16-aircraft.js?v=20261128c"></script>
+<script src="js/17-emplacements.js?v=20261128c"></script>
+<script src="js/18-game.js?v=20261128c"></script>
+<script src="js/19-input.js?v=20261128c"></script>
+<script src="js/19b-gamepad.js?v=20261128c"></script>
+<script src="js/20-player.js?v=20261128c"></script>
+<script src="js/20a-seats.js?v=20261128c"></script>
+<script src="js/21-match.js?v=20261128c"></script>
+<script src="js/22-hud.js?v=20261128c"></script>
+<script src="js/22a-menuart.js?v=20261128c"></script>
+<script src="js/22b-speclayer.js?v=20261128c"></script>
+<script src="js/23-deploy.js?v=20261128c"></script>
+<script src="js/23b-worldrestore.js?v=20261128c"></script>
+<script src="js/25-zombies.js?v=20261128c"></script>
+<script src="js/26-commander.js?v=20261128c"></script>
+<script src="js/27-achievements.js?v=20261128c"></script>
+<script src="js/24-main.js?v=20261128c"></script>
 <script>
 // 兜底: 首屏 pre-hide 之后若主脚本链中途抛错, 不要留下"全黑屏且无 UI"的死局 ——
 // 只有 24-main 正常跑完才会置 window.__sfBooted; 未置位则解除隐藏并把菜单抬到最前, 让报错可见可交互。

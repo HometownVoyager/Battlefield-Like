@@ -1500,8 +1500,8 @@ else if(player.spectator) tt=t2('调试模式 · <b>双击空格</b> 悬停飞�
 	const bt2=BUILD_MENU[player.buildSel||0];
 	const bn2=bt2==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt2];
 	tt=player.mortarPlaced
-	?t2('<b>5</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0))
-	:t2('<b>5</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0));
+	?t2('<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 回收迫击炮 · <b>F</b> 上炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0))
+	:t2('<b>N</b> 工事: {0} ({1}点) · <b>B</b> 建造 · <b>6</b> 架设迫击炮 · 剩 {2} 点',t2(bn2),BUILD_COST[bt2],(player.buildCount||0));   // ★2026-11-28 键位轮换: 选工事 5→N
 	}
 	else if(isLoiterClass()) tt=t2('<b>左键</b> 发射巡飞弹(TV制导) · <b>6</b> 燃烧弹');
 }

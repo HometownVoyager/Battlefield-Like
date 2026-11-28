@@ -495,12 +495,12 @@ keys.ShiftLeft=sprintLock;
 el('tSprint').classList.toggle('on',sprintLock);
 },null);
 bindBtn('tSkill',()=>kd('KeyB'),()=>ku('KeyB'));
-bindBtn('tBuild5',()=>kd('Digit5'),()=>ku('Digit5'));
+bindBtn('tBuild5',()=>kd('KeyN'),()=>ku('KeyN'));   // ★2026-11-28 键位轮换: 选工事 Digit5→KeyN (原 5 让给烟雾)
 bindBtn('tMortar',()=>kd('Digit6'),()=>ku('Digit6'));
-bindBtn('tMelee',()=>kd('KeyN'),()=>ku('KeyN'));   // 2026-10-26 交互重做批: 近战键 V→N (V 让给减速)
-	bindBtn('tSmoke',()=>kd('Digit4'),()=>ku('Digit4'));
+bindBtn('tMelee',()=>kd('Digit3'),()=>ku('Digit3'));   // ★2026-11-28 键位轮换: 军刀 KeyN→Digit3 (2026-10-26 批曾 V→N)
+	bindBtn('tSmoke',()=>kd('Digit5'),()=>ku('Digit5'));   // ★2026-11-28 键位轮换: 烟雾 Digit4→Digit5
 	bindBtn('tIncin',()=>kd('Digit6'),()=>ku('Digit6'));
-	bindBtn('tATN',()=>kd('Digit3'),()=>ku('Digit3'));
+	bindBtn('tATN',()=>kd('Digit4'),()=>ku('Digit4'));   // ★2026-11-28 键位轮换: AT雷 Digit3→Digit4
 bindBtn('tSquad',()=>kd('KeyT'),()=>ku('KeyT'));
 // ── 指挥官触控键 (2026-10-26 排查轮二审 修复 B-8: 移动端没有任何开图/减速入口) ──
 // tCmdMap: 点按 = 开/关指挥地图。走 cmdMapToggle 单源 (姿态门 D18/布势 D21/暂停 D20 全在它内部把关),

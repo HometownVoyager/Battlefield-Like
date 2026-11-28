@@ -57,10 +57,10 @@ card.removeAttribute('title');
 function classCardWeaponText(i){
 const ws=playerClassWeapons(player.team,i);
 let d2=ws.map(k=>t(WPN_DEFS[k].name)).join(' · ');
-if(player.spectator) return d2+' · '+t('手雷[G]×{0}',4)+' · '+t('AT雷[3]×{0}',4)+' · '+t('烟雾弹[4]×{0}',4)+' · '+t('燃烧弹[6]×{0}',4); // 观战: 四弹种全给 (2026-10-24, 卡片显示与 specGear 落装一致)
-if(i===1){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[3]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 2026-09-28 兵种8→5: 突击兵=原cls2 配置随合并迁到 cls1
-if(i===5){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[3]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 指挥官 (2026-10-26): 绷带/手雷配置同突击兵 (设计 R2)
-if(i===0) d2+=' · '+t('AT雷[3]×{0}',clsGear(i,player.team).atn); // 2026-10-05: 步枪兵新增 AT雷×2 (键位同突击兵的 3)
+if(player.spectator) return d2+' · '+t('手雷[G]×{0}',4)+' · '+t('AT雷[4]×{0}',4)+' · '+t('烟雾弹[5]×{0}',4)+' · '+t('燃烧弹[6]×{0}',4); // 观战: 四弹种全给 (2026-10-24, 卡片显示与 specGear 落装一致; ★2026-11-28 键位轮换 AT 3→4/烟雾 4→5)
+if(i===1){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[4]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 2026-09-28 兵种8→5: 突击兵=原cls2 配置随合并迁到 cls1
+if(i===5){ const g=clsGear(i,player.team); d2+=' · '+t('AT雷[4]×{0}',g.atn)+' · '+t('燃烧弹[6]×{0}',(CLASSES[i].incin||0)); } // 指挥官 (2026-10-26): 绷带/手雷配置同突击兵 (设计 R2)
+if(i===0) d2+=' · '+t('AT雷[4]×{0}',clsGear(i,player.team).atn); // 2026-10-05: 步枪兵新增 AT雷×2 (键位同突击兵的 4, ★2026-11-28 轮换)
 if(i===3) d2+=EXPERIMENT?' · '+t('燃烧弹[6]×2'):' · '+t('AT雷×{0}',(TEAM_FACTION[player.team].atn5||3));
 return d2;
 }
@@ -700,7 +700,7 @@ vmEquip(p.curW.key,p.team);
 VM.root.visible=true;
 // 详细操作开关 (2026-11-09 批): 关=部署页兵种键位提示不弹 (cmdDeployHint 同规, 见 26-commander)
 if(SHOW_CTL_HINTS){
-if(p.cls===4) showScorePop('工程兵 · 按 5 选工事 · B 建造(靠近自己工事 B 读条拆除退点) · 6 架设/读条回收迫击炮');
+if(p.cls===4) showScorePop('工程兵 · 按 N 选工事 · B 建造(靠近自己工事 B 读条拆除退点) · 6 架设/读条回收迫击炮');
 else if(isLoiterClass()) showScorePop('巡飞弹兵 · 左键发射后进入TV制导 · 按 6 扔燃烧弹');
 }
 if(typeof cmdDeployHint==='function') cmdDeployHint();   // 指挥官: 通讯仪右键开图/下令/减速提示 (2026-10-26)

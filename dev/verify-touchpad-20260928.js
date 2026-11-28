@@ -97,9 +97,9 @@ out.tv={x:+player.tvDX.toFixed(6),y:+player.tvDY.toFixed(6)};
 out.tvExp={x:+(DZ(0.8)*1000/60).toFixed(6),y:+(DZ(-0.5)*1000/60).toFixed(6)};
 gp.axes=[0,0,0,0]; updateLoiters(1/60,1/60); out.tvCleared=player.tvDX===0&&player.tvDY===0;
 loiterDespawn(d);
-// 工程兵: 十字左 = Digit5 (非工程 = Digit4)
-player.cls=4; P(14,1); step(); out.dig5=!!keys.Digit5; P(14,0); step(); out.dig5Up=!keys.Digit5;
-player.cls=0; P(14,1); step(); out.dig4=!!keys.Digit4; P(14,0); step(); out.dig4Up=!keys.Digit4;
+// 工程兵: 十字左 = KeyN (★2026-11-28 键位轮换: 选工事 Digit5→KeyN; 非工程烟雾 Digit4→Digit5)
+player.cls=4; P(14,1); step(); out.digN=!!keys.KeyN; P(14,0); step(); out.digNUp=!keys.KeyN;
+player.cls=0; P(14,1); step(); out.dig5=!!keys.Digit5; P(14,0); step(); out.dig5Up=!keys.Digit5;
 // Start 暂停 (战斗中) + 再按恢复
 P(9,1); step(); out.paused=gamePaused;
 P(9,0); step(); P(9,1); step(); out.resumed=!gamePaused; P(9,0); step();
@@ -126,8 +126,8 @@ ok(Math.abs(r.mouseDX-r.mouseDXExp)<1e-9,'G1 右摇杆同时记账 mouseDX (视�
 ok(r.deadzone===true,'G1 死区 0.22: 0.1 输入零响应');
 ok(Math.abs(r.tv.x-r.tvExp.x)<1e-6&&Math.abs(r.tv.y-r.tvExp.y)<1e-6,'G1 TV制导: 满杆记账 tvDX/tvDY (≈1000px/s)');
 ok(r.tvCleared===true,'G1 updateLoiters 消费后清账 (单源闭环)');
-ok(r.dig5===true&&r.dig5Up===true,'G1 工程兵: 十字左=选工事 Digit5');
-ok(r.dig4===true&&r.dig4Up===true,'G1 非工程: 十字左=烟雾 Digit4');
+ok(r.digN===true&&r.digNUp===true,'G1 工程兵: 十字左=选工事 KeyN (键位轮换跟走)');
+ok(r.dig5===true&&r.dig5Up===true,'G1 非工程: 十字左=烟雾 Digit5 (键位轮换跟走)');
 ok(r.paused===true&&r.resumed===true,'G1 Start=暂停/继续 (togglePause 真链)');
 ok(r.swap===true,'G1 LS按=切枪 (switchSlot 真链)');
 ok(r.heldA===true&&r.relA===true,'G1 ★ 断开: held 全释放 + on/idx 复位 (防卡键)');

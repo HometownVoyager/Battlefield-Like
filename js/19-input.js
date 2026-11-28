@@ -40,7 +40,7 @@ if(typeof showScorePop==='function')
 showScorePop(t2(p.navalGun?'炮手镜 · 稳像倍镜':(p.thirdPerson?'第三人称: 开':'艏向第一人称')));
 }
 // ★2026-11-22 投掷手感批: 出手弧接续单源 —— 自己的出手弧 (松手后 0.55s 收尾段) 不再吃键。旧链两层卡手
-// (用户实报"连点 G/3/4/6 卡手, 像有前摇"):
+// (用户实报"连点 G/3/4/6 卡手, 像有前摇"; ★2026-11-28 键位轮换后四键 = G/4/5/6):
 //   ① 20261121 审计 P1-4 把出手弧 (VM'nade' 且 !nadeHeld) 收进 readBarActive 后, 弧中按投掷键先撞上
 //      barStealArmed 双击确认 —— 第一次只记账不放行 = **白吃一键**;
 //   ② 举雷起步门 VM.state==='idle' 在弧内恒 false ⇒ 0.55s 死区内怎么按都没反应。
@@ -301,13 +301,11 @@ AudioSys.metalSlide(0.3,0.13,320,170); AudioSys.click(700,0.3,0.05);
 }
 if(e.code==='Digit1') switchSlot(0,true);
 if(e.code==='Digit2') switchSlot(1,true);
-// ★2026-10-26 交互重做批 (用户裁定"V 太远"): 减速键 N → V, 近战键 V → N。两键互换,
-//   本节从 KeyV 改成 KeyN, 而 26-commander 的 CMD_TIME.KEY 改成 'KeyV'。互换而不是"另找空键"的理由:
-//   · V 在 WASD 左手手位上, 食指/中指可直接压到 —— 而减速是**按住式持续动作**, 放在手位键上是必要的;
-//     近战是瞬时单发动作, 按一下就走, 放在 N 上不影响手感 (且 N 在 V 右边一格, 手指不需离开手位)。
-//   · 近战已有多条等价入口 (手柄 RS / 移动端 tMelee), 键位挪动的实际影响面最小。
-if(e.code==='KeyN'){
-// ★2026-11-20 近战重做批: N = 切军刀槽 / 切回 (军刀成为第 3 槽常驻武器; 旧"刺刀瞬刺"整段退役 ——
+// ★2026-11-28 键位轮换批 (用户令): 投掷键组 3→4→5→N 循环一圈 —— N=选工事(原5) / 3=军刀(原N) /
+//   4=AT雷(原3) / 5=烟雾(原4); 6 与 G 不动。军刀本节从 KeyN 改挂 Digit3 (2026-10-26 批曾把它从 KeyV
+//   挪到 KeyN, 减速键钉在 KeyV 不受本批影响)。手柄 RS / 移动端 tMelee 等合成入口已在各自文件同批改派。
+if(e.code==='Digit3'){
+// ★2026-11-20 近战重做批: 3 = 切军刀槽 / 切回 (军刀成为第 3 槽常驻武器; 旧"刺刀瞬刺"整段退役 ——
 //   三式起手全部改走 startMelee 单源: 左键刺 / 右键斩 / 中键劈, 见本文件 mousedown 与 20-player playerFireTick)。
 //   目标槽二态: 已在军刀槽(2) ⇒ 切回上次枪槽 (_lastGunSlot, switchSlot 内记账), 否则切军刀槽。
 //   门全部复用 switchSlot 既有结构 (座位门 / VM 态门 / viaKey 双击打断读条 barStealArmed('SW2')),
@@ -335,8 +333,8 @@ AudioSys.click(1600,0.25,0.04);
 }
 }
 }
-if(e.code==='Digit3'){
-// 同键不抢 (举 AT 中再按 3 维持); 异读条/异种雷被 3 打断 = 换举 AT (★2026-10-25 反馈轮①; ok=除 VM 态外全门)
+if(e.code==='Digit4'){
+// 同键不抢 (举 AT 中再按 4 维持); 异读条/异种雷被 4 打断 = 换举 AT (★2026-10-25 反馈轮①; ok=除 VM 态外全门)
 const sameHeld=player.nadeHeld&&player.nadeIsAT;
 const ok=player.atNades>0&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar&&!player.loiter;
 // ★2026-11-22 投掷手感批: 弧中接续同 KeyG (见 nadeArcTakeover 注); flush 清零则空手不自举。
@@ -344,7 +342,7 @@ if(ok&&nadeArcTakeover()&&player.atNades>0){
 player.nadeHeld=true; player.nadeFuse=99; player.nadeIsAT=true; player.nadeIsSmoke=false; player.nadeIsIncin=false;   // AT 哨兵引信 (与 idle 起步同账)
 AudioSys.click(1200,0.3,0.05);
 }else{
-if(ok&&!sameHeld){ if(!player.barStealArmed('Digit3')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
+if(ok&&!sameHeld){ if(!player.barStealArmed('Digit4')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 // 持掷化 (2026-09-30 批, 与 KeyG 同口径): 按住=举雷瞄准 (弹道预演亮出), 松手=出手。AT 保持 nadeFuse=99
 // 哨兵 —— 撞炸弹无引信可烹 (出手即武装, 撞什么炸什么, 99 不会被 releaseNade 采用); 烟雾/燃烧已改
@@ -356,11 +354,11 @@ AudioSys.click(1200,0.3,0.05);
 }
 }
 }
-if(e.code==='Digit4'){
-// 观战不切火箭筒 (观战槽位无火箭筒, findIndex=-1 会把 4 键整个吞掉): 观战者按 4 = 烟雾弹 (四弹种全给, 2026-10-24 用户指定)
-// ★2026-10-25 反馈轮①: 读条中 4 = 打断读条再切火箭筒/举烟雾弹; 同键(举烟雾中再按4)不抢; ok=除 VM 态外全门。
-if(player.cls===3&&!player.spectator&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){   // ★2026-11-21 批B#4: 补座位门与兄弟分支(烟雾/燃烧/手雷)同款 —— 坐火力点双击4会把包扎/原位换弹读条白偷走; onBattery 已在 :231 座位门上游拦死 4 键, 无需重复
-if(!player.barStealArmed('Digit4')) return;   // ★2026-10-30 读条交互批: 打断双击确认
+if(e.code==='Digit5'){
+// 观战不切火箭筒 (观战槽位无火箭筒, findIndex=-1 会把 5 键整个吞掉): 观战者按 5 = 烟雾弹 (四弹种全给, 2026-10-24 用户指定)
+// ★2026-10-25 反馈轮①: 读条中 5 = 打断读条再切火箭筒/举烟雾弹; 同键(举烟雾中再按5)不抢; ok=除 VM 态外全门。
+if(player.cls===3&&!player.spectator&&!player.loiter&&!player.onMG&&!player.onVehicle&&!player.onAT&&!player.onAA&&!player.onMortar){   // ★2026-11-21 批B#4: 补座位门与兄弟分支(烟雾/燃烧/手雷)同款 —— 坐火力点双击5会把包扎/原位换弹读条白偷走; onBattery 已在 :231 座位门上游拦死 5 键, 无需重复
+if(!player.barStealArmed('Digit5')) return;   // ★2026-10-30 读条交互批: 打断双击确认
 player.stealBar();
 if(VM.state==='idle') switchSlot(player.slots.findIndex(s=>s&&s.def.rocket),true); // 2026-09-28 兵种8→5: 反坦克=3
 }else{
@@ -371,7 +369,7 @@ if(ok&&nadeArcTakeover()&&player.smokeCount>0){
 player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.smoke; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;   // 烟雾真引信 (与 idle 起步同账)
 AudioSys.click(1000,0.28,0.05);
 }else{
-if(ok&&!sameHeld){ if(!player.barStealArmed('Digit4')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
+if(ok&&!sameHeld){ if(!player.barStealArmed('Digit5')) return; player.stealBar(); }   // ★2026-10-30 读条交互批: 打断双击确认
 if(ok&&VM.state==='idle'){
 VM.state='nade'; VM.stateT=0; VM.stateDur=999;
 player.nadeHeld=true; player.nadeFuse=NADE_COOK_FUSE.smoke; player.nadeIsAT=false; player.nadeIsSmoke=true; player.nadeIsIncin=false;   // ★2026-11-17 批2.6: 烟雾弹改可烹饪真引信 (旧 99 哨兵)
@@ -454,10 +452,10 @@ AudioSys.metalSlide(0.14,0.25,400,700);
 }
 }
 // 兵种 8→5 (2026-09-28 阶段三 P1): 工程兵(cls4) 一个兵种三件事 ——
-//   B=锤击建造 / 5=选工事型号 / **6=架设/回收迫击炮** (见上面 Digit6 处理器, 原迫击炮兵 cls6 的 B 键职责迁到 6);
+//   B=锤击建造 / N=选工事型号 (★2026-11-28 键位轮换批: 原 5 让给烟雾弹, 选号改挂 KeyN) / **6=架设/回收迫击炮** (见上面 Digit6 处理器, 原迫击炮兵 cls6 的 B 键职责迁到 6);
 //   原医护兵 cls4 的"按B放医疗箱"取消 —— 医疗箱改为工程兵建造菜单第 5 件 (06-engineering BUILD_MENU)。
 //   读条回收 (同批用户提议): B 靠近自己工事=拆除读条 (退全款) / 读条中再按=取消 / 离开工事=正常建造。
-// 丧尸模式全职业建造 (2026-10-28 修复, 指导 §4.6(1)): KeyB/Digit5 旧门 cls===4 把非工程兵锁死 ——
+// 丧尸模式全职业建造 (2026-10-28 修复, 指导 §4.6(1)): KeyB/Digit5(现 KeyN) 旧门 cls===4 把非工程兵锁死 ——
 // 尸潮守备局里人人需要沙袋/铁丝。ZOMBIE_MODE 放行全职业 (基础件免费/商店件扣 ZP, 见 06-engineering
 // engBuild 单源); 座位门不变。普通模式仍 cls===4 独占, 逐位零变化。
 if(e.code==='KeyB'){
@@ -468,7 +466,7 @@ if(player.demolish){ player.demolish.t+=DEMOLISH_T*BAR_PRESS_BOOST; }
 else { const nb=nearOwnBuild(player); if(nb){ if(!player.barStealArmed('KeyB')) return; player.stealBar(); startDemolish(player,nb); } else engBuild(player); }   // ★2026-10-25 反馈轮①: 拆除起步前抢读条 (nb 找到=确认起步); 建造的抢占在 engBuild 全部早退之后 (06-engineering) —— ★2026-10-30: 两条路都改双击确认
 }
 }
-if(e.code==='Digit5'&&(player.cls===4||ZOMBIE_MODE)){
+if(e.code==='KeyN'&&(player.cls===4||ZOMBIE_MODE)){
 player.buildSel=((player.buildSel||0)+1)%BUILD_MENU.length;
 const bt=BUILD_MENU[player.buildSel];
 const bn=bt==='mg'?mgDefOfTeam(player.team).name:BUILD_NAMES[bt];
@@ -504,8 +502,8 @@ if(e.code==='KeyG'&&player.nadeHeld){
 player.nadeHeld=false;
 VM.stateT=0; VM.stateDur=0.55;
 }
-// 3/4/6 持掷松手 (2026-09-30 批): 与 KeyG 同一收口 —— 按住期间 nadeHeld=true (弹道预演亮出), 松手进投掷动画
-if((e.code==='Digit3'||e.code==='Digit4'||e.code==='Digit6')&&player.nadeHeld){
+// 4/5/6 持掷松手 (2026-09-30 批; ★2026-11-28 键位轮换: AT 3→4 / 烟雾 4→5): 与 KeyG 同一收口 —— 按住期间 nadeHeld=true (弹道预演亮出), 松手进投掷动画
+if((e.code==='Digit4'||e.code==='Digit5'||e.code==='Digit6')&&player.nadeHeld){
 player.nadeHeld=false;
 VM.stateT=0; VM.stateDur=0.55;
 }

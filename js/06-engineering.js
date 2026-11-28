@@ -213,8 +213,8 @@ return g2;
 const BUILD_MENU=['sandbag','wire','hedge','mg','medkit','barrel'];   // ★2026-11-28 批④b: 加"油桶"件 (1 建造点, 造得出也碾得爆 —— 15-vehicles _tkCylCb 接触即爆)
 const BUILD_NAMES={sandbag:'沙袋墙',wire:'铁丝网',hedge:'拒马',mg:'重机枪',medkit:'医疗箱',barrel:'油桶'};   // 词条'油桶'由批③统一进 00b-i18n (本文件不碰词典; t2() 缺词条回退原文, 可接受)
 const BUILD_COST={sandbag:1,wire:1,hedge:1,mg:3,medkit:2,barrel:1};
-// 丧尸模式商店件 ZP 价 (2026-10-28 单源): 建造弹窗 (19-input Digit5) 与 engBuild 扣款同读此表 ——
-// 旧版价目内联在 engBuild 里, Digit5 提示拿 BUILD_COST[tower/ammoc] 查空 ⇒ "消耗undefined点" 穿帮。
+// 丧尸模式商店件 ZP 价 (2026-10-28 单源): 建造弹窗 (19-input Digit5, ★2026-11-28 键位轮换后=KeyN) 与 engBuild 扣款同读此表 ——
+// 旧版价目内联在 engBuild 里, 选号键提示拿 BUILD_COST[tower/ammoc] 查空 ⇒ "消耗undefined点" 穿帮。
 const BUILD_ZP={mg:150,tower:250,ammoc:80};
 const BUILD_TIME={sandbag:2.2,wire:2.2,hedge:1.8,mg:3.4,medkit:2.0,barrel:1.2};   // ★2026-11-28 批④b: 油桶=轻件快读条
 // 建造升起动画: 新建工事从地里逐渐升起
